@@ -173,19 +173,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **The catch-all merge no longer closes an HTML block that the next
-  section closes itself.** Two adjacent non-schema sections, the first
-  ending inside a `<!X` block whose `>` line sits in the second, were
-  merged with a synthesised `>` between them; the second section was then
-  read under a context it never had in the document (a `<!--` inside the
-  block became a live comment, a tilde fence went dead, and a `## ` line
-  the fence had masked surfaced as a heading), so the first parse and the
-  second disagreed and an extra `-->` appeared. A closer is now written
-  between two pieces only when the next piece still reads as exactly one
-  section with it; otherwise the pieces are joined as they stood and the
-  open context is judged again after the next piece. Parse and generate
-  are a fixpoint for this class (fuzz finding, CI run 2026-09-08, corpus
-  member `crash-c9e7bbf7…`).
+- **A section that stood inside an HTML block is read the way it is
+  written.** A `## ` heading inside an HTML block of a kind no blank line
+  ends (`<!X`, `<!--`, `<?`) is still a section, but its content had been
+  read under that block's context while the generator writes every section
+  from a neutral start. Two fuzz inputs found the gap: a `<!--` that was
+  inert inside a `<!X` block (opened by the preceding section in one input,
+  by the preamble before any heading in the other) became a live comment on
+  the re-parse, the tilde fence after it went dead, a `## ` line the fence
+  had masked surfaced as a heading, and the second generation carried an
+  extra `-->`. The splitter now re-reads every such section from a neutral
+  start and splits it where the next parse would have, so the first parse
+  already lands on the fixpoint; sections whose heading the referee read as
+  a heading are untouched, and canonical bytes of every document that was
+  stable before are unchanged (fuzz findings, CI runs 2026-09-08 and
+  2026-09-09, corpus members `crash-c9e7bbf7…` and `crash-ce631bf5…`).
 - **`memstead search --json` and `memstead list --json` hits carry `origin`.**
   The MCP `memstead_search` envelope stamped the data-origin label
   (`first-party` / `third-party`) on every hit after building the envelope;
