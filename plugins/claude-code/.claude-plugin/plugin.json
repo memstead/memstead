@@ -1,5 +1,5 @@
 {
   "name": "memstead",
   "description": "Install expertise into your agent. The Memstead plugin for Claude Code: the MCP tools for reading and writing typed, schema-validated markdown knowledge graphs, plus skills for setup, interview, bulk ingest, recall, sync/verify, and graph upkeep. A session that is already running picks the new skills up only after /reload-plugins or a restart; then run /setup once per workspace. Or just talk to Claude; the MCP tools need no slash command.",
-  "version": "0.18.1"
+  "version": "0.19.0"
 }
