@@ -1,8 +1,8 @@
 # memstead-cli
 
-Command-line interface for
-[Memstead](https://github.com/memstead/memstead) — the schema-agnostic
-graph engine that gives AI agents a durable, typed memory stored as plain
+Install expertise into your agent. `memstead-cli` is the command-line
+interface of [Memstead](https://github.com/memstead/memstead), the
+schema-agnostic graph engine that keeps typed knowledge graphs as plain
 markdown in git.
 
 The `memstead` binary queries and mutates typed entity graphs from the

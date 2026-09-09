@@ -28,7 +28,7 @@ license = "MIT OR Apache-2.0"
 # Inherited by every crate via `repository.workspace = true`; the
 # `[publish = false]` registry crates inherit the same value harmlessly.
 repository = "https://github.com/memstead/memstead"
-homepage = "https://memstead.io"
+homepage = "https://memstead.com"
 
 [workspace.lints.clippy]
 # `result_large_err` flags fallible functions returning the engine's large

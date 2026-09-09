@@ -1,15 +1,15 @@
 # memstead-schema
 
+Install expertise into your agent. `memstead-schema` holds the schema
+types of [Memstead](https://github.com/memstead/memstead): entity
+definitions, the relationship vocabulary and the validation rules.
+
 `memstead-schema` is a dependency of the two Memstead products, the
 [`memstead-cli`](../memstead-cli/) binary and the
 [`memstead-mcp`](../memstead-mcp/) server, and not a supported library.
 It is on crates.io because cargo publishes a crate only when every path
 dependency is on the registry at the same version; nothing else about it
 is a product.
-
-Schema types for [Memstead](https://github.com/memstead/memstead) — the
-schema-agnostic graph engine that gives AI agents a durable, typed memory
-stored as plain markdown in git.
 
 > **Stability:** none promised. The Rust API is pre-1.0 and changes
 > without deprecation cycles whenever the products need it. For a stable

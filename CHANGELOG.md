@@ -326,6 +326,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The open repo opens with the product sentence.** "Install expertise
+  into your agent." opens the README's lede, the first line of every
+  crate README, the crates.io descriptions of `memstead-cli` and
+  `memstead-mcp`, the marketplace manifest and the plugin's manifest and
+  README, verbatim from the positioning that is its one source; the
+  circulating wordings ("durable, typed memory", "typed, validated model
+  of a project", "Work with Memstead knowledge graphs from Claude Code")
+  retire from those surfaces. Beside it, the honesty fixes: SECURITY.md
+  supports the latest tagged release, which is what `install.sh`,
+  Homebrew and crates.io serve, and names `main` as development with no
+  support promise; the workspace `homepage` points at memstead.com, the
+  product's site, not at the registry host; every crate README's first
+  line names the crate's role after the sentence.
+
 - **The names left from the retired two-build split say what holds.**
   `memstead_base::instantiate_lean_backend` is `instantiate_local_backend`,
   `InstantiateError::GitBranchRequiresMemRepoFeature` is

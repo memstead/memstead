@@ -2,12 +2,12 @@
 
 ## Supported versions
 
-Memstead is currently in **pre-1.0** development. Until a stable 1.0 release is tagged, the latest release and `main` are supported. Earlier tagged `0.x` releases, other commits and branches do not receive security fixes.
+Memstead is currently in **pre-1.0** development. Until a stable 1.0 release is tagged, the latest tagged release receives security fixes: it is what `install.sh`, Homebrew and crates.io serve. `main` is the development branch and carries no support promise; a fix lands there first and reaches users in the next tagged release. Earlier tagged `0.x` releases, other commits and branches do not receive security fixes.
 
 | Version | Supported |
 |---|---|
-| `main` (HEAD) | yes |
 | The latest tagged release | yes |
+| `main` (development) | no support promise: fixes land here and ship in the next tagged release |
 | Earlier tagged `0.x` releases | no |
 | Forks | by the fork maintainer |
 

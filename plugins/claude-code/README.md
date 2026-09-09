@@ -1,9 +1,9 @@
 # Memstead — Claude Code plugin
 
-Work with a Memstead knowledge graph directly from Claude Code. The plugin gives
-Claude a set of MCP tools (all prefixed `memstead_`) for reading and mutating the
-graph, plus a handful of slash commands for the jobs that benefit from a guided
-flow.
+Install expertise into your agent. The Memstead plugin gives Claude Code a set
+of MCP tools (all prefixed `memstead_`) for reading and mutating a Memstead
+knowledge graph, plus a handful of slash commands for the jobs that benefit
+from a guided flow.
 
 A Memstead mem is a typed graph of interconnected Markdown entities, stored as
 Markdown + git. This plugin is how a Claude Code session reads and grows one.

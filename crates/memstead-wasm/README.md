@@ -1,9 +1,9 @@
 # memstead-wasm
 
-WebAssembly bindings for the
-[Memstead](https://github.com/memstead/memstead) engine — hydrate a
-knowledge-graph snapshot in the browser and read it with the same typed
-engine that runs natively.
+Install expertise into your agent. `memstead-wasm` is the WebAssembly
+binding of the [Memstead](https://github.com/memstead/memstead) engine:
+hydrate a knowledge-graph snapshot in the browser and read it with the
+same typed engine that runs natively.
 
 The bundle is built from this crate with wasm-bindgen (`--target web`):
 instantiate the module, load a `.mem` snapshot, then read entities,
