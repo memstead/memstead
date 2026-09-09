@@ -5,7 +5,8 @@
 //! - Code blocks are masked before section/link detection to prevent false matches
 //! - The parser is schema-aware: it uses the schema to determine catch-all sections
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::Range;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -558,12 +559,114 @@ pub(crate) struct DuplicateSection {
 }
 
 /// The section boundary: a column-0 ATX `## ` line with a non-empty
-/// rest, matched over the MASKED body. The splitter finds boundaries
-/// with it; the catch-all merge checks with it that a re-emitted piece
-/// still reads as exactly one section.
+/// rest, matched over a MASKED text. One definition, used over the
+/// whole body and again over each piece the splitter reads from a
+/// neutral start.
 fn section_heading_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"(?m)^## (.+)$").unwrap())
+}
+
+/// A section's stored content and the body offset where it starts.
+///
+/// Leading trim drops blank lines wholesale but keeps the first
+/// visible line's indentation: a full trim promoted an indented
+/// heading-lookalike (` ## Specifies`) to column 0 inside stored
+/// content, where the catch-all re-emit made the NEXT parse read
+/// it as a real section heading — structure from content, and a
+/// broken parse-generate fixpoint (fuzz finding, long tier,
+/// 2026-08-24, corpus member `crash-de0c69e0…`). Trailing trim
+/// stays full: it can never move a line to column 0. The
+/// runtime validator's embedded-heading guard keeps its own full
+/// trim, so the mutation path refuses exactly what it refused.
+fn section_content(body: &str, content_start: usize, content_end: usize) -> (&str, usize) {
+    let raw = &body[content_start..content_end];
+    let visible_start = raw
+        .split_inclusive('\n')
+        .take_while(|line| line.trim().is_empty())
+        .map(str::len)
+        .sum::<usize>();
+    (
+        raw[visible_start..].trim_end(),
+        content_start + visible_start,
+    )
+}
+
+/// Every section boundary of `body` in document order, each the byte
+/// range of its heading line.
+///
+/// The first pass is the regex over the masked body: a column-0 `## `
+/// line outside every code block. That pass reads each heading where
+/// it stands, and a heading can stand inside a block the referee is
+/// still reading: an HTML block of a kind no blank line ends (`<!X`,
+/// `<!--`, `<?`), or a table. The splitter does not narrow the
+/// boundary there (a `## ` line inside an unterminated comment stays a
+/// section, so a stray `<!--` never swallows the rest of the document),
+/// but the section's content was then read in situ under that block's
+/// context, and the generator writes every section from a neutral
+/// start: heading line, newline, content. Read from there the same
+/// bytes can mean something else. A `<!--` that was inert inside a
+/// `<!X` block opens a comment, the tilde fence after it goes dead, and
+/// a `## ` line the fence masked in situ reads as a heading on the next
+/// parse; the second parse splits where the first did not and the two
+/// generations differ (fuzz findings, CI runs 2026-09-08 and
+/// 2026-09-09, corpus members `crash-c9e7bbf7…` and `crash-ce631bf5…`;
+/// in the first the enclosing block was opened by the preceding
+/// section, in the second by the preamble before any heading, so no
+/// rule about closers between merged pieces can repair the class).
+///
+/// So the second pass reads every such section the way the generator
+/// will write it. A heading the referee did not itself read as a
+/// heading in situ was read inside some other block; its piece
+/// (verbatim heading line, newline, trimmed content) is masked from a
+/// neutral start, and the first `## ` line that surfaces becomes a
+/// boundary of its own. The new piece is read the same way, and so on
+/// until every piece shows exactly one boundary. Boundaries are only
+/// ever added, and only at lines the next parse would have split on
+/// anyway, so the first parse already lands on the fixpoint. A section
+/// whose heading the referee read as a heading stands in a neutral
+/// context already (a column-0 ATX heading ends every paragraph, list
+/// and quote before it, and a code block would have masked it), so its
+/// in-situ reading and the generator's agree; reading it again would
+/// find nothing, which is why the heading list is only a cost filter
+/// and most documents never enter the second pass.
+fn section_boundaries(body: &str, masked_body: &str) -> Vec<Range<usize>> {
+    let mut bounds: BTreeMap<usize, usize> = section_heading_re()
+        .find_iter(masked_body)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+    if bounds.is_empty() {
+        return Vec::new();
+    }
+    let read_as_heading = crate::markdown::heading_starts(body);
+    let mut work: Vec<usize> = bounds
+        .keys()
+        .copied()
+        .filter(|start| read_as_heading.binary_search(start).is_err())
+        .collect();
+    while let Some(start) = work.pop() {
+        let end = bounds[&start];
+        let content_end = bounds
+            .range(start + 1..)
+            .next()
+            .map_or(body.len(), |(next, _)| *next);
+        let heading_line = &body[start..end];
+        let (content, content_start) = section_content(body, end, content_end);
+        let piece = format!("{heading_line}\n{content}");
+        let masked = mask_code_blocks(&piece);
+        let Some(extra) = section_heading_re()
+            .find_iter(&masked)
+            .find(|m| m.start() > 0)
+        else {
+            continue;
+        };
+        // The piece is heading line, `\n`, content: an offset past the
+        // heading line maps into the body at the content's start.
+        let abs_start = content_start + (extra.start() - heading_line.len() - 1);
+        bounds.insert(abs_start, abs_start + extra.len());
+        work.push(abs_start);
+    }
+    bounds.into_iter().map(|(start, end)| start..end).collect()
 }
 
 /// Split body into named sections. Returns `Map<lowercase_key,
@@ -587,9 +690,6 @@ pub(crate) fn split_sections(
     body: &str,
     masked_body: &str,
 ) -> (SplitSections, Vec<DuplicateSection>, Vec<String>) {
-    // One definition of the boundary, shared with the catch-all merge's
-    // shape check: whatever the splitter reads as a section, the merge
-    // must read the same way.
     // IndexMap, not HashMap: the catch-all builder re-emits non-schema
     // sections in this map's iteration order, so the order must be the
     // document's — hash-random order made canonical bytes unstable
@@ -598,39 +698,19 @@ pub(crate) fn split_sections(
     let mut sections = IndexMap::new();
     let mut duplicates: HashMap<String, DuplicateSection> = HashMap::new();
     let mut raw_headings = Vec::new();
-    let matches: Vec<_> = section_heading_re().find_iter(masked_body).collect();
+    let boundaries = section_boundaries(body, masked_body);
 
-    for (i, m) in matches.iter().enumerate() {
+    for (i, m) in boundaries.iter().enumerate() {
         // Extract heading name from original body (not masked)
-        let heading_line = &body[m.start()..m.end()];
+        let heading_line = &body[m.clone()];
         let name = heading_line
             .strip_prefix("## ")
             .unwrap_or(heading_line)
             .trim();
 
-        let content_start = m.end();
-        let content_end = if i + 1 < matches.len() {
-            matches[i + 1].start()
-        } else {
-            body.len()
-        };
-        // Leading trim drops blank lines wholesale but keeps the first
-        // visible line's indentation: a full trim promoted an indented
-        // heading-lookalike (` ## Specifies`) to column 0 inside stored
-        // content, where the catch-all re-emit made the NEXT parse read
-        // it as a real section heading — structure from content, and a
-        // broken parse-generate fixpoint (fuzz finding, long tier,
-        // 2026-08-24, corpus member `crash-de0c69e0…`). Trailing trim
-        // stays full: it can never move a line to column 0. The
-        // runtime validator's embedded-heading guard keeps its own full
-        // trim, so the mutation path refuses exactly what it refused.
-        let raw = &body[content_start..content_end];
-        let visible_start = raw
-            .split_inclusive('\n')
-            .take_while(|line| line.trim().is_empty())
-            .map(str::len)
-            .sum::<usize>();
-        let content = raw[visible_start..].trim_end().to_string();
+        let content_end = boundaries.get(i + 1).map_or(body.len(), |next| next.start);
+        let (content, _) = section_content(body, m.end, content_end);
+        let content = content.to_string();
         // Schema section keys are underscore-separated (e.g. `current_state`).
         // A heading like `## Current State` must derive to the same form so
         // schema-declared sections land in `result_sections` under the right
@@ -823,66 +903,29 @@ fn build_catch_all(sections: &SplitSections, schema: &TypeDefinition) -> String 
     // (fuzz finding, long tier, 0.17.0 release readiness run, corpus
     // member `crash-1233c134…`). The same oracle closes both.
     //
-    // The closer is verified once more against the piece it is written in
-    // front of. Two pieces adjacent in the document were read in situ as
-    // one run of lines, so a block the first leaves open may be the very
-    // block the second closes: the block's context reached into the
-    // second piece and decided what its lines meant. Closing it early
-    // moves that boundary, and the second piece is read under a context
-    // it never had in situ. A `<!X` block left open by piece one ran in
-    // situ through a `>` line inside piece two; a `<!--` before that line
-    // was inert inside the block, and a tilde fence after it was live and
-    // masked a `## ` line into content. With `>` injected between the
-    // pieces the `<!--` opened a comment, the fence went dead, the masked
-    // line surfaced as a heading on the next parse, and the document
-    // shifted for one round (fuzz finding, CI run 2026-09-08, corpus
-    // member `crash-c9e7bbf7…`). So the closer is written only when the
-    // next piece keeps its shape with it, or loses its shape without it:
-    // the piece must read as exactly one section, its heading a heading
-    // and nothing in its content one. When the closer alone breaks that
-    // shape, the pieces are joined bare, exactly as they stood in the
-    // document, and the still-open context is judged again after the
-    // next piece over the running string. The last piece has no
-    // successor and always closes, as before; so does every piece whose
-    // closer leaves its successor intact, so the canonical bytes of
-    // every document the old rule already kept stable are unchanged.
+    // A closer between two pieces is always safe to write: every piece
+    // reads as exactly one section from a neutral start
+    // (`section_boundaries` guarantees it, reading each section the
+    // way it is written here), and the verified closer leaves exactly
+    // that start for the next piece. The mirror case, a closer that
+    // changed how the next piece read because that piece had been read
+    // inside a block the previous one left open, is settled at the
+    // splitter, not judged here (fuzz findings, corpus members
+    // `crash-c9e7bbf7…` and `crash-ce631bf5…`).
     let mut joined = String::new();
-    let mut parts = parts.into_iter().peekable();
-    while let Some(piece) = parts.next() {
+    for piece in parts {
         if joined.is_empty() {
             joined = piece;
         } else {
             joined.push_str("\n\n");
             joined.push_str(&piece);
         }
-        let Some(closer) = crate::markdown::closing_context_if_unterminated(&joined) else {
-            continue;
-        };
-        if let Some(next) = parts.peek() {
-            let closed = format!("{joined}\n{closer}");
-            if !next_piece_reads_intact(&closed, next) && next_piece_reads_intact(&joined, next) {
-                continue;
-            }
+        if let Some(closer) = crate::markdown::closing_context_if_unterminated(&joined) {
+            joined.push('\n');
+            joined.push_str(&closer);
         }
-        joined.push('\n');
-        joined.push_str(&closer);
     }
     joined
-}
-
-/// Does `next`, a non-schema section re-emitted heading line first,
-/// keep its shape when the catch-all merge appends it to `prefix`? It
-/// does when the masked join shows exactly one section boundary inside
-/// the piece, at its first byte: the heading is still a heading, and no
-/// `## ` line inside its content has surfaced (in situ every such line
-/// was masked, or it would have been a boundary of its own).
-fn next_piece_reads_intact(prefix: &str, next: &str) -> bool {
-    let joined = format!("{prefix}\n\n{next}");
-    let masked = mask_code_blocks(&joined);
-    let mut starts = section_heading_re()
-        .find_iter(&masked[prefix.len() + "\n\n".len()..])
-        .map(|m| m.start());
-    starts.next() == Some(0) && starts.next().is_none()
 }
 
 // ---------------------------------------------------------------------------
@@ -1760,17 +1803,18 @@ done >
     // Fixture pinned by the CI fuzz run of 2026-09-08 (corpus member
     // `crash-c9e7bbf7…`), the mirror image of the case above: two
     // adjacent non-schema sections, the first ending inside a `<!X`
-    // block that the SECOND closes with its `>` line. In situ the `<!--`
-    // before that line was inert inside the block and the tilde fence
-    // after it masked `## Hidden` into content. The merge's eager `>`
-    // after the first piece turned the `<!--` into a live comment, the
-    // fence went dead, `## Hidden` surfaced as a heading on the second
-    // parse and took a second `-->` with it. The merge now writes a
-    // closer between two pieces only when it leaves the next piece
-    // reading as one section; here it does not, so the pieces stay
-    // joined bare and the dangling fence closes at the end instead.
+    // block that the SECOND closes with its `>` line, so the second
+    // heading stood inside the block. In situ the `<!--` before that
+    // line was inert inside the block and the tilde fence after it
+    // masked `## Hidden` into content. Written from a neutral start,
+    // the `<!--` is a live comment, the fence is dead and `## Hidden`
+    // is a heading; the second parse split there and carried a second
+    // `-->`. The splitter now reads a section that stood inside a
+    // block the way it will be written, so `## Hidden` is a boundary
+    // on the first parse already (an empty non-schema section, dropped
+    // as every such section is) and the comment closes before it.
     #[test]
-    fn closer_that_would_reshape_the_next_piece_is_withheld() {
+    fn section_that_stood_inside_the_previous_sections_block_is_read_as_written() {
         let schema = spec_schema();
         let md = "\
 ---
@@ -1789,23 +1833,52 @@ type: spec
 ";
         let e1 = parse_markdown(md, "html.md", &schema, "specs").unwrap();
         assert_eq!(
-            e1.entity.sections["specifies"],
-            "## First\n<!X\n\n## Second\n<!--\n>\n~~~\n## Hidden\n~~~",
-            "no `>` between the pieces; the fence the second piece leaves open closes at the end"
+            e1.entity.sections["specifies"], "## First\n<!X\n>\n\n## Second\n<!--\n>\n~~~\n-->",
+            "the second section ends where a neutral read would split it, and its comment closes there"
+        );
+        assert_eq!(
+            e1.entity.raw_section_headings,
+            vec!["First", "Second", "Hidden"],
+            "the surfaced line is a boundary on the first parse"
         );
         let m1 = crate::entity::generator::generate_markdown(&e1.entity, &schema);
         let e2 = parse_markdown(&m1, "html.md", &schema, "specs").unwrap();
         let m2 = crate::entity::generator::generate_markdown(&e2.entity, &schema);
         assert_eq!(m1, m2, "parse→generate is a fixpoint");
+    }
+
+    // Fixture pinned by the CI fuzz run of 2026-09-09 (corpus member
+    // `crash-ce631bf5…`), the sibling with no section before the block:
+    // the `<!X` block opens in the preamble under the title, so the only
+    // section's heading stands inside it and no closer between merged
+    // pieces exists to blame. Same in-situ reading (inert `<!--`, live
+    // fence, masked `## Hidden`), same neutral reading (live comment,
+    // dead fence, surfaced heading); the splitter's second pass makes
+    // the first parse agree with the second.
+    #[test]
+    fn section_that_stood_inside_a_preamble_block_is_read_as_written() {
+        let schema = spec_schema();
+        let md = "\
+---
+type: spec
+---
+# T
+<!X
+## Only
+<!--
+>
+~~~
+## Hidden
+";
+        let e1 = parse_markdown(md, "html.md", &schema, "specs").unwrap();
         assert_eq!(
-            e2.entity
-                .raw_section_headings
-                .iter()
-                .filter(|h| h.as_str() == "Hidden")
-                .count(),
-            0,
-            "the masked line never becomes a heading"
+            e1.entity.sections["specifies"], "## Only\n<!--\n>\n~~~\n-->",
+            "the section ends where a neutral read would split it, and its comment closes there"
         );
+        let m1 = crate::entity::generator::generate_markdown(&e1.entity, &schema);
+        let e2 = parse_markdown(&m1, "html.md", &schema, "specs").unwrap();
+        let m2 = crate::entity::generator::generate_markdown(&e2.entity, &schema);
+        assert_eq!(m1, m2, "parse→generate is a fixpoint");
     }
 
     // Fixture pinned by the coverage-guided long tier (first dispatch,

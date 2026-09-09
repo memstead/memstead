@@ -136,6 +136,25 @@ pub fn mask_code_blocks_and_spans(text: &str) -> String {
     mask_ranges(text, &code_ranges(text, true))
 }
 
+/// Byte offsets at which the referee opens a heading: the start of
+/// every `Heading` block it reads, sorted. A column-0 `## ` line whose
+/// offset is missing here was read as something else where it stands
+/// (a line of an HTML block, a table row), so the context after it is
+/// not the neutral one a heading leaves behind. The section splitter
+/// uses this to find the sections it must read again from a neutral
+/// start; the list is a cost filter there, never the verdict.
+///
+/// **Pass a body, not a whole entity file**, see the module header.
+pub fn heading_starts(text: &str) -> Vec<usize> {
+    let mut out: Vec<usize> = Parser::new_ext(text, parser_options())
+        .into_offset_iter()
+        .filter(|(event, _)| matches!(event, Event::Start(Tag::Heading { .. })))
+        .map(|(_, range)| range.start)
+        .collect();
+    out.sort_unstable();
+    out
+}
+
 /// When `text` — a section body — ends inside an unterminated fenced
 /// code block that would swallow whatever the caller writes after it,
 /// return the closing fence that terminates it. `None` when the text is
