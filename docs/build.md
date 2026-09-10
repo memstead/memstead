@@ -29,6 +29,7 @@ The engine workspace is root-hoisted: `Cargo.toml` + `crates/` + `xtask/` live a
 | `crates/memstead-mcp/` | MCP server binary | Cargo | `target/<profile>/memstead-mcp` |
 | `crates/memstead-base/` | Engine kernel: store, parser, validators, mem lifecycle, workspace policy (library, no binary) | Cargo | linked into others |
 | `crates/memstead-git-branch/` | Git-backed storage backend: multi-mem mem-repo, history, packaging, search index (library, no binary) | Cargo | linked into others |
+| `crates/memstead-projection/` | The maintenance loop: projection briefs, findings and verify, advance, prune, the health assembly (library, no binary; above the kernel, below the binaries) | Cargo | linked into others |
 | `crates/memstead-schema/` | Schema layer (library, no binary) | Cargo | linked into others |
 | `crates/memstead-wasm/` | WASM bindings | Cargo (wasm target) | wasm module + JS glue |
 | `plugins/claude-code/` | Claude Code plugin | none — plain `.mjs`/`.json` | runs as-is |
@@ -116,11 +117,12 @@ Workspace crates stay unoptimised so incremental rebuilds during development are
 
 `profile.release` uses Cargo's standard release profile — full optimisation, no debug info.
 
-## Cargo features (memstead-git-branch)
+## Cargo features (memstead-git-branch, memstead-base)
 
-| Feature | Purpose | Default? |
-|---|---|---|
-| `test-support` | Exposes `init_mem_repo_stub` (and future helpers) for downstream test crates. | No |
+| Crate | Feature | Purpose | Default? |
+|---|---|---|---|
+| `memstead-git-branch` | `test-support` | Exposes `init_mem_repo_stub` (and future helpers) for downstream test crates. | No |
+| `memstead-base` | `test-support` | Exposes the anchor-figure test accessor to a downstream suite (`memstead-projection`'s). | No |
 
 No feature changes what the binaries do; the git-tree writer is always compiled.
 

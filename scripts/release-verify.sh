@@ -339,8 +339,8 @@ done
 # crates.io now, so it is held to the release like every other channel.
 #
 # Two crates are products on crates.io, memstead-cli and memstead-mcp: each
-# is read as its own channel. memstead-schema, memstead-base and
-# memstead-git-branch are on crates.io only because cargo refuses to
+# is read as its own channel. memstead-schema, memstead-base,
+# memstead-git-branch and memstead-projection are on crates.io only because cargo refuses to
 # publish a crate whose path dependencies are not on the registry at the
 # same version; they are dependencies of the two products, not channels,
 # so they get a line here and no verdict.
@@ -359,7 +359,7 @@ for product in memstead-cli memstead-mcp; do
     unmeasured "crates.io $product" "$FETCH_REASON"
   fi
 done
-say "crates.io dependency crates" "memstead-schema, memstead-base, memstead-git-branch: published as dependencies of the two products, not channels"
+say "crates.io dependency crates" "memstead-schema, memstead-base, memstead-git-branch, memstead-projection: published as dependencies of the two products, not channels"
 # ── 6. the publish jobs of the release run ───────────────────────────────────
 # dist's `announce` runs when every publish job is `success` OR `skipped`;
 # skipping is how prereleases opt out. On a non-prerelease a skipped publish

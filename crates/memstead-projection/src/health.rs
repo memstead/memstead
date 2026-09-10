@@ -9,6 +9,18 @@
 
 use memstead_base::ops::health_compose::{ComposeHealthError, HealthArgs, HealthConfig};
 
+/// The summary-shaped assembly for an embedder that renders the kernel's
+/// `HealthSummary` rather than the JSON payload (the UI API does): the
+/// kernel summary with the loop's warnings appended where the engine's own
+/// report used to carry them. Same axis, same computation, one more shape.
+pub fn health_summary(engine: &memstead_base::Engine) -> memstead_base::ops::HealthSummary {
+    let mut summary = engine.health();
+    summary
+        .warnings
+        .extend(super::findings::unanchored_mention_warnings(engine));
+    summary
+}
+
 /// Compose the complete health payload — see the module doc.
 pub fn compose_health(
     engine: &mut memstead_base::Engine,

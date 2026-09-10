@@ -10,11 +10,12 @@
 #   memstead-schema       (leaf — no internal deps)
 #   memstead-base         -> schema
 #   memstead-git-branch   -> base, schema
-#   memstead-mcp          -> base, git-branch, schema
-#   memstead-cli          -> base, git-branch, schema
+#   memstead-projection   -> base, schema
+#   memstead-mcp          -> base, git-branch, projection, schema
+#   memstead-cli          -> base, git-branch, projection, schema
 #
-# Two of the five are products: memstead-cli and memstead-mcp, the crates a
-# user installs and release-verify.sh reads on crates.io. The other three
+# Two of the six are products: memstead-cli and memstead-mcp, the crates a
+# user installs and release-verify.sh reads on crates.io. The other four
 # are published because cargo refuses to publish a crate whose path
 # dependencies are not on the registry at the same version; they are
 # dependencies of the two products, not supported libraries, and their
@@ -47,6 +48,7 @@ CRATES=(
     memstead-schema
     memstead-base
     memstead-git-branch
+    memstead-projection
     memstead-mcp
     memstead-cli
 )
