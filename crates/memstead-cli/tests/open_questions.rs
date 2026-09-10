@@ -403,6 +403,19 @@ fn axis_composes_all_signals_and_matches_per_signal_axes() {
         open.contains("coverage_gap") && open.contains("uncovered-corner"),
         "coverage gap under open work: {open}"
     );
+    // The lists are ordered by id, never by the store's hash order: a
+    // byte-parity gate over this axis reads the same bytes every run.
+    for key in ["open_entries", "already_searched"] {
+        let ids: Vec<&str> = proc[key]["items"]
+            .as_array()
+            .expect("capped list carries items")
+            .iter()
+            .map(|v| v["id"].as_str().unwrap())
+            .collect();
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        assert_eq!(ids, sorted, "{key} is ordered by id: {open}");
+    }
     assert!(
         !open.contains("negative_finding"),
         "negative findings must NOT be in the todo pile: {open}"

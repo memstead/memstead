@@ -7,6 +7,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **`health --include open_questions` lists a process mem's `open_entries`
+  and `already_searched` in a stable order.** Both lists were pushed in the
+  store's hash order, so two runs over the same workspace could differ in
+  nothing but that order, and a byte-parity gate over the axis (the
+  CLI-versus-MCP pin, a fixture diff between two builds) could lie or
+  flake. They are ordered by entity id before the cap takes the head
+  (found by the plan-01 grader of the projection-crate bundle, 2026-09-10).
+
 ### Changed
 
 - **Health is composed through the maintenance loop's one assembly.**

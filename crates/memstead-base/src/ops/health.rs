@@ -818,6 +818,15 @@ pub fn health_open_questions_axis(
                         open.push(item);
                     }
                 }
+                // The store iterates in hash order; a byte-parity gate over
+                // this axis (the CLI-versus-MCP pin, a fixture diff between
+                // two builds) needs the same bytes every run, so both lists
+                // are ordered by id before the cap takes the head.
+                let by_id = |a: &serde_json::Value, b: &serde_json::Value| {
+                    a["id"].as_str().cmp(&b["id"].as_str())
+                };
+                open.sort_by(by_id);
+                searched.sort_by(by_id);
                 process.push(serde_json::json!({
                     "binding": binding,
                     "process_mem": r.mem,
