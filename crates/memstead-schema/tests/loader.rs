@@ -1769,6 +1769,106 @@ fn constraint_requires_when_unknown_when_field_rejected() {
     );
 }
 
+/// Form 6 floor: `min_related` loads with its declared value and
+/// defaults to zero (the sealed semantics), so an existing package
+/// keeps meaning what it meant.
+#[test]
+fn constraint_transition_requires_checks_min_related_loads_and_defaults() {
+    use memstead_schema::ConstraintDef;
+    let with_floor = minimal_type()
+        + r#"constraints:
+  - kind: transition_requires_checks
+    field: status
+    to_value: closed
+    relationships: [PART_OF]
+    direction: incoming
+    min_related: 1
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &with_floor)]).expect("must load");
+    let ConstraintDef::TransitionRequiresChecks { min_related, .. } =
+        &schema.types.get("sample").unwrap().constraints[0]
+    else {
+        panic!("expected transition_requires_checks");
+    };
+    assert_eq!(*min_related, 1);
+
+    let without = minimal_type()
+        + r#"constraints:
+  - kind: transition_requires_checks
+    field: status
+    to_value: closed
+    relationships: [PART_OF]
+    direction: incoming
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &without)]).expect("must load");
+    let ConstraintDef::TransitionRequiresChecks { min_related, .. } =
+        &schema.types.get("sample").unwrap().constraints[0]
+    else {
+        panic!("expected transition_requires_checks");
+    };
+    assert_eq!(*min_related, 0, "absent floor is zero: sealed semantics");
+}
+
+/// Form 7 loader honesty: a well-formed `transition_requires_self_check`
+/// loads with block as its default severity; an unknown `field`, a
+/// `to_value` outside the enum, and a malformed `check_kind` (not an
+/// engine kind, not `x-<name>`) each refuse typed, naming the offender.
+#[test]
+fn constraint_transition_requires_self_check_validates() {
+    use memstead_schema::{ConstraintDef, ConstraintSeverity};
+    for kind in ["verification", "conformance", "x-projection", "x-a1-b2"] {
+        let t = minimal_type()
+            + &format!(
+                "constraints:\n  - kind: transition_requires_self_check\n    field: status\n    to_value: closed\n    check_kind: {kind}\n"
+            );
+        let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+        let ConstraintDef::TransitionRequiresSelfCheck {
+            check_kind,
+            severity,
+            ..
+        } = &schema.types.get("sample").unwrap().constraints[0]
+        else {
+            panic!("expected transition_requires_self_check");
+        };
+        assert_eq!(check_kind, kind);
+        assert_eq!(
+            *severity,
+            ConstraintSeverity::Block,
+            "form 7 defaults to block"
+        );
+    }
+
+    for (yaml, offender) in [
+        (
+            "constraints:\n  - kind: transition_requires_self_check\n    field: phase\n    to_value: closed\n    check_kind: x-projection\n",
+            "phase",
+        ),
+        (
+            "constraints:\n  - kind: transition_requires_self_check\n    field: status\n    to_value: archived\n    check_kind: x-projection\n",
+            "archived",
+        ),
+        (
+            "constraints:\n  - kind: transition_requires_self_check\n    field: status\n    to_value: closed\n    check_kind: projection\n",
+            "projection",
+        ),
+        (
+            "constraints:\n  - kind: transition_requires_self_check\n    field: status\n    to_value: closed\n    check_kind: x-Bad_Kind\n",
+            "x-Bad_Kind",
+        ),
+        (
+            "constraints:\n  - kind: transition_requires_self_check\n    field: status\n    to_value: closed\n    check_kind: x-\n",
+            "x-",
+        ),
+    ] {
+        let t = minimal_type() + yaml;
+        let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+        assert!(
+            matches!(err, SchemaLoadError::InvalidConstraint { offender: ref o, .. } if o == offender),
+            "offender {offender}: got {err}"
+        );
+    }
+}
+
 /// Form 6 loader honesty: a well-formed `transition_requires_checks`
 /// loads with its declaration intact; a malformed one refuses typed,
 /// naming the offender — unknown `field`, `to_value` outside the

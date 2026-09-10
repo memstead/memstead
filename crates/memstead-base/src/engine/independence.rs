@@ -286,21 +286,20 @@ impl Engine {
     /// mem's touches gathered once per provider.
     pub(crate) fn check_standing_provider(
         &self,
-    ) -> impl Fn(&crate::entity::Entity) -> CheckStanding + '_ {
+    ) -> impl Fn(&crate::entity::Entity, &str) -> CheckStanding + '_ {
         let ledger = self
             .workspace_root()
             .map(crate::check::CheckLedger::for_workspace);
         let touches: std::cell::RefCell<HashMap<String, MemTouches>> =
             std::cell::RefCell::new(HashMap::new());
-        move |entity: &crate::entity::Entity| {
+        move |entity: &crate::entity::Entity, kind: &str| {
             let Some(ledger) = &ledger else {
                 return CheckStanding {
                     state: CheckState::NeverChecked,
                     independence: None,
                 };
             };
-            let latest =
-                ledger.latest_for_kind(&entity.id.0, crate::check::CheckKind::Verification);
+            let latest = ledger.latest_for_wire_kind(&entity.id.0, kind);
             let state = crate::check::derive_state(latest.as_ref(), &entity.content_hash);
             if state != CheckState::CheckedOk {
                 return CheckStanding {

@@ -2024,6 +2024,7 @@ pub fn build_schema_payload_scoped(
                         to_value,
                         relationships,
                         direction,
+                        min_related,
                         severity,
                     } => serde_json::json!({
                         "kind": "transition_requires_checks",
@@ -2031,6 +2032,19 @@ pub fn build_schema_payload_scoped(
                         "to_value": to_value,
                         "relationships": relationships,
                         "direction": direction,
+                        "min_related": min_related,
+                        "severity": severity,
+                    }),
+                    memstead_schema::ConstraintDef::TransitionRequiresSelfCheck {
+                        field,
+                        to_value,
+                        check_kind,
+                        severity,
+                    } => serde_json::json!({
+                        "kind": "transition_requires_self_check",
+                        "field": field,
+                        "to_value": to_value,
+                        "check_kind": check_kind,
                         "severity": severity,
                     }),
                 })

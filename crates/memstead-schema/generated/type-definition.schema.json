@@ -337,6 +337,13 @@
               "type": "string",
               "const": "transition_requires_checks"
             },
+            "min_related": {
+              "description": "The least number of related entities the transition needs.\nDefault 0: universal quantification over nothing satisfies,\nthe sealed semantics every earlier generation carries. `1`\nturns the gate into \"at least one related entity, and every\none confirmed\": the floor a graded contract needs so an\nentity with no related checkable entity cannot land the\ngated value vacuously.",
+              "type": "integer",
+              "format": "uint",
+              "default": 0,
+              "minimum": 0
+            },
             "relationships": {
               "description": "Edge names whose related entities must be checked (each\nvalidated against the relationship vocabulary).",
               "type": "array",
@@ -361,6 +368,40 @@
             "to_value",
             "relationships",
             "direction"
+          ]
+        },
+        {
+          "description": "Form 7 — gated transition on the entity's own check record: a\nwrite that lands `field` holding `to_value` requires the entity\nITSELF to carry a fresh confirming check record of `check_kind`\n(an engine kind, `verification` or `conformance`, or a foreign\n`x-<name>` kind the engine records verbatim), recorded under an\nidentity distinct from the entity's own author (the same\nindependence reading form 6 applies to related entities). The\nengine never judges what the check asserts; it requires that\nthe act was recorded, fresh against the entity's content, by\nsomeone else. Generic by construction: any type, any enum\nfield, any declared kind. Evaluated at write time in the shared\ndeclared-constraints pass (block refuses, warn warns) and\nreported by the health `constraints` include as a standing\nviolation when the check goes stale after the transition. On an\nengine without a check ledger the entity derives\n`never_checked`, so a declared gate refuses rather than passing.",
+          "type": "object",
+          "properties": {
+            "check_kind": {
+              "description": "The check kind the record must carry: `verification`,\n`conformance`, or a foreign `x-<name>` kind (validated by\nthe loader against the wire grammar).",
+              "type": "string"
+            },
+            "field": {
+              "description": "The metadata field whose value gates (must declare\n`enum_values`; validated by the loader).",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "transition_requires_self_check"
+            },
+            "severity": {
+              "description": "Defaults to `block` — the declaration exists to refuse the\nunrecorded transition at write time.",
+              "$ref": "#/$defs/ConstraintSeverity",
+              "default": "block"
+            },
+            "to_value": {
+              "description": "The gated value — landing it requires the check.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "field",
+            "to_value",
+            "check_kind"
           ]
         }
       ]

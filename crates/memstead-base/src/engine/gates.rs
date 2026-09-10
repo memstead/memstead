@@ -81,14 +81,23 @@ impl Engine {
                     to_value,
                     relationships,
                     direction,
+                    min_related,
                     ..
                 } = c
                 else {
                     continue;
                 };
+                let floor = if *min_related > 0 {
+                    format!(
+                        ", and at least {min_related} such entit{}",
+                        if *min_related == 1 { "y" } else { "ies" }
+                    )
+                } else {
+                    String::new()
+                };
                 lines.push(format!(
                     "Gate: `{type_name}` — `{field}: {to_value}` requires a fresh confirming \
-                     check record on every entity related via [{}] ({}).",
+                     check record on every entity related via [{}] ({}){floor}.",
                     relationships.join(", "),
                     match direction {
                         memstead_schema::PropagationDirection::Incoming => "incoming",

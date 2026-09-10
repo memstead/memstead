@@ -471,8 +471,48 @@ pub enum ConstraintDef {
         /// `incoming` — entities whose edges point at this one;
         /// `outgoing` — entities this one points at.
         direction: PropagationDirection,
+        /// The least number of related entities the transition needs.
+        /// Default 0: universal quantification over nothing satisfies,
+        /// the sealed semantics every earlier generation carries. `1`
+        /// turns the gate into "at least one related entity, and every
+        /// one confirmed": the floor a graded contract needs so an
+        /// entity with no related checkable entity cannot land the
+        /// gated value vacuously.
+        #[serde(default)]
+        min_related: usize,
         /// Defaults to `block` — the declaration exists to refuse the
         /// unverified transition at write time.
+        #[serde(default = "ConstraintSeverity::block")]
+        severity: ConstraintSeverity,
+    },
+    /// Form 7 — gated transition on the entity's own check record: a
+    /// write that lands `field` holding `to_value` requires the entity
+    /// ITSELF to carry a fresh confirming check record of `check_kind`
+    /// (an engine kind, `verification` or `conformance`, or a foreign
+    /// `x-<name>` kind the engine records verbatim), recorded under an
+    /// identity distinct from the entity's own author (the same
+    /// independence reading form 6 applies to related entities). The
+    /// engine never judges what the check asserts; it requires that
+    /// the act was recorded, fresh against the entity's content, by
+    /// someone else. Generic by construction: any type, any enum
+    /// field, any declared kind. Evaluated at write time in the shared
+    /// declared-constraints pass (block refuses, warn warns) and
+    /// reported by the health `constraints` include as a standing
+    /// violation when the check goes stale after the transition. On an
+    /// engine without a check ledger the entity derives
+    /// `never_checked`, so a declared gate refuses rather than passing.
+    TransitionRequiresSelfCheck {
+        /// The metadata field whose value gates (must declare
+        /// `enum_values`; validated by the loader).
+        field: String,
+        /// The gated value — landing it requires the check.
+        to_value: String,
+        /// The check kind the record must carry: `verification`,
+        /// `conformance`, or a foreign `x-<name>` kind (validated by
+        /// the loader against the wire grammar).
+        check_kind: String,
+        /// Defaults to `block` — the declaration exists to refuse the
+        /// unrecorded transition at write time.
         #[serde(default = "ConstraintSeverity::block")]
         severity: ConstraintSeverity,
     },
@@ -994,4 +1034,35 @@ impl Filterable {
             Filterable::Range => Some("range"),
         }
     }
+}
+
+/// The engine's own check kinds on the wire — the closed half of the
+/// check-kind vocabulary. The other half is the foreign form
+/// `x-<name>`, recorded verbatim and never interpreted.
+pub const ENGINE_CHECK_KINDS: &[&str] = &["verification", "conformance"];
+
+/// Prefix of a caller-declared check kind the engine records verbatim
+/// and never interprets: `x-<name>`, `name` lowercase letters, digits
+/// and hyphens, not starting or ending with a hyphen.
+pub const FOREIGN_CHECK_KIND_PREFIX: &str = "x-";
+
+/// Whether a wire check kind is well-formed: an engine kind, or a
+/// foreign `x-<name>` kind under the grammar above. ONE definition,
+/// shared by the schema loader (a `transition_requires_self_check`
+/// declaration naming a malformed kind refuses at load) and the
+/// engine's check surface (a malformed kind refuses at record time),
+/// so a declaration can never name a kind no check could carry.
+pub fn check_kind_wire_is_well_formed(kind: &str) -> bool {
+    if ENGINE_CHECK_KINDS.contains(&kind) {
+        return true;
+    }
+    let Some(name) = kind.strip_prefix(FOREIGN_CHECK_KIND_PREFIX) else {
+        return false;
+    };
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !name.starts_with('-')
+        && !name.ends_with('-')
 }

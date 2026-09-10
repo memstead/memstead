@@ -7,6 +7,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Two gated-transition forms the constraint vocabulary lacked.**
+  `transition_requires_checks` takes an optional `min_related` (default
+  0, the sealed semantics): with `min_related: 1` an entity with no
+  related checkable entity can no longer land the gated value vacuously.
+  New form `transition_requires_self_check` gates a transition on the
+  entity's OWN fresh, independent check record of a declared
+  `check_kind` (an engine kind or a foreign `x-<name>` kind the engine
+  records verbatim). Both are generic; the workspace-local planning
+  generation 0.7.0 is their first user (a plan with no criterion cannot
+  complete; a bundle completes only on a recorded `x-projection` check by
+  someone other than its author). The check-kind wire grammar now has one
+  definition, `memstead_schema::check_kind_wire_is_well_formed`, shared by
+  the loader and the check surface. The gates brief names the floor.
+
 ### Fixed
 
 - **`health --include open_questions` lists a process mem's `open_entries`

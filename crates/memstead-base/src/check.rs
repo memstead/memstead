@@ -88,14 +88,13 @@ impl RecordKind {
         if let Some(k) = CheckKind::from_wire(s) {
             return Some(Self::Engine(k));
         }
-        let name = s.strip_prefix(FOREIGN_KIND_PREFIX)?;
-        let well_formed = !name.is_empty()
-            && name
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-            && !name.starts_with('-')
-            && !name.ends_with('-');
-        well_formed.then(|| Self::Foreign(s.to_string()))
+        // ONE grammar, declared beside the schema's constraint
+        // vocabulary so a `transition_requires_self_check` declaration
+        // and a recorded check agree on what a kind may look like.
+        s.starts_with(FOREIGN_KIND_PREFIX)
+            .then(|| memstead_schema::check_kind_wire_is_well_formed(s))
+            .filter(|ok| *ok)
+            .map(|_| Self::Foreign(s.to_string()))
     }
 
     /// The engine kind, when this is one.
@@ -437,6 +436,22 @@ impl CheckLedger {
             .into_iter()
             .rev()
             .find(|r| r.entity == entity && r.resolved_kind() == Some(kind))
+    }
+
+    /// The newest record for one entity of one WIRE kind: an engine
+    /// kind resolves as [`Self::latest_for_kind`] (legacy kind-less
+    /// lines read as `verification`); a foreign `x-<name>` kind matches
+    /// the recorded kind verbatim. The lookup a `transition_requires_self_check`
+    /// gate declares its kind against.
+    pub fn latest_for_wire_kind(&self, entity: &str, kind: &str) -> Option<CheckRecord> {
+        match CheckKind::from_wire(kind) {
+            Some(k) => self.latest_for_kind(entity, k),
+            None => self
+                .all()
+                .into_iter()
+                .rev()
+                .find(|r| r.entity == entity && r.kind.as_deref() == Some(kind)),
+        }
     }
 }
 

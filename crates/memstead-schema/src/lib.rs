@@ -55,6 +55,7 @@ pub use types::{
     Serialization, SignalDef, SignalKind, SignalLevel, SignalThreshold, TableFormat,
     TypeDefinition, derive_section_key,
 };
+pub use types::{ENGINE_CHECK_KINDS, FOREIGN_CHECK_KIND_PREFIX, check_kind_wire_is_well_formed};
 
 /// Name constants for the 10 built-in knowledge types shipped in the
 /// `default` schema. Kept as a module to catch typos at compile time.

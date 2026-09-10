@@ -2169,6 +2169,50 @@ fn validate_type(
                     }
                 }
             }
+            crate::types::ConstraintDef::TransitionRequiresSelfCheck {
+                field,
+                to_value,
+                check_kind,
+                ..
+            } => {
+                match td.metadata_fields.iter().find(|f| f.key == *field) {
+                    None => {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "transition_requires_self_check",
+                            offender: field.clone(),
+                            reason: "`field` names no metadata field of this type".to_string(),
+                        });
+                    }
+                    Some(field_def) => {
+                        if let Some(allowed) = &field_def.enum_values
+                            && !allowed.contains(to_value)
+                        {
+                            errors.push(SchemaLoadError::InvalidConstraint {
+                                type_name: td.name.clone(),
+                                kind: "transition_requires_self_check",
+                                offender: to_value.clone(),
+                                reason: format!(
+                                    "`to_value` is not in `{field}`'s enum_values [{}]",
+                                    allowed.join(", ")
+                                ),
+                            });
+                        }
+                    }
+                }
+                if !crate::types::check_kind_wire_is_well_formed(check_kind) {
+                    errors.push(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "transition_requires_self_check",
+                        offender: check_kind.clone(),
+                        reason: format!(
+                            "`check_kind` is neither an engine check kind [{}] nor a foreign \
+                             `x-<name>` kind (lowercase letters, digits, hyphens)",
+                            crate::types::ENGINE_CHECK_KINDS.join(", ")
+                        ),
+                    });
+                }
+            }
             crate::types::ConstraintDef::StatusPropagation {
                 field,
                 value,

@@ -1694,6 +1694,23 @@ pub enum UnsatisfiedConstraint {
         /// Every related entity NOT at derived state `checked_ok`,
         /// each with the state it derived, sorted by id.
         unchecked: Vec<UncheckedRelated>,
+        /// How many related entities the declared edges reach.
+        related: usize,
+        /// The declared floor; a violation with `related < min_related`
+        /// is the vacuous case the floor exists to refuse.
+        min_related: usize,
+        severity: memstead_schema::ConstraintSeverity,
+    },
+    /// Form 7 — the entity holds the gated `to_value` while it carries
+    /// no fresh, independent, confirming check record of `check_kind`.
+    TransitionRequiresSelfCheck {
+        field: String,
+        to_value: String,
+        check_kind: String,
+        /// The standing the entity's own record derived instead of an
+        /// independent `checked_ok` (`never_checked`, `check_stale`,
+        /// `check_failed`, `self_checked`, `unconfirmable`).
+        state: String,
         severity: memstead_schema::ConstraintSeverity,
     },
     /// The entity reaches no non-stub entity of a terminal type along
@@ -1718,7 +1735,8 @@ impl UnsatisfiedConstraint {
             | Self::EnumFromNeighbour { severity, .. }
             | Self::StatusPropagation { severity, .. }
             | Self::MustReach { severity, .. }
-            | Self::TransitionRequiresChecks { severity, .. } => *severity,
+            | Self::TransitionRequiresChecks { severity, .. }
+            | Self::TransitionRequiresSelfCheck { severity, .. } => *severity,
         }
     }
 
@@ -1779,8 +1797,18 @@ impl UnsatisfiedConstraint {
                 to_value,
                 relationships,
                 unchecked,
+                related,
+                min_related,
                 ..
             } => {
+                if related < min_related {
+                    return format!(
+                        "transition_requires_checks: {field}={to_value} requires at least \
+                         {min_related} related entit{} via [{}] — found {related}",
+                        if *min_related == 1 { "y" } else { "ies" },
+                        relationships.join(", ")
+                    );
+                }
                 let listed: Vec<String> = unchecked
                     .iter()
                     .map(|u| format!("'{}' ({})", u.id, u.state))
@@ -1792,6 +1820,17 @@ impl UnsatisfiedConstraint {
                     listed.join(", ")
                 )
             }
+            Self::TransitionRequiresSelfCheck {
+                field,
+                to_value,
+                check_kind,
+                state,
+                ..
+            } => format!(
+                "transition_requires_self_check: {field}={to_value} requires a fresh confirming \
+                 `{check_kind}` check record on this entity under an identity other than its \
+                 author — derived: {state}"
+            ),
         }
     }
 }
@@ -1805,14 +1844,15 @@ pub struct UncheckedRelated {
     pub state: String,
 }
 
-/// The `transition_requires_checks` evaluator's window into the check
-/// ledger: derived verification state for one entity. Callers with an
-/// engine build it from the workspace check ledger; `None` (no ledger
-/// access — a workspace-less engine, or a call path that cannot reach
-/// one) derives every related entity as `never_checked`, so a
-/// declared gate refuses honestly rather than passing unverified.
+/// The gated-transition evaluators' window into the check ledger:
+/// the derived standing of one entity's newest check record of one
+/// wire kind (`verification`, `conformance`, or a foreign `x-<name>`).
+/// Callers with an engine build it from the workspace check ledger;
+/// `None` (no ledger access — a workspace-less engine, or a call path
+/// that cannot reach one) derives every entity as `never_checked`, so
+/// a declared gate refuses honestly rather than passing unverified.
 pub type CheckStateProvider<'a> =
-    &'a dyn Fn(&crate::entity::Entity) -> crate::engine::independence::CheckStanding;
+    &'a dyn Fn(&crate::entity::Entity, &str) -> crate::engine::independence::CheckStanding;
 
 /// Evaluate one entity's declared per-entity `constraints` against its
 /// current state (and, for the store-aware forms, against the rest of
@@ -1937,6 +1977,7 @@ pub fn unsatisfied_constraints(
                 to_value,
                 relationships,
                 direction,
+                min_related,
                 severity,
             } => {
                 let triggered = entity
@@ -1946,7 +1987,7 @@ pub fn unsatisfied_constraints(
                 if !triggered {
                     return None;
                 }
-                let (_, unchecked) = transition_gate_standing(
+                let (related, unchecked) = transition_gate_standing(
                     store,
                     entity,
                     relationships,
@@ -1954,7 +1995,7 @@ pub fn unsatisfied_constraints(
                     exclude,
                     checks,
                 );
-                if unchecked.is_empty() {
+                if unchecked.is_empty() && related >= *min_related {
                     return None;
                 }
                 Some(UnsatisfiedConstraint::TransitionRequiresChecks {
@@ -1963,6 +2004,43 @@ pub fn unsatisfied_constraints(
                     relationships: relationships.clone(),
                     direction: *direction,
                     unchecked,
+                    related,
+                    min_related: *min_related,
+                    severity: *severity,
+                })
+            }
+            ConstraintDef::TransitionRequiresSelfCheck {
+                field,
+                to_value,
+                check_kind,
+                severity,
+            } => {
+                let triggered = entity
+                    .metadata
+                    .get(field.as_str())
+                    .is_some_and(|v| v.to_frontmatter_string() == *to_value);
+                if !triggered {
+                    return None;
+                }
+                // The entity's own record of the declared kind, read
+                // through the same provider form 6 reads related
+                // entities with: no ledger derives never_checked, the
+                // author's own ok reads self_checked, neither confirms.
+                let standing = match checks {
+                    Some(provider) => provider(entity, check_kind),
+                    None => crate::engine::independence::CheckStanding {
+                        state: crate::check::CheckState::NeverChecked,
+                        independence: None,
+                    },
+                };
+                if standing.confirms() {
+                    return None;
+                }
+                Some(UnsatisfiedConstraint::TransitionRequiresSelfCheck {
+                    field: field.clone(),
+                    to_value: to_value.clone(),
+                    check_kind: check_kind.clone(),
+                    state: standing.label().to_string(),
                     severity: *severity,
                 })
             }
@@ -2015,7 +2093,9 @@ pub fn transition_gate_standing(
             // executors (engine::independence): the executor's own ok
             // reads `self_checked` here and does not close the gate.
             let standing = match checks {
-                Some(provider) => provider(rel_entity),
+                Some(provider) => {
+                    provider(rel_entity, crate::check::CheckKind::Verification.as_str())
+                }
                 None => crate::engine::independence::CheckStanding {
                     state: crate::check::CheckState::NeverChecked,
                     independence: None,
@@ -4743,7 +4823,7 @@ community:
                 CheckState::CheckStale
             }
         };
-        let provider = |e: &crate::entity::Entity| {
+        let provider = |e: &crate::entity::Entity, _kind: &str| {
             crate::engine::independence::CheckStanding::assumed_independent(state_of(e))
         };
         let violations = unsatisfied_constraints(&store, &plan, &td, None, Some(&provider));
@@ -4773,7 +4853,7 @@ community:
         );
 
         // Every related entity confirmed -> satisfied.
-        let all_ok = |_: &crate::entity::Entity| {
+        let all_ok = |_: &crate::entity::Entity, _kind: &str| {
             crate::engine::independence::CheckStanding::assumed_independent(CheckState::CheckedOk)
         };
         assert!(
@@ -4811,5 +4891,143 @@ community:
             unsatisfied_constraints(&store, &lone, &td, None, Some(&provider)).is_empty(),
             "an empty related set satisfies the universal quantification"
         );
+    }
+
+    /// The form-6 floor: with `min_related: 1` a gated entity that no
+    /// related entity points at is a violation naming the floor, while
+    /// the same declaration without the floor keeps the sealed
+    /// vacuous-satisfaction semantics; one confirmed related entity
+    /// satisfies both.
+    #[test]
+    fn transition_requires_checks_floor_refuses_the_vacuous_case() {
+        use crate::check::CheckState;
+        use crate::entity::MetadataValue;
+        let base = gated_transition_schema();
+        let floored = {
+            let mut td = memstead_schema::TypeDefinition::clone(base.types.get("plan").unwrap());
+            let memstead_schema::ConstraintDef::TransitionRequiresChecks { min_related, .. } =
+                &mut td.constraints[0]
+            else {
+                panic!("form 6 declared");
+            };
+            *min_related = 1;
+            td
+        };
+        let unfloored = memstead_schema::TypeDefinition::clone(base.types.get("plan").unwrap());
+
+        let mut store = Store::default();
+        let mut plan = make_typed_entity("g", "lonely-plan", "plan");
+        plan.metadata
+            .insert("status".into(), MetadataValue::String("complete".into()));
+        store.upsert(plan.id.clone(), plan.clone());
+        let provider = |_e: &crate::entity::Entity, _kind: &str| {
+            crate::engine::independence::CheckStanding::assumed_independent(CheckState::CheckedOk)
+        };
+
+        let v = unsatisfied_constraints(&store, &plan, &floored, None, Some(&provider));
+        assert_eq!(v.len(), 1, "{v:?}");
+        match &v[0] {
+            UnsatisfiedConstraint::TransitionRequiresChecks {
+                related,
+                min_related,
+                unchecked,
+                ..
+            } => {
+                assert_eq!((*related, *min_related), (0, 1));
+                assert!(unchecked.is_empty());
+                assert!(
+                    v[0].describe()
+                        .contains("requires at least 1 related entity")
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let v = unsatisfied_constraints(&store, &plan, &unfloored, None, Some(&provider));
+        assert!(v.is_empty(), "no floor keeps the vacuous case: {v:?}");
+
+        let mut crit = make_typed_entity("g", "one-crit", "criterion");
+        crit.relationships.push(crate::entity::Relationship {
+            rel_type: "VERIFIES".into(),
+            target: plan.id.clone(),
+            description: None,
+        });
+        store.upsert(crit.id.clone(), crit);
+        let v = unsatisfied_constraints(&store, &plan, &floored, None, Some(&provider));
+        assert!(
+            v.is_empty(),
+            "one confirmed related entity meets the floor: {v:?}"
+        );
+    }
+
+    /// Form 7: the entity's own check record of the declared kind
+    /// gates the transition. The provider is asked for THAT kind; a
+    /// confirming independent record satisfies, a self-checked or
+    /// stale one does not, and no provider derives never_checked.
+    #[test]
+    fn transition_requires_self_check_reads_the_declared_kind() {
+        use crate::check::CheckState;
+        use crate::engine::independence::{CheckStanding, Independence};
+        use crate::entity::MetadataValue;
+        let base = gated_transition_schema();
+        let mut td = memstead_schema::TypeDefinition::clone(base.types.get("plan").unwrap());
+        td.constraints = vec![
+            memstead_schema::ConstraintDef::TransitionRequiresSelfCheck {
+                field: "status".into(),
+                to_value: "complete".into(),
+                check_kind: "x-projection".into(),
+                severity: memstead_schema::ConstraintSeverity::Block,
+            },
+        ];
+        let store = Store::default();
+        let mut bundle = make_typed_entity("g", "the-bundle", "plan");
+        bundle
+            .metadata
+            .insert("status".into(), MetadataValue::String("complete".into()));
+
+        let asked = std::cell::RefCell::new(Vec::<String>::new());
+        let confirming = |_e: &crate::entity::Entity, kind: &str| {
+            asked.borrow_mut().push(kind.to_string());
+            CheckStanding::assumed_independent(CheckState::CheckedOk)
+        };
+        let v = unsatisfied_constraints(&store, &bundle, &td, None, Some(&confirming));
+        assert!(v.is_empty(), "{v:?}");
+        assert_eq!(asked.borrow().as_slice(), ["x-projection"]);
+
+        let self_checked = |_e: &crate::entity::Entity, _k: &str| CheckStanding {
+            state: CheckState::CheckedOk,
+            independence: Some(Independence::SelfChecked),
+        };
+        let v = unsatisfied_constraints(&store, &bundle, &td, None, Some(&self_checked));
+        assert_eq!(v.len(), 1, "{v:?}");
+        match &v[0] {
+            UnsatisfiedConstraint::TransitionRequiresSelfCheck {
+                state, check_kind, ..
+            } => {
+                assert_eq!(state, "self_checked");
+                assert_eq!(check_kind, "x-projection");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        let stale = |_e: &crate::entity::Entity, _k: &str| {
+            CheckStanding::assumed_independent(CheckState::CheckStale)
+        };
+        let v = unsatisfied_constraints(&store, &bundle, &td, None, Some(&stale));
+        assert_eq!(v.len(), 1);
+
+        let v = unsatisfied_constraints(&store, &bundle, &td, None, None);
+        assert_eq!(v.len(), 1, "no ledger refuses rather than passes");
+        match &v[0] {
+            UnsatisfiedConstraint::TransitionRequiresSelfCheck { state, .. } => {
+                assert_eq!(state, "never_checked")
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        bundle
+            .metadata
+            .insert("status".into(), MetadataValue::String("draft".into()));
+        let v = unsatisfied_constraints(&store, &bundle, &td, None, None);
+        assert!(v.is_empty(), "not triggered before the gated value");
     }
 }
