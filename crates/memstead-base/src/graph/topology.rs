@@ -99,70 +99,91 @@ impl crate::Engine {
         if self.mount(mem).is_none() {
             return Err(self.unknown_mem_error(mem));
         }
-        let store = self.store();
-        let louvain = self.communities();
+        Ok(project_mem_topology(
+            self.store(),
+            self.communities(),
+            mem,
+            chain,
+        ))
+    }
+}
 
-        let mut nodes = Vec::new();
-        let mut edges = Vec::new();
-        let mut community_sizes: std::collections::BTreeMap<String, usize> =
-            std::collections::BTreeMap::new();
+/// The projection itself, over any store and partition: every entity
+/// of `mem` (the whole mem, or the chain-induced subgraph when `chain`
+/// is given), every relationship edge sourced in it (cross-mem targets
+/// marked), and the mem's community roster from `louvain`. THE single
+/// derivation: [`crate::Engine::mem_topology`] is this function over
+/// the live engine store, and a consumer that holds a store without
+/// an engine (a validated archive about to be published, an in-memory
+/// load) calls it directly rather than re-deriving nodes, edges and
+/// communities on its own. Deterministic order: nodes by id, edges by
+/// (source, target, rel_type), communities by cluster id.
+pub fn project_mem_topology(
+    store: &crate::store::Store,
+    louvain: &crate::graph::LouvainOutput,
+    mem: &str,
+    chain: Option<&crate::graph::chain::ChainSet>,
+) -> MemTopology {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let mut community_sizes: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
 
-        for entity in store.all_entities() {
-            if entity.mem != mem {
-                continue;
-            }
+    for entity in store.all_entities() {
+        if entity.mem != mem {
+            continue;
+        }
+        if let Some(chain) = chain
+            && !chain.contains(&entity.id)
+        {
+            continue;
+        }
+        let id = entity.id.to_string();
+        let community = louvain.entity_cluster_map.get(&id).cloned();
+        if let Some(cluster) = &community {
+            *community_sizes.entry(cluster.clone()).or_insert(0) += 1;
+        }
+        nodes.push(TopologyNode {
+            id: id.clone(),
+            title: entity.title.clone(),
+            entity_type: entity.entity_type.clone(),
+            community,
+            stub: entity.stub,
+        });
+        for edge in store.outgoing(&entity.id) {
             if let Some(chain) = chain
-                && !chain.contains(&entity.id)
+                && !chain.contains(&edge.target)
             {
                 continue;
             }
-            let id = entity.id.to_string();
-            let community = louvain.entity_cluster_map.get(&id).cloned();
-            if let Some(cluster) = &community {
-                *community_sizes.entry(cluster.clone()).or_insert(0) += 1;
-            }
-            nodes.push(TopologyNode {
-                id: id.clone(),
-                title: entity.title.clone(),
-                entity_type: entity.entity_type.clone(),
-                community,
-                stub: entity.stub,
+            let target_in_mem = store
+                .get(&edge.target)
+                .map(|t| t.mem == mem)
+                .unwrap_or(false);
+            edges.push(TopologyEdge {
+                source: id.clone(),
+                target: edge.target.to_string(),
+                rel_type: edge.rel_type.clone(),
+                target_in_mem,
             });
-            for edge in store.outgoing(&entity.id) {
-                if let Some(chain) = chain
-                    && !chain.contains(&edge.target)
-                {
-                    continue;
-                }
-                let target_in_mem = store
-                    .get(&edge.target)
-                    .map(|t| t.mem == mem)
-                    .unwrap_or(false);
-                edges.push(TopologyEdge {
-                    source: id.clone(),
-                    target: edge.target.to_string(),
-                    rel_type: edge.rel_type.clone(),
-                    target_in_mem,
-                });
-            }
         }
+    }
 
-        // Deterministic order: stable frames, simple assertions.
-        nodes.sort_by(|a, b| a.id.cmp(&b.id));
-        edges.sort_by(|a, b| {
-            (&a.source, &a.target, &a.rel_type).cmp(&(&b.source, &b.target, &b.rel_type))
-        });
-        let communities = community_sizes
-            .into_iter()
-            .map(|(id, size_in_mem)| TopologyCommunity { id, size_in_mem })
-            .collect();
+    // Deterministic order: stable frames, simple assertions.
+    nodes.sort_by(|a, b| a.id.cmp(&b.id));
+    edges.sort_by(|a, b| {
+        (&a.source, &a.target, &a.rel_type).cmp(&(&b.source, &b.target, &b.rel_type))
+    });
+    let communities = community_sizes
+        .into_iter()
+        .map(|(id, size_in_mem)| TopologyCommunity { id, size_in_mem })
+        .collect();
 
-        Ok(MemTopology {
-            mem: mem.to_string(),
-            nodes,
-            edges,
-            communities,
-        })
+    MemTopology {
+        mem: mem.to_string(),
+        nodes,
+        edges,
+        communities,
     }
 }
 

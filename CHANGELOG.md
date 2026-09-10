@@ -35,6 +35,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The per-mem topology projection is a store-level function.**
+  `memstead_base::graph::topology::project_mem_topology(store, louvain,
+  mem, chain)` is the one derivation of `{nodes, edges, communities}`;
+  `Engine::mem_topology` is that function over the live store after the
+  mount check. A consumer that holds a store without an engine (a
+  validated archive about to be published) calls it instead of
+  re-deriving the projection privately. Byte-identical output.
+
 - **Health is composed through the maintenance loop's one assembly.**
   `memstead_base::ingest::health::compose_health` is the function every
   surface (CLI, MCP, embedders) calls; the kernel composer
