@@ -2967,12 +2967,12 @@ mod tests {
         let engine = crate::Engine::from_mounts(vec![
             (
                 folder_mount("dest", dest_dir.clone()),
-                Box::new(crate::storage::FilesystemMemWriter::new(dest_dir.clone()))
+                Box::new(crate::storage::FilesystemBackend::new(dest_dir.clone()))
                     as Box<dyn crate::backend::MemBackend>,
             ),
             (
                 folder_mount("oddly-named-process", proc_dir.clone()),
-                Box::new(crate::storage::FilesystemMemWriter::new(proc_dir))
+                Box::new(crate::storage::FilesystemBackend::new(proc_dir))
                     as Box<dyn crate::backend::MemBackend>,
             ),
         ])
@@ -3003,7 +3003,7 @@ mod tests {
         .unwrap();
         let engine2 = crate::Engine::from_mounts(vec![(
             folder_mount("dest", dest_dir.clone()),
-            Box::new(crate::storage::FilesystemMemWriter::new(dest_dir))
+            Box::new(crate::storage::FilesystemBackend::new(dest_dir))
                 as Box<dyn crate::backend::MemBackend>,
         )])
         .unwrap();
@@ -3031,7 +3031,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut engine = crate::Engine::from_mounts(vec![(
             folder_mount("gate", dir.clone()),
-            Box::new(crate::storage::FilesystemMemWriter::new(dir))
+            Box::new(crate::storage::FilesystemBackend::new(dir))
                 as Box<dyn crate::backend::MemBackend>,
         )])
         .unwrap();

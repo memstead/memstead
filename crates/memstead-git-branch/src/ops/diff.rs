@@ -732,9 +732,9 @@ fn primary_id(entry: &EntityDiff) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::MemWriter;
-    use crate::storage::git_tree::GitTreeMemWriter;
+    use crate::storage::git_tree::GitTreeBackend;
     use crate::vcs::CommitContext;
+    use memstead_base::backend::MemBackend;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -764,7 +764,7 @@ mod tests {
         entries: &[(&str, &str)],
         subject: &str,
     ) -> String {
-        let writer = GitTreeMemWriter::new(gitdir.to_path_buf(), format!("refs/heads/{mem}"));
+        let writer = GitTreeBackend::new(gitdir.to_path_buf(), format!("refs/heads/{mem}"));
         for (path, content) in entries {
             writer
                 .write_entity(Path::new(path), content.as_bytes())
@@ -837,7 +837,7 @@ mod tests {
         // standard prefix: `HEAD` must land on the declared branch.
         let tmp = TempDir::new().unwrap();
         let gitdir = init_gitdir(&tmp);
-        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/team/specs".to_string());
+        let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/team/specs".to_string());
         writer
             .write_entity(Path::new("a.md"), body_with_title("A").as_bytes())
             .unwrap();
@@ -921,7 +921,7 @@ mod tests {
             "update beta + add gamma",
         );
         // Drop alpha in a third commit so it surfaces as a deletion.
-        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer.delete_entity(Path::new("alpha.md")).unwrap();
         writer
             .commit("drop alpha", &CommitContext::internal())
@@ -1100,7 +1100,7 @@ mod tests {
         let gitdir = init_gitdir(&tmp);
 
         let body = body_with_title("Title");
-        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer
             .write_entity(Path::new("alpha.md"), body.as_bytes())
             .unwrap();
@@ -1109,7 +1109,7 @@ mod tests {
 
         // alpha → beta. Move the file (delete + write) and emit the
         // commit subject the engine uses on its rename pipeline.
-        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer.delete_entity(Path::new("alpha.md")).unwrap();
         writer
             .write_entity(Path::new("beta.md"), body.as_bytes())
@@ -1122,7 +1122,7 @@ mod tests {
             .unwrap();
 
         // beta → gamma. Same shape.
-        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer.delete_entity(Path::new("beta.md")).unwrap();
         writer
             .write_entity(Path::new("gamma.md"), body.as_bytes())
@@ -1205,7 +1205,7 @@ mod tests {
         let gamma_links_alpha = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Gamma\n\n## Identity\n\nLinks to [[specs--alpha]].\n".to_string();
         // Drop beta to break its outbound link on ref_b. Add gamma
         // with a fresh inbound link to alpha.
-        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer
             .write_entity(Path::new("alpha.md"), alpha_v2.as_bytes())
             .unwrap();
@@ -1276,7 +1276,7 @@ mod tests {
         let sha_a = sha_for(&gix::open(&gitdir).unwrap(), "refs/heads/specs").unwrap();
 
         let alpha_v2 = body_with_title("Alpha-v2");
-        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer
             .write_entity(Path::new("alpha.md"), alpha_v2.as_bytes())
             .unwrap();
@@ -1367,7 +1367,7 @@ mod tests {
         );
         let sha_a = sha_for(&gix::open(&gitdir).unwrap(), "refs/heads/specs").unwrap();
         // Overwrite alpha with a body that has no frontmatter.
-        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
         writer
             .write_entity(
                 Path::new("alpha.md"),

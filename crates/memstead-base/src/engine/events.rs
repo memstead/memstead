@@ -303,7 +303,7 @@ mod tests {
     use crate::engine::test_helpers::{
         archive_mount, build_archive, cli_actor, empty_create_args, folder_mount,
     };
-    use crate::storage::{ArchiveBackend, FilesystemMemWriter};
+    use crate::storage::{ArchiveBackend, FilesystemBackend};
 
     /// Captured events shared between the test thread and a subscriber
     /// callback. The callback pushes into the locked vec; the test
@@ -320,7 +320,7 @@ mod tests {
     fn writable_specs_engine() -> (crate::Engine, tempfile::TempDir) {
         let tmp = tempfile::TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = crate::Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,

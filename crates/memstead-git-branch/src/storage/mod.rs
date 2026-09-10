@@ -1,25 +1,12 @@
-//! Re-export shim over `memstead_base::storage` (the [`MemWriter`] trait
-//! and [`MemWriterError`]) plus the git-tree adapter that stays in
-//! this crate.
-//!
-//! The git-tree adapter ([`git_tree::GitTreeMemWriter`]) buffers
-//! mutations and applies them via `gix::object::tree::Editor` against a
-//! multi-root `mem-repo-git` repository, one branch per mem.
+//! The git-tree backend and the commit-id type it shares with the
+//! folder backend. [`git_tree::GitTreeBackend`] buffers mutations and
+//! applies them via `gix::object::tree::Editor` against a multi-root
+//! `mem-repo-git` repository, one branch per mem; it implements
+//! [`memstead_base::backend::MemBackend`], the one write-side trait.
 
 pub mod git_tree;
 
-use std::path::PathBuf;
-
-pub use memstead_base::storage::{CommitId, MemWriter, MemWriterError};
-
-/// Construct a `Box<dyn MemWriter>` for the git-object-backed path.
-/// `gitdir` points at the multi-root `mem-repo-git` repo; `ref_name`
-/// is the per-mem branch (fully-qualified, e.g.
-/// `refs/heads/<mem>`). The first commit creates the ref if it does
-/// not yet exist.
-pub fn git_tree_mem_writer(gitdir: PathBuf, ref_name: String) -> Box<dyn MemWriter> {
-    Box::new(git_tree::GitTreeMemWriter::new(gitdir, ref_name))
-}
+pub use memstead_base::storage::CommitId;
 
 /// Git-branch counterpart of [`memstead_base::instantiate_local_backend`]:
 /// turns any [`memstead_base::Mount`] into a `Box<dyn MemBackend>`, including
@@ -27,7 +14,7 @@ pub fn git_tree_mem_writer(gitdir: PathBuf, ref_name: String) -> Box<dyn MemWrit
 ///
 /// Folder and Archive variants delegate to the local function so the
 /// instantiation paths share one implementation. The git-branch
-/// variant constructs a [`git_tree::GitTreeMemWriter`] using the
+/// variant constructs a [`git_tree::GitTreeBackend`] using the
 /// mount's `gitdir` + `branch`, fully-qualifying the ref-name as
 /// `refs/heads/<branch>` so the per-branch mutex inside the writer
 /// keys consistently with what `agent_notes_since` and
@@ -40,9 +27,10 @@ pub fn instantiate_full_backend(
         MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
             memstead_base::instantiate_local_backend(mount)
         }
-        MountStorage::GitBranch { gitdir, branch } => Ok(Box::new(
-            git_tree::GitTreeMemWriter::new(gitdir.clone(), memstead_base::branch_full_ref(branch)),
-        )),
+        MountStorage::GitBranch { gitdir, branch } => Ok(Box::new(git_tree::GitTreeBackend::new(
+            gitdir.clone(),
+            memstead_base::branch_full_ref(branch),
+        ))),
     }
 }
 

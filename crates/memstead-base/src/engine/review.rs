@@ -196,7 +196,7 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::MemWriter;
+    use crate::backend::MemBackend;
 
     const SEED: &str = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Seed\n\n## Identity\n\nSeed.\n";
 
@@ -204,10 +204,10 @@ mod tests {
         let dir = tmp.path().join("specs");
         if !dir.exists() {
             std::fs::create_dir_all(&dir).unwrap();
-            let writer = crate::storage::FilesystemMemWriter::new(dir.clone());
-            MemWriter::write_entity(&writer, std::path::Path::new("seed.md"), SEED.as_bytes())
+            let writer = crate::storage::FilesystemBackend::new(dir.clone());
+            MemBackend::write_entity(&writer, std::path::Path::new("seed.md"), SEED.as_bytes())
                 .unwrap();
-            MemWriter::commit(&writer, "seed", &crate::vcs::CommitContext::internal()).unwrap();
+            MemBackend::commit(&writer, "seed", &crate::vcs::CommitContext::internal()).unwrap();
             crate::backend::MemBackend::append_provenance(
                 &writer,
                 &crate::provenance::Provenance::new(
@@ -266,7 +266,7 @@ mod tests {
             migration_target: None,
         };
         let backend =
-            Box::new(crate::storage::FilesystemMemWriter::new(dir)) as Box<dyn crate::MemBackend>;
+            Box::new(crate::storage::FilesystemBackend::new(dir)) as Box<dyn crate::MemBackend>;
         crate::Engine::from_mounts(vec![(mount, backend)]).unwrap()
     }
 

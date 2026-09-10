@@ -301,7 +301,7 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
             }
             let branch_path =
                 crate::mem_repo_config::resolve_full_path_at_gitdir(&gitdir, mem).ok()??;
-            let backend = crate::storage::git_tree::GitTreeMemWriter::new(
+            let backend = crate::storage::git_tree::GitTreeBackend::new(
                 gitdir.clone(),
                 format!("refs/heads/{branch_path}"),
             );
@@ -357,9 +357,9 @@ mod tests {
     /// branch exists at all.
     #[test]
     fn relate_into_unmounted_mem_verifies_against_branch_tree() {
+        use memstead_base::backend::MemBackend;
         use memstead_base::engine::RelateEntityArgs;
         use memstead_base::ops::WarningHint;
-        use memstead_base::storage::MemWriter;
         use memstead_base::vcs::{Actor, ClientId, CommitContext};
 
         let tmp = TempDir::new().unwrap();
@@ -410,11 +410,11 @@ Body.
         .unwrap();
 
         // UNMOUNTED mem "far": a real content branch, no mounts row.
-        let far = crate::storage::git_tree::GitTreeMemWriter::new(
+        let far = crate::storage::git_tree::GitTreeBackend::new(
             gitdir.clone(),
             "refs/heads/far".to_string(),
         );
-        MemWriter::write_entity(
+        MemBackend::write_entity(
             &far,
             std::path::Path::new("topic.md"),
             b"---
@@ -428,7 +428,7 @@ Body.
 ",
         )
         .unwrap();
-        MemWriter::commit(
+        MemBackend::commit(
             &far,
             "seed far",
             &CommitContext {

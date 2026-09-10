@@ -530,9 +530,9 @@ fn diff_ref_snapshots(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::MemWriter;
-    use crate::storage::git_tree::GitTreeMemWriter;
+    use crate::storage::git_tree::GitTreeBackend;
     use crate::vcs::CommitContext;
+    use memstead_base::backend::MemBackend;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -567,7 +567,7 @@ mod tests {
     }
 
     fn commit(gitdir: &Path, branch: &str, file: &str, content: &str) -> String {
-        let writer = GitTreeMemWriter::new(gitdir.to_path_buf(), format!("refs/heads/{branch}"));
+        let writer = GitTreeBackend::new(gitdir.to_path_buf(), format!("refs/heads/{branch}"));
         writer
             .write_entity(Path::new(file), content.as_bytes())
             .unwrap();
@@ -662,7 +662,7 @@ mod tests {
         // commit (the atomicity the mutation path relies on).
         let sidecar = br#"{"version":1,"entities":{"specs--a":[{"artifact":"src/lib.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}]}}"#;
         {
-            let writer = GitTreeMemWriter::new(local.to_path_buf(), "refs/heads/specs".to_string());
+            let writer = GitTreeBackend::new(local.to_path_buf(), "refs/heads/specs".to_string());
             writer
                 .write_entity(Path::new("a.md"), body("A").as_bytes())
                 .unwrap();
@@ -679,7 +679,7 @@ mod tests {
         pull_in_gitdir(&second, "origin", "specs", "specs").unwrap();
 
         // The pulled branch carries the sidecar blob byte-for-byte.
-        let reader = GitTreeMemWriter::new(second.to_path_buf(), "refs/heads/specs".to_string());
+        let reader = GitTreeBackend::new(second.to_path_buf(), "refs/heads/specs".to_string());
         let pulled = memstead_base::backend::MemBackend::read_anchors_sidecar(&reader).unwrap();
         assert_eq!(pulled.as_deref(), Some(&sidecar[..]));
     }
@@ -769,7 +769,7 @@ mod tests {
         // Land a malformed entity on the upstream and push it. The
         // body has no frontmatter at all — the strict validator's
         // `split_frontmatter_strict` refuses with `MissingFrontmatter`.
-        let writer = GitTreeMemWriter::new(local_upstream.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeBackend::new(local_upstream.clone(), "refs/heads/specs".to_string());
         writer
             .write_entity(
                 Path::new("broken.md"),
@@ -839,7 +839,7 @@ mod tests {
         let local = init_local(&tmp, "local");
         let remote = init_bare_remote(&tmp, "remote.git");
         add_remote(&local, "origin", &remote);
-        let writer = GitTreeMemWriter::new(local.clone(), "refs/heads/specs".to_string());
+        let writer = GitTreeBackend::new(local.clone(), "refs/heads/specs".to_string());
         writer
             .write_entity(
                 Path::new("broken.md"),
@@ -953,7 +953,7 @@ mod tests {
             commit(&local, mem, "a.md", &valid_body("A"));
         }
         {
-            let writer = GitTreeMemWriter::new(local.clone(), "refs/heads/__MEMSTEAD".to_string());
+            let writer = GitTreeBackend::new(local.clone(), "refs/heads/__MEMSTEAD".to_string());
             writer
                 .write_entity(Path::new("schemas/README.md"), b"seed\n")
                 .unwrap();
@@ -966,7 +966,7 @@ mod tests {
         let alpha2 = commit(&local, "alpha", "b.md", &valid_body("B"));
         let beta2 = commit(&local, "beta", "b.md", &valid_body("B"));
         let memstead2 = {
-            let writer = GitTreeMemWriter::new(local.clone(), "refs/heads/__MEMSTEAD".to_string());
+            let writer = GitTreeBackend::new(local.clone(), "refs/heads/__MEMSTEAD".to_string());
             writer
                 .write_entity(Path::new("schemas/README.md"), b"seed 2\n")
                 .unwrap();

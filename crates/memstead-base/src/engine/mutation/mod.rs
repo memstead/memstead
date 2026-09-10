@@ -1776,7 +1776,7 @@ mod tests {
     use crate::engine::test_helpers::*;
     use crate::engine::{CreateEntityArgs, Engine, UpdateEntityArgs};
 
-    use crate::storage::FilesystemMemWriter;
+    use crate::storage::FilesystemBackend;
     use crate::vcs::CommitContext;
 
     use indexmap::IndexMap;
@@ -1790,7 +1790,7 @@ mod tests {
         // forms would.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -1874,7 +1874,7 @@ mod tests {
     fn stamped_engine_fixture(mem_dir: std::path::PathBuf) -> Engine {
         Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
-            Box::new(FilesystemMemWriter::new(mem_dir)) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(mem_dir)) as Box<dyn MemBackend>,
         )])
         .unwrap()
     }
@@ -2043,7 +2043,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
         write_config(&mem_dir, None);
-        let backend = FilesystemMemWriter::new(mem_dir.clone());
+        let backend = FilesystemBackend::new(mem_dir.clone());
         let observed = backend.read_mem_config().unwrap().expect("config exists");
 
         // Someone else writes.

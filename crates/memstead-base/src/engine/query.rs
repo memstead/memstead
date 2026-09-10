@@ -3591,7 +3591,7 @@ mod tests {
     use crate::entity::EntityId;
     use crate::ops::{Direction, SearchScope, WarningHint};
     use crate::provenance::Provenance;
-    use crate::storage::{ArchiveBackend, FilesystemMemWriter, MemWriter};
+    use crate::storage::{ArchiveBackend, FilesystemBackend};
 
     use crate::vcs::CommitContext;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
@@ -3645,7 +3645,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", tmp.path().to_path_buf()),
-            Box::new(FilesystemMemWriter::new(tmp.path().to_path_buf())) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(tmp.path().to_path_buf())) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -3685,7 +3685,7 @@ mod tests {
         // Writable folder mem.
         let writable_dir = tmp.path().join("writable");
         std::fs::create_dir_all(&writable_dir).unwrap();
-        let writer = FilesystemMemWriter::new(writable_dir.clone());
+        let writer = FilesystemBackend::new(writable_dir.clone());
 
         // Read-only archive mem.
         let body = "---\ntype: spec\n---\n# Ext\n\n## Identity\n\nFrom an archive.\n";
@@ -3806,7 +3806,7 @@ community:
                 cross_linkable: true,
                 migration_target: None,
             };
-            let backend = Box::new(FilesystemMemWriter::new(mem_dir)) as Box<dyn MemBackend>;
+            let backend = Box::new(FilesystemBackend::new(mem_dir)) as Box<dyn MemBackend>;
             // Keep `tmp` alive for the engine's lifetime by leaking it —
             // the test process is short-lived and the folder must outlast
             // the closure.
@@ -3913,13 +3913,13 @@ community:
     fn folder_mount_routes_reads_to_filesystem_backend() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
-        // MemWriter and MemBackend share method names; the
+        let writer = FilesystemBackend::new(mem_dir.clone());
+        // Seeding goes through the MemBackend trait; the
         // module-top `use` brings both into scope. Seed via fully-
-        // qualified MemWriter calls so dot-syntax stays unambiguous.
-        <FilesystemMemWriter as MemWriter>::write_entity(&writer, Path::new("a.md"), b"alpha")
+        // qualified MemBackend calls so dot-syntax stays unambiguous.
+        <FilesystemBackend as MemBackend>::write_entity(&writer, Path::new("a.md"), b"alpha")
             .unwrap();
-        <FilesystemMemWriter as MemWriter>::commit(&writer, "seed", &CommitContext::internal())
+        <FilesystemBackend as MemBackend>::commit(&writer, "seed", &CommitContext::internal())
             .unwrap();
 
         let engine = Engine::from_mounts(vec![(
@@ -3950,14 +3950,14 @@ community:
         // Folder mem.
         let folder_dir = tmp.path().join("folder-mem");
         std::fs::create_dir_all(&folder_dir).unwrap();
-        let folder_writer = FilesystemMemWriter::new(folder_dir.clone());
-        <FilesystemMemWriter as MemWriter>::write_entity(
+        let folder_writer = FilesystemBackend::new(folder_dir.clone());
+        <FilesystemBackend as MemBackend>::write_entity(
             &folder_writer,
             Path::new("local.md"),
             b"local",
         )
         .unwrap();
-        <FilesystemMemWriter as MemWriter>::commit(
+        <FilesystemBackend as MemBackend>::commit(
             &folder_writer,
             "seed",
             &CommitContext::internal(),
@@ -4027,15 +4027,15 @@ community:
         // (under the alias model edges originate from `## Relationships`).
         let folder_dir = tmp.path().join("local-mem");
         std::fs::create_dir_all(&folder_dir).unwrap();
-        let folder_writer = FilesystemMemWriter::new(folder_dir.clone());
+        let folder_writer = FilesystemBackend::new(folder_dir.clone());
         let local_md = b"---\ntype: spec\n---\n# Note\n\n## Identity\n\nsee [[external:archived]] for prior context.\n\n## Relationships\n\n- **REFERENCES**: [[external:archived]]\n";
-        <FilesystemMemWriter as MemWriter>::write_entity(
+        <FilesystemBackend as MemBackend>::write_entity(
             &folder_writer,
             Path::new("note.md"),
             local_md,
         )
         .unwrap();
-        <FilesystemMemWriter as MemWriter>::commit(
+        <FilesystemBackend as MemBackend>::commit(
             &folder_writer,
             "seed",
             &CommitContext::internal(),
@@ -4234,7 +4234,7 @@ community:
             cross_linkable: true,
             migration_target: None,
         };
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine =
             Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
         let mut settings = crate::workspace::WorkspaceSettings::default();
@@ -4410,7 +4410,7 @@ community:
         let body = "---\ntype: spec\n---\n# Dup2\n\n## Identity\n\na.\n\n## Identity\n\nb.\n";
         std::fs::write(mem_dir.join("dup2.md"), body).unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -4432,7 +4432,7 @@ community:
     fn workspace_root_accessor_is_none_for_engine_built_from_mounts() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         // Newest default generation so the clean-boot assertion below
         // isn't tripped by the SCHEMA_GENERATIONS_BEHIND hint.
         let mut mount = folder_mount("specs", mem_dir);
@@ -4458,7 +4458,7 @@ community:
     fn health_omits_outer_repo_warning_when_workspace_root_unset() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -4478,7 +4478,7 @@ community:
     fn writable_mem_names_filters_by_capability() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
@@ -4516,11 +4516,11 @@ community:
         let engine = Engine::from_mounts(vec![
             (
                 folder_mount("test", test_dir.clone()),
-                Box::new(FilesystemMemWriter::new(test_dir)) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(test_dir)) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("other", other_dir.clone()),
-                Box::new(FilesystemMemWriter::new(other_dir)) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(other_dir)) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
@@ -4547,11 +4547,11 @@ community:
         let engine = Engine::from_mounts(vec![
             (
                 folder_mount("other", other_dir.clone()),
-                Box::new(FilesystemMemWriter::new(other_dir)) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(other_dir)) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("test", test_dir.clone()),
-                Box::new(FilesystemMemWriter::new(test_dir)) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(test_dir)) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
@@ -4577,7 +4577,7 @@ community:
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().join("specs");
         std::fs::create_dir_all(&mem_dir).unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
@@ -4610,7 +4610,7 @@ community:
         // accessors).
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
@@ -4656,7 +4656,7 @@ community:
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().join("specs");
         std::fs::create_dir_all(&mem_dir).unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
@@ -4691,7 +4691,7 @@ community:
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().join("specs");
         std::fs::create_dir_all(&mem_dir).unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
 
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
@@ -4714,7 +4714,7 @@ community:
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().join("specs");
         std::fs::create_dir_all(&mem_dir).unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
 
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
@@ -4737,7 +4737,7 @@ community:
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().join("specs");
         std::fs::create_dir_all(&mem_dir).unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
@@ -4763,7 +4763,7 @@ community:
 
     #[test]
     fn read_mem_config_via_backend_trait_folder_reads_bytes() {
-        // Direct trait call against FilesystemMemWriter. Verifies
+        // Direct trait call against FilesystemBackend. Verifies
         // the backend-side primitive returns the raw bytes the
         // engine then parses.
         let tmp = TempDir::new().unwrap();
@@ -4776,7 +4776,7 @@ community:
         }"#;
         std::fs::write(mem_dir.join(".memstead").join("config.json"), body).unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir);
+        let writer = FilesystemBackend::new(mem_dir);
         let result = MemBackend::read_mem_config(&writer).unwrap();
         let bytes = result.expect("config bytes must surface");
         let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -4787,7 +4787,7 @@ community:
     fn read_mem_config_via_backend_trait_folder_missing_returns_none() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir);
+        let writer = FilesystemBackend::new(mem_dir);
         let result = MemBackend::read_mem_config(&writer).unwrap();
         assert!(result.is_none());
     }
@@ -4830,7 +4830,7 @@ community:
         // accessor must lenient — return None, not error.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -4858,7 +4858,7 @@ community:
         }"#;
         std::fs::write(mem_dir.join(".memstead").join("config.json"), config_body).unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -4884,7 +4884,7 @@ community:
         // Lenient accessor — unknown names get None, not Err.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -4932,11 +4932,11 @@ community:
         let engine = Engine::from_mounts(vec![
             (
                 folder_mount("specs", with_config.clone()),
-                Box::new(FilesystemMemWriter::new(with_config)) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(with_config)) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("memos", without_config.clone()),
-                Box::new(FilesystemMemWriter::new(without_config)) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(without_config)) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
@@ -4955,7 +4955,7 @@ community:
         // mutations resolve internally; unknown names return None.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -4969,7 +4969,7 @@ community:
     fn gitdir_for_unknown_mem_returns_unknown_mem() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -4985,7 +4985,7 @@ community:
         // a mem-level error, not UnknownMem. Mirror that here.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -5002,7 +5002,7 @@ community:
     fn worktree_for_folder_mount_returns_storage_path() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -5016,7 +5016,7 @@ community:
     fn worktree_for_unknown_mem_returns_unknown_mem() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -5048,7 +5048,7 @@ community:
         // Ok(None) at construction; mem_head_sha returns Ok(None).
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -5062,7 +5062,7 @@ community:
     fn mem_head_sha_unknown_mem_returns_unknown_mem() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -5076,7 +5076,7 @@ community:
     fn capability_surfaces_per_mount() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"a")]);
 
         let engine = Engine::from_mounts(vec![
@@ -5109,7 +5109,7 @@ community:
     fn read_provenance_routes_through_backend() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
 
         // Append a provenance record via the backend trait directly,
         // then read it back through the engine.
@@ -5323,7 +5323,7 @@ community:
 
     fn build_demo_engine(tmp: &TempDir) -> Engine {
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -5430,7 +5430,7 @@ community:
     fn stubs_lists_unresolved_link_targets() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -5572,7 +5572,7 @@ community:
         // warning. Post-fix, the filter is honored and no warning fires.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mount = Mount {
             mem: "planning".to_string(),
             schema: Some(memstead_schema::SchemaRef::new(

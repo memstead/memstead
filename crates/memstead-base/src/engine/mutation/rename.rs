@@ -724,13 +724,13 @@ mod tests {
     use crate::engine::test_helpers::*;
     use crate::engine::{Engine, EngineError, RenameEntityArgs};
     use crate::ops::WarningHint;
-    use crate::storage::FilesystemMemWriter;
+    use crate::storage::FilesystemBackend;
 
     #[test]
     fn rename_moves_entity_anchors_to_new_id() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -782,7 +782,7 @@ mod tests {
         let mem_dir = tmp.path().to_path_buf();
 
         let (old_id, new_id, new_file) = {
-            let writer = FilesystemMemWriter::new(mem_dir.clone());
+            let writer = FilesystemBackend::new(mem_dir.clone());
             let mut engine = Engine::from_mounts(vec![(
                 folder_mount("specs", mem_dir.clone()),
                 Box::new(writer) as Box<dyn MemBackend>,
@@ -819,7 +819,7 @@ mod tests {
         };
 
         // New engine reading the same mem sees only the new id.
-        let writer2 = FilesystemMemWriter::new(mem_dir.clone());
+        let writer2 = FilesystemBackend::new(mem_dir.clone());
         let engine2 = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer2) as Box<dyn MemBackend>,
@@ -896,7 +896,7 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -1017,7 +1017,7 @@ mod tests {
         )
         .unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -1088,7 +1088,7 @@ mod tests {
         )
         .unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -1136,7 +1136,7 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -1309,8 +1309,8 @@ mod tests {
         memos_dir: PathBuf,
     ) -> Engine {
         use memstead_schema::workspace_config::CrossLinkValue;
-        let writer_specs = FilesystemMemWriter::new(specs_dir.clone());
-        let writer_memos = FilesystemMemWriter::new(memos_dir.clone());
+        let writer_specs = FilesystemBackend::new(specs_dir.clone());
+        let writer_memos = FilesystemBackend::new(memos_dir.clone());
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("specs", specs_dir),
@@ -1535,9 +1535,9 @@ mod tests {
         // wrapped in DriftingBackend so its peer-mem commit during
         // rename fails with ParentMismatch (the parent-pin tripped
         // by a hypothetical sibling writer).
-        let writer_specs = FilesystemMemWriter::new(specs_dir.clone());
+        let writer_specs = FilesystemBackend::new(specs_dir.clone());
         let writer_memos_inner: Box<dyn MemBackend> =
-            Box::new(FilesystemMemWriter::new(memos_dir.clone()));
+            Box::new(FilesystemBackend::new(memos_dir.clone()));
         let writer_memos = DriftingBackend::new(writer_memos_inner);
 
         let mut engine = Engine::from_mounts(vec![
@@ -1698,9 +1698,9 @@ mod tests {
         // rename entries. Both mems must record a Rename entry, and
         // both entries must share the same logical_operation_id.
         let specs_backend: Box<dyn MemBackend> =
-            Box::new(FilesystemMemWriter::new(specs_dir.clone()));
+            Box::new(FilesystemBackend::new(specs_dir.clone()));
         let memos_backend: Box<dyn MemBackend> =
-            Box::new(FilesystemMemWriter::new(memos_dir.clone()));
+            Box::new(FilesystemBackend::new(memos_dir.clone()));
         let specs_provenance = specs_backend.read_provenance(None).unwrap();
         let memos_provenance = memos_backend.read_provenance(None).unwrap();
 
@@ -1845,7 +1845,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let writable_dir = tmp.path().join("writable");
         std::fs::create_dir_all(&writable_dir).unwrap();
-        let writer = FilesystemMemWriter::new(writable_dir.clone());
+        let writer = FilesystemBackend::new(writable_dir.clone());
 
         // Archive entity declares an explicit cross-mem relation
         // into the writable mem; under the alias model every edge
@@ -1981,7 +1981,7 @@ mod tests {
         use indexmap::IndexMap;
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -2111,8 +2111,8 @@ mod tests {
         // Pretty-print scaffold: `test` and `other` are the
         // canonical mem names. Reuse the helper by ignoring the
         // returned dirs and overriding the policy explicitly.
-        let writer_test = FilesystemMemWriter::new(test_dir.clone());
-        let writer_other = FilesystemMemWriter::new(other_dir.clone());
+        let writer_test = FilesystemBackend::new(test_dir.clone());
+        let writer_other = FilesystemBackend::new(other_dir.clone());
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("test", test_dir.clone()),
@@ -2237,8 +2237,8 @@ mod tests {
         let test_dir = tmp_test.path().to_path_buf();
         let other_dir = tmp_other.path().to_path_buf();
 
-        let writer_test = FilesystemMemWriter::new(test_dir.clone());
-        let writer_other = FilesystemMemWriter::new(other_dir.clone());
+        let writer_test = FilesystemBackend::new(test_dir.clone());
+        let writer_other = FilesystemBackend::new(other_dir.clone());
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("test", test_dir),
@@ -2341,7 +2341,7 @@ mod tests {
     fn rename_with_no_cross_mem_referrers_succeeds_regardless_of_policy() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,

@@ -201,7 +201,7 @@ impl Engine {
         // committed as their own grain — the relate that materialised
         // them committed the source entity's markdown, the stub itself
         // is in-memory + edge-index only. Routing a stub delete through
-        // `backend.delete_entity` trips `MemWriter(Path("mem-
+        // `backend.delete_entity` trips `BackendError::Path("mem-
         // relative path is empty"))`. Skip the backend write + commit
         // for stubs; provenance still records the explicit drop so
         // memstead_changes_since consumers see the event.
@@ -343,7 +343,7 @@ mod tests {
         CreateEntityArgs, DeleteEntityArgs, Engine, EngineError, RelateEntityArgs,
     };
     use crate::ops::WarningHint;
-    use crate::storage::FilesystemMemWriter;
+    use crate::storage::FilesystemBackend;
 
     /// Seed a folder-backed engine with one anchored entity; return the
     /// engine and the create outcome.
@@ -352,7 +352,7 @@ mod tests {
         title: &str,
     ) -> (Engine, crate::engine::CreateEntityOutcome) {
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -441,7 +441,7 @@ mod tests {
         .unwrap();
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", tmp.path().to_path_buf()),
-            Box::new(FilesystemMemWriter::new(tmp.path().to_path_buf())) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(tmp.path().to_path_buf())) as Box<dyn MemBackend>,
         )])
         .unwrap();
         drop(seeded);
@@ -606,7 +606,7 @@ mod tests {
     }
 
     /// `memstead_delete id=<stub> expected_hash=""` end-to-end. The pre-fix
-    /// path tripped `BackendError::MemWriter(Path("mem-relative
+    /// path tripped `BackendError::Path("mem-relative
     /// path is empty"))` because stubs carry an empty `file_path` and
     /// the backend's `delete_entity` rejected the empty path. The fix
     /// routes stub deletes around the backend write — stubs are
@@ -850,7 +850,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let writable_dir = tmp.path().join("writable");
         std::fs::create_dir_all(&writable_dir).unwrap();
-        let writer = FilesystemMemWriter::new(writable_dir.clone());
+        let writer = FilesystemBackend::new(writable_dir.clone());
 
         // Build an archive that declares an explicit cross-mem
         // relation into the writable mem. Under the alias model

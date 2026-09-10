@@ -357,7 +357,7 @@ mod tests {
 
     use crate::backend::{BackendError, MemBackend};
     use crate::engine::test_helpers::{cli_actor, empty_create_args, folder_mount};
-    use crate::storage::FilesystemMemWriter;
+    use crate::storage::FilesystemBackend;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
     /// Seed a folder-backed mem with `.memstead/config.json` and N
@@ -372,7 +372,7 @@ mod tests {
         }"#;
         std::fs::write(mem_dir.join(".memstead").join("config.json"), config_body).unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -431,7 +431,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -514,7 +514,7 @@ mod tests {
             r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -727,7 +727,7 @@ mod tests {
             r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -811,7 +811,7 @@ mod tests {
             r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -891,7 +891,7 @@ mod tests {
             r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
         )
         .unwrap();
-        let writer2 = FilesystemMemWriter::new(mem_dir2.clone());
+        let writer2 = FilesystemBackend::new(mem_dir2.clone());
         let mut engine2 = Engine::from_mounts(vec![(
             folder_mount("plain", mem_dir2.clone()),
             Box::new(writer2) as Box<dyn MemBackend>,
@@ -984,7 +984,7 @@ mod tests {
             r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -1197,7 +1197,7 @@ E
         std::fs::remove_file(mem_dir.join("broker.md")).unwrap();
         let clean_engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
-            Box::new(FilesystemMemWriter::new(mem_dir.clone())) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(mem_dir.clone())) as Box<dyn MemBackend>,
         )])
         .unwrap();
         let clean_out = tmp.path().join("clean.mem");
@@ -1353,7 +1353,7 @@ E
             r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut source = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -1552,7 +1552,7 @@ E
             r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -1604,7 +1604,7 @@ E
             r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,

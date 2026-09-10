@@ -742,9 +742,9 @@ mod tests {
 
     mod git_object_export {
         use super::*;
-        use crate::storage::MemWriter;
-        use crate::storage::git_tree::GitTreeMemWriter;
+        use crate::storage::git_tree::GitTreeBackend;
         use crate::vcs::CommitContext;
+        use memstead_base::backend::MemBackend;
 
         /// Build a fresh `mem-repo-git`-style bare repo and a side-by-side
         /// mem config dir so [`export_mem_from_branch`] has both inputs
@@ -773,7 +773,7 @@ mod tests {
             // Commit each entry to `refs/heads/<mem_name>` via the
             // production write path so the test exercises the same tree
             // shape `memstead-cli`'s mutations would produce.
-            let writer = GitTreeMemWriter::new(gitdir.clone(), format!("refs/heads/{mem_name}"));
+            let writer = GitTreeBackend::new(gitdir.clone(), format!("refs/heads/{mem_name}"));
             for (rel, content) in entries {
                 writer
                     .write_entity(Path::new(rel), content.as_bytes())

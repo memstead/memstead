@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 
 use memstead_base::backend::MemBackend;
-use memstead_base::storage::FilesystemMemWriter;
+use memstead_base::storage::FilesystemBackend;
 use memstead_base::workspace::{
     CreateRuleSetting, DeleteRuleSetting, Mount, MountCapability, MountLifecycle, MountStorage,
     WorkspaceSettings,
@@ -46,7 +46,7 @@ fn create_mem_rejects_overlong_note() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -83,7 +83,7 @@ fn create_mem_rejects_when_no_allowlist_configured() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -122,7 +122,7 @@ fn create_mem_rejects_name_collision() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("alpha");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("alpha", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -172,7 +172,7 @@ fn create_mem_succeeds_with_wildcard_rule() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -261,7 +261,7 @@ fn create_mem_seed_provenance_carries_the_callers_actor_and_client() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -352,7 +352,7 @@ fn create_mem_persists_write_guidance_into_seed_config() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -414,7 +414,7 @@ fn create_mem_with_hierarchical_name_matches_path_rule() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -465,7 +465,7 @@ fn create_mem_rejects_double_underscore_segment() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -520,7 +520,7 @@ fn create_mem_structural_invalid_name_matrix() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -589,7 +589,7 @@ fn create_mem_rejects_basename_mismatch() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -640,7 +640,7 @@ fn create_mem_rejects_explicit_git_branch_without_mem_repo() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -684,7 +684,7 @@ fn delete_mem_rejects_when_no_allowlist_configured() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("specs");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("specs", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -720,7 +720,7 @@ fn delete_mem_rejects_unknown_name() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("specs");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("specs", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -749,7 +749,7 @@ fn delete_mem_rejects_overlong_note() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("specs");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("specs", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -784,7 +784,7 @@ fn delete_mem_unregisters_when_allowlist_matches() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("specs");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("specs", mem_dir.clone()),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -829,7 +829,7 @@ fn create_delete_round_trip_flat_namespace() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -894,7 +894,7 @@ fn create_delete_round_trip_hierarchical_namespace() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -962,7 +962,7 @@ fn delete_mem_hierarchical_name_in_path_not_allowed_envelope() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -1029,7 +1029,7 @@ fn delete_mem_with_delete_files_removes_directory() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("specs");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("specs", mem_dir.clone()),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -1075,7 +1075,7 @@ fn create_mem_operator_mode_bypasses_empty_allowlist() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -1139,7 +1139,7 @@ fn create_mem_operator_mode_still_enforces_input_validation() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -1181,7 +1181,7 @@ fn delete_mem_operator_mode_bypasses_empty_allowlist() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("specs");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("specs", mem_dir.clone()),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -1244,8 +1244,8 @@ fn delete_mem_policy_check_gates_on_delete_files() {
     std::fs::create_dir_all(&target_dir).unwrap();
     std::fs::create_dir_all(&referrer_dir).unwrap();
 
-    let target_writer = FilesystemMemWriter::new(target_dir.clone());
-    let referrer_writer = FilesystemMemWriter::new(referrer_dir.clone());
+    let target_writer = FilesystemBackend::new(target_dir.clone());
+    let referrer_writer = FilesystemBackend::new(referrer_dir.clone());
     let mut engine = Engine::from_mounts(vec![
         (
             folder_mount("target", target_dir.clone()),
@@ -1361,8 +1361,8 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
     let b_dir = tmp.path().join("mem-b");
     std::fs::create_dir_all(&a_dir).unwrap();
     std::fs::create_dir_all(&b_dir).unwrap();
-    let a_writer = FilesystemMemWriter::new(a_dir.clone());
-    let b_writer = FilesystemMemWriter::new(b_dir.clone());
+    let a_writer = FilesystemBackend::new(a_dir.clone());
+    let b_writer = FilesystemBackend::new(b_dir.clone());
     let mut engine = Engine::from_mounts(vec![
         (
             folder_mount("a", a_dir.clone()),
@@ -1589,11 +1589,11 @@ fn a_revoked_grant_surfaces_its_edges_and_a_live_grant_surfaces_none() {
     let mut engine = Engine::from_mounts(vec![
         (
             folder_mount("a", a_dir.clone()),
-            Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(a_dir.clone())) as Box<dyn MemBackend>,
         ),
         (
             folder_mount("b", b_dir.clone()),
-            Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(b_dir.clone())) as Box<dyn MemBackend>,
         ),
     ])
     .unwrap();
@@ -1792,11 +1792,11 @@ fn a_deferred_mems_ungranted_edges_are_found_not_silently_skipped() {
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("a", a_dir.clone()),
-                Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(a_dir.clone())) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("b", b_dir.clone()),
-                Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(b_dir.clone())) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
@@ -1846,11 +1846,11 @@ fn a_deferred_mems_ungranted_edges_are_found_not_silently_skipped() {
     let mut engine = Engine::from_mounts(vec![
         (
             lazy_a,
-            Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(a_dir.clone())) as Box<dyn MemBackend>,
         ),
         (
             folder_mount("b", b_dir.clone()),
-            Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(b_dir.clone())) as Box<dyn MemBackend>,
         ),
     ])
     .unwrap();
@@ -1898,11 +1898,11 @@ fn an_ungranted_edge_can_still_be_removed_without_a_grant() {
     let mut engine = Engine::from_mounts(vec![
         (
             folder_mount("a", a_dir.clone()),
-            Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(a_dir.clone())) as Box<dyn MemBackend>,
         ),
         (
             folder_mount("b", b_dir.clone()),
-            Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(b_dir.clone())) as Box<dyn MemBackend>,
         ),
     ])
     .unwrap();
@@ -2012,8 +2012,8 @@ fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
     let b_dir = tmp.path().join("mem-b");
     std::fs::create_dir_all(&a_dir).unwrap();
     std::fs::create_dir_all(&b_dir).unwrap();
-    let a_writer = FilesystemMemWriter::new(a_dir.clone());
-    let b_writer = FilesystemMemWriter::new(b_dir.clone());
+    let a_writer = FilesystemBackend::new(a_dir.clone());
+    let b_writer = FilesystemBackend::new(b_dir.clone());
     let mut engine = Engine::from_mounts(vec![
         (
             folder_mount("a", a_dir.clone()),
@@ -2172,7 +2172,7 @@ fn destructive_delete_scrubs_cross_links_but_keeps_allowlist_rules() {
     std::fs::create_dir_all(&other_dir).unwrap();
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("other", other_dir.clone()),
-        Box::new(FilesystemMemWriter::new(other_dir)) as Box<dyn MemBackend>,
+        Box::new(FilesystemBackend::new(other_dir)) as Box<dyn MemBackend>,
     )])
     .unwrap();
     engine.set_workspace_root(workspace.clone());
@@ -2299,7 +2299,7 @@ fn router_only_unregister_leaves_policy_intact() {
     std::fs::create_dir_all(&other_dir).unwrap();
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("other", other_dir.clone()),
-        Box::new(FilesystemMemWriter::new(other_dir)) as Box<dyn MemBackend>,
+        Box::new(FilesystemBackend::new(other_dir)) as Box<dyn MemBackend>,
     )])
     .unwrap();
     engine.set_workspace_root(workspace.clone());
@@ -2358,7 +2358,7 @@ a = ["b"]
 
     let mem_dir = workspace.join("mem");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("v", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -2417,8 +2417,8 @@ fn delete_mem_succeeds_when_no_cross_mem_incoming_edges() {
     let b_dir = tmp.path().join("mem-b");
     std::fs::create_dir_all(&a_dir).unwrap();
     std::fs::create_dir_all(&b_dir).unwrap();
-    let a_writer = FilesystemMemWriter::new(a_dir.clone());
-    let b_writer = FilesystemMemWriter::new(b_dir.clone());
+    let a_writer = FilesystemBackend::new(a_dir.clone());
+    let b_writer = FilesystemBackend::new(b_dir.clone());
     let mut engine = Engine::from_mounts(vec![
         (
             folder_mount("a", a_dir.clone()),
@@ -2468,7 +2468,7 @@ fn rule_derived_cross_link_grant_is_enforced_and_surfaced_in_overview() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -2547,7 +2547,7 @@ fn explicit_and_rule_derived_cross_links_project_as_distinct_entries() {
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().join("seed");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(
         folder_mount("seed", mem_dir),
         Box::new(writer) as Box<dyn MemBackend>,
@@ -2627,11 +2627,11 @@ fn delete_mem_guard_sees_referrers_in_deferred_mems() {
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("a", a_dir.clone()),
-                Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(a_dir.clone())) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("b", b_dir.clone()),
-                Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(b_dir.clone())) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
@@ -2696,11 +2696,11 @@ fn delete_mem_guard_sees_referrers_in_deferred_mems() {
     let mut engine = Engine::from_mounts(vec![
         (
             lazy_a,
-            Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(a_dir.clone())) as Box<dyn MemBackend>,
         ),
         (
             folder_mount("b", b_dir.clone()),
-            Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(b_dir.clone())) as Box<dyn MemBackend>,
         ),
     ])
     .unwrap();

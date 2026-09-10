@@ -11,7 +11,7 @@
 //!
 //! ## Why model on the folder backend
 //!
-//! The folder backend ([`super::filesystem::FilesystemMemWriter`]) is
+//! The folder backend ([`super::filesystem::FilesystemBackend`]) is
 //! the closest sibling: it buffers mutations until commit, mints a
 //! synthetic history-free commit-id, and keeps a sidecar provenance
 //! log. This backend mirrors that contract one-for-one — same
@@ -383,7 +383,7 @@ mod tests {
     fn rejects_path_traversal_absolute_and_empty() {
         let b = InMemoryBackend::new();
         // Same rejection rules as the folder backend — reused via
-        // `normalise_rel_path`, surfaced as MemWriter path errors.
+        // `normalise_rel_path`, surfaced as backend path errors.
         assert!(b.write_entity(Path::new("../escape.md"), b"x").is_err());
         assert!(b.write_entity(Path::new("/etc/passwd"), b"x").is_err());
         assert!(b.write_entity(Path::new(""), b"x").is_err());

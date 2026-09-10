@@ -667,7 +667,7 @@ mod tests {
         CreateEntityArgs, Engine, EngineError, RelateEntityArgs, RetypeEntityArgs,
     };
     use crate::ops::WarningHint;
-    use crate::storage::FilesystemMemWriter;
+    use crate::storage::FilesystemBackend;
     use crate::workspace::{
         Mount, MountCapability, MountLifecycle, MountStorage, WorkspaceSettings,
     };
@@ -829,11 +829,11 @@ write_rules: []
             vec![
                 (
                     mount("main", f.main_dir.clone(), main_pin, MountLifecycle::Eager),
-                    Box::new(FilesystemMemWriter::new(f.main_dir.clone())) as Box<dyn MemBackend>,
+                    Box::new(FilesystemBackend::new(f.main_dir.clone())) as Box<dyn MemBackend>,
                 ),
                 (
                     mount("peer", f.peer_dir.clone(), peer_pin, peer_lifecycle),
-                    Box::new(FilesystemMemWriter::new(f.peer_dir.clone())) as Box<dyn MemBackend>,
+                    Box::new(FilesystemBackend::new(f.peer_dir.clone())) as Box<dyn MemBackend>,
                 ),
             ],
             Some(&f.schemas_dir),
@@ -1160,11 +1160,11 @@ write_rules: []
                         main_pin.clone(),
                         MountLifecycle::Eager,
                     ),
-                    Box::new(FilesystemMemWriter::new(f.main_dir.clone())) as Box<dyn MemBackend>,
+                    Box::new(FilesystemBackend::new(f.main_dir.clone())) as Box<dyn MemBackend>,
                 ),
                 (
                     mount("twin", tmp_twin.clone(), main_pin, MountLifecycle::Eager),
-                    Box::new(FilesystemMemWriter::new(tmp_twin.clone())) as Box<dyn MemBackend>,
+                    Box::new(FilesystemBackend::new(tmp_twin.clone())) as Box<dyn MemBackend>,
                 ),
             ],
             Some(&f.schemas_dir),

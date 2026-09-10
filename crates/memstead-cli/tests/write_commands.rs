@@ -44,7 +44,7 @@ fn make_mem(tmp: &Path) -> PathBuf {
         r#"{ "schema": "default@1.0.0" }"#,
     )
     .unwrap();
-    // The CLI write flow routes through the `MemWriter` seam — for
+    // The CLI write flow routes through the `MemBackend` seam — for
     // mem-repo-backed mems commits land on `refs/heads/cli-write` of
     // `<workspace>/mem-repo/.git/`. Seed a real mem-repo from the disk
     // shell so reads and writes share the same gitdir tip.

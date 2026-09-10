@@ -186,14 +186,14 @@ mod tests {
     use crate::backend::MemBackend;
     use crate::engine::test_helpers::*;
     use crate::entity::EntityId;
-    use crate::storage::FilesystemMemWriter;
+    use crate::storage::FilesystemBackend;
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
     fn empty_folder_engine(tmp: &TempDir, mem: &str) -> Engine {
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         Engine::from_mounts(vec![(
             folder_mount(mem, mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,

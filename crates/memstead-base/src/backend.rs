@@ -8,12 +8,10 @@
 //! search index live in one place regardless of which backend serves
 //! a given mount.
 //!
-//! Today's [`crate::storage::MemWriter`] is a write-side subset of
-//! this trait. As each backend gains its `MemBackend` impl the
-//! `MemWriter` references in that backend's call sites collapse
-//! into the unified surface; `MemWriter` stays in
-//! `crate::storage::filesystem` for now as the on-disk write helpers
-//! it embodies are reused by the folder-backend `MemBackend` impl.
+//! This is the one write-side abstraction: the earlier writer
+//! trait (four write methods, its own error type) was folded into it on
+//! 2026-09-11, so a backend implements one trait and raises one error
+//! type, [`BackendError`].
 //!
 //! ## Per-backend write semantics
 //!
@@ -28,7 +26,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::provenance::Provenance;
-use crate::storage::{CommitId, MemWriterError};
+use crate::storage::CommitId;
 use crate::vcs::CommitContext;
 
 /// One row of [`MemBackend::read_all_entities`]: the mem-relative
@@ -444,18 +442,32 @@ pub trait MemBackend: Send + Sync {
 /// capability check.
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
-    /// Re-thrown from the existing [`MemWriterError`] surface so
-    /// folder-backend implementations can lift `MemWriter`
-    /// failures without lossy conversion.
-    #[error(transparent)]
-    MemWriter(#[from] MemWriterError),
     /// Backend physically rejects writes. Returned by the archive
     /// backend and any future read-only backend (e.g. registry pin).
     #[error("backend is sealed (writes rejected)")]
     Sealed,
-    /// Filesystem IO failure outside the [`MemWriterError`] path.
+    /// Filesystem IO failure.
     #[error("backend io error: {0}")]
     Io(#[from] std::io::Error),
+    /// Commit-time CAS conflict: the backend snapshotted parent commit
+    /// `X` at write time, but by commit time the underlying store has
+    /// advanced to `current`. Raised by backends that perform
+    /// commit-tip CAS (the git-tree backend); the engine maps it onto
+    /// its `HashMismatch` envelope so agents see one `HASH_MISMATCH`
+    /// code whether the conflict was detected at the entity-hash level
+    /// or at the commit level.
+    #[error("backend cas conflict: current commit is now {current}")]
+    HashMismatch {
+        /// New commit identifier observed when the CAS check failed.
+        /// Opaque to base callers; the git-tree backend populates it
+        /// with a hex commit object id.
+        current: CommitId,
+    },
+    /// Path-related rejection that does not map onto the IO case:
+    /// an empty relative path, a path that escapes the mem root, a
+    /// move whose source is missing or whose target is already pending.
+    #[error("backend path error: {0}")]
+    Path(String),
     /// Backend-specific failure not modelled by the variants above.
     /// Carries an agent-readable message; structured backend errors
     /// add their own variant.

@@ -736,7 +736,7 @@ pub(super) mod test_helpers {
     use memstead_schema::SchemaRef;
 
     use crate::backend::MemBackend;
-    use crate::storage::FilesystemMemWriter;
+    use crate::storage::FilesystemBackend;
     use crate::vcs::{Actor, ClientId};
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
@@ -888,7 +888,7 @@ write_rules: []
 
     pub(crate) fn engine_with_seed(tmp: &TempDir, title: &str) -> (Engine, CreateEntityOutcome) {
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -907,7 +907,7 @@ write_rules: []
     }
     pub(crate) fn build_demo_engine(tmp: &TempDir) -> Engine {
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,

@@ -16,7 +16,7 @@
 //! schema registry, and the runtime validator all live in
 //! `memstead-base`. This crate's exports are:
 //!
-//! - [`storage::git_tree::GitTreeMemWriter`] — the
+//! - [`storage::git_tree::GitTreeBackend`] — the
 //!   [`memstead_base::backend::MemBackend`] implementation that buffers
 //!   mutations and applies them via `gix::object::tree::Editor`
 //!   against the per-mem branch.

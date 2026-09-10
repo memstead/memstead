@@ -284,7 +284,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let engine = crate::Engine::from_mounts(vec![(
             crate::engine::test_helpers::folder_mount("plain", dir.clone()),
-            Box::new(crate::storage::FilesystemMemWriter::new(dir))
+            Box::new(crate::storage::FilesystemBackend::new(dir))
                 as Box<dyn crate::backend::MemBackend>,
         )])
         .unwrap();

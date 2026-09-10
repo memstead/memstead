@@ -35,12 +35,12 @@ fn cache_guard() -> &'static Mutex<()> {
 /// content from this branch tip — disk-resident `.md` files alone are not
 /// sufficient under the GitObject default.
 fn commit_mem_branch(root: &Path, mem_name: &str, entries: &[(&str, &str)]) {
-    use memstead_git_branch::storage::MemWriter;
-    use memstead_git_branch::storage::git_tree::GitTreeMemWriter;
+    use memstead_base::backend::MemBackend;
+    use memstead_git_branch::storage::git_tree::GitTreeBackend;
     use memstead_git_branch::vcs::CommitContext;
 
     let gitdir = root.join("mem-repo").join(".git");
-    let writer = GitTreeMemWriter::new(gitdir, format!("refs/heads/{mem_name}"));
+    let writer = GitTreeBackend::new(gitdir, format!("refs/heads/{mem_name}"));
     for (rel, content) in entries {
         writer
             .write_entity(Path::new(rel), content.as_bytes())

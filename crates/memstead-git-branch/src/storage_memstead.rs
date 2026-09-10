@@ -1001,7 +1001,7 @@ pub fn commit_paths_to_memstead_at_gitdir(
 /// `__MEMSTEAD:mems/<branch_leaf>/config.json` blob (collapsing any
 /// empty `mems/…` ancestor directories along the way). Symmetric
 /// counterpart to [`commit_config_to_memstead_at_gitdir`] +
-/// [`crate::storage::git_tree::GitTreeMemWriter::commit`]'s seed
+/// [`crate::storage::git_tree::GitTreeBackend::commit`]'s seed
 /// commit pair — `memstead_mem_create` writes those two, this helper
 /// undoes them when `memstead_mem_delete delete_files=true`.
 ///

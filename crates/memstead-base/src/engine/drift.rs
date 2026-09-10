@@ -1903,10 +1903,10 @@ mod tests {
     fn folder_feed_serves_a_renamed_entity_once_with_its_final_id() {
         use crate::engine::test_helpers::*;
         use crate::engine::{CreateEntityArgs, RenameEntityArgs};
-        use crate::storage::FilesystemMemWriter;
+        use crate::storage::FilesystemBackend;
         let tmp = tempfile::TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,

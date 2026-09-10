@@ -32,7 +32,7 @@ fn main() {
 fn build_fixture_bytes() -> Vec<u8> {
     use memstead_base::backend::MemBackend;
     use memstead_base::engine::Engine;
-    use memstead_base::storage::FilesystemMemWriter;
+    use memstead_base::storage::FilesystemBackend;
     use memstead_base::vcs::{Actor, ClientId};
     use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
     use memstead_schema::SchemaRef;
@@ -57,7 +57,7 @@ fn build_fixture_bytes() -> Vec<u8> {
         cross_linkable: true,
         migration_target: None,
     };
-    let writer = FilesystemMemWriter::new(mem_dir.clone());
+    let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)])
         .expect("from_mounts");
 

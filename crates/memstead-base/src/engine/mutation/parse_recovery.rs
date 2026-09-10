@@ -231,7 +231,7 @@ mod tests {
         archive_mount, build_archive, cli_actor, folder_mount, write_schema_files_with_default_type,
     };
     use crate::ops::{ParseRecoveryEntry, WarningHint};
-    use crate::storage::{ArchiveBackend, FilesystemMemWriter};
+    use crate::storage::{ArchiveBackend, FilesystemBackend};
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
     use memstead_schema::SchemaRef;
@@ -249,7 +249,7 @@ mod tests {
         std::fs::write(mem_dir.join("target.md"), target).unwrap();
         std::fs::write(mem_dir.join("source.md"), source).unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -317,7 +317,7 @@ mod tests {
         std::fs::write(&sidecar_path, sidecar).unwrap();
         let before = std::fs::read(&sidecar_path).unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -398,7 +398,7 @@ mod tests {
         std::fs::write(mem_dir.join("target.md"), target).unwrap();
         std::fs::write(mem_dir.join("source.md"), source).unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -450,7 +450,7 @@ mod tests {
             ],
         );
 
-        let writer = FilesystemMemWriter::new(writable_dir.clone());
+        let writer = FilesystemBackend::new(writable_dir.clone());
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("specs", writable_dir),
@@ -526,7 +526,7 @@ community:
         std::fs::write(mem_dir.join("target.md"), target).unwrap();
         std::fs::write(mem_dir.join("source.md"), source).unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let pin = SchemaRef::new("link-test", semver::Version::new(0, 1, 0));
         let mount = Mount {
             mem: "specs".to_string(),

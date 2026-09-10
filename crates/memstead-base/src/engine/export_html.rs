@@ -498,7 +498,7 @@ mod tests {
 
     use crate::backend::MemBackend;
     use crate::engine::test_helpers::{cli_actor, folder_mount};
-    use crate::storage::FilesystemMemWriter;
+    use crate::storage::FilesystemBackend;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
     /// The export scan uses the one definition of "not a link": a
@@ -580,7 +580,7 @@ mod tests {
             "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Target Entity\n\n## Identity\n\nThe link target.\n\n## Purpose\n\nAnchors resolve here.\n",
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -633,7 +633,7 @@ mod tests {
              ## Significance\n\nS.\n\n## Current State\n\nWhere things stand.\n",
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -669,7 +669,7 @@ mod tests {
              Everything else.\n",
         )
         .unwrap();
-        let goal_writer = FilesystemMemWriter::new(goal_dir.clone());
+        let goal_writer = FilesystemBackend::new(goal_dir.clone());
         let goal_mount = Mount {
             mem: "plans".to_string(),
             schema: Some(memstead_schema::SchemaRef::new(
@@ -852,7 +852,7 @@ mod tests {
             "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Foreign Note\n\n## Identity\n\nI.\n\n## Purpose\n\nP.\n",
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mount = Mount {
             mem: "foreign".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),

@@ -3075,7 +3075,7 @@ mod tests {
     use crate::engine::{Engine, EngineError};
     use crate::mem::MemOrigin;
     use crate::ops::WarningHint;
-    use crate::storage::{ArchiveBackend, FilesystemMemWriter};
+    use crate::storage::{ArchiveBackend, FilesystemBackend};
 
     fn schema_package_files(heading: &str, manifest_name: &str) -> Vec<(String, Vec<u8>)> {
         let manifest = format!(
@@ -3437,7 +3437,7 @@ write_rules: []
         // The accumulator should pick up the new typed warning.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         // Newest default generation so the clean-boot baseline isn't
         // tripped by the SCHEMA_GENERATIONS_BEHIND hint.
         let mut mount = folder_mount("specs", mem_dir.clone());
@@ -3483,7 +3483,7 @@ write_rules: []
         // Seed a clean target entity at boot.
         let target_body = "---\ntype: spec\n---\n# Target\n\n## Identity\n\nThe target.\n";
         std::fs::write(mem_dir.join("target.md"), target_body).unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -3547,11 +3547,11 @@ write_rules: []
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("alpha", a_dir.clone()),
-                Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(a_dir.clone())) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("beta", b_dir.clone()),
-                Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(b_dir.clone())) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
@@ -3595,11 +3595,11 @@ write_rules: []
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("alpha", a_dir.clone()),
-                Box::new(FilesystemMemWriter::new(a_dir)) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(a_dir)) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("beta", b_dir.clone()),
-                Box::new(FilesystemMemWriter::new(b_dir)) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(b_dir)) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
@@ -3643,11 +3643,11 @@ write_rules: []
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("alpha", a_dir.clone()),
-                Box::new(FilesystemMemWriter::new(a_dir)) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(a_dir)) as Box<dyn MemBackend>,
             ),
             (
                 folder_mount("beta", b_dir.clone()),
-                Box::new(FilesystemMemWriter::new(b_dir)) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(b_dir)) as Box<dyn MemBackend>,
             ),
         ])
         .unwrap();
@@ -3685,7 +3685,7 @@ write_rules: []
         let mem_dir = tmp.path().to_path_buf();
         let dup_body = "---\ntype: spec\n---\n# Dup\n\n## Identity\n\na.\n\n## Identity\n\nb.\n";
         std::fs::write(mem_dir.join("dup.md"), dup_body).unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -3734,8 +3734,8 @@ write_rules: []
         let b_dir = tmp.path().join("b");
         std::fs::create_dir_all(&a_dir).unwrap();
         std::fs::create_dir_all(&b_dir).unwrap();
-        let a_writer = FilesystemMemWriter::new(a_dir.clone());
-        let b_writer = FilesystemMemWriter::new(b_dir.clone());
+        let a_writer = FilesystemBackend::new(a_dir.clone());
+        let b_writer = FilesystemBackend::new(b_dir.clone());
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("specs", a_dir),
@@ -3854,8 +3854,8 @@ write_rules: []
         let b_dir = tmp.path().join("b");
         std::fs::create_dir_all(&a_dir).unwrap();
         std::fs::create_dir_all(&b_dir).unwrap();
-        let a_writer = FilesystemMemWriter::new(a_dir.clone());
-        let b_writer = FilesystemMemWriter::new(b_dir.clone());
+        let a_writer = FilesystemBackend::new(a_dir.clone());
+        let b_writer = FilesystemBackend::new(b_dir.clone());
         let mut engine = Engine::from_mounts(vec![
             (
                 folder_mount("specs", a_dir),
@@ -3930,7 +3930,7 @@ write_rules: []
     fn workspace_root_setter_round_trips() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -3956,7 +3956,7 @@ write_rules: []
         }"#;
         std::fs::write(mem_dir.join(".memstead").join("config.json"), config_body).unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -3976,7 +3976,7 @@ write_rules: []
     fn export_mem_unknown_mem_returns_unknown_mem() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -3994,7 +3994,7 @@ write_rules: []
         // rather than reaching the backend.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -4104,7 +4104,7 @@ write_rules: []
         let tmp = TempDir::new().unwrap();
         let mem_a = tmp.path().join("a");
         std::fs::create_dir_all(&mem_a).unwrap();
-        let writer_a = FilesystemMemWriter::new(mem_a.clone());
+        let writer_a = FilesystemBackend::new(mem_a.clone());
 
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("alpha", mem_a),
@@ -4115,7 +4115,7 @@ write_rules: []
 
         let mem_b = tmp.path().join("b");
         std::fs::create_dir_all(&mem_b).unwrap();
-        let writer_b = FilesystemMemWriter::new(mem_b.clone());
+        let writer_b = FilesystemBackend::new(mem_b.clone());
 
         engine
             .register_writable_mem(
@@ -4153,7 +4153,7 @@ write_rules: []
         std::fs::create_dir_all(&mem_a).unwrap();
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("alpha", mem_a.clone()),
-            Box::new(FilesystemMemWriter::new(mem_a)) as Box<dyn MemBackend>,
+            Box::new(FilesystemBackend::new(mem_a)) as Box<dyn MemBackend>,
         )])
         .unwrap();
 
@@ -4181,7 +4181,7 @@ write_rules: []
         engine
             .register_writable_mem(
                 mount_b,
-                Box::new(FilesystemMemWriter::new(mem_b)) as Box<dyn MemBackend>,
+                Box::new(FilesystemBackend::new(mem_b)) as Box<dyn MemBackend>,
                 MemOrigin::ExplicitToml,
             )
             .expect("config pin software@0.1.0 is authoritative — register must succeed despite the unresolvable mount pin");
@@ -4210,7 +4210,7 @@ write_rules: []
         let tmp = TempDir::new().unwrap();
         let mem_a = tmp.path().join("a");
         std::fs::create_dir_all(&mem_a).unwrap();
-        let writer_a = FilesystemMemWriter::new(mem_a.clone());
+        let writer_a = FilesystemBackend::new(mem_a.clone());
 
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("alpha", mem_a),
@@ -4221,7 +4221,7 @@ write_rules: []
 
         let mem_collide = tmp.path().join("alpha-2");
         std::fs::create_dir_all(&mem_collide).unwrap();
-        let writer_collide = FilesystemMemWriter::new(mem_collide.clone());
+        let writer_collide = FilesystemBackend::new(mem_collide.clone());
 
         let err = engine
             .register_writable_mem(
@@ -4258,7 +4258,7 @@ write_rules: []
         let tmp = TempDir::new().unwrap();
         let mem_a = tmp.path().join("a");
         std::fs::create_dir_all(&mem_a).unwrap();
-        let writer_a = FilesystemMemWriter::new(mem_a.clone());
+        let writer_a = FilesystemBackend::new(mem_a.clone());
 
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("alpha", mem_a),
@@ -4275,7 +4275,7 @@ write_rules: []
             "---\ntype: spec\n---\n# B1\n\n## Identity\n\nseed.\n",
         )
         .unwrap();
-        let writer_b = FilesystemMemWriter::new(mem_b.clone());
+        let writer_b = FilesystemBackend::new(mem_b.clone());
 
         engine
             .register_writable_mem(
@@ -4303,7 +4303,7 @@ write_rules: []
         let tmp = TempDir::new().unwrap();
         let mem_a = tmp.path().join("a");
         std::fs::create_dir_all(&mem_a).unwrap();
-        let writer_a = FilesystemMemWriter::new(mem_a.clone());
+        let writer_a = FilesystemBackend::new(mem_a.clone());
 
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("alpha", mem_a),
@@ -4314,7 +4314,7 @@ write_rules: []
 
         let mem_b = tmp.path().join("b");
         std::fs::create_dir_all(&mem_b).unwrap();
-        let writer_b = FilesystemMemWriter::new(mem_b);
+        let writer_b = FilesystemBackend::new(mem_b);
 
         engine
             .register_writable_mem(
@@ -4338,7 +4338,7 @@ write_rules: []
         // a typed error envelope for the common "already gone" case.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -4359,10 +4359,10 @@ write_rules: []
         let tmp = TempDir::new().unwrap();
         let mem_a = tmp.path().join("a");
         std::fs::create_dir_all(&mem_a).unwrap();
-        let writer_a = FilesystemMemWriter::new(mem_a.clone());
+        let writer_a = FilesystemBackend::new(mem_a.clone());
         let mem_b = tmp.path().join("b");
         std::fs::create_dir_all(&mem_b).unwrap();
-        let writer_b = FilesystemMemWriter::new(mem_b.clone());
+        let writer_b = FilesystemBackend::new(mem_b.clone());
 
         let mut engine = Engine::from_mounts(vec![
             (
@@ -4402,7 +4402,7 @@ write_rules: []
             "---\ntype: spec\n---\n# A1\n\n## Identity\n\nseed.\n",
         )
         .unwrap();
-        let writer_a = FilesystemMemWriter::new(mem_a.clone());
+        let writer_a = FilesystemBackend::new(mem_a.clone());
 
         let mem_b = tmp.path().join("b");
         std::fs::create_dir_all(&mem_b).unwrap();
@@ -4411,7 +4411,7 @@ write_rules: []
             "---\ntype: spec\n---\n# B1\n\n## Identity\n\nseed.\n",
         )
         .unwrap();
-        let writer_b = FilesystemMemWriter::new(mem_b.clone());
+        let writer_b = FilesystemBackend::new(mem_b.clone());
 
         let mut engine = Engine::from_mounts(vec![
             (
@@ -5146,7 +5146,7 @@ community:
         write_mig_schema(&schemas_dir, "mig-b-1", "mig-b", "0.1.0", true);
         let mem_dir = tmp.path().join("mem");
         std::fs::create_dir_all(&mem_dir).unwrap();
-        let writer = crate::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = crate::storage::FilesystemBackend::new(mem_dir.clone());
         let mut mount = folder_mount("specs", mem_dir);
         mount.schema = Some("mig-a@0.1.0".parse().unwrap());
         let mut engine = Engine::from_mounts_with_schemas_dir(
@@ -5303,7 +5303,7 @@ community:
             br#"{"schema":"mig-a@0.1.0"}"#,
         )
         .unwrap();
-        let writer = crate::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = crate::storage::FilesystemBackend::new(mem_dir.clone());
         let mut mount = folder_mount("specs", mem_dir.clone());
         mount.schema = Some("mig-a@0.1.0".parse().unwrap());
         let mut engine = Engine::from_mounts_with_schemas_dir(
@@ -5350,7 +5350,7 @@ community:
             br#"{"schema":"mig-a@0.1.0","mutationStamp":{"engineVersion":"0.0.1","schema":"mig-a@0.1.0"}}"#,
         )
         .unwrap();
-        let writer = crate::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = crate::storage::FilesystemBackend::new(mem_dir.clone());
         let mut mount = folder_mount("specs", mem_dir.clone());
         mount.schema = Some("mig-a@0.1.0".parse().unwrap());
         let mut engine = Engine::from_mounts_with_schemas_dir(
@@ -5626,7 +5626,7 @@ community:
         drop(engine);
         let schemas_dir = tmp.path().join("schemas");
         let mem_dir = tmp.path().join("mem");
-        let writer = crate::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = crate::storage::FilesystemBackend::new(mem_dir.clone());
         let mut mount = folder_mount("specs", mem_dir);
         mount.schema = Some("mig-a@0.1.0".parse().unwrap());
         mount.migration_target = Some("mig-b@0.1.0".parse().unwrap());
@@ -5773,7 +5773,7 @@ community:
             )
             .unwrap();
 
-            let writer = FilesystemMemWriter::new(mem_dir.clone());
+            let writer = FilesystemBackend::new(mem_dir.clone());
             let mut engine = Engine::from_mounts(vec![(
                 folder_mount("specs", mem_dir.clone()),
                 Box::new(writer) as Box<dyn MemBackend>,
@@ -5820,7 +5820,7 @@ community:
         std::fs::create_dir_all(&meta).unwrap();
         let path = meta.join("config.json");
         std::fs::write(&path, br#"{"schema": "default@1.0.0"}"#.as_slice()).unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mut engine = Engine::from_mounts(vec![(
             folder_mount("specs", mem_dir.clone()),
             Box::new(writer) as Box<dyn MemBackend>,

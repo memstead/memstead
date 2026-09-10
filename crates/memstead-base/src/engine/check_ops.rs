@@ -271,7 +271,7 @@ mod tests {
         mount.schema = None;
         let mut engine = crate::Engine::from_mounts(vec![(
             mount,
-            Box::new(crate::storage::FilesystemMemWriter::new(
+            Box::new(crate::storage::FilesystemBackend::new(
                 tmp.path().to_path_buf(),
             )) as Box<dyn crate::backend::MemBackend>,
         )])
@@ -300,7 +300,7 @@ mod tests {
         mount.capability = MountCapability::ReadOnly;
         let mut engine = crate::Engine::from_mounts(vec![(
             mount,
-            Box::new(crate::storage::FilesystemMemWriter::new(
+            Box::new(crate::storage::FilesystemBackend::new(
                 tmp.path().to_path_buf(),
             )) as Box<dyn crate::backend::MemBackend>,
         )])

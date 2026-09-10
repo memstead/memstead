@@ -282,7 +282,7 @@ pub fn export_mem_to_bytes(
     // backend so the JSONL parsing has one home. A mem with no changelog
     // yields no rationale, but every entity still gets its record.
     use crate::backend::MemBackend;
-    let backend = crate::storage::FilesystemMemWriter::new(mem_dir.to_path_buf());
+    let backend = crate::storage::FilesystemBackend::new(mem_dir.to_path_buf());
     let entity_paths = entity_paths_of(
         &md_entries
             .iter()

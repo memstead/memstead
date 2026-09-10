@@ -49,7 +49,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::backend::MemBackend;
-use crate::storage::{ArchiveBackend, FilesystemMemWriter, InMemoryBackend};
+use crate::storage::{ArchiveBackend, FilesystemBackend, InMemoryBackend};
 use crate::workspace::{
     McpSection, Mount, MountCapability, MountLifecycle, MountStorage, MutationsSection, Workspace,
     WorkspaceSettings,
@@ -1038,7 +1038,7 @@ impl InstantiateError {
 /// `from_mounts` glue is identical with and without the git-branch crate.
 pub fn instantiate_local_backend(mount: &Mount) -> Result<Box<dyn MemBackend>, InstantiateError> {
     match &mount.storage {
-        MountStorage::Folder { path } => Ok(Box::new(FilesystemMemWriter::new(path.clone()))),
+        MountStorage::Folder { path } => Ok(Box::new(FilesystemBackend::new(path.clone()))),
         MountStorage::Archive { path } => Ok(Box::new(ArchiveBackend::new(path.clone()))),
         MountStorage::InMemory => Ok(Box::new(InMemoryBackend::new())),
         MountStorage::GitBranch { .. } => Err(InstantiateError::GitBranchBackendUnavailable {

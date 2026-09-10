@@ -689,7 +689,7 @@ fn filter_provenance_for_entity(
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::MemWriter;
+    use crate::backend::MemBackend;
 
     /// A `batch-create` commit that lists the entity IS its creation:
     /// the filter stops walking older history there (regression: an
@@ -751,10 +751,10 @@ mod tests {
         let dir = tmp.path().join("specs");
         if !dir.exists() {
             std::fs::create_dir_all(&dir).unwrap();
-            let writer = crate::storage::FilesystemMemWriter::new(dir.clone());
-            MemWriter::write_entity(&writer, std::path::Path::new("seed.md"), SEED.as_bytes())
+            let writer = crate::storage::FilesystemBackend::new(dir.clone());
+            MemBackend::write_entity(&writer, std::path::Path::new("seed.md"), SEED.as_bytes())
                 .unwrap();
-            MemWriter::commit(&writer, "seed", &crate::vcs::CommitContext::internal()).unwrap();
+            MemBackend::commit(&writer, "seed", &crate::vcs::CommitContext::internal()).unwrap();
         }
         let mount = crate::Mount {
             mem: "specs".to_string(),
@@ -769,7 +769,7 @@ mod tests {
             migration_target: None,
         };
         let backend =
-            Box::new(crate::storage::FilesystemMemWriter::new(dir)) as Box<dyn crate::MemBackend>;
+            Box::new(crate::storage::FilesystemBackend::new(dir)) as Box<dyn crate::MemBackend>;
         crate::Engine::from_mounts(vec![(mount, backend)]).unwrap()
     }
 

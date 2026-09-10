@@ -5416,8 +5416,8 @@ mod tests {
             cross_linkable: true,
             migration_target: None,
         };
-        let a_writer = memstead_base::storage::FilesystemMemWriter::new(a_dir.clone());
-        let b_writer = memstead_base::storage::FilesystemMemWriter::new(b_dir.clone());
+        let a_writer = memstead_base::storage::FilesystemBackend::new(a_dir.clone());
+        let b_writer = memstead_base::storage::FilesystemBackend::new(b_dir.clone());
         let mut engine = memstead_base::Engine::from_mounts(vec![
             (
                 mk_mount("specs", a_dir),
@@ -5581,19 +5581,18 @@ mod tests {
         let mut engine = memstead_base::Engine::from_mounts(vec![
             (
                 mk_mount("specs", specs_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemMemWriter::new(specs_dir))
+                Box::new(memstead_base::storage::FilesystemBackend::new(specs_dir))
                     as Box<dyn memstead_base::backend::MemBackend>,
             ),
             (
                 mk_mount("memos", memos_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemMemWriter::new(memos_dir))
+                Box::new(memstead_base::storage::FilesystemBackend::new(memos_dir))
                     as Box<dyn memstead_base::backend::MemBackend>,
             ),
             (
                 mk_mount("scratch", scratch_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemMemWriter::new(
-                    scratch_dir,
-                )) as Box<dyn memstead_base::backend::MemBackend>,
+                Box::new(memstead_base::storage::FilesystemBackend::new(scratch_dir))
+                    as Box<dyn memstead_base::backend::MemBackend>,
             ),
         ])
         .unwrap();
@@ -5737,14 +5736,13 @@ mod tests {
         let engine = memstead_base::Engine::from_mounts(vec![
             (
                 mk_mount("specs", specs_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemMemWriter::new(specs_dir))
+                Box::new(memstead_base::storage::FilesystemBackend::new(specs_dir))
                     as Box<dyn memstead_base::backend::MemBackend>,
             ),
             (
                 mk_mount("scratch", scratch_dir.clone()),
-                Box::new(memstead_base::storage::FilesystemMemWriter::new(
-                    scratch_dir,
-                )) as Box<dyn memstead_base::backend::MemBackend>,
+                Box::new(memstead_base::storage::FilesystemBackend::new(scratch_dir))
+                    as Box<dyn memstead_base::backend::MemBackend>,
             ),
         ])
         .unwrap();
@@ -5955,7 +5953,7 @@ mod tests {
     #[test]
     fn health_missing_fields_include_carries_issue_codes_additively() {
         use memstead_base::backend::MemBackend;
-        use memstead_base::storage::FilesystemMemWriter;
+        use memstead_base::storage::FilesystemBackend;
         use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
         let tmp = tempfile::TempDir::new().unwrap();
@@ -5988,7 +5986,7 @@ mod tests {
         )
         .unwrap();
 
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let mount = Mount {
             mem: "debate-mem".to_string(),
             schema: Some(memstead_schema::SchemaRef::new(
@@ -7308,7 +7306,7 @@ community:
     fn test_memstead_mem_create_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let seed_dir = tmp.path().join("seed");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(seed_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(seed_dir.clone());
         let mount = memstead_base::Mount {
             mem: "seed".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -7438,7 +7436,7 @@ community:
     fn test_memstead_mem_delete_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let target_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(target_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(target_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -7489,7 +7487,7 @@ community:
     fn test_memstead_overview_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -7538,7 +7536,7 @@ community:
     fn test_memstead_health_default_body_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -7601,7 +7599,7 @@ community:
         }"#;
         std::fs::write(mem_dir.join(".memstead").join("config.json"), config_body).unwrap();
 
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -7673,7 +7671,7 @@ community:
     fn test_memstead_entity_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -7727,7 +7725,7 @@ community:
     fn test_memstead_schema_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -7803,7 +7801,7 @@ community:
     fn test_memstead_schema_verbosity_toggle() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -7891,7 +7889,7 @@ community:
     fn test_memstead_schema_resolves_builtin_when_no_mem_pins_it() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         // Pin a builtin that's NOT `planning@0.1.0` so the planning
         // resolution path must go through the builtin catalogue.
         let mount = memstead_base::Mount {
@@ -7968,7 +7966,7 @@ community:
     fn test_memstead_schema_mem_shortcut() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -8049,7 +8047,7 @@ community:
     fn test_memstead_reload_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -8277,7 +8275,7 @@ write_rules: []
     fn test_memstead_changes_since_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -8318,7 +8316,7 @@ write_rules: []
     fn test_unified_validation_envelopes_carry_recovery_payload() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -8407,7 +8405,7 @@ write_rules: []
     fn test_unified_mutation_handlers_emit_typed_error_envelopes() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -8525,7 +8523,7 @@ write_rules: []
     fn text_channel_carries_typed_error_code_inline() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -9517,7 +9515,7 @@ write_rules: []
     fn test_memstead_relate_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -9607,7 +9605,7 @@ write_rules: []
     fn test_memstead_update_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -9692,7 +9690,7 @@ write_rules: []
     fn test_memstead_create_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -9812,7 +9810,7 @@ write_rules: []
     fn test_memstead_retype_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -9927,7 +9925,7 @@ write_rules: []
     fn test_memstead_delete_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -10003,7 +10001,7 @@ write_rules: []
     fn test_memstead_rename_via_unified_engine_path() {
         let tmp = setup_test_workspace();
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -10406,11 +10404,11 @@ write_rules: []
 
         // Construct a unified engine reading the same mem directory
         // the full engine reads. The folder backend trait impl on
-        // FilesystemMemWriter walks the mem tree on `from_mounts`,
+        // FilesystemBackend walks the mem tree on `from_mounts`,
         // populating the unified store with the same entities full
         // already loaded.
         let mem_dir = tmp.path().join("specs");
-        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let writer = memstead_base::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = memstead_base::Mount {
             mem: "specs".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),

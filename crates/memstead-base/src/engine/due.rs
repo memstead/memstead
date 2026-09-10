@@ -469,7 +469,7 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::backend::MemBackend;
-    use crate::storage::FilesystemMemWriter;
+    use crate::storage::FilesystemBackend;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
     fn frist_schema_dir(root: &Path) {
@@ -587,8 +587,8 @@ mod tests {
         )
         .unwrap();
 
-        let own_writer = FilesystemMemWriter::new(own.clone());
-        let foreign_writer = FilesystemMemWriter::new(foreign.clone());
+        let own_writer = FilesystemBackend::new(own.clone());
+        let foreign_writer = FilesystemBackend::new(foreign.clone());
         let engine = Engine::from_mounts_with_schemas_dir(
             vec![
                 (
@@ -699,7 +699,7 @@ mod tests {
     fn no_declaring_schema_renders_honest_empty_brief() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         let engine = Engine::from_mounts(vec![(
             crate::engine::test_helpers::folder_mount("specs", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,
@@ -722,7 +722,7 @@ mod obligation_builtin_tests {
 
     use crate::backend::MemBackend;
     use crate::engine::test_helpers::{cli_actor, empty_create_args};
-    use crate::storage::FilesystemMemWriter;
+    use crate::storage::FilesystemBackend;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
     fn obligation_mount(mem: &str, path: std::path::PathBuf) -> Mount {
@@ -745,7 +745,7 @@ mod obligation_builtin_tests {
             "{\n  \"version\": \"1.0.0\",\n  \"description\": \"obligation fixture\",\n  \"schema\": \"obligation@0.1.0\"\n}",
         )
         .unwrap();
-        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let writer = FilesystemBackend::new(mem_dir.clone());
         Engine::from_mounts(vec![(
             obligation_mount("duties", mem_dir),
             Box::new(writer) as Box<dyn MemBackend>,

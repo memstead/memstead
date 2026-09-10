@@ -587,7 +587,7 @@ mod tests {
     };
     use memstead_base::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
     use memstead_base::pipeline_store::write_binding;
-    use memstead_base::storage::FilesystemMemWriter;
+    use memstead_base::storage::FilesystemBackend;
     use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
     use tempfile::TempDir;
 
@@ -675,7 +675,7 @@ mod tests {
         };
         let mut engine = Engine::from_mounts(vec![(
             mount,
-            Box::new(FilesystemMemWriter::new(root.to_path_buf()))
+            Box::new(FilesystemBackend::new(root.to_path_buf()))
                 as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
@@ -727,7 +727,7 @@ mod tests {
         };
         let engine = Engine::from_mounts(vec![(
             mount,
-            Box::new(FilesystemMemWriter::new(root.to_path_buf()))
+            Box::new(FilesystemBackend::new(root.to_path_buf()))
                 as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
@@ -815,7 +815,7 @@ mod tests {
         };
         Engine::from_mounts(vec![(
             mount,
-            Box::new(FilesystemMemWriter::new(root.to_path_buf()))
+            Box::new(FilesystemBackend::new(root.to_path_buf()))
                 as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap()
@@ -900,7 +900,7 @@ mod tests {
         };
         let engine = Engine::from_mounts(vec![(
             mount,
-            Box::new(FilesystemMemWriter::new(root.to_path_buf()))
+            Box::new(FilesystemBackend::new(root.to_path_buf()))
                 as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();

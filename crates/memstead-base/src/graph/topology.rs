@@ -189,7 +189,7 @@ pub fn project_mem_topology(
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::MemWriter;
+    use crate::backend::MemBackend;
 
     /// Two folder mems, one cross-mem edge (seeded in the markdown so
     /// no mutation-time policy is involved). The projection must keep
@@ -199,7 +199,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let seed = |dir: &std::path::Path, files: &[(&str, &str)]| {
             std::fs::create_dir_all(dir).unwrap();
-            let writer = crate::storage::FilesystemMemWriter::new(dir.to_path_buf());
+            let writer = crate::storage::FilesystemBackend::new(dir.to_path_buf());
             for (name, body) in files {
                 writer
                     .write_entity(std::path::Path::new(name), body.as_bytes())
@@ -246,7 +246,7 @@ mod tests {
                     cross_linkable: true,
                     migration_target: None,
                 },
-                Box::new(crate::storage::FilesystemMemWriter::new(path))
+                Box::new(crate::storage::FilesystemBackend::new(path))
                     as Box<dyn crate::MemBackend>,
             )
         };
@@ -325,7 +325,7 @@ mod tests {
 
 #[cfg(test)]
 mod scale_tests {
-    use crate::storage::MemWriter;
+    use crate::backend::MemBackend;
 
     /// Design-target guard (plan criterion: "a mem at the design-target
     /// entity count is served whole — no page cap, no top-N
@@ -338,7 +338,7 @@ mod scale_tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().join("bulk");
         std::fs::create_dir_all(&dir).unwrap();
-        let writer = crate::storage::FilesystemMemWriter::new(dir.clone());
+        let writer = crate::storage::FilesystemBackend::new(dir.clone());
         for i in 0..N {
             // Chain edges so the edge count scales with the node count.
             let rel = if i > 0 {
@@ -373,7 +373,7 @@ mod scale_tests {
             migration_target: None,
         };
         let backend =
-            Box::new(crate::storage::FilesystemMemWriter::new(dir)) as Box<dyn crate::MemBackend>;
+            Box::new(crate::storage::FilesystemBackend::new(dir)) as Box<dyn crate::MemBackend>;
         let engine = crate::Engine::from_mounts(vec![(mount, backend)]).unwrap();
 
         let topology = engine.mem_topology("bulk").unwrap();

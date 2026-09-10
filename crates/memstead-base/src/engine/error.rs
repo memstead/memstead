@@ -900,9 +900,12 @@ pub enum EngineError {
     #[error("parse error: {0}")]
     Parse(#[from] ParseError),
     /// A backend operation failed. Inner error carries the typed
-    /// payload (e.g. `Sealed`, `HashMismatch`, `Io`).
+    /// payload (e.g. `Sealed`, `Io`, `Path`). A backend's commit-tip
+    /// CAS conflict never lands here: the `From` impl below maps
+    /// [`BackendError::HashMismatch`] onto [`Self::HashMismatch`] so the
+    /// wire carries one `HASH_MISMATCH` code for both detection levels.
     #[error(transparent)]
-    Backend(#[from] BackendError),
+    Backend(BackendError),
     /// A mem's schema pin did not resolve. `sources` carries the
     /// fixed-order resolution diagnostics (local storage / built-in /
     /// remote) so the caller can tell *where* the pin failed and spot a
@@ -3152,5 +3155,24 @@ mod inline_list_tests {
         let msg = untitled.to_string();
         assert!(msg.contains("occupied by a stub"), "got: {msg}");
         assert!(!msg.contains("''"), "empty title must not render: {msg}");
+    }
+}
+
+impl From<BackendError> for EngineError {
+    /// One `HASH_MISMATCH` for both detection levels: a commit-tip CAS
+    /// conflict raised by the backend (the git-tree backend's
+    /// `commit`) maps onto the entity-level envelope, carrying the
+    /// live tip as `current`; the entity id is unknown at the backend
+    /// layer, so the envelope names the mem-level conflict instead.
+    /// Everything else stays a typed backend failure.
+    fn from(e: BackendError) -> Self {
+        match e {
+            BackendError::HashMismatch { current } => EngineError::HashMismatch {
+                id: String::new(),
+                current,
+                is_stub: false,
+            },
+            other => EngineError::Backend(other),
+        }
     }
 }

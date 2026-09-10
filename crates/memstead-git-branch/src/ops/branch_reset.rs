@@ -226,9 +226,9 @@ pub fn branch_reset_in_gitdir(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::MemWriter;
-    use crate::storage::git_tree::GitTreeMemWriter;
+    use crate::storage::git_tree::GitTreeBackend;
     use crate::vcs::CommitContext;
+    use memstead_base::backend::MemBackend;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -246,7 +246,7 @@ mod tests {
     }
 
     fn commit(gitdir: &Path, branch: &str, file: &str, content: &str, subject: &str) -> String {
-        let writer = GitTreeMemWriter::new(gitdir.to_path_buf(), format!("refs/heads/{branch}"));
+        let writer = GitTreeBackend::new(gitdir.to_path_buf(), format!("refs/heads/{branch}"));
         writer
             .write_entity(Path::new(file), content.as_bytes())
             .unwrap();
@@ -265,7 +265,7 @@ mod tests {
         // Commit A: entity `a` + a sidecar carrying one anchor.
         let sidecar_a = br#"{"version":1,"entities":{"specs--a":[{"artifact":"a.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}]}}"#;
         let sha_a = {
-            let w = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+            let w = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
             w.write_entity(Path::new("a.md"), body("A").as_bytes())
                 .unwrap();
             w.write_entity(Path::new(".memstead/anchors.json"), sidecar_a)
@@ -276,7 +276,7 @@ mod tests {
         // Commit B: extend the sidecar with a second anchor.
         let sidecar_b = br#"{"version":1,"entities":{"specs--a":[{"artifact":"a.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"},{"artifact":"b.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h2"}]}}"#;
         {
-            let w = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+            let w = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
             w.write_entity(Path::new(".memstead/anchors.json"), sidecar_b)
                 .unwrap();
             w.commit("B", &CommitContext::internal()).unwrap();
@@ -285,7 +285,7 @@ mod tests {
         // Reset to A → the sidecar rewinds with the branch.
         branch_reset_in_gitdir(&gitdir, "specs", &sha_a, None).unwrap();
 
-        let reader = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        let reader = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
         let after = memstead_base::backend::MemBackend::read_anchors_sidecar(&reader).unwrap();
         assert_eq!(
             after.as_deref(),
