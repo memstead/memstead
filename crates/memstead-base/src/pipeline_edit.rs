@@ -94,7 +94,7 @@ pub enum PipelineEditError {
     },
     /// The write would put an intent into the record that names a
     /// relationship the destination schema does not declare
-    /// ([`crate::ingest::intent`]). Refused on `init` and on an `edit` that
+    /// ([`crate::binding_intent`]). Refused on `init` and on an `edit` that
     /// sets the intent; a stored record already carrying one keeps loading
     /// and is reported on every brief instead. Nothing was written.
     #[error(

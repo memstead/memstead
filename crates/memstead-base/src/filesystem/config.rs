@@ -330,7 +330,7 @@ pub fn init_filesystem_mem(root: &Path, name: &str, schema: &SchemaRef) -> std::
 /// carry a mem if the mem owns a folder of its own rather than the root.
 /// Both facts of that shape follow from the mount roster and need no
 /// special-casing downstream: the mem folder is a mount storage location,
-/// so [`crate::ingest::cursor`] already excludes it from every binding's
+/// so the loop's cursor (`memstead_projection::cursor`) already excludes it from every binding's
 /// input set unconditionally.
 ///
 /// Writes `<mem_dir>/.memstead/config.json` (the mem's own config, the

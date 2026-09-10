@@ -28,7 +28,7 @@
 //!    preparation-registry check (a declared `preparation` must be one
 //!    [`crate::preparation`] knows, over a medium it can apply to).
 //!
-//! The findings store ([`crate::ingest::findings`]) keys on `hash(D)`, so the
+//! The findings store (`memstead_projection::findings`, the maintenance-loop crate above this one) keys on `hash(D)`, so the
 //! consolidation's shape change invalidates prior findings by construction —
 //! accepted and disclosed (findings are re-derivable measurements).
 

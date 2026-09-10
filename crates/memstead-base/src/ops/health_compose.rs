@@ -89,7 +89,7 @@ pub enum ComposeHealthError {
 /// the composer extends the lot with the health report's own warnings, the
 /// limit-clamp notice, and unknown-include notices, then embeds it under
 /// `warnings`. Every surface reaches this through the loop's one assembly,
-/// `crate::ingest::health::compose_health`, so no surface can forget the
+/// `memstead_projection::health::compose_health`, so no surface can forget the
 /// loop's axis.
 pub fn compose_health(
     engine: &mut crate::Engine,

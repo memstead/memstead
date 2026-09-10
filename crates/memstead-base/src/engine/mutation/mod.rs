@@ -349,7 +349,7 @@ impl super::Engine {
     /// Record verify-observed prepared-content hashes onto **hash-less
     /// hash-bearing** anchors in `mem_name`'s anchors sidecar — the
     /// measurement-bookkeeping backfill the verify pass hands over via
-    /// [`crate::ingest::VerifyOutcome::hash_backfill`].
+    /// the loop's `VerifyOutcome::hash_backfill` (`memstead_projection`).
     ///
     /// This mutates **only** the engine-owned sidecar
     /// ([`crate::anchor::ANCHOR_SIDECAR_PATH`]): no entity content, no
