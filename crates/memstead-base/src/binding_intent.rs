@@ -1,30 +1,9 @@
-//! The binding's intent says only what the destination vocabulary carries.
-//!
-//! An intent is prose for the agent, and an agent reads an all-caps token
-//! in it (`DEPENDS_ON`, `USES`) as a relationship of the destination mem's
-//! schema — an edge it may write. A token the schema does not declare is
-//! therefore a fact the intent asserts about a vocabulary that does not
-//! hold it: this project's own engine binding once named `PROVIDED_BY` against
-//! the software schema and a sync agent read it as an edge to write. The
-//! rule here is generic: the vocabulary is read from whatever schema the
-//! destination mem pins, never from a built-in list.
-//!
-//! Two postures, one rule ([`intent_findings`]):
-//!
-//! * **Load reports.** A binding that already carries an unknown token keeps
-//!   loading; every brief and the verify report carry the finding
-//!   ([`BINDING_INTENT_UNKNOWN_RELATIONSHIP_CODE`]) so the defect surfaces
-//!   without breaking the pipeline.
-//! * **Write refuses.** `projection init` and `projection edit` refuse to
-//!   write an intent that names one, with the same code.
-//!
-//! What counts as a relationship-shaped token is deliberately narrow: an
-//! all-caps word that carries an underscore (`DEPENDS_ON`, `PROVIDED_BY`),
-//! or one that IS a relationship name of some schema this engine knows
-//! (`USES`, `STORES`) even though the destination schema lacks it. A plain
-//! acronym an intent names as a word (README, MCP, JSON, API, CLAUDE) is
-//! prose and is never reported: the rule reads the shape of relationship
-//! names, not a list of exempt words.
+//! Binding-intent check — the findings a binding's intent text earns
+//! against the destination schema (relationship-shaped tokens the schema
+//! does not declare, and their kin). Kernel, not loop: the binding editor
+//! validates an intent at write time, so the check lives beside the
+//! binding store. Moved here from `ingest::intent` on 2026-09-10; the loop
+//! and every consumer path reach it through `ingest::intent`.
 
 use serde::Serialize;
 

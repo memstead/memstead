@@ -29,7 +29,7 @@ pub use crate::check_path;
 pub mod cursor;
 pub mod findings;
 pub mod guidance;
-pub mod intent;
+pub use crate::binding_intent as intent;
 pub mod prune;
 pub mod refinement;
 pub mod render;

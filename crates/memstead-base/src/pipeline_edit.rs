@@ -103,7 +103,7 @@ pub enum PipelineEditError {
     )]
     IntentUnknownRelationship {
         key: String,
-        findings: Vec<crate::ingest::intent::IntentFinding>,
+        findings: Vec<crate::binding_intent::IntentFinding>,
     },
     /// Underlying store IO / parse failure.
     #[error(transparent)]
@@ -127,7 +127,7 @@ fn refuse_unknown_intent(
     let Some((pin, schema, known)) = schema else {
         return Ok(());
     };
-    let findings = crate::ingest::intent::intent_findings(intent, pin, schema, known);
+    let findings = crate::binding_intent::intent_findings(intent, pin, schema, known);
     if findings.is_empty() {
         Ok(())
     } else {
@@ -495,7 +495,7 @@ impl Engine {
     ) -> Option<(String, std::sync::Arc<memstead_schema::Schema>, Vec<String>)> {
         let pin = self.schema_pin(mem)?.as_display();
         let schema = self.schema_for(mem)?;
-        let known = crate::ingest::intent::known_relationship_names(self);
+        let known = crate::binding_intent::known_relationship_names(self);
         Some((pin, schema, known))
     }
 
