@@ -783,10 +783,10 @@ pub fn health_open_questions_axis(
             .filter(|(d, _)| d == mem)
             .map(|(_, b)| b)
             .collect();
-        let mut resolutions: Vec<(Option<String>, crate::ingest::resolve::ProcessMemResolution)> =
+        let mut resolutions: Vec<(Option<String>, crate::binding_run::ProcessMemResolution)> =
             Vec::new();
         if mem_bindings.is_empty() {
-            let r = crate::ingest::resolve::resolve_process_mem(engine, mem, "");
+            let r = crate::binding_run::resolve_process_mem(engine, mem, "");
             if r.declared {
                 resolutions.push((None, r));
             }
@@ -794,7 +794,7 @@ pub fn health_open_questions_axis(
             for binding in &mem_bindings {
                 resolutions.push((
                     Some((*binding).clone()),
-                    crate::ingest::resolve::resolve_process_mem(engine, mem, binding),
+                    crate::binding_run::resolve_process_mem(engine, mem, binding),
                 ));
             }
         }
@@ -2890,13 +2890,12 @@ mod tests {
         .unwrap();
 
         // The one resolution function: declaration wins.
-        let r = crate::ingest::resolve::resolve_process_mem(&engine, "dest", "dest-derived");
+        let r = crate::binding_run::resolve_process_mem(&engine, "dest", "dest-derived");
         assert!(r.declared && r.mounted);
         assert_eq!(r.mem, "oddly-named-process");
         // No declaration → derivation fallback, byte-identical to the
         // pre-declaration behaviour.
-        let r =
-            crate::ingest::resolve::resolve_process_mem(&engine, "oddly-named-process", "whatever");
+        let r = crate::binding_run::resolve_process_mem(&engine, "oddly-named-process", "whatever");
         assert!(!r.declared && !r.mounted);
         assert_eq!(r.mem, "whatever");
 

@@ -16,6 +16,7 @@
 pub mod anchor;
 pub mod backend;
 pub mod binding;
+pub mod binding_run;
 pub mod build_info;
 pub mod check;
 pub mod check_path;

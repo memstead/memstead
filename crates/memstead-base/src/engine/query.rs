@@ -2471,8 +2471,7 @@ impl Engine {
         let mut out = Vec::new();
         for record in &configs.bindings {
             let binding_id = format!("{}/{}", record.mem, record.name);
-            let Ok(resolved) =
-                crate::ingest::resolve::resolve_binding_run(&binding_id, &record.config)
+            let Ok(resolved) = crate::binding_run::resolve_binding_run(&binding_id, &record.config)
             else {
                 continue;
             };

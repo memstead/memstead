@@ -1,18 +1,13 @@
-//! Ingest runtime resolution — turn a stored v2 [`Binding`] into a
-//! [`ResolvedIngest`]: the shape the selection, backoff, change-detection,
-//! and brief-assembly stages all read.
+//! Binding-run resolution — turning a declared binding into the resolved
+//! form a run works from (sources with their bases and change strategies,
+//! the process mem a binding writes into), with the typed refusals a
+//! malformed declaration earns.
 //!
-//! Since the 2026-07 single-record consolidation there is **no join**: a v2
-//! binding carries its sources inline, so resolution is a pure unpacking —
-//! the binding id supplies the identity, the `operations.build` block the
-//! schedule, and each inline [`Source`] *is* the resolved primary source.
-//! The cross-record reference errors of the three-file era (dangling facet /
-//! medium refs) are gone with the references; in-record source validation
-//! lives in [`crate::binding::validate_binding`].
-//!
-//! Resolving a source's *change-detection strategy* (which reads the source's
-//! declared strategy and probes the filesystem for a git work tree) is the
-//! separate, filesystem-touching concern at the bottom of this module.
+//! Kernel, not loop: the health surface resolves the process mem for its
+//! projection axis and the read surface resolves a binding run before it
+//! reports findings, so the resolution lives beside the binding store it
+//! reads. Moved here from `ingest::resolve` on 2026-09-10; the loop and
+//! every consumer path reach it through `ingest::resolve`.
 
 use std::path::{Path, PathBuf};
 
@@ -154,7 +149,7 @@ pub fn resolve_binding_run(
         match source.medium_type {
             crate::pipeline::MediumType::Graph => {
                 for rule in &source.scope {
-                    if crate::ingest::cursor::parse_entity_selector(&rule.path).is_none() {
+                    if crate::source_scope::parse_entity_selector(&rule.path).is_none() {
                         return Err(ResolveError::UninterpretableScope {
                             binding: binding_id.to_string(),
                             reason: format!(

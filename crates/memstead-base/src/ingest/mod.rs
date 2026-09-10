@@ -34,7 +34,7 @@ pub mod prune;
 pub mod refinement;
 pub mod render;
 pub mod report;
-pub mod resolve;
+pub use crate::binding_run as resolve;
 pub mod selection;
 pub mod slice;
 pub mod status;

@@ -823,7 +823,7 @@ pub fn validate_binding(binding: &Binding) -> Result<(), Vec<CapabilityError>> {
         match source.medium_type {
             MediumType::Graph => {
                 for rule in &source.scope {
-                    if crate::ingest::cursor::parse_entity_selector(&rule.path).is_none() {
+                    if crate::source_scope::parse_entity_selector(&rule.path).is_none() {
                         refusals.push(CapabilityError::GraphScopeNotEntitySelector {
                             source_name: source.name.clone(),
                             pattern: rule.path.clone(),
@@ -1147,7 +1147,7 @@ mod tests {
         // Entity namespace: a legal selector, and one the run time honours.
         assert_eq!(scope_of(MediumType::Graph), vec!["*".to_string()]);
         assert!(
-            crate::ingest::cursor::parse_entity_selector("*").is_some(),
+            crate::source_scope::parse_entity_selector("*").is_some(),
             "the graph scaffold writes a selector the parser accepts"
         );
 
