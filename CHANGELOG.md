@@ -7,6 +7,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **`projection advance` no longer drops an authored exclusion under a bare
+  `worked`.** A disposition without a rationale over an artifact the
+  exclusion ledger holds refuses before any write
+  (`PROJECTION_ADVANCE_EXCLUSION_HELD`), naming the artifact and the recorded
+  rationale; lifting the exclusion takes the reasoned form
+  (`{"disposition": "worked", "rationale": "…"}`). An excluded artifact the
+  agent names no verdict for is disposed by its ledger row, so a pass never
+  stalls on it. Measured 2026-09-10 on the engine binding: a blanket `worked`
+  silently removed two rows, and both artifacts came back as `uncovered` on
+  the next exhaustive verify with their reasoning gone.
+
 ### Changed
 
 - **Prune proposes and never merges: the `never-clobber` / `conflict-flag`

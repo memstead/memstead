@@ -270,7 +270,7 @@ pub fn reconcile_exclusions(
 /// mined, warrants no destination entity. When supplied with a rationale (the
 /// [`DispositionInput::Reasoned`] form) it lands in the durable authored
 /// exclusion ledger ([`AdvanceState::exclusions`]) and persists past advance
-/// completion; any other verdict clears a prior exclusion for that artifact.
+/// completion; only a reasoned non-excluded verdict lifts it.
 pub const EXCLUDED_VERDICT: &str = "excluded";
 
 /// An agent-supplied disposition for one artifact: either a bare verdict
@@ -407,12 +407,41 @@ pub enum AdvanceError {
         /// Each offending artifact with the entity ids whose rows drift (sorted).
         artifacts: Vec<(String, Vec<String>)>,
     },
+    /// A bare (rationale-less) non-`excluded` disposition names an artifact
+    /// the durable authored-exclusion ledger holds. The ledger row carries
+    /// the agent's reasoning for keeping the artifact out of the model;
+    /// silently dropping it on a blanket `worked` is how the artifact came
+    /// back as `uncovered` on the next exhaustive verify with its rationale
+    /// gone (measured 2026-09-10 on the engine binding). Refused atomically
+    /// before any write; lifting an exclusion is a re-judgement and takes
+    /// the reasoned disposition form, or the artifact is left undisposed
+    /// and the ledger disposes it.
+    #[error(
+        "{} disposition(s) would silently lift an authored exclusion: {}; leave the artifact \
+         undisposed (the exclusion ledger disposes it) or lift the exclusion explicitly with a \
+         reasoned disposition ({{\"disposition\": \"worked\", \"rationale\": \"…\"}})",
+        artifacts.len(),
+        fmt_excluded(artifacts)
+    )]
+    ExclusionHeld {
+        /// Each offending artifact with the recorded exclusion rationale (sorted).
+        artifacts: Vec<(String, String)>,
+    },
     /// Reading or writing the durable advance store failed.
     #[error("advance store error: {0}")]
     Store(#[source] StoreError),
     /// The `set_mem_sync_state` baseline write failed on completion.
     #[error("could not advance baseline token: {0}")]
     Engine(String),
+}
+
+/// Render `artifact (rationale)` pairs for the held-exclusion refusal.
+fn fmt_excluded(items: &[(String, String)]) -> String {
+    items
+        .iter()
+        .map(|(a, r)| format!("{a} (excluded: {r})"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Render `artifact (entity, entity)` pairs for the drifted-anchors refusal.
@@ -636,8 +665,11 @@ fn subtract_disposed(frozen: &Slice, dispositions: &BTreeMap<String, String>) ->
 /// judged artifact id to an agent-supplied [`DispositionInput`] — a bare verdict
 /// or a verdict with an authored rationale (in E2 the agent supplies one for
 /// **every** artifact — see the module docs). An `excluded` verdict with a
-/// rationale is recorded in the durable authored-exclusion ledger; any other
-/// verdict clears a prior exclusion for that artifact.
+/// rationale is recorded in the durable authored-exclusion ledger; a presented
+/// artifact the ledger holds is disposed `excluded` by its row when the agent
+/// names no verdict for it; a bare non-excluded verdict over such an artifact
+/// refuses ([`AdvanceError::ExclusionHeld`]), and only the reasoned form lifts
+/// the exclusion.
 pub fn advance_baseline(
     engine: &mut Engine,
     workspace_root: &Path,
@@ -686,10 +718,30 @@ pub fn advance_baseline(
         });
     }
 
+    // Gate (atomic): a bare non-`excluded` verdict over an artifact the
+    // durable exclusion ledger holds is refused before any write. The ledger
+    // row is the agent's recorded judgement; only a reasoned re-judgement
+    // may replace it.
+    let mut held: Vec<(String, String)> = dispositions
+        .iter()
+        .filter(|(_, input)| input.verdict() != EXCLUDED_VERDICT && input.rationale().is_none())
+        .filter_map(|(artifact, _)| {
+            state
+                .exclusions
+                .get(artifact)
+                .map(|rationale| (artifact.clone(), rationale.clone()))
+        })
+        .collect();
+    if !held.is_empty() {
+        held.sort();
+        return Err(AdvanceError::ExclusionHeld { artifacts: held });
+    }
+
     // Accumulate the new (agent-supplied) dispositions. An `excluded` verdict
     // with a rationale lands in the durable exclusion ledger (survives
-    // completion); any other verdict clears a prior exclusion for that artifact
-    // (a re-judged artifact must not keep stale "excluded" reasoning).
+    // completion); a reasoned non-excluded verdict lifts a prior exclusion for
+    // that artifact (a re-judged artifact must not keep stale "excluded"
+    // reasoning, and the re-judgement carries its own).
     for (artifact, input) in dispositions {
         state
             .dispositions
@@ -702,6 +754,20 @@ pub fn advance_baseline(
         } else {
             state.exclusions.remove(artifact);
             state.exclusion_sources.remove(artifact);
+        }
+    }
+
+    // The ledger disposes: a presented artifact the agent left undisposed and
+    // the exclusion ledger holds is `excluded` by its standing row. The agent
+    // judged it once with a rationale; a later change to the artifact does
+    // not reopen that judgement on its own, and a pass never stalls on it.
+    for art in printed.iter() {
+        if !state.dispositions.contains_key(art.as_str())
+            && state.exclusions.contains_key(art.as_str())
+        {
+            state
+                .dispositions
+                .insert(art.clone(), EXCLUDED_VERDICT.to_string());
         }
     }
 
@@ -1543,7 +1609,7 @@ mod tests {
     /// left. This is the persistence the fidelity report relies on so an
     /// excluded-on-purpose artifact stops re-surfacing as `uncovered`.
     #[test]
-    fn advance_retains_authored_exclusions_past_completion_and_clears_on_rejudge() {
+    fn advance_holds_authored_exclusions_against_bare_verdicts_and_lifts_on_reasoned_rejudge() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
 
@@ -1597,23 +1663,85 @@ mod tests {
             "the durable exclusion + its rationale persist"
         );
 
-        // Move to head2 (modify a.rs again) → a.rs re-enters the slice → re-judge
-        // it as `worked`. The non-excluded verdict clears the stale exclusion, and
-        // with nothing durable left the store is dropped.
+        // Move to head2 (modify a.rs again) → a.rs re-enters the slice. A bare
+        // `worked` over the ledgered artifact REFUSES before any write, naming
+        // the artifact and its recorded rationale (the 2026-09-10 case: a
+        // blanket `worked` silently dropped the row, and the artifact came
+        // back as `uncovered` with its reasoning gone).
         std::fs::write(root.join("a.rs"), "one-longer-still").unwrap();
         git(root, &["add", "-A"]);
         git(root, &["commit", "-qm", "head2"]);
         {
             let mut engine = engine_at(root);
-            let out = advance_baseline(&mut engine, root, &resolved, &input(&[("a.rs", "worked")]))
-                .unwrap();
+            let err = advance_baseline(&mut engine, root, &resolved, &input(&[("a.rs", "worked")]))
+                .unwrap_err();
+            match err {
+                AdvanceError::ExclusionHeld { artifacts } => assert_eq!(
+                    artifacts,
+                    vec![(
+                        "a.rs".to_string(),
+                        "mined; warrants no destination entity".to_string()
+                    )]
+                ),
+                other => panic!("expected ExclusionHeld, got {other:?}"),
+            }
+        }
+        let after_refusal = read_advance_store(root, "engine", "graph")
+            .unwrap()
+            .expect("the refusal left the store untouched");
+        assert!(
+            after_refusal.dispositions.is_empty(),
+            "a refused call writes no disposition"
+        );
+        assert_eq!(
+            after_refusal.exclusions.get("a.rs").map(String::as_str),
+            Some("mined; warrants no destination entity"),
+            "the exclusion row survives the refused call"
+        );
+
+        // With no verdict named, the ledger disposes the artifact: the pass
+        // completes on the standing row and the exclusion persists.
+        {
+            let mut engine = engine_at(root);
+            let out = advance_baseline(&mut engine, root, &resolved, &BTreeMap::new()).unwrap();
+            assert!(out.completed, "the ledger disposed the sole slice artifact");
+        }
+        let still_excluded = read_advance_store(root, "engine", "graph")
+            .unwrap()
+            .expect("the exclusion keeps the store alive");
+        assert_eq!(
+            still_excluded.exclusions.get("a.rs").map(String::as_str),
+            Some("mined; warrants no destination entity"),
+            "an undisposed ledgered artifact keeps its row"
+        );
+
+        // Move to head3 → a REASONED `worked` lifts the exclusion: the
+        // re-judgement carries its own rationale, and with nothing durable
+        // left the store is dropped.
+        std::fs::write(root.join("a.rs"), "one-longer-still-and-more").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "head3"]);
+        let lifted = {
+            let mut m = BTreeMap::new();
+            m.insert(
+                "a.rs".to_string(),
+                DispositionInput::Reasoned {
+                    disposition: "worked".to_string(),
+                    rationale: "now defines a concept the model names".to_string(),
+                },
+            );
+            m
+        };
+        {
+            let mut engine = engine_at(root);
+            let out = advance_baseline(&mut engine, root, &resolved, &lifted).unwrap();
             assert!(out.completed);
         }
         assert!(
             read_advance_store(root, "engine", "graph")
                 .unwrap()
                 .is_none(),
-            "re-judging the artifact cleared the exclusion; nothing durable remains"
+            "the reasoned re-judgement lifted the exclusion; nothing durable remains"
         );
     }
 

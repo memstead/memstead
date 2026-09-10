@@ -145,7 +145,10 @@ pub enum ProjectionCommand {
     /// (`PROJECTION_ADVANCE_ANCHORS_DRIFTED`): the rows are re-pinned first.
     /// The agent supplies a disposition for every artifact the brief
     /// presented; an artifact whose anchors all resolve and that no entity
-    /// mentions is disposed by its anchors.
+    /// mentions is disposed by its anchors, and an artifact the authored
+    /// exclusion ledger holds is disposed by its row. A bare `worked` over
+    /// an excluded artifact refuses (`PROJECTION_ADVANCE_EXCLUSION_HELD`);
+    /// lifting an exclusion takes the reasoned disposition form.
     Advance(AdvanceArgs),
     /// Declare authored **exclusions** for in-scope source artifacts. Unlike
     /// `advance` (whose gate accepts only artifacts in the changed slice), this
@@ -1720,6 +1723,24 @@ fn map_advance_err(binding_id: &str, err: AdvanceError) -> CliError {
                 "binding": binding_id,
                 "drifted": drifted,
                 "remedy": "re-pin each named entity's anchor on the artifact (anchors_unset the row and write it fresh in the same update, or supply the current content) or rewrite the claim, then advance again",
+            }))
+        }
+        AdvanceError::ExclusionHeld { artifacts } => {
+            // The machine-readable half: artifact -> the recorded rationale,
+            // so the agent sees the judgement it was about to drop.
+            let excluded: serde_json::Map<String, serde_json::Value> = artifacts
+                .iter()
+                .map(|(art, rationale)| (art.clone(), serde_json::Value::String(rationale.clone())))
+                .collect();
+            CliError::new(
+                ExitKind::Validation,
+                "PROJECTION_ADVANCE_EXCLUSION_HELD",
+                message,
+            )
+            .with_details(json!({
+                "binding": binding_id,
+                "excluded": excluded,
+                "remedy": "omit the artifact from --dispositions (its exclusion row disposes it), or lift the exclusion explicitly with the reasoned form {\"disposition\": \"worked\", \"rationale\": \"...\"}",
             }))
         }
         AdvanceError::Store(_) | AdvanceError::Engine(_) => {
