@@ -82,13 +82,20 @@ pub enum ComposeHealthError {
 }
 
 /// Build the complete health payload. `drift_warnings` are the reload warnings
-/// the wrapper collected before calling in; the composer extends them with the
-/// health report's own warnings, the limit-clamp notice, and unknown-include
-/// notices, then embeds the lot under `warnings`.
+/// the wrapper collected before calling in; `loop_warnings` are the
+/// maintenance loop's contribution (the unanchored-mention findings its
+/// verify passes recorded), handed in as data the composer never
+/// interprets and placed where the engine's own report used to carry them;
+/// the composer extends the lot with the health report's own warnings, the
+/// limit-clamp notice, and unknown-include notices, then embeds it under
+/// `warnings`. Every surface reaches this through the loop's one assembly,
+/// `crate::ingest::health::compose_health`, so no surface can forget the
+/// loop's axis.
 pub fn compose_health(
     engine: &mut crate::Engine,
     args: &HealthArgs,
     drift_warnings: Vec<crate::WarningHint>,
+    loop_warnings: Vec<crate::WarningHint>,
     config: &HealthConfig,
 ) -> Result<serde_json::Value, ComposeHealthError> {
     let health = engine.health();
@@ -113,6 +120,7 @@ pub fn compose_health(
 
     let mut warnings: Vec<crate::WarningHint> = drift_warnings;
     warnings.extend(health.warnings.clone());
+    warnings.extend(loop_warnings);
     if requested_limit > HEALTH_LIMIT_MAX {
         warnings.push(crate::WarningHint::LimitClamped {
             requested: requested_limit,

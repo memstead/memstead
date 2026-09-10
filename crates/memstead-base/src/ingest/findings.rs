@@ -68,10 +68,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::Engine;
+use crate::WarningHint;
 use crate::anchor::{Anchor, AnchorState, ObservedArtifactHash};
 use crate::binding::{
     Binding, DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, hash_binding, medium_capabilities,
 };
+use crate::entity::EntityId;
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
 use super::advance::is_single_component;
@@ -1985,6 +1987,48 @@ fn medium_type_wire(t: crate::pipeline::MediumType) -> String {
         .unwrap_or_default()
 }
 
+/// The `unanchored-mention` findings of every binding's current batch,
+/// as health warnings — the loop's contribution to the health report,
+/// handed to the kernel composer as data by [`super::health::compose_health`]. Empty without a workspace root (no binding store
+/// to read) and for a binding whose store or resolution is unreadable —
+/// health never fabricates a projection reading it did not find.
+pub fn unanchored_mention_warnings(engine: &Engine) -> Vec<WarningHint> {
+    let Some(root) = engine.workspace_root() else {
+        return Vec::new();
+    };
+    let Ok(configs) = crate::pipeline_store::load_pipeline_configs(root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for record in &configs.bindings {
+        let binding_id = format!("{}/{}", record.mem, record.name);
+        let Ok(resolved) = crate::binding_run::resolve_binding_run(&binding_id, &record.config)
+        else {
+            continue;
+        };
+        let Ok((_, findings)) = current_findings(engine, root, &record.config, &resolved) else {
+            continue;
+        };
+        for f in findings {
+            if let FindingTarget::Mention {
+                entity,
+                artifact,
+                section,
+            } = f.target
+            {
+                out.push(WarningHint::UnanchoredMention {
+                    mem: record.config.destination_mem.clone(),
+                    binding: binding_id.clone(),
+                    entity: EntityId(entity),
+                    artifact,
+                    section,
+                });
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2991,14 +3035,14 @@ mod tests {
         );
 
         // Health: one `UNANCHORED_MENTION` warning per finding, naming the
-        // entity, the artifact and the section.
-        let health = engine.health();
-        let mentions: Vec<&crate::ops::WarningHint> = health
-            .warnings
+        // entity, the artifact and the section — the loop's axis, handed
+        // to the kernel composer by `ingest::health::compose_health`.
+        let loop_warnings = unanchored_mention_warnings(&engine);
+        let mentions: Vec<&crate::ops::WarningHint> = loop_warnings
             .iter()
             .filter(|w| w.code() == "UNANCHORED_MENTION")
             .collect();
-        assert_eq!(mentions.len(), 2, "{:?}", health.warnings);
+        assert_eq!(mentions.len(), 2, "{:?}", loop_warnings);
         assert!(mentions.iter().all(|w| {
             let msg = w.message();
             msg.contains("`engine--b` names `src/") && msg.contains("in section `specifies`")

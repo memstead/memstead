@@ -7,6 +7,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **Health is composed through the maintenance loop's one assembly.**
+  `memstead_base::ingest::health::compose_health` is the function every
+  surface (CLI, MCP, embedders) calls; the kernel composer
+  `ops::health_compose::compose_health` now takes the loop's warnings (the
+  unanchored-mention findings the bindings' verify passes recorded) as a
+  data parameter it never interprets, and `Engine::health()` no longer
+  reads the findings store itself. The CLI's JSON and the MCP
+  `structured_content` are byte-identical to before; an embedder that read
+  `Engine::health()` for the unanchored-mention axis must compose through
+  the assembly instead. First step of moving the maintenance loop out of the
+  kernel crate: source-scope enumeration (`source_scope`), the deny-path
+  oracle (`check_path`), binding-run resolution (`binding_run`) and the
+  binding-intent check (`binding_intent`) are kernel modules now, each
+  re-exported under its former `ingest::` path.
+
 ## [0.20.0] - 2026-09-10
 
 ### Fixed

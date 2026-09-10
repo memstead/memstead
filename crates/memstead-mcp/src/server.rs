@@ -3829,7 +3829,7 @@ impl McpServer {
             plugin: serde_json::Value::Object(plugin_json),
         };
 
-        let result = match memstead_base::ops::health_compose::compose_health(
+        let result = match memstead_base::ingest::health::compose_health(
             &mut engine,
             &args,
             drift_warnings,
@@ -6021,13 +6021,9 @@ mod tests {
             mutations: serde_json::Value::Null,
             plugin: serde_json::Value::Object(Default::default()),
         };
-        let payload = memstead_base::ops::health_compose::compose_health(
-            &mut engine,
-            &args,
-            Vec::new(),
-            &config,
-        )
-        .expect("compose_health succeeds");
+        let payload =
+            memstead_base::ingest::health::compose_health(&mut engine, &args, Vec::new(), &config)
+                .expect("compose_health succeeds");
 
         let entries = payload["missing_fields"]
             .as_array()
@@ -6123,7 +6119,7 @@ mod tests {
                 mutations: serde_json::Value::Null,
                 plugin: serde_json::Value::Object(Default::default()),
             };
-            memstead_base::ops::health_compose::compose_health(&mut engine, &args, drift, &config)
+            memstead_base::ingest::health::compose_health(&mut engine, &args, drift, &config)
                 .expect("compose_health succeeds")
         };
 
