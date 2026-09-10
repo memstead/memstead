@@ -9,6 +9,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The sizing harness measures the warm path.** `xtask sizing-curve`
+  spawns one `memstead-mcp` server per size point after the cold leg and
+  times `memstead_search`, `memstead_entity` with relations and
+  `memstead_overview` per call, request to reply, in microseconds
+  (`--warm-iterations`, default 20; `--memstead-mcp` for a pre-built
+  server). Results format `sizing-curve/v2` (v1 carried the cold leg
+  alone). `docs/sizing-curve.md` carries the measured warm curve: after
+  boot a session pays under two milliseconds per search or entity read
+  at the advertised ceiling, and the overview is the warm read that
+  scales like a load (2.5 µs per entity).
+
 - **Two gated-transition forms the constraint vocabulary lacked.**
   `transition_requires_checks` takes an optional `min_related` (default
   0, the sealed semantics): with `min_related: 1` an entity with no

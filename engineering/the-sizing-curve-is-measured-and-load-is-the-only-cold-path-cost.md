@@ -1,7 +1,7 @@
 ---
 type: memo
 created_date: 2026-08-06T16:38:36Z
-last_modified: 2026-09-10T15:46:54Z
+last_modified: 2026-09-10T22:55:52Z
 status: active
 tags: performance, sizing, measurement, boot, scale
 ---
@@ -35,3 +35,4 @@ Dated record, 2026-08-06 curve: boot 181 / 1,162 / 3,043 / 5,647 ms at 500 / 2,5
 ## Outcome
 
 The MCP server instructions cite docs/sizing-curve.md as the measured grounding of the 1,000-5,000 span; rerunning the curve after an engine change is one command plus a JSON diff, and it is what caught the fix's effect the same day. Plenum finding 10 closed. Amendment 2026-09-10: a CPU profile of the 7,500-entity boot put 96 % of the time in the backend's per-entity read (repository opened, ref peeled, root tree inflated once per entity); the backend trait gained `read_all_entities`, one tree walk for the whole mem, and the curve became 59 / 145 / 255 / 371 ms at 500 / 2,500 / 5,000 / 7,500. The three redesigns this memo priced keep their mechanisms; their per-entity multipliers are a twentieth of what they were argued from.
+Amendment 2026-09-11: the warm path is measured (architecture-seams bundle, plan 03). The harness gained a warm leg, one memstead-mcp server per size point timed per call after a warm-up: at 500 / 2,500 / 5,000 / 7,500 entities, warm search 427 / 487 / 624 / 693 µs (0.04 µs per entity, a fixed ~0.4 ms floor), warm entity read with relations 822 / 1,079 / 1,393 / 1,711 µs (0.13 µs per entity, the incoming-edge scan), warm overview 1,563 / 6,270 / 12,578 / 19,156 µs (2.5 µs per entity, linear). The reading: after boot a session pays under two milliseconds per search or entity read at the advertised ceiling, and the overview, not search, is the warm read that scales like a load; the 2026-08-22 incremental-maintenance finding named query-side work as the next lever without a number, and the number names the workspace-global overview assembly first and the include_relations scan second.

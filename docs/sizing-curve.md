@@ -1,8 +1,10 @@
 # Sizing curve — measured operating limits
 
-**Measured:** 2026-09-10 · engine at 0.20.0 (the release that carries the
+**Measured:** 2026-09-10 (cold path) and 2026-09-11 (warm path, same
+corpus, same hardware, engine at 0.20.0 plus the harness's warm leg) ·
+engine at 0.20.0 (the release that carries the
 linear-boot fix and this page) · Apple M5 Max (macOS, aarch64),
-release binary. **All numbers are hardware-relative** — treat the shape of
+release binaries. **All numbers are hardware-relative** — treat the shape of
 the curve as portable and the absolute milliseconds as this machine's.
 The first measurement (2026-08-06, commit `c48cd07`) is kept below as a
 dated record: it found the cost super-linear, a profile on 2026-09-10
@@ -12,8 +14,8 @@ hardware and saw ~0.5 ms/entity on the pre-fix engine.
 
 The engine's MCP instructions describe a mem as "designed for 1,000–5,000
 entities". Until this document, that span was advertised, not measured.
-This page states what the four everyday
-operations actually cost across workspace sizes, so the deferred redesigns
+This page states what the four everyday cold
+operations and the three warm reads actually cost across workspace sizes, so the deferred redesigns
 that wait for numbers (incremental derived-structure maintenance — and
 lazy mounts plus deferred cross-mem targets, since landed and recorded
 below) can be argued from data.
@@ -27,17 +29,25 @@ machine-readable results:
 cargo run -p xtask -- sizing-curve
 ```
 
-Defaults: sizes `500,2500,5000,7500`, 3 iterations per operation, results
-to `target/sizing-curve.json` (`format: "sizing-curve/v1"`, per-run
-samples included). Override with `--sizes`, `--iterations`, `--output`.
-The harness builds the release binary itself, drives everything through
-the product surface (`memstead mem-repo init` → `mem init` →
-`batch-create`), and runs each workspace in a temp directory that is
-deleted afterwards — no residue in the repo, no effect on the test suite.
+Defaults: sizes `500,2500,5000,7500`, 3 iterations per cold operation
+and 20 calls per warm operation, results to `target/sizing-curve.json`
+(`format: "sizing-curve/v2"`, per-run samples included; v1 carried the
+cold leg alone). Override with `--sizes`, `--iterations`,
+`--warm-iterations`, `--output`; `--memstead` and `--memstead-mcp` point
+at pre-built release binaries. The harness builds both release binaries
+itself otherwise, drives everything through the product surface
+(`memstead mem-repo init` → `mem init` → `batch-create` for the cold
+leg, one `memstead-mcp` server over stdio JSON-RPC for the warm leg),
+and runs each workspace in a temp directory that is deleted afterwards
+— no residue in the repo, no effect on the test suite.
 
 To diff after an engine change: rerun, then compare the JSON
 (`diff <(jq . old.json) <(jq . target/sizing-curve.json)` or any JSON
-diff) — medians per operation per size are the contract.
+diff) — medians per operation per size are the contract. Run-to-run
+tolerance on this hardware: cold medians within about 5 %, warm medians
+within about 20 % at the small end (a sub-millisecond call is dominated
+by scheduling noise) and about 10 % above 2,500; the per-entity slopes
+are the stable reading.
 
 ## Method
 
@@ -48,11 +58,12 @@ metadata, two explicit edges (USES / DEPENDS_ON) to earlier entities plus
 one body wiki-link (alias-emitting REFERENCES) — edge density ~3/entity,
 following the shape of the largest real deployment without depending on
 it. Backend: git-branch (mem-repo), the backend the field pain was
-measured on. Each operation is a fresh `memstead` process — the **cold
-CLI path**, where cost was reported; a warm MCP server pays boot once at
-startup and is out of scope here.
+measured on. Each cold operation is a fresh `memstead` process — the
+**cold CLI path**, where cost was first reported; the **warm path**, one
+MCP server paying boot once and answering calls after it, is measured
+separately below on the same workspace.
 
-The four operations, timed spawn-to-exit, median of 3:
+The four cold operations, timed spawn-to-exit, median of 3:
 
 | Operation | Command | What it pays |
 |---|---|---|
@@ -60,6 +71,16 @@ The four operations, timed spawn-to-exit, median of 3:
 | update | `memstead update <id> --auto-hash --append …` | boot + read + write commit + index invalidation |
 | search | `memstead search <term>` (right after the update) | boot + search-index rebuild + query |
 | overview | `memstead overview` | boot + community/summary path |
+
+The three warm operations, timed request-to-reply over one long-lived
+`memstead-mcp` server on the same workspace (boot paid once by a
+warm-up call and excluded), median of 20:
+
+| Operation | Tool call | What it pays |
+|---|---|---|
+| warm search | `memstead_search` (`query.any`, `limit` 10) | index query + hit rendering |
+| warm entity | `memstead_entity` (`include_relations: true`) | one read + the incoming-edge scan over the store |
+| warm overview | `memstead_overview` | the workspace-global partition summary, roster and budget fill |
 
 ## The curve
 
@@ -117,6 +138,37 @@ Generation context: one `batch-create` call lands 7,500 entities in
 ~4.7 s — the batch path exists precisely because per-call cold boots made
 per-entity creation scale to hours.
 
+## The warm path
+
+Median microseconds per call after boot (full per-call samples in the
+JSON), measured 2026-09-11 on the same corpus and hardware:
+
+| Entities | Warm search | Warm entity (with relations) | Warm overview |
+|---:|---:|---:|---:|
+| 500 | 427 | 822 | 1,563 |
+| 2,500 | 487 | 1,079 | 6,270 |
+| 5,000 | 624 | 1,393 | 12,578 |
+| 7,500 | 693 | 1,711 | 19,156 |
+
+Per-entity slopes over the 500 to 7,500 span: search **0.04 µs/entity**
+(a fixed ~0.4 ms floor, the query itself is nearly free of the store
+size), entity read with relations **0.13 µs/entity** (linear: the
+incoming-edge scan walks the store), overview **2.5 µs/entity** (linear
+and sixty times the search slope: the partition summary, roster and
+budget fill touch every entity). Two findings:
+
+1. **After boot, a session pays under two milliseconds per read at the
+   advertised ceiling.** At 5,000 entities a search returns in about
+   0.6 ms and an entity with its relations in about 1.4 ms; the cold
+   path's quarter of a second per command is boot, and boot alone.
+2. **The overview is the warm path's next lever, not search.** It is
+   the one warm read that scales like a load (2.5 µs/entity, 19 ms at
+   7,500), and it is the cold-start call every session makes first. The
+   incremental-maintenance work of 2026-08-22 predicted "query-side
+   work" as the next lever without a number; the number says which
+   query: the workspace-global overview assembly, and after it the
+   incoming-edge scan behind `include_relations`.
+
 ## What the numbers imply for the deferred redesigns
 
 Data, not decisions — each paragraph states what the curve says, the
@@ -151,8 +203,10 @@ in maintained vs simulated whole-drop modes: search-share speedup 1.8x
 at 500 entities, 1.4x at 2000, 1.3x at 5000. Single mutations now
 maintain the index in place under a generation-keyed memo; the honest
 finding alongside: the per-query cost grows with store size in BOTH
-modes, so query-side work (not the rebuild) is the warm path's next
-lever.
+modes. The warm-path table above (2026-09-11) prices that growth per
+call: search is nearly flat, the entity read is linear in the store
+through its incoming-edge scan, and the overview is the warm read that
+scales like a load.
 
 **Deferred cross-mem target resolution (landed 2026-08-22).**
 The curve priced the forced mount this redesign removes: each
@@ -168,7 +222,9 @@ loads, and no change to any subsequent cold command.
 ## Relation to the advertised range
 
 Inside 1,000–5,000, a cold CLI command costs roughly 0.1–0.25 s on this
-hardware; the warm MCP path pays load once per server start. The span
+hardware; the warm MCP path pays load once per server start and then
+under two milliseconds per search or entity read, and up to about
+thirteen milliseconds per overview at the ceiling. The span
 remains a design statement about model granularity — the curve attaches
 its measured price and shows the price rising linearly past the ceiling
 (7.5k works, at ~0.4 s per cold command). The MCP instructions cite this
