@@ -36,11 +36,11 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::Engine;
-use crate::anchor::{AnchorProvenanceClass, AnchorState};
-use crate::binding::Binding;
+use memstead_base::Engine;
+use memstead_base::anchor::{AnchorProvenanceClass, AnchorState};
+use memstead_base::binding::Binding;
 
-use super::resolve::ResolvedIngest;
+use memstead_base::binding_run::ResolvedIngest;
 
 /// The disposition a prune proposal carries (F3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,10 +137,10 @@ pub fn prune_proposals(
         any: bool,
     }
     let mut by_entity: BTreeMap<String, Acc> = BTreeMap::new();
-    let population = crate::ingest::anchor_population::population_for(
+    let population = crate::anchor_population::population_for(
         engine,
         resolved,
-        Some(crate::binding::hash_binding(binding).as_str()),
+        Some(memstead_base::binding::hash_binding(binding).as_str()),
     );
     for (eid, resolved_anchor) in population.included {
         let entry = by_entity.entry(eid.as_ref().to_string()).or_insert(Acc {
@@ -250,19 +250,21 @@ mod tests {
 
     // ---- F2/F3: end-to-end over a real engine ----------------------------
 
-    use crate::anchor::{Anchor, AnchorGrain, AnchorHashStability, AnchorSidecar, AnchorVersion};
-    use crate::binding::{
+    use crate::render::render_sync_brief_for;
+    use memstead_base::anchor::{
+        Anchor, AnchorGrain, AnchorHashStability, AnchorSidecar, AnchorVersion,
+    };
+    use memstead_base::binding::{
         BINDING_VERSION, BuildMode, BuildOperation, DEFAULT_ADJUDICATION_CAP,
         DEFAULT_FULL_RESYNC_EVERY, Operations, PruneConfig, VerifyOperation,
     };
-    use crate::ingest::render::render_sync_brief_for;
-    use crate::ingest::resolve::resolve_binding_run;
-    use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
-    use crate::pipeline_store::write_binding;
-    use crate::workspace::{
+    use memstead_base::binding_run::resolve_binding_run;
+    use memstead_base::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
+    use memstead_base::pipeline_store::write_binding;
+    use memstead_base::workspace::{
         Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
     };
-    use crate::workspace_store::WorkspaceStoreAdapter;
+    use memstead_base::workspace_store::WorkspaceStoreAdapter;
 
     /// An orphan-bound anchor of `class` on `artifact`, git-pinned when
     /// `commit` is set (a retrievable base leg).
@@ -320,7 +322,7 @@ mod tests {
             cross_linkable: false,
             migration_target: None,
         };
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 &root,
                 &Workspace {
@@ -356,7 +358,7 @@ mod tests {
             sidecar.set(eid, anchors.clone());
         }
         std::fs::write(
-            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -366,7 +368,7 @@ mod tests {
         let binding = Binding {
             version: BINDING_VERSION,
             intent: None,
-            sources: vec![crate::pipeline::Source {
+            sources: vec![memstead_base::pipeline::Source {
                 name: "graph".to_string(),
                 medium_type: MediumType::Filesystem,
                 pointer: String::new(),
@@ -391,7 +393,7 @@ mod tests {
                     batch_size: 20,
                     post_actions: None,
                 }),
-                sync: Some(crate::binding::SyncOperation {
+                sync: Some(memstead_base::binding::SyncOperation {
                     trigger: IngestTrigger::Manual,
                     batch_size: 20,
                 }),

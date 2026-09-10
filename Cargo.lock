@@ -2501,6 +2501,7 @@ dependencies = [
  "indexmap",
  "memstead-base",
  "memstead-git-branch",
+ "memstead-projection",
  "memstead-schema",
  "predicates",
  "reqwest",
@@ -2556,6 +2557,7 @@ dependencies = [
  "indexmap",
  "memstead-base",
  "memstead-git-branch",
+ "memstead-projection",
  "memstead-schema",
  "rmcp",
  "semver",
@@ -2567,6 +2569,22 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "memstead-projection"
+version = "0.20.0"
+dependencies = [
+ "globset",
+ "indexmap",
+ "memstead-base",
+ "memstead-schema",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
 ]
 
 [[package]]

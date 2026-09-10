@@ -30,7 +30,6 @@ pub mod error;
 pub mod filesystem;
 pub mod friction;
 pub mod graph;
-pub mod ingest;
 pub mod markdown;
 pub mod mem;
 pub mod mem_management;

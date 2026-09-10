@@ -25,7 +25,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ops::ChangeEnvelope;
+use memstead_base::ops::ChangeEnvelope;
 
 use super::change_detection::{
     Digest, StatDiff, StatMap, diff_stat_maps, digest_stat_map, digests_equal, parse_digest_token,
@@ -79,7 +79,7 @@ pub enum NoSignalReason {
     /// whole medium writes `**/*`.
     Unscoped,
     /// Change detection is declared `none` — the source is inert by design
-    /// ([`super::resolve::ChangeStrategy::None`]), re-roamed whole with no
+    /// ([`memstead_base::binding_run::ChangeStrategy::None`]), re-roamed whole with no
     /// slice.
     DetectionNone,
     /// A git strategy could not read a signal: no work tree over the medium
@@ -261,7 +261,7 @@ pub fn mtime_slice_outcome(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity::EntityId;
+    use memstead_base::entity::EntityId;
 
     fn added(mem: &str, slug: &str) -> ChangeEnvelope {
         ChangeEnvelope::Added {

@@ -1615,9 +1615,10 @@ impl AnchorResolutionFigure {
 
     /// The bare count, for a test assertion and nothing else: a renderer
     /// prints through [`Display`] or [`Self::ratio`]. Compiled for tests
-    /// only, so no shipping code can reach it.
-    #[cfg(test)]
-    pub(crate) fn count_for_assertions(&self) -> usize {
+    /// only (this crate's own, or a downstream crate's under the
+    /// `test-support` feature), so no shipping code can reach it.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn count_for_assertions(&self) -> usize {
         self.resolves
     }
 }

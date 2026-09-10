@@ -1,6 +1,6 @@
 //! The population the anchor axis answers for.
 //!
-//! WHY: the mem-wide anchor query ([`crate::Engine::mem_anchors_resolved`])
+//! WHY: the mem-wide anchor query ([`memstead_base::Engine::mem_anchors_resolved`])
 //! scopes by mem and nothing else, so a binding's fidelity report scored every
 //! anchor in its destination mem, including anchors another binding wrote and
 //! anchors pointing at artifacts its own scope excludes. Narrowing a binding's
@@ -27,7 +27,7 @@
 //!
 //! That test reads a NEGATIVE from the store, which is only evidence when the
 //! store holds everything the mem has. Where it does not
-//! ([`crate::Engine::entity_set_is_reconcilable`]), no row is called dangling
+//! ([`memstead_base::Engine::entity_set_is_reconcilable`]), no row is called dangling
 //! and the population says why instead.
 //!
 //! Two signals decide membership, in this order.
@@ -51,14 +51,14 @@
 
 use std::collections::BTreeSet;
 
-use crate::Engine;
-use crate::anchor::AnchorGrain;
-use crate::engine::query::ResolvedAnchor;
-use crate::entity::EntityId;
-use crate::ingest::cursor::build_glob_set;
-use crate::ingest::resolve::{ResolvedIngest, ResolvedSource};
-use crate::pipeline::PatternMode;
+use crate::cursor::build_glob_set;
 use globset::GlobSet;
+use memstead_base::Engine;
+use memstead_base::anchor::AnchorGrain;
+use memstead_base::binding_run::{ResolvedIngest, ResolvedSource};
+use memstead_base::engine::query::ResolvedAnchor;
+use memstead_base::entity::EntityId;
+use memstead_base::pipeline::PatternMode;
 
 /// Why an anchor is not in the population. Every exclusion carries one, and
 /// the report names them, because a number a reader cannot act on reproduces
@@ -280,11 +280,11 @@ fn scope_matcher(resolved: &ResolvedIngest) -> Option<ScopeMatcher> {
             let pointer = if pointer == "." { "" } else { pointer };
             let allows_j: Vec<String> = allows
                 .iter()
-                .map(|a| crate::engine::query::join_pointer(pointer, a))
+                .map(|a| memstead_base::engine::query::join_pointer(pointer, a))
                 .collect();
             let denies_j: Vec<String> = denies
                 .iter()
-                .map(|d| crate::engine::query::join_pointer(pointer, d))
+                .map(|d| memstead_base::engine::query::join_pointer(pointer, d))
                 .collect();
             let allow_refs: Vec<&str> = allows_j.iter().map(String::as_str).collect();
             let deny_refs: Vec<&str> = denies_j.iter().map(String::as_str).collect();
@@ -309,7 +309,7 @@ fn scope_matcher(resolved: &ResolvedIngest) -> Option<ScopeMatcher> {
     // Binding-level denies stay in the WORKSPACE namespace and go through the
     // resolver that enforces them, so a path hidden from the ingest agent is
     // also outside the population.
-    let ws_deny = super::check_path::DenyOracle::new(&resolved.deny_paths);
+    let ws_deny = memstead_base::check_path::DenyOracle::new(&resolved.deny_paths);
     let source_names = resolved
         .sources
         .iter()
@@ -329,7 +329,7 @@ fn scope_matcher(resolved: &ResolvedIngest) -> Option<ScopeMatcher> {
 /// allow pattern (see [`ScopeMatcher::covers_tree`]).
 struct ScopeMatcher {
     per_source: Vec<SourceScope>,
-    ws_deny: super::check_path::DenyOracle,
+    ws_deny: memstead_base::check_path::DenyOracle,
     /// Every primary source's declared name, web sources included: the
     /// membership test a `url` row gets, since no glob speaks its namespace.
     source_names: Vec<String>,
@@ -379,7 +379,7 @@ impl SourceScope {
     /// joins — the fabricated `<ptr>/../…` would let a `**` pattern under the
     /// pointer match a sibling tree by string).
     fn readings(&self, artifact: &str) -> Vec<String> {
-        crate::engine::query::artifact_candidates(&self.pointer, artifact)
+        memstead_base::engine::query::artifact_candidates(&self.pointer, artifact)
     }
 
     fn covers_tree_for(&self, dir: &str) -> bool {
@@ -406,7 +406,7 @@ fn literal_head(pattern: &str) -> String {
 /// is in scope when the scope could contain something beneath it. An
 /// `entity`-grain anchor is a graph id rather than a path and file globs
 /// cannot judge it, so it is never excluded on path grounds.
-fn in_declared_scope(matcher: &ScopeMatcher, anchor: &crate::anchor::Anchor) -> bool {
+fn in_declared_scope(matcher: &ScopeMatcher, anchor: &memstead_base::anchor::Anchor) -> bool {
     if anchor.grain == AnchorGrain::Entity {
         return true;
     }
@@ -427,7 +427,7 @@ fn in_declared_scope(matcher: &ScopeMatcher, anchor: &crate::anchor::Anchor) -> 
     // matcher that saw the locator excluded every located span as out of
     // scope, silently — the report then read "nothing adjudicated" over a mem
     // whose anchors were all in scope.
-    let base = crate::engine::query::anchor_base_path(&anchor.artifact);
+    let base = memstead_base::engine::query::anchor_base_path(&anchor.artifact);
     let path = base.trim_end_matches('/');
     // A binding-level deny is workspace-namespaced and hides the path from the
     // ingest agent, so it is outside the population whatever any source says.
@@ -446,20 +446,22 @@ fn in_declared_scope(matcher: &ScopeMatcher, anchor: &crate::anchor::Anchor) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Engine;
-    use crate::anchor::{Anchor, AnchorHashStability, AnchorProvenanceClass, AnchorSidecar};
-    use crate::binding::BuildMode;
-    use crate::binding::{
+    use memstead_base::Engine;
+    use memstead_base::anchor::{
+        Anchor, AnchorHashStability, AnchorProvenanceClass, AnchorSidecar,
+    };
+    use memstead_base::binding::BuildMode;
+    use memstead_base::binding::{
         BINDING_VERSION, Binding, BuildOperation, DEFAULT_ADJUDICATION_CAP,
         DEFAULT_FULL_RESYNC_EVERY, Operations, VerifyOperation,
     };
-    use crate::ingest::resolve::resolve_binding_run;
-    use crate::pipeline::{IngestTrigger, MediumType};
-    use crate::pipeline::{PatternEntry, PatternMode, Source};
-    use crate::workspace::{
+    use memstead_base::binding_run::resolve_binding_run;
+    use memstead_base::pipeline::{IngestTrigger, MediumType};
+    use memstead_base::pipeline::{PatternEntry, PatternMode, Source};
+    use memstead_base::workspace::{
         Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
     };
-    use crate::workspace_store::WorkspaceStoreAdapter;
+    use memstead_base::workspace_store::WorkspaceStoreAdapter;
 
     fn anchor(artifact: &str, binding: Option<&str>, grain: AnchorGrain) -> Anchor {
         Anchor {
@@ -520,7 +522,7 @@ mod tests {
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(&p, "x\n").unwrap();
         }
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 &root,
                 &Workspace {
@@ -556,7 +558,7 @@ mod tests {
         let mut sidecar = AnchorSidecar::default();
         sidecar.set("engine--e", anchors);
         std::fs::write(
-            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -923,7 +925,7 @@ mod tests {
         let path = tmp
             .path()
             .join("mem")
-            .join(crate::anchor::ANCHOR_SIDECAR_PATH);
+            .join(memstead_base::anchor::ANCHOR_SIDECAR_PATH);
         let before = std::fs::read(&path).unwrap();
         let pop = population_for(&engine, &r, Some("h"));
         assert_eq!(pop.dangling.len(), 1);

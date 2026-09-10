@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use memstead_base::Store;
-use memstead_base::ingest::status::{ProjectionStatus, Rollup, projection_overview};
+use memstead_projection::status::{ProjectionStatus, Rollup, projection_overview};
 use serde::Serialize;
 use serde_json::json;
 

@@ -10,13 +10,13 @@
 //! two-instance scenario is exercised here at the engine boundary.
 
 use indexmap::IndexMap;
-use memstead_base::ingest::Slice;
-use memstead_base::ingest::advance::{AdvanceState, read_advance_store, write_advance_store};
 use memstead_base::ops::NoticeChanges;
 use memstead_base::vcs::{Actor, ClientId};
 use memstead_base::{CreateEntityArgs, EngineError, EntityId, UpdateEntityArgs};
 use memstead_git_branch::test_support::init_real_mem_repo;
 use memstead_git_branch::workspace_store::engine_from_workspace_root;
+use memstead_projection::Slice;
+use memstead_projection::advance::{AdvanceState, read_advance_store, write_advance_store};
 use tempfile::TempDir;
 
 fn create_args(mem: &str, title: &str) -> CreateEntityArgs {

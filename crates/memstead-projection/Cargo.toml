@@ -1,0 +1,30 @@
+[package]
+name = "memstead-projection"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "The maintenance loop for Memstead — projection briefs, findings, verify, advance and prune over bound mems. Published as a dependency of the memstead-cli and memstead-mcp products, not as a supported library — pre-1.0, no API stability promise."
+readme = "README.md"
+keywords = ["agent-memory", "knowledge-graph", "markdown", "graph", "agents"]
+categories = ["database-implementations"]
+
+[dependencies]
+memstead-base.workspace = true
+memstead-schema.workspace = true
+globset.workspace = true
+indexmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+memstead-base = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

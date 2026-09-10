@@ -5,7 +5,7 @@
 //! entity in the destination mem (though a completed run does write this
 //! store, backfill observed anchor hashes, and record a `#verified`
 //! baseline). The store is the real home behind plan 03's findings
-//! schema stub ([`crate::binding`]'s removed `FindingKey` / `FindingRecord`).
+//! schema stub ([`memstead_base::binding`]'s removed `FindingKey` / `FindingRecord`).
 //!
 //! ## Keying: `hash(D)` alone — findings survive head movement
 //!
@@ -67,21 +67,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::Engine;
-use crate::WarningHint;
-use crate::anchor::{Anchor, AnchorState, ObservedArtifactHash};
-use crate::binding::{
+use memstead_base::Engine;
+use memstead_base::WarningHint;
+use memstead_base::anchor::{Anchor, AnchorState, ObservedArtifactHash};
+use memstead_base::binding::{
     Binding, DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, hash_binding, medium_capabilities,
 };
-use crate::entity::EntityId;
-use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
+use memstead_base::entity::EntityId;
+use memstead_base::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
 use super::advance::is_single_component;
 use super::cursor::{compute_source_cursor, enumerate_source_artifacts};
 use super::refinement::{
     ROTATION_ANCHOR_ADJUDICATION, bump_verify_runs, next_batch, next_rotation_batch,
 };
-use super::resolve::{ResolvedIngest, ResolvedSource};
+use memstead_base::binding_run::{ResolvedIngest, ResolvedSource};
 
 /// The engine-owned state directory root, under the workspace store:
 /// `<root>/.memstead/state/`. Mirrors [`super::advance`]'s `STATE_DIR`.
@@ -104,11 +104,11 @@ const FINDINGS_DIR: &str = "findings";
 /// the module docs).
 ///
 /// The real key behind plan 03's schema stub (which lived, IO-less, in
-/// [`crate::binding`]).
+/// [`memstead_base::binding`]).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FindingKey {
     /// The binding's `hash(D)` (lowercase hex SHA-256; see
-    /// [`crate::binding::hash_binding`]) — the store key.
+    /// [`memstead_base::binding::hash_binding`]) — the store key.
     pub binding_hash: String,
     /// The composite source-head token the finding was observed at — the
     /// per-facet baseline tokens current at observation time. Metadata, not
@@ -387,7 +387,7 @@ pub struct AnnotatedStandaloneFinding {
 /// "everything resolved clean" statement that closes prior findings.
 pub fn record_standalone_findings(
     workspace_root: &Path,
-    report: &crate::engine::query::MemAnchorVerification,
+    report: &memstead_base::engine::query::MemAnchorVerification,
 ) -> Result<Vec<AnnotatedStandaloneFinding>, StoreError> {
     let mem = &report.mem;
     let key = FindingKey {
@@ -641,7 +641,7 @@ pub fn record_verified_baseline(
     destination_mem: &str,
     outcome: &VerifyOutcome,
     note: Option<&str>,
-) -> Result<Vec<String>, crate::engine::EngineError> {
+) -> Result<Vec<String>, memstead_base::engine::EngineError> {
     let mut written = Vec::with_capacity(outcome.facet_heads.len());
     for (facet, token) in &outcome.facet_heads {
         let key = format!("{}/{facet}#verified", outcome.binding);
@@ -672,7 +672,7 @@ pub fn record_anchor_hash_backfill(
     destination_mem: &str,
     outcome: &VerifyOutcome,
     note: Option<&str>,
-) -> Result<usize, crate::engine::EngineError> {
+) -> Result<usize, memstead_base::engine::EngineError> {
     engine.record_anchor_observed_hashes(destination_mem, &outcome.hash_backfill, note)
 }
 
@@ -824,7 +824,7 @@ pub fn current_findings(
         .map(|s| s.current(&key).to_vec())
         .unwrap_or_default();
     let excluded: BTreeSet<String> =
-        crate::ingest::advance::read_advance_store(workspace_root, &mem, &name)
+        crate::advance::read_advance_store(workspace_root, &mem, &name)
             .ok()
             .flatten()
             .map(|state| state.exclusions.keys().cloned().collect())
@@ -1366,12 +1366,12 @@ fn run_verify(
         if let ResolvedSource::Primary(p) = source
             && matches!(
                 p.medium_type,
-                crate::pipeline::MediumType::Codebase
-                    | crate::pipeline::MediumType::Filesystem
-                    | crate::pipeline::MediumType::Git
+                memstead_base::pipeline::MediumType::Codebase
+                    | memstead_base::pipeline::MediumType::Filesystem
+                    | memstead_base::pipeline::MediumType::Git
             )
         {
-            let base = super::resolve::source_base_path(p, workspace_root);
+            let base = memstead_base::binding_run::source_base_path(p, workspace_root);
             // Unreachable is not only "absent". A directory that exists but
             // cannot be entered (permissions, a broken mount) enumerates
             // nothing, and the pass then reports every anchor unresolvable —
@@ -1404,7 +1404,7 @@ fn run_verify(
     // must never be indistinguishable from a deleted one.
     for source in &resolved.sources {
         if let ResolvedSource::Primary(p) = source
-            && p.medium_type == crate::pipeline::MediumType::Graph
+            && p.medium_type == memstead_base::pipeline::MediumType::Graph
             && !engine.mem_names().iter().any(|m| *m == p.pointer)
         {
             return Err(FindingsError::SourceUnreachable {
@@ -1560,7 +1560,7 @@ fn run_verify(
     // Scoped to this binding's population (consistency-sweep 03/01). An
     // excluded anchor must never raise a finding against a binding that did
     // not write it or has disclaimed the file; the report names the exclusions.
-    let population = crate::ingest::anchor_population::population_for(
+    let population = crate::anchor_population::population_for(
         engine,
         resolved,
         Some(binding_hash_of(binding, resolved).as_str()),
@@ -1717,7 +1717,7 @@ fn run_verify(
     // Reconciled first (A3 AC3): an exclusion whose source left the
     // declaration is dropped here as well, not only when a brief renders.
     let excluded: BTreeSet<String> =
-        crate::ingest::advance::reconcile_exclusions(engine, workspace_root, resolved)
+        crate::advance::reconcile_exclusions(engine, workspace_root, resolved)
             .map(|l| l.active.into_iter().map(|e| e.artifact).collect())
             .unwrap_or_default();
     for file in &sample_files {
@@ -1837,7 +1837,7 @@ fn unanchored_mention_findings(
             continue;
         }
         for (section, body) in &entity.sections {
-            let masked = crate::markdown::mask_code_blocks(body);
+            let masked = memstead_base::markdown::mask_code_blocks(body);
             for token in path_tokens(&masked) {
                 let Some(artifact) = resolve_mention(&token, &pointers, s_d) else {
                     continue;
@@ -1934,7 +1934,7 @@ pub(crate) fn resolve_mention(
         return Some(token.to_string());
     }
     for pointer in pointers {
-        for candidate in crate::engine::query::artifact_candidates(pointer, token) {
+        for candidate in memstead_base::engine::query::artifact_candidates(pointer, token) {
             if s_d.contains(&candidate) {
                 return Some(candidate);
             }
@@ -1951,7 +1951,7 @@ pub(crate) fn resolve_mention(
 /// and deterministic; whether a symbol matters is decided by lookup against
 /// the change's defined-or-removed set, never by guessing.
 pub(crate) fn code_span_symbols(text: &str) -> Vec<String> {
-    let masked = crate::markdown::mask_code_blocks(text);
+    let masked = memstead_base::markdown::mask_code_blocks(text);
     let mut out = Vec::new();
     let mut rest = masked.as_str();
     while let Some(open) = rest.find('`') {
@@ -1980,7 +1980,7 @@ pub(crate) fn code_span_symbols(text: &str) -> Vec<String> {
 
 /// The medium type's wire string (`codebase` / `web` / …) — the serde form the
 /// capability matrix and reports use.
-fn medium_type_wire(t: crate::pipeline::MediumType) -> String {
+fn medium_type_wire(t: memstead_base::pipeline::MediumType) -> String {
     serde_json::to_value(t)
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
@@ -1996,13 +1996,14 @@ pub fn unanchored_mention_warnings(engine: &Engine) -> Vec<WarningHint> {
     let Some(root) = engine.workspace_root() else {
         return Vec::new();
     };
-    let Ok(configs) = crate::pipeline_store::load_pipeline_configs(root) else {
+    let Ok(configs) = memstead_base::pipeline_store::load_pipeline_configs(root) else {
         return Vec::new();
     };
     let mut out = Vec::new();
     for record in &configs.bindings {
         let binding_id = format!("{}/{}", record.mem, record.name);
-        let Ok(resolved) = crate::binding_run::resolve_binding_run(&binding_id, &record.config)
+        let Ok(resolved) =
+            memstead_base::binding_run::resolve_binding_run(&binding_id, &record.config)
         else {
             continue;
         };
@@ -2032,7 +2033,7 @@ pub fn unanchored_mention_warnings(engine: &Engine) -> Vec<WarningHint> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anchor::{Anchor, AnchorGrain, AnchorHashStability, AnchorProvenanceClass};
+    use memstead_base::anchor::{Anchor, AnchorGrain, AnchorHashStability, AnchorProvenanceClass};
 
     fn key(hash: &str, head: &str) -> FindingKey {
         FindingKey {
@@ -2160,7 +2161,7 @@ mod tests {
     /// so nothing is deleted, only retired from the current view.
     #[test]
     fn impl_version_bump_invalidates_findings_by_construction() {
-        use crate::binding::{
+        use memstead_base::binding::{
             PREPARATION_IMPL_VERSION, ScaffoldParams, hash_binding, hash_binding_at_impl_version,
             scaffold_binding,
         };
@@ -2168,7 +2169,7 @@ mod tests {
             destination_mem: "plugin",
             source_name: "source-tree",
             pointer: "../public",
-            medium_type: crate::pipeline::MediumType::Codebase,
+            medium_type: memstead_base::pipeline::MediumType::Codebase,
             intent: None,
             additional_deny_paths: Vec::new(),
         })
@@ -2578,18 +2579,18 @@ mod tests {
 
     // ---- A1/A5 end-to-end: verify writes durable findings, no entity write --
 
-    use crate::anchor::AnchorSidecar;
-    use crate::binding::{
+    use memstead_base::anchor::AnchorSidecar;
+    use memstead_base::binding::{
         BINDING_VERSION, BuildMode, BuildOperation, CoverageSemantics, DEFAULT_ADJUDICATION_CAP,
         DEFAULT_FULL_RESYNC_EVERY, Operations, VerifyOperation,
     };
-    use crate::ingest::resolve::resolve_binding_run;
-    use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
-    use crate::pipeline_store::{load_pipeline_configs, write_binding};
-    use crate::workspace::{
+    use memstead_base::binding_run::resolve_binding_run;
+    use memstead_base::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
+    use memstead_base::pipeline_store::{load_pipeline_configs, write_binding};
+    use memstead_base::workspace::{
         Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
     };
-    use crate::workspace_store::WorkspaceStoreAdapter;
+    use memstead_base::workspace_store::WorkspaceStoreAdapter;
 
     /// A full verify pass over a folder mem: it adjudicates the mem's anchors
     /// against the live source (orphaned → unresolvable-anchor; present
@@ -2629,7 +2630,7 @@ mod tests {
             cross_linkable: false,
             migration_target: None,
         };
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -2686,7 +2687,7 @@ mod tests {
             ],
         );
         std::fs::write(
-            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -2699,7 +2700,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: String::new(),
@@ -2824,7 +2825,7 @@ mod tests {
             cross_linkable: false,
             migration_target: None,
         };
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -2846,7 +2847,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: pointer.to_string(),
@@ -2954,7 +2955,8 @@ mod tests {
         let mut sidecar = AnchorSidecar::default();
         sidecar.set("engine--a", vec![informed_by("src/present.rs")]);
         std::fs::write(
-            root.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            root.join("mem")
+                .join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -3038,7 +3040,7 @@ mod tests {
         // entity, the artifact and the section — the loop's axis, handed
         // to the kernel composer by `ingest::health::compose_health`.
         let loop_warnings = unanchored_mention_warnings(&engine);
-        let mentions: Vec<&crate::ops::WarningHint> = loop_warnings
+        let mentions: Vec<&memstead_base::ops::WarningHint> = loop_warnings
             .iter()
             .filter(|w| w.code() == "UNANCHORED_MENTION")
             .collect();
@@ -3053,7 +3055,8 @@ mod tests {
         // report counts the excluded file under `excluded`.
         sidecar.set("engine--b", vec![informed_by("src/present.rs")]);
         std::fs::write(
-            root.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            root.join("mem")
+                .join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -3149,8 +3152,8 @@ mod tests {
     /// F's id in one call with the rest of the slice.
     #[test]
     fn a_changed_files_brief_lists_the_entities_that_name_it_without_anchoring_it() {
-        use crate::ingest::advance::{DispositionInput, advance_baseline};
-        use crate::ingest::render::render_sync_brief_for;
+        use crate::advance::{DispositionInput, advance_baseline};
+        use crate::render::render_sync_brief_for;
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -3166,7 +3169,8 @@ mod tests {
         let mut sidecar = AnchorSidecar::default();
         sidecar.set("engine--a", vec![informed_by("src/f.rs")]);
         std::fs::write(
-            root.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            root.join("mem")
+                .join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -3224,7 +3228,7 @@ mod tests {
     /// names renders neither a mention line nor a count line.
     #[test]
     fn the_mention_block_degrades_to_a_count_under_the_budget_never_to_silence() {
-        use crate::ingest::render::render_sync_brief_budgeted;
+        use crate::render::render_sync_brief_budgeted;
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -3235,7 +3239,8 @@ mod tests {
         let mut sidecar = AnchorSidecar::default();
         sidecar.set("engine--a", vec![informed_by("src/f.rs")]);
         std::fs::write(
-            root.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            root.join("mem")
+                .join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -3273,7 +3278,9 @@ mod tests {
         mention_workspace(root2, "");
         decision_entity(root2, "d", "Nothing here names the source.");
         std::fs::write(
-            root2.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            root2
+                .join("mem")
+                .join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             AnchorSidecar::default().to_bytes(),
         )
         .unwrap();
@@ -3294,7 +3301,7 @@ mod tests {
     /// the other.
     #[test]
     fn symbol_scanners_are_lexical() {
-        use crate::ingest::cursor::defined_symbols;
+        use crate::cursor::defined_symbols;
         let defined = defined_symbols(
             "pub fn alpha(x: u8) {}\nstruct Beta;\npub enum Gamma {\n    First,\n    Second { \
              n: u8 },\n    Third(u8),\n}\nconst DELTA: u8 = 1;\nfn not_enum() {}\nclass Eps:\n    \
@@ -3334,7 +3341,8 @@ mod tests {
             "Spelt both ways: inner/x.rs and sub/inner/x.rs. Not in scope: lib/x.rs, x.rs.",
         );
         std::fs::write(
-            root.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            root.join("mem")
+                .join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             AnchorSidecar::default().to_bytes(),
         )
         .unwrap();
@@ -3376,7 +3384,7 @@ mod tests {
     /// resolved it never re-presents, at any head.
     #[test]
     fn finding_recorded_at_old_head_presents_in_brief_at_new_head() {
-        use crate::ingest::render::render_sync_brief_for;
+        use crate::render::render_sync_brief_for;
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -3404,7 +3412,7 @@ mod tests {
             cross_linkable: false,
             migration_target: None,
         };
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -3464,7 +3472,7 @@ mod tests {
         let mut sidecar = AnchorSidecar::default();
         sidecar.set("engine--e", vec![mk("src/present.rs"), mk("src/gone.rs")]);
         std::fs::write(
-            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -3476,7 +3484,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: String::new(),
@@ -3496,7 +3504,7 @@ mod tests {
                 prune: None,
                 operations: Operations {
                     build: None,
-                    sync: Some(crate::binding::SyncOperation {
+                    sync: Some(memstead_base::binding::SyncOperation {
                         trigger: IngestTrigger::Manual,
                         batch_size: 20,
                     }),
@@ -3617,7 +3625,7 @@ mod tests {
             cross_linkable: false,
             migration_target: None,
         };
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -3693,7 +3701,7 @@ mod tests {
             ],
         );
         std::fs::write(
-            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -3705,7 +3713,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: String::new(),
@@ -3791,12 +3799,12 @@ mod tests {
 
         // The sidecar now carries the observed prepared-form hashes — and the
         // non-hash classes still carry none (class semantics preserved).
-        let expected_present = crate::anchor::prepared_content_hash(
+        let expected_present = memstead_base::anchor::prepared_content_hash(
             &std::fs::read(root.join("src").join("present.rs")).unwrap(),
         );
         {
             let sc = AnchorSidecar::from_bytes(
-                &std::fs::read(mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH)).unwrap(),
+                &std::fs::read(mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH)).unwrap(),
             )
             .unwrap();
             for a in sc.get("engine--e") {
@@ -3925,7 +3933,7 @@ mod tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -3995,7 +4003,7 @@ mod tests {
             }],
         );
         std::fs::write(
-            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -4007,7 +4015,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: String::new(),
@@ -4044,8 +4052,8 @@ mod tests {
         let resolved = resolve_binding_run("engine/graph", binding).unwrap();
 
         // --- Pass 1: the tree observes the plain digest and backfills. ---
-        let expected_digest = crate::anchor::prepared_content_hash(
-            crate::preparation::plain_tree_digest(&[
+        let expected_digest = memstead_base::anchor::prepared_content_hash(
+            memstead_base::preparation::plain_tree_digest(&[
                 ("src/a.rs".to_string(), b"fn a() {}\n".to_vec()),
                 ("src/b.rs".to_string(), b"fn b() {}\n".to_vec()),
             ])
@@ -4142,7 +4150,7 @@ mod tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -4194,7 +4202,7 @@ mod tests {
             ],
         );
         std::fs::write(
-            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -4203,7 +4211,7 @@ mod tests {
         let written = engine
             .record_anchor_observed_hashes(
                 "engine",
-                &[crate::anchor::ObservedArtifactHash {
+                &[memstead_base::anchor::ObservedArtifactHash {
                     entity: "engine--e".to_string(),
                     artifact: "src/a.rs".to_string(),
                     hash: "observed".to_string(),
@@ -4216,7 +4224,7 @@ mod tests {
             "non-hash classes refuse the hash; a recorded hash is never overwritten"
         );
         let sc = AnchorSidecar::from_bytes(
-            &std::fs::read(mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH)).unwrap(),
+            &std::fs::read(mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH)).unwrap(),
         )
         .unwrap();
         for a in sc.get("engine--e") {
@@ -4272,7 +4280,7 @@ mod tests {
             cross_linkable: false,
             migration_target: None,
         };
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -4292,7 +4300,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "gone".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: "vanished-src".to_string(),
@@ -4381,7 +4389,7 @@ mod tests {
             cross_linkable: false,
             migration_target: None,
         };
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -4404,7 +4412,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: String::new(),
@@ -4668,7 +4676,7 @@ mod tests {
             cross_linkable: false,
             migration_target: None,
         };
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -4695,7 +4703,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: String::new(),
@@ -4801,7 +4809,7 @@ mod tests {
             cross_linkable: false,
             migration_target: None,
         };
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -4826,7 +4834,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: "src".to_string(),
@@ -4927,7 +4935,7 @@ mod tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -4985,7 +4993,7 @@ mod tests {
             vec![mk("src/a.rs"), mk("src/b.rs"), mk("src/c.rs")],
         );
         std::fs::write(
-            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -4997,7 +5005,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: String::new(),
@@ -5115,7 +5123,7 @@ mod tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -5143,7 +5151,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "manual".to_string(),
                     medium_type: MediumType::Web,
                     pointer: "https://example.com/docs".to_string(),
@@ -5199,9 +5207,9 @@ mod tests {
         assert_eq!(sampled.binding, "engine/manual");
     }
 
-    fn sourceless_binding() -> crate::binding::Binding {
-        crate::binding::Binding {
-            version: crate::binding::BINDING_VERSION,
+    fn sourceless_binding() -> memstead_base::binding::Binding {
+        memstead_base::binding::Binding {
+            version: memstead_base::binding::BINDING_VERSION,
             intent: None,
             sources: Vec::new(),
             reference_mems: Vec::new(),
@@ -5210,7 +5218,7 @@ mod tests {
             coverage_semantics: None,
             rules: None,
             prune: None,
-            operations: crate::binding::Operations {
+            operations: memstead_base::binding::Operations {
                 build: None,
                 sync: None,
                 verify: None,
@@ -5240,12 +5248,12 @@ mod tests {
     fn current_findings_drops_ledger_excluded_uncovered_without_a_verify() {
         let ws = tempfile::tempdir().unwrap();
         let root = ws.path();
-        let engine = crate::engine::Engine::from_mounts(Vec::new()).unwrap();
+        let engine = memstead_base::engine::Engine::from_mounts(Vec::new()).unwrap();
         let binding = sourceless_binding();
         let resolved = resolve_binding_run("m/s", &binding).unwrap();
 
         let key = FindingKey {
-            binding_hash: crate::binding::hash_binding(&binding),
+            binding_hash: memstead_base::binding::hash_binding(&binding),
             source_head: String::new(),
         };
         let mut store = FindingsStore {
@@ -5265,14 +5273,14 @@ mod tests {
 
         // The exclusion lands in the durable ledger (as `projection exclude`
         // records it) — no verify rewrites the batch.
-        let state = crate::ingest::advance::AdvanceState {
+        let state = crate::advance::AdvanceState {
             binding: "m/s".to_string(),
             exclusions: [("docs/a.md".to_string(), "generated; no entity".to_string())]
                 .into_iter()
                 .collect(),
             ..Default::default()
         };
-        crate::ingest::advance::write_advance_store(root, "m", "s", &state).unwrap();
+        crate::advance::write_advance_store(root, "m", "s", &state).unwrap();
 
         let (_, after) = current_findings(&engine, root, &binding, &resolved).unwrap();
         assert_eq!(after.len(), 1);
@@ -5289,13 +5297,13 @@ mod tests {
     fn current_findings_never_serves_superseded_batches() {
         let ws = tempfile::tempdir().unwrap();
         let root = ws.path();
-        let engine = crate::engine::Engine::from_mounts(Vec::new()).unwrap();
+        let engine = memstead_base::engine::Engine::from_mounts(Vec::new()).unwrap();
         let binding = sourceless_binding();
         let resolved = resolve_binding_run("m/s", &binding).unwrap();
 
         let old_key = key("a-prior-binding-hash", "head0");
         let cur_key = FindingKey {
-            binding_hash: crate::binding::hash_binding(&binding),
+            binding_hash: memstead_base::binding::hash_binding(&binding),
             source_head: String::new(),
         };
         let mut store = FindingsStore {
@@ -5339,23 +5347,23 @@ mod tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        let mount = crate::workspace::Mount {
+        let mount = memstead_base::workspace::Mount {
             mem: "engine".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: crate::workspace::MountStorage::Folder {
+            storage: memstead_base::workspace::MountStorage::Folder {
                 path: mem_dir.clone(),
             },
-            capability: crate::workspace::MountCapability::Write,
-            lifecycle: crate::workspace::MountLifecycle::Eager,
+            capability: memstead_base::workspace::MountCapability::Write,
+            lifecycle: memstead_base::workspace::MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
         };
-        crate::workspace_store::WorkspaceStoreAdapter::save_state(
-            &crate::FileWorkspaceStore::new(),
+        memstead_base::workspace_store::WorkspaceStoreAdapter::save_state(
+            &memstead_base::FileWorkspaceStore::new(),
             root,
-            &crate::workspace::Workspace {
+            &memstead_base::workspace::Workspace {
                 mounts: vec![mount],
-                settings: crate::workspace::WorkspaceSettings::default(),
+                settings: memstead_base::workspace::WorkspaceSettings::default(),
             },
         )
         .unwrap();
@@ -5376,20 +5384,20 @@ mod tests {
         sources: &[(&str, &str)],
         deny: &[&str],
         batch_size: u32,
-    ) -> crate::binding::Binding {
-        crate::binding::Binding {
-            version: crate::binding::BINDING_VERSION,
+    ) -> memstead_base::binding::Binding {
+        memstead_base::binding::Binding {
+            version: memstead_base::binding::BINDING_VERSION,
             intent: None,
             sources: sources
                 .iter()
-                .map(|(name, glob)| crate::pipeline::Source {
+                .map(|(name, glob)| memstead_base::pipeline::Source {
                     name: name.to_string(),
-                    medium_type: crate::pipeline::MediumType::Codebase,
+                    medium_type: memstead_base::pipeline::MediumType::Codebase,
                     pointer: String::new(),
                     change_detection: Some("git".to_string()),
-                    scope: vec![crate::pipeline::PatternEntry {
+                    scope: vec![memstead_base::pipeline::PatternEntry {
                         path: glob.to_string(),
-                        mode: crate::pipeline::PatternMode::Allow,
+                        mode: memstead_base::pipeline::PatternMode::Allow,
                     }],
                     engagement: None,
                     preparation: None,
@@ -5401,18 +5409,18 @@ mod tests {
             coverage_semantics: None,
             rules: None,
             prune: None,
-            operations: crate::binding::Operations {
-                build: Some(crate::binding::BuildOperation {
-                    mode: crate::binding::BuildMode::Discovery,
-                    trigger: crate::pipeline::IngestTrigger::Loop,
+            operations: memstead_base::binding::Operations {
+                build: Some(memstead_base::binding::BuildOperation {
+                    mode: memstead_base::binding::BuildMode::Discovery,
+                    trigger: memstead_base::pipeline::IngestTrigger::Loop,
                     batch_size,
                     post_actions: None,
                 }),
                 sync: None,
-                verify: Some(crate::binding::VerifyOperation {
-                    trigger: crate::pipeline::IngestTrigger::Manual,
+                verify: Some(memstead_base::binding::VerifyOperation {
+                    trigger: memstead_base::pipeline::IngestTrigger::Manual,
                     batch_size,
-                    adjudication_cap: crate::binding::DEFAULT_ADJUDICATION_CAP,
+                    adjudication_cap: memstead_base::binding::DEFAULT_ADJUDICATION_CAP,
                     // Scheduled full walks off: the sampled path is under test.
                     full_resync_every: 0,
                 }),

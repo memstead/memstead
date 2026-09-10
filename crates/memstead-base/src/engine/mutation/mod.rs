@@ -159,7 +159,7 @@ impl super::Engine {
     /// [`EngineError::InvalidAnchor`]. Empty input yields an empty vec (no
     /// sidecar write); a single malformed element aborts before any state
     /// change so the entity is never written.
-    pub(crate) fn validate_anchor_inputs(
+    pub fn validate_anchor_inputs(
         &self,
         mem: &str,
         inputs: &[crate::anchor::AnchorInput],

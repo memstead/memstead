@@ -7,15 +7,21 @@
 //! by one surface and kept by another — the parity pin between the CLI's
 //! JSON and the MCP `structured_content` rests on it.
 
-use crate::ops::health_compose::{ComposeHealthError, HealthArgs, HealthConfig};
+use memstead_base::ops::health_compose::{ComposeHealthError, HealthArgs, HealthConfig};
 
 /// Compose the complete health payload — see the module doc.
 pub fn compose_health(
-    engine: &mut crate::Engine,
+    engine: &mut memstead_base::Engine,
     args: &HealthArgs,
-    drift_warnings: Vec<crate::WarningHint>,
+    drift_warnings: Vec<memstead_base::WarningHint>,
     config: &HealthConfig,
 ) -> Result<serde_json::Value, ComposeHealthError> {
     let loop_warnings = super::findings::unanchored_mention_warnings(engine);
-    crate::ops::health_compose::compose_health(engine, args, drift_warnings, loop_warnings, config)
+    memstead_base::ops::health_compose::compose_health(
+        engine,
+        args,
+        drift_warnings,
+        loop_warnings,
+        config,
+    )
 }

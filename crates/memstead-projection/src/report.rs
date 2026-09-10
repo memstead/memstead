@@ -22,7 +22,7 @@
 //!   detectable) renders `signal: none` → *"freshness unknowable"*; a green
 //!   freshness verdict is **structurally unreachable** for such a medium (B2).
 //! - **Token-budgeted** in the house envelope shape shared with
-//!   [`crate::overview`]: aggregates are hard-required and always ship; heavy
+//!   [`memstead_base::overview`]: aggregates are hard-required and always ship; heavy
 //!   per-artifact lists greedy-fill by priority and, when they do not fit,
 //!   drop to `## Hints` with an `estimated_tokens` figure — never rendered
 //!   unbounded (B3).
@@ -37,18 +37,20 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use crate::Engine;
-use crate::anchor::{AnchorGrain, AnchorProvenanceClass, AnchorState};
-use crate::binding::{Binding, CoverageSemantics, MediumCapabilities, medium_capabilities};
-use crate::chunking::estimate_tokens;
+use memstead_base::Engine;
+use memstead_base::anchor::{AnchorGrain, AnchorProvenanceClass, AnchorState};
+use memstead_base::binding::{Binding, CoverageSemantics, MediumCapabilities, medium_capabilities};
+use memstead_base::chunking::estimate_tokens;
 
 use super::advance::read_advance_store;
 use super::cursor::{enumerate_source_artifacts_reported, source_moved};
 use super::findings::{FindingClass, FindingKey, read_findings_store};
-use super::resolve::{ChangeStrategy, ResolvedIngest, ResolvedSource, resolve_change_strategy};
+use memstead_base::binding_run::{
+    ChangeStrategy, ResolvedIngest, ResolvedSource, resolve_change_strategy,
+};
 
 /// Default token budget for the report's heavy content. Mirrors
-/// [`crate::overview::DEFAULT_OVERVIEW_BUDGET`] — one house envelope, one
+/// [`memstead_base::overview::DEFAULT_OVERVIEW_BUDGET`] — one house envelope, one
 /// default.
 pub const DEFAULT_REPORT_BUDGET: usize = 8_000;
 
@@ -205,7 +207,7 @@ pub struct AnchorComposition {
     /// `fully_adjudicated` at this level in JSON): the count is never
     /// reachable apart from what it was computed over.
     #[serde(flatten)]
-    pub figure: crate::anchor::AnchorResolutionFigure,
+    pub figure: memstead_base::anchor::AnchorResolutionFigure,
     /// Non-`authored` anchors that drifted (stable-medium hash break).
     pub drifted: usize,
     /// Non-`authored` anchors deferred for re-examination (unstable / no hash).
@@ -360,7 +362,7 @@ pub struct FidelityReport {
     pub adopt: bool,
     /// The binding's EFFECTIVE coverage (B4) — declared when the author
     /// wrote the field, otherwise resolved per medium
-    /// ([`crate::binding::effective_coverage_semantics`]).
+    /// ([`memstead_base::binding::effective_coverage_semantics`]).
     pub coverage_semantics: CoverageSemantics,
     /// `true` when the binding declared the field; `false` when the
     /// effective value was resolved from the sources' media. The render
@@ -409,12 +411,12 @@ pub struct FidelityReport {
     /// Degradation flags (B1) — typed, human/agent-readable strings.
     pub degradations: Vec<String>,
     /// The binding's intent checked against the destination schema's
-    /// relationship vocabulary ([`super::intent`]): one entry per all-caps
+    /// relationship vocabulary ([`memstead_base::binding_intent`]): one entry per all-caps
     /// token the schema does not declare, code
     /// `BINDING_INTENT_UNKNOWN_RELATIONSHIP`. Reported, never refused, on a
     /// record that already carries one; empty proves a clean intent. Not a
     /// fidelity figure, so it never moves the rollup verdict.
-    pub intent_findings: Vec<super::intent::IntentFinding>,
+    pub intent_findings: Vec<memstead_base::binding_intent::IntentFinding>,
 }
 
 // ---------------------------------------------------------------------------
@@ -748,7 +750,7 @@ impl FidelityReport {
 // ---------------------------------------------------------------------------
 
 /// The rendered report: markdown plus the structured envelope bits (mode,
-/// hints) mirroring [`crate::overview::OverviewOutput`].
+/// hints) mirroring [`memstead_base::overview::OverviewOutput`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedFidelityReport {
     /// The rendered markdown.
@@ -1516,10 +1518,10 @@ pub fn compute_fidelity_report(
         // is not second-guessed (that is the resolver's job); what the run
         // could observe is reported honestly.
         let signal_readable = match strategy {
-            ChangeStrategy::Git => {
-                super::resolve::find_git_root(&super::resolve::source_base_path(p, workspace_root))
-                    .is_some()
-            }
+            ChangeStrategy::Git => memstead_base::binding_run::find_git_root(
+                &memstead_base::binding_run::source_base_path(p, workspace_root),
+            )
+            .is_some(),
             _ => true,
         };
         let change_detectable =
@@ -1662,7 +1664,7 @@ pub fn compute_fidelity_report(
         // entity end could be reconciled at all, so an unreconcilable mem
         // keeps its old coverage rather than reading as wholly uncovered.
         let refs = engine.anchors_referencing_artifact(file);
-        let mine: Vec<&(crate::EntityId, crate::anchor::Anchor)> = refs
+        let mine: Vec<&(memstead_base::EntityId, memstead_base::anchor::Anchor)> = refs
             .iter()
             .filter(|(eid, a)| {
                 eid.mem() == dest.as_str()
@@ -1800,19 +1802,16 @@ pub fn compute_fidelity_report(
     // --- Anchor composition + resolution over THIS BINDING'S anchors ---
     // Scoped rather than mem-wide (consistency-sweep 03/01): the axis answers
     // for the population this binding is responsible for, and names the rest.
-    let population = crate::ingest::anchor_population::population_for(
-        engine,
-        resolved,
-        Some(key.binding_hash.as_str()),
-    );
+    let population =
+        crate::anchor_population::population_for(engine, resolved, Some(key.binding_hash.as_str()));
     let mut resolves = 0usize;
     let mut anchors = AnchorComposition {
         counted_rows: population.included.len(),
         distinct_artifacts: population.distinct_artifacts(),
         excluded_other_binding: population
-            .excluded_count(crate::ingest::anchor_population::ExclusionReason::OtherBinding),
+            .excluded_count(crate::anchor_population::ExclusionReason::OtherBinding),
         excluded_out_of_scope: population
-            .excluded_count(crate::ingest::anchor_population::ExclusionReason::OutOfScope),
+            .excluded_count(crate::anchor_population::ExclusionReason::OutOfScope),
         excluded_artifacts: population
             .excluded
             .iter()
@@ -1835,11 +1834,11 @@ pub fn compute_fidelity_report(
             .included
             .iter()
             .filter(|(_, r)| {
-                r.anchor.hash_source == Some(crate::anchor::AnchorHashSource::Backfill)
+                r.anchor.hash_source == Some(memstead_base::anchor::AnchorHashSource::Backfill)
             })
             .count(),
         aging: {
-            let today = crate::engine::mutation::iso_now();
+            let today = memstead_base::engine::mutation::iso_now();
             let mut rows: Vec<AgingAnchor> = population
                 .included
                 .iter()
@@ -1849,7 +1848,8 @@ pub fn compute_fidelity_report(
                         entity: eid.as_ref().to_string(),
                         artifact: r.anchor.artifact.clone(),
                         observed_at: at.to_string(),
-                        unobserved_for_days: crate::anchor::days_between(at, &today).unwrap_or(0),
+                        unobserved_for_days: memstead_base::anchor::days_between(at, &today)
+                            .unwrap_or(0),
                     })
                 })
                 .collect();
@@ -1950,7 +1950,7 @@ pub fn compute_fidelity_report(
     // The figure closes here, with the population it was computed over: rows
     // and artifacts differ whenever one artifact carries several legitimate
     // rows, and a reader reads the figure as being about artifacts.
-    anchors.figure = crate::anchor::AnchorResolutionFigure::new(
+    anchors.figure = memstead_base::anchor::AnchorResolutionFigure::new(
         resolves,
         format!(
             "over {} counted row(s) on {} distinct artifact(s), with {} unobserved this pass \
@@ -1978,9 +1978,12 @@ pub fn compute_fidelity_report(
     // the sync brief and the status rollup: a mem with no anchors and no recorded
     // `#synced` baseline predates its binding, so 0% anchored is expected.
     let adopt = super::render::mem_predates_binding(engine, resolved);
-    let effective_coverage = crate::binding::effective_coverage_semantics(binding);
-    let intent_findings =
-        super::intent::binding_intent_findings(engine, &dest, binding.intent.as_deref());
+    let effective_coverage = memstead_base::binding::effective_coverage_semantics(binding);
+    let intent_findings = memstead_base::binding_intent::binding_intent_findings(
+        engine,
+        &dest,
+        binding.intent.as_deref(),
+    );
 
     FidelityReport {
         legacy_dialect_patterns: legacy_patterns,
@@ -2098,7 +2101,7 @@ mod tests {
                 by_grain: BTreeMap::from([("file".to_string(), 4), ("tree".to_string(), 1)]),
                 authored: 2,
                 observed: 5,
-                figure: crate::anchor::AnchorResolutionFigure::new(
+                figure: memstead_base::anchor::AnchorResolutionFigure::new(
                     4,
                     "over 6 counted row(s) on 6 distinct artifact(s), with 0 unobserved this pass (state unavailable, never scored as resolved)",
                     true,
@@ -2235,7 +2238,7 @@ mod tests {
     /// filesystem medium backed by `git` reports `true`.
     #[test]
     fn b1_base_retrievability_follows_resolved_strategy_not_medium_ceiling() {
-        use crate::pipeline::MediumType;
+        use memstead_base::pipeline::MediumType;
 
         // The medium type's static ceiling advertises retrievability…
         assert!(medium_capabilities(MediumType::Filesystem).base_version_retrievable);
@@ -2546,19 +2549,21 @@ mod tests {
 
     // ---- assembly (impure) end-to-end ------------------------------------
 
-    use crate::anchor::{Anchor, AnchorHashStability, AnchorProvenanceClass, AnchorSidecar};
-    use crate::binding::{
+    use crate::findings::verify_binding;
+    use memstead_base::anchor::{
+        Anchor, AnchorHashStability, AnchorProvenanceClass, AnchorSidecar,
+    };
+    use memstead_base::binding::{
         BINDING_VERSION, Binding, BuildMode, BuildOperation, DEFAULT_ADJUDICATION_CAP,
         DEFAULT_FULL_RESYNC_EVERY, Operations, VerifyOperation,
     };
-    use crate::ingest::findings::verify_binding;
-    use crate::ingest::resolve::resolve_binding_run;
-    use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
-    use crate::pipeline_store::{load_pipeline_configs, write_binding};
-    use crate::workspace::{
+    use memstead_base::binding_run::resolve_binding_run;
+    use memstead_base::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
+    use memstead_base::pipeline_store::{load_pipeline_configs, write_binding};
+    use memstead_base::workspace::{
         Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
     };
-    use crate::workspace_store::WorkspaceStoreAdapter;
+    use memstead_base::workspace_store::WorkspaceStoreAdapter;
 
     /// The assembly reads the engine, findings store, and enumeration end to
     /// end: coverage is classed over `S(D)` with a direct-covered file, a
@@ -2610,11 +2615,7 @@ mod tests {
     fn end_to_end_report(
         root: &std::path::Path,
         entity_slugs: &[&str],
-    ) -> (
-        FidelityReport,
-        crate::ingest::findings::VerifyOutcome,
-        String,
-    ) {
+    ) -> (FidelityReport, crate::findings::VerifyOutcome, String) {
         let mem_dir = root.join("mem");
         std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         std::fs::write(
@@ -2640,7 +2641,7 @@ mod tests {
             cross_linkable: false,
             migration_target: None,
         };
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -2712,7 +2713,7 @@ mod tests {
             )],
         );
         std::fs::write(
-            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
@@ -2724,7 +2725,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: String::new(),
@@ -2777,7 +2778,7 @@ mod tests {
 
     fn end_to_end_body(
         report: &FidelityReport,
-        outcome: &crate::ingest::findings::VerifyOutcome,
+        outcome: &crate::findings::VerifyOutcome,
         md: &str,
     ) {
         // S(D) = the three .rs files under src/.
@@ -2856,7 +2857,7 @@ mod tests {
             cross_linkable: false,
             migration_target: None,
         };
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -2883,7 +2884,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: String::new(),
@@ -3018,7 +3019,7 @@ mod rollup_tests {
                 by_grain: BTreeMap::from([("file".to_string(), 4)]),
                 authored: 0,
                 observed: 4,
-                figure: crate::anchor::AnchorResolutionFigure::new(
+                figure: memstead_base::anchor::AnchorResolutionFigure::new(
                     4,
                     "over 6 counted row(s) on 6 distinct artifact(s), with 0 unobserved this pass (state unavailable, never scored as resolved)",
                     true,
@@ -3263,7 +3264,7 @@ mod rollup_tests {
     fn zero_observed_anchors_blocks_green() {
         let mut r = clean_report();
         r.anchors.observed = 0;
-        r.anchors.figure = crate::anchor::AnchorResolutionFigure::new(
+        r.anchors.figure = memstead_base::anchor::AnchorResolutionFigure::new(
             0,
             "over 0 counted row(s) on 0 distinct artifact(s), with 0 unobserved this pass (state unavailable, never scored as resolved)",
             true,
@@ -3361,23 +3362,23 @@ mod rollup_tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        let mount = crate::workspace::Mount {
+        let mount = memstead_base::workspace::Mount {
             mem: "engine".to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
-            storage: crate::workspace::MountStorage::Folder {
+            storage: memstead_base::workspace::MountStorage::Folder {
                 path: mem_dir.clone(),
             },
-            capability: crate::workspace::MountCapability::Write,
-            lifecycle: crate::workspace::MountLifecycle::Eager,
+            capability: memstead_base::workspace::MountCapability::Write,
+            lifecycle: memstead_base::workspace::MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
         };
-        crate::workspace_store::WorkspaceStoreAdapter::save_state(
-            &crate::FileWorkspaceStore::new(),
+        memstead_base::workspace_store::WorkspaceStoreAdapter::save_state(
+            &memstead_base::FileWorkspaceStore::new(),
             root,
-            &crate::workspace::Workspace {
+            &memstead_base::workspace::Workspace {
                 mounts: vec![mount],
-                settings: crate::workspace::WorkspaceSettings::default(),
+                settings: memstead_base::workspace::WorkspaceSettings::default(),
             },
         )
         .unwrap();
@@ -3398,20 +3399,20 @@ mod rollup_tests {
         sources: &[(&str, &str)],
         deny: &[&str],
         batch_size: u32,
-    ) -> crate::binding::Binding {
-        crate::binding::Binding {
-            version: crate::binding::BINDING_VERSION,
+    ) -> memstead_base::binding::Binding {
+        memstead_base::binding::Binding {
+            version: memstead_base::binding::BINDING_VERSION,
             intent: None,
             sources: sources
                 .iter()
-                .map(|(name, glob)| crate::pipeline::Source {
+                .map(|(name, glob)| memstead_base::pipeline::Source {
                     name: name.to_string(),
-                    medium_type: crate::pipeline::MediumType::Codebase,
+                    medium_type: memstead_base::pipeline::MediumType::Codebase,
                     pointer: String::new(),
                     change_detection: Some("git".to_string()),
-                    scope: vec![crate::pipeline::PatternEntry {
+                    scope: vec![memstead_base::pipeline::PatternEntry {
                         path: glob.to_string(),
-                        mode: crate::pipeline::PatternMode::Allow,
+                        mode: memstead_base::pipeline::PatternMode::Allow,
                     }],
                     engagement: None,
                     preparation: None,
@@ -3423,18 +3424,18 @@ mod rollup_tests {
             coverage_semantics: None,
             rules: None,
             prune: None,
-            operations: crate::binding::Operations {
-                build: Some(crate::binding::BuildOperation {
-                    mode: crate::binding::BuildMode::Discovery,
-                    trigger: crate::pipeline::IngestTrigger::Loop,
+            operations: memstead_base::binding::Operations {
+                build: Some(memstead_base::binding::BuildOperation {
+                    mode: memstead_base::binding::BuildMode::Discovery,
+                    trigger: memstead_base::pipeline::IngestTrigger::Loop,
                     batch_size,
                     post_actions: None,
                 }),
                 sync: None,
-                verify: Some(crate::binding::VerifyOperation {
-                    trigger: crate::pipeline::IngestTrigger::Manual,
+                verify: Some(memstead_base::binding::VerifyOperation {
+                    trigger: memstead_base::pipeline::IngestTrigger::Manual,
                     batch_size,
-                    adjudication_cap: crate::binding::DEFAULT_ADJUDICATION_CAP,
+                    adjudication_cap: memstead_base::binding::DEFAULT_ADJUDICATION_CAP,
                     // Scheduled full walks off: the sampled path is under test.
                     full_resync_every: 0,
                 }),
@@ -3458,13 +3459,13 @@ mod rollup_tests {
             )
             .unwrap();
         }
-        let mk = |artifact: &str| crate::anchor::Anchor {
+        let mk = |artifact: &str| memstead_base::anchor::Anchor {
             artifact: artifact.to_string(),
-            grain: crate::anchor::AnchorGrain::File,
-            class: crate::anchor::AnchorProvenanceClass::Anchored,
+            grain: memstead_base::anchor::AnchorGrain::File,
+            class: memstead_base::anchor::AnchorProvenanceClass::Anchored,
             at_version: None,
             hash: Some("recorded".to_string()),
-            hash_stability: crate::anchor::AnchorHashStability::Stable,
+            hash_stability: memstead_base::anchor::AnchorHashStability::Stable,
             derived_from: Vec::new(),
             binding: None,
             source: None,
@@ -3472,7 +3473,7 @@ mod rollup_tests {
             hash_source: None,
             last_observed: None,
         };
-        let mut sidecar = crate::anchor::AnchorSidecar::default();
+        let mut sidecar = memstead_base::anchor::AnchorSidecar::default();
         sidecar.set(
             "engine--one",
             vec![mk("src/three.rs"), mk("src/three.rs"), mk("src/three.rs")],
@@ -3480,17 +3481,16 @@ mod rollup_tests {
         sidecar.set("engine--left", vec![mk("src/two.rs")]);
         sidecar.set("engine--right", vec![mk("src/two.rs")]);
         std::fs::write(
-            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            mem_dir.join(memstead_base::anchor::ANCHOR_SIDECAR_PATH),
             sidecar.to_bytes(),
         )
         .unwrap();
         let b = a3_binding(&[("graph", "src/**/*.rs")], &[], 20);
-        crate::pipeline_store::write_binding(root, "engine", "graph", &b).unwrap();
+        memstead_base::pipeline_store::write_binding(root, "engine", "graph", &b).unwrap();
 
-        let engine = crate::Engine::from_workspace_root(root).unwrap();
-        let resolved = crate::ingest::resolve::resolve_binding_run("engine/graph", &b).unwrap();
-        let outcome =
-            crate::ingest::findings::verify_binding(&engine, root, &b, &resolved).unwrap();
+        let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
+        let resolved = memstead_base::binding_run::resolve_binding_run("engine/graph", &b).unwrap();
+        let outcome = crate::findings::verify_binding(&engine, root, &b, &resolved).unwrap();
         let report = super::compute_fidelity_report(&engine, root, &b, &resolved, &outcome.key);
         assert_eq!(
             report.coverage.denominator,

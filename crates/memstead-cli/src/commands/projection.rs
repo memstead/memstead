@@ -35,26 +35,26 @@ use memstead_base::binding::{
     BuildMode, BuildOperation, CapabilityError, DEFAULT_ADJUDICATION_CAP,
     DEFAULT_FULL_RESYNC_EVERY, ScaffoldParams, SyncOperation, VerifyOperation, validate_binding,
 };
-use memstead_base::ingest::advance::{
+use memstead_base::pipeline::{IngestTrigger, MediumType};
+use memstead_base::pipeline_store::{load_pipeline_configs, read_binding, write_binding};
+use memstead_base::workspace_store::StoreError;
+use memstead_projection::advance::{
     AdvanceError, DispositionInput, ExcludeError, advance_baseline, record_exclusions,
 };
-use memstead_base::ingest::findings::{
+use memstead_projection::findings::{
     FindingsError, FullResyncDecision, record_anchor_hash_backfill, record_verified_baseline,
     verify_binding, verify_binding_full,
 };
-use memstead_base::ingest::intent::{IntentFinding, intent_findings};
-use memstead_base::ingest::report::{
+use memstead_projection::intent::{IntentFinding, intent_findings};
+use memstead_projection::report::{
     DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
 };
-use memstead_base::ingest::resolve::{ResolveError, resolve_binding_run};
-use memstead_base::ingest::{
+use memstead_projection::resolve::{ResolveError, resolve_binding_run};
+use memstead_projection::{
     OperationFilter, OperationKind, RenderBriefError, not_loop_declared, render_ingest_brief,
     render_sync_brief_budgeted, render_sync_brief_for, render_verify_brief_for,
     select_next_due_operation,
 };
-use memstead_base::pipeline::{IngestTrigger, MediumType};
-use memstead_base::pipeline_store::{load_pipeline_configs, read_binding, write_binding};
-use memstead_base::workspace_store::StoreError;
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
@@ -828,7 +828,7 @@ that is not there. Repair the mem, then re-run",
                     &root,
                     &binding_id,
                     args.budget
-                        .unwrap_or(memstead_base::ingest::brief::DEFAULT_BRIEF_BUDGET),
+                        .unwrap_or(memstead_projection::brief::DEFAULT_BRIEF_BUDGET),
                     &args.include,
                 ),
                 OperationKind::Sync,
@@ -1099,7 +1099,7 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // Out-of-workspace medium base — a supported shape with one honest
     // caveat, named NOW, at the layout decision. The operation still succeeds.
     if let Some(w) =
-        memstead_base::ingest::cursor::out_of_root_layout_warning(&args.source, &root, medium_type)
+        memstead_projection::cursor::out_of_root_layout_warning(&args.source, &root, medium_type)
     {
         warnings.push(w);
     }
@@ -1114,7 +1114,7 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             | memstead_base::MediumType::Filesystem
             | memstead_base::MediumType::Git
     ) {
-        let base = memstead_base::ingest::cursor::medium_base(&args.source, &root);
+        let base = memstead_projection::cursor::medium_base(&args.source, &root);
         if !base.exists() {
             warnings.push(format!(
                 "source '{}' resolves to '{}', which does not exist — the binding is \
@@ -1578,7 +1578,7 @@ fn check_path(ctx: &CliContext, args: CheckPathArgs) -> anyhow::Result<()> {
     // "allowed" — the caller decides that an unanswerable check fails open.
     let binding_id = match args.binding.clone() {
         Some(id) => id,
-        None => memstead_base::ingest::read_active_binding_file(&root).ok_or_else(|| {
+        None => memstead_projection::read_active_binding_file(&root).ok_or_else(|| {
             CliError::new(
                 ExitKind::NotFound,
                 "NO_ACTIVE_BINDING",
@@ -1607,7 +1607,7 @@ fn check_path(ctx: &CliContext, args: CheckPathArgs) -> anyhow::Result<()> {
         None => std::env::current_dir()?,
     };
     let verdicts =
-        memstead_base::ingest::check_deny_paths(&binding.deny_paths, &candidates, &cwd, &root);
+        memstead_projection::check_deny_paths(&binding.deny_paths, &candidates, &cwd, &root);
 
     if ctx.json {
         print_json(&json!({
@@ -2003,7 +2003,7 @@ fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
             not_member.sort();
             return Err(map_exclude_err(
                 &binding_id,
-                memstead_base::ingest::ExcludeError::NotDestinationEntity {
+                memstead_projection::ExcludeError::NotDestinationEntity {
                     entities: not_member,
                     mem: dest,
                 },
@@ -2018,11 +2018,11 @@ fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
         .map_err(|e| map_exclude_err(&binding_id, e))?;
     let entities = entity_exclusions
         .as_ref()
-        .map(|ex| memstead_base::ingest::record_entity_exclusions(engine, &root, &resolved, ex))
+        .map(|ex| memstead_projection::record_entity_exclusions(engine, &root, &resolved, ex))
         .transpose()
         .map_err(|e| map_exclude_err(&binding_id, e))?;
 
-    let recorded_json = |outcome: &memstead_base::ingest::ExcludeOutcome| {
+    let recorded_json = |outcome: &memstead_projection::ExcludeOutcome| {
         outcome
             .recorded
             .iter()
@@ -2504,7 +2504,7 @@ binding as never verified"
     // gate exists because that 0 is indistinguishable from a
     // substantive clean pass to a code-only consumer.
     if args.fail_on_inconclusive
-        && rollup.verdict == memstead_base::ingest::report::RollupVerdict::Inconclusive
+        && rollup.verdict == memstead_projection::report::RollupVerdict::Inconclusive
     {
         return Err(CliError::new(
             ExitKind::Findings,

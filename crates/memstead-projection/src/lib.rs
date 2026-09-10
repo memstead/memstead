@@ -25,22 +25,21 @@ pub mod advance;
 pub mod anchor_population;
 pub mod brief;
 pub mod change_detection;
-pub use crate::check_path;
+pub use memstead_base::check_path;
 pub mod cursor;
 pub mod findings;
 pub mod guidance;
 pub mod health;
-pub use crate::binding_intent as intent;
+pub use memstead_base::binding_intent as intent;
 pub mod prune;
 pub mod refinement;
 pub mod render;
 pub mod report;
-pub use crate::binding_run as resolve;
+pub use memstead_base::binding_run as resolve;
 pub mod selection;
 pub mod slice;
 pub mod status;
 
-pub use crate::pipeline::Source;
 pub use advance::{
     AdvanceError, AdvanceOutcome, AdvanceState, DispositionInput, EXCLUDED_VERDICT, ExcludeError,
     ExcludeOutcome, advance_baseline, advance_store_path, delete_advance_store, read_advance_store,
@@ -74,6 +73,7 @@ pub use intent::{
     BINDING_INTENT_UNKNOWN_RELATIONSHIP_CODE, IntentFinding, binding_intent_findings,
     intent_findings, known_relationship_names, relationship_vocabulary, render_intent_findings,
 };
+pub use memstead_base::pipeline::Source;
 pub use prune::{PruneDisposition, PruneProposal, classify_prune_candidate, prune_proposals};
 pub use refinement::{
     Batch, ROTATION_ANCHOR_ADJUDICATION, ROTATION_UNCOVERED_FILES, bump_verify_runs, next_batch,

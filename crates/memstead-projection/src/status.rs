@@ -17,16 +17,16 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use crate::Engine;
-use crate::binding::CoverageSemantics;
-use crate::ingest::advance::read_advance_store;
-use crate::ingest::cursor::source_moved;
-use crate::ingest::findings::{FindingClass, current_findings};
-use crate::ingest::render::mem_predates_binding;
-use crate::ingest::resolve::{
+use crate::advance::read_advance_store;
+use crate::cursor::source_moved;
+use crate::findings::{FindingClass, current_findings};
+use crate::render::mem_predates_binding;
+use memstead_base::Engine;
+use memstead_base::binding::CoverageSemantics;
+use memstead_base::binding_run::{
     ChangeStrategy, ResolvedIngest, ResolvedSource, resolve_binding_run, resolve_change_strategy,
 };
-use crate::pipeline_store::load_pipeline_configs;
+use memstead_base::pipeline_store::load_pipeline_configs;
 
 /// One source facet's (or reference mem's) baseline + signal state (D11). Keyed
 /// in [`ProjectionStatus::state`] by the facet-or-refmem name — the same key
@@ -141,7 +141,7 @@ thread_local! {
 fn resolve_binding_status(
     engine: &Engine,
     workspace_root: &Path,
-    binding: &crate::binding::Binding,
+    binding: &memstead_base::binding::Binding,
     resolved: &ResolvedIngest,
 ) -> BindingResolution {
     #[cfg(test)]
@@ -170,7 +170,7 @@ fn resolve_binding_status(
     }
     let uncovered_counts = findings.uncovered > 0
         && matches!(
-            crate::binding::effective_coverage_semantics(binding).value,
+            memstead_base::binding::effective_coverage_semantics(binding).value,
             CoverageSemantics::Exhaustive
         );
     let has_action = source_moved
@@ -582,13 +582,13 @@ fn rollup_from_scans(total: usize, scans: &[(String, Option<BindingResolution>)]
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::binding::{
+    use memstead_base::binding::{
         BINDING_VERSION, Binding, BuildMode, BuildOperation, Operations, SyncOperation,
     };
-    use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
-    use crate::pipeline_store::write_binding;
-    use crate::storage::FilesystemMemWriter;
-    use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
+    use memstead_base::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
+    use memstead_base::pipeline_store::write_binding;
+    use memstead_base::storage::FilesystemMemWriter;
+    use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
     use tempfile::TempDir;
 
     /// A workspace with one folder mem `engine` (also a git source tree), a v1
@@ -627,7 +627,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: String::new(),
@@ -676,7 +676,7 @@ mod tests {
         let mut engine = Engine::from_mounts(vec![(
             mount,
             Box::new(FilesystemMemWriter::new(root.to_path_buf()))
-                as Box<dyn crate::backend::MemBackend>,
+                as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         engine
@@ -728,7 +728,7 @@ mod tests {
         let engine = Engine::from_mounts(vec![(
             mount,
             Box::new(FilesystemMemWriter::new(root.to_path_buf()))
-                as Box<dyn crate::backend::MemBackend>,
+                as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         assert!(projection_status(&engine, root).is_empty());
@@ -767,7 +767,7 @@ mod tests {
             &Binding {
                 version: BINDING_VERSION,
                 intent: None,
-                sources: vec![crate::pipeline::Source {
+                sources: vec![memstead_base::pipeline::Source {
                     name: "graph".to_string(),
                     medium_type: MediumType::Codebase,
                     pointer: String::new(),
@@ -816,7 +816,7 @@ mod tests {
         Engine::from_mounts(vec![(
             mount,
             Box::new(FilesystemMemWriter::new(root.to_path_buf()))
-                as Box<dyn crate::backend::MemBackend>,
+                as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap()
     }
@@ -901,7 +901,7 @@ mod tests {
         let engine = Engine::from_mounts(vec![(
             mount,
             Box::new(FilesystemMemWriter::new(root.to_path_buf()))
-                as Box<dyn crate::backend::MemBackend>,
+                as Box<dyn memstead_base::backend::MemBackend>,
         )])
         .unwrap();
         let rollup = projection_rollup(&engine, root);

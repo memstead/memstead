@@ -20,7 +20,7 @@ use crate::pipeline::{MediumType, PatternMode, Source};
 /// Lexically normalize a path — resolve `.` and `..` without touching the
 /// filesystem (no symlink resolution), matching Node's `path.resolve` on an
 /// already-absolute path.
-pub(crate) fn normalize_lexical(path: &Path) -> PathBuf {
+pub fn normalize_lexical(path: &Path) -> PathBuf {
     let mut out: Vec<Component> = Vec::new();
     for comp in path.components() {
         match comp {
@@ -40,7 +40,7 @@ pub(crate) fn normalize_lexical(path: &Path) -> PathBuf {
 
 /// The relative path from `from` to `to` (both normalized), matching Node's
 /// `path.relative`.
-pub(crate) fn relative_path(from: &Path, to: &Path) -> PathBuf {
+pub fn relative_path(from: &Path, to: &Path) -> PathBuf {
     let from = normalize_lexical(from);
     let to = normalize_lexical(to);
     let from_comps: Vec<Component> = from.components().collect();
@@ -84,7 +84,7 @@ pub fn medium_base(pointer: &str, workspace_root: &Path) -> PathBuf {
 /// state); the mount storage locations key on their *resolved* paths
 /// because their directory names are configurable. Fail-open on an
 /// unreadable mount list: the name-based excludes stay in force.
-pub(crate) fn engine_state_denies(workspace_root: &Path) -> Vec<String> {
+pub fn engine_state_denies(workspace_root: &Path) -> Vec<String> {
     use crate::workspace_store::{FileWorkspaceStore, WorkspaceStoreAdapter};
 
     let mut denies: Vec<String> = vec![
@@ -127,7 +127,7 @@ pub(crate) fn engine_state_denies(workspace_root: &Path) -> Vec<String> {
 /// malformed. The namespace the patterns are written in is the caller's
 /// business — scope patterns are source-relative, ingest denies
 /// workspace-relative.
-pub(crate) fn build_glob_set(patterns: &[&str]) -> Option<GlobSet> {
+pub fn build_glob_set(patterns: &[&str]) -> Option<GlobSet> {
     build_glob_set_reporting(patterns).0
 }
 
@@ -140,7 +140,7 @@ pub(crate) fn build_glob_set(patterns: &[&str]) -> Option<GlobSet> {
 /// caller can state the partiality instead of computing over it.
 /// `validate_binding` refuses a malformed scope pattern outright; this path
 /// carries records written before that gate existed.
-pub(crate) fn build_glob_set_reporting(patterns: &[&str]) -> (Option<GlobSet>, Vec<String>) {
+pub fn build_glob_set_reporting(patterns: &[&str]) -> (Option<GlobSet>, Vec<String>) {
     let mut builder = GlobSetBuilder::new();
     let mut malformed = Vec::new();
     let mut any = false;
@@ -350,7 +350,7 @@ pub fn enumerate_facet_files_reported(
 /// The longest run of leading path segments in a glob pattern that carry no
 /// glob metacharacter — the literal region a match must live under. `dev/**/
 /// *.md` → `["dev"]`; `VISION.md` → `["VISION.md"]`; `**/*.rs` → `[]`.
-pub(crate) fn glob_literal_prefix(pattern: &str) -> Vec<String> {
+pub fn glob_literal_prefix(pattern: &str) -> Vec<String> {
     pattern
         .split('/')
         .take_while(|seg| {
@@ -368,7 +368,7 @@ pub(crate) fn glob_literal_prefix(pattern: &str) -> Vec<String> {
 /// (the walk must pass through it) or inside the pattern's glob region. An
 /// empty prefix (pattern starts with a glob segment) matches every
 /// directory — no pruning for unanchored scopes.
-pub(crate) fn allow_could_match_under(prefixes: &[Vec<String>], dir_rel: &str) -> bool {
+pub fn allow_could_match_under(prefixes: &[Vec<String>], dir_rel: &str) -> bool {
     let dir_segs: Vec<&str> = dir_rel.split('/').filter(|s| !s.is_empty()).collect();
     prefixes.iter().any(|prefix| {
         let n = dir_segs.len().min(prefix.len());
@@ -539,7 +539,7 @@ pub fn parse_entity_selector(pattern: &str) -> Option<EntitySelector> {
 }
 
 /// Does `selector` select this entity?
-pub(crate) fn selector_matches(selector: &EntitySelector, id: &str, entity_type: &str) -> bool {
+pub fn selector_matches(selector: &EntitySelector, id: &str, entity_type: &str) -> bool {
     match selector {
         EntitySelector::All => true,
         EntitySelector::Type(t) => entity_type == t,
@@ -651,4 +651,4 @@ pub fn enumerate_source_artifacts_reported(
 
 /// VCS metadata directories — never source artifacts. Pruned from source
 /// enumeration (`S(D)`, mtime slices, advance) and from the dead-deny scan.
-pub(crate) const VCS_INTERNAL_DIRS: &[&str] = &[".git", ".svn", ".hg"];
+pub const VCS_INTERNAL_DIRS: &[&str] = &[".git", ".svn", ".hg"];

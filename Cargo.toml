@@ -4,6 +4,7 @@ members = [
     "crates/memstead-schema",
     "crates/memstead-base",
     "crates/memstead-git-branch",
+    "crates/memstead-projection",
     "crates/memstead-mcp",
     "crates/memstead-cli",
     "crates/memstead-wasm",
@@ -47,6 +48,7 @@ memstead-base = { path = "crates/memstead-base", version = "0.20.0" }
 memstead-mcp = { path = "crates/memstead-mcp", version = "0.20.0" }
 memstead-cli = { path = "crates/memstead-cli", version = "0.20.0" }
 memstead-git-branch = { path = "crates/memstead-git-branch", version = "0.20.0" }
+memstead-projection = { path = "crates/memstead-projection", version = "0.20.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

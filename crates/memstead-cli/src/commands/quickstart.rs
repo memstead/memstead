@@ -537,7 +537,7 @@ impl GuidedPlan {
         let pointer = if repo_abs == workspace_abs {
             ".".to_string()
         } else {
-            let rel = memstead_base::ingest::cursor::relative_to(&workspace_abs, &repo_abs);
+            let rel = memstead_projection::cursor::relative_to(&workspace_abs, &repo_abs);
             if rel.as_os_str().is_empty() {
                 ".".to_string()
             } else {
@@ -553,7 +553,7 @@ impl GuidedPlan {
             .map(|n| n.to_string_lossy().to_string())
             .and_then(|n| derive_mem_name(&n))
             .unwrap_or_else(|| mem.to_string());
-        let layout_warning = memstead_base::ingest::cursor::out_of_root_layout_warning(
+        let layout_warning = memstead_projection::cursor::out_of_root_layout_warning(
             &pointer,
             &workspace_abs,
             memstead_base::MediumType::Codebase,
@@ -1278,7 +1278,7 @@ fn report(
         let Some(cwd) = &cwd_canon else {
             return absolute_form;
         };
-        let rel = memstead_base::ingest::cursor::relative_to(cwd, &resolved)
+        let rel = memstead_projection::cursor::relative_to(cwd, &resolved)
             .to_string_lossy()
             .replace('\\', "/");
         if rel.is_empty() {

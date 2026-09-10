@@ -62,6 +62,9 @@ js-sys = "0.3"
 
 [features]
 default = []
+# Test-only accessors a downstream crate's tests need (the maintenance
+# loop's suite asserts on anchor-resolution counts); never on in a product.
+test-support = []
 # Opt-in tokio convenience: `Engine::subscribe_mem_changes_broadcast`
 # wraps the Core callback API in a `tokio::sync::broadcast::Receiver`
 # so axum-style consumers can consume events as a tokio stream without

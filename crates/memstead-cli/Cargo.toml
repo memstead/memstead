@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 memstead-base.workspace = true
 memstead-git-branch.workspace = true
+memstead-projection.workspace = true
 memstead-schema.workspace = true
 clap.workspace = true
 gix.workspace = true

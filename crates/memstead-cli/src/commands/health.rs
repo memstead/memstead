@@ -7,8 +7,8 @@
 //! and the markdown rendering.
 
 use clap::Parser;
-use memstead_base::ingest::health::compose_health;
 use memstead_base::ops::health_compose::{ComposeHealthError, HealthArgs, HealthConfig};
+use memstead_projection::health::compose_health;
 use serde_json::Value;
 
 use crate::output::{ExitKind, print_json, print_markdown};

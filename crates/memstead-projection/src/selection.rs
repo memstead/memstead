@@ -39,14 +39,14 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::Engine;
-use crate::binding::{Binding, BuildMode};
-use crate::pipeline::IngestTrigger;
-use crate::pipeline_store::BindingConfigs;
+use memstead_base::Engine;
+use memstead_base::binding::{Binding, BuildMode};
+use memstead_base::pipeline::IngestTrigger;
+use memstead_base::pipeline_store::BindingConfigs;
 
 use super::cursor::{source_moved, source_moved_since};
 use super::findings::current_findings;
-use super::resolve::{ResolvedIngest, resolve_binding_run};
+use memstead_base::binding_run::{ResolvedIngest, resolve_binding_run};
 
 /// The backoff cooldown ceiling — after this many consecutive unproductive
 /// passes the skip count stops growing. Mirrors the plugin's `MAX_SKIP_LEVEL`.
@@ -516,11 +516,11 @@ mod tests {
 
     // ── op-aware selection (pairs, eligibility, due-checks) ─────────────────
 
-    use crate::binding::{
+    use memstead_base::binding::{
         BINDING_VERSION, BuildOperation, Operations, SyncOperation, VerifyOperation, hash_binding,
     };
-    use crate::pipeline::{MediumType, PatternEntry, PatternMode, Source};
-    use crate::pipeline_store::MemPipelineRecord;
+    use memstead_base::pipeline::{MediumType, PatternEntry, PatternMode, Source};
+    use memstead_base::pipeline_store::MemPipelineRecord;
 
     use super::super::findings::{
         Finding, FindingClass, FindingKey, FindingTarget, FindingsStore, write_findings_store,

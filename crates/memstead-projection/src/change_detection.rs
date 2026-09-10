@@ -32,7 +32,7 @@
 //! **Port note.** This is a faithful port of the Claude-Code plugin's
 //! `skills/ingest/scripts/change-detection.mjs`. The one deliberate change:
 //! the `aggregate` hash uses SHA-256 (truncated to 16 hex chars), matching
-//! the engine's existing [`crate::entity::parser::compute_hash`] convention,
+//! the engine's existing [`memstead_base::entity::parser::compute_hash`] convention,
 //! where the plugin used SHA-1. The aggregate is an opaque content digest
 //! only ever compared for equality against a token produced by the same
 //! producer, so the algorithm is an internal detail — the preserved
@@ -158,7 +158,7 @@ pub fn digest_stat_map(map: &StatMap) -> Digest {
         }
         hasher.update(format!("{path}\0{}\0{}\n", entry.mtime, entry.size).as_bytes());
     }
-    let aggregate = crate::hex_lower(&hasher.finalize())[..16].to_string();
+    let aggregate = memstead_base::hex_lower(&hasher.finalize())[..16].to_string();
     Digest {
         count: map.len() as u64,
         watermark,

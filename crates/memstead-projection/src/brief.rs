@@ -16,10 +16,10 @@
 //! [`SourceCursor`]).
 
 use super::guidance::ResolvedGuidance;
-use super::resolve::{ResolvedIngest, ResolvedSource};
 use super::slice::{NoSignalReason, Slice};
-use crate::binding::BuildMode;
-use crate::pipeline::{MediumType, PatternMode};
+use memstead_base::binding::BuildMode;
+use memstead_base::binding_run::{ResolvedIngest, ResolvedSource};
+use memstead_base::pipeline::{MediumType, PatternMode};
 
 /// Per-class cap on the rendered changed slice — mirrors the plugin's
 /// `SLICE_CAP`. Beyond it a `…and N more` line stands in.
@@ -438,19 +438,19 @@ pub struct SourceCursor {
 /// One unit of a [`DeliverySequence`], as presented.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeliveredUnit {
-    /// The unit's artifact id, `<path>#<key>` ([`crate::preparation::unit_id`]).
+    /// The unit's artifact id, `<path>#<key>` ([`memstead_base::preparation::unit_id`]).
     pub id: String,
     /// The unit's intrinsic order key; the sequence sorts by it, then by id.
     pub order_key: String,
     /// How the unit changed (every unit of a first delivery is `Added`).
-    pub change: crate::preparation::UnitChange,
+    pub change: memstead_base::preparation::UnitChange,
     /// Already disposed in the binding's in-progress advance store, so it is
     /// counted but not re-presented.
     pub disposed: bool,
 }
 
 /// The ordered delivery sequence of one source under a delivery preparation
-/// (touchpoint B of [`crate::preparation`]): the same source state yields the
+/// (touchpoint B of [`memstead_base::preparation`]): the same source state yields the
 /// same sequence on every pass, first run and change run alike.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeliverySequence {
@@ -531,7 +531,7 @@ fn shell_quote(s: &str) -> String {
 /// disposed), capped at the sequence's batch with the remainder counted,
 /// never reshuffled.
 fn render_delivery_sequence(lines: &mut Vec<String>, seq: &DeliverySequence) {
-    use crate::preparation::UnitChange;
+    use memstead_base::preparation::UnitChange;
     lines.push(format!(
         "### Delivery sequence: `{}` (`{}`)\n",
         seq.source, seq.preparation
@@ -694,7 +694,7 @@ fn render_steered_entities(
         .flat_map(|e| e.mentioned.iter().map(row_text))
         .collect::<Vec<_>>()
         .join("\n");
-    let mention_cost = crate::chunking::estimate_tokens(&mention_text);
+    let mention_cost = memstead_base::chunking::estimate_tokens(&mention_text);
     let show_mentions = mention_entities.is_empty()
         || mention_cost <= budget
         || include.iter().any(|k| k == BRIEF_INCLUDE_MENTIONS);
@@ -934,8 +934,8 @@ pub fn render_anchor_instruction(resolved: &ResolvedIngest) -> String {
         .sources
         .iter()
         .filter_map(|s| match s {
-            crate::ingest::resolve::ResolvedSource::Primary(src) => Some(src.name.as_str()),
-            crate::ingest::resolve::ResolvedSource::Reference { .. } => None,
+            memstead_base::binding_run::ResolvedSource::Primary(src) => Some(src.name.as_str()),
+            memstead_base::binding_run::ResolvedSource::Reference { .. } => None,
         })
         .collect();
     if !primary_names.is_empty() {
@@ -971,26 +971,26 @@ pub fn render_anchor_instruction(resolved: &ResolvedIngest) -> String {
     // A source under a preparation hashes a PREPARED form, which no agent
     // computes by hand: say so, and say what to do instead.
     for source in &resolved.sources {
-        let crate::ingest::resolve::ResolvedSource::Primary(src) = source else {
+        let memstead_base::binding_run::ResolvedSource::Primary(src) = source else {
             continue;
         };
         let Some(prep) = src
             .preparation
             .as_deref()
-            .and_then(crate::preparation::lookup)
+            .and_then(memstead_base::preparation::lookup)
         else {
             continue;
         };
         let what = match prep.id {
-            crate::preparation::CODE_MAP => {
+            memstead_base::preparation::CODE_MAP => {
                 "the file's interface digest (imports, exports, signatures; comments, \
                  formatting and bodies invisible), and a `tree` anchor the code map of every \
                  scoped file under it"
             }
-            crate::preparation::DATED_ENTRIES => {
+            memstead_base::preparation::DATED_ENTRIES => {
                 "the unit's own text for a `<path>#<key>` span, the file's bytes otherwise"
             }
-            crate::preparation::ENTITY_LOAD_BEARING => "the entity's load-bearing sections",
+            memstead_base::preparation::ENTITY_LOAD_BEARING => "the entity's load-bearing sections",
             _ => prep.description,
         };
         block.push_str(&format!(
@@ -1007,7 +1007,7 @@ pub fn render_anchor_instruction(resolved: &ResolvedIngest) -> String {
 #[allow(clippy::too_many_arguments)]
 pub fn assemble_discovery_brief(
     resolved: &ResolvedIngest,
-    intent_findings: &[super::intent::IntentFinding],
+    intent_findings: &[memstead_base::binding_intent::IntentFinding],
     guidance: &ResolvedGuidance,
     process_mem: &ProcessMemInfo,
     destination_schema: Option<&str>,
@@ -1018,7 +1018,7 @@ pub fn assemble_discovery_brief(
     let parts = [
         render_situation(resolved, process_mem),
         render_intent(resolved),
-        super::intent::render_intent_findings(intent_findings, &resolved.name),
+        memstead_base::binding_intent::render_intent_findings(intent_findings, &resolved.name),
         render_goal_and_avoid(guidance),
         render_operative_data(
             resolved,
@@ -1143,7 +1143,7 @@ pub fn render_one_shot_lens(
 #[allow(clippy::too_many_arguments)]
 pub fn assemble_one_shot_brief(
     resolved: &ResolvedIngest,
-    intent_findings: &[super::intent::IntentFinding],
+    intent_findings: &[memstead_base::binding_intent::IntentFinding],
     guidance: &ResolvedGuidance,
     process_mem: &ProcessMemInfo,
     destination_schema: Option<&str>,
@@ -1154,7 +1154,7 @@ pub fn assemble_one_shot_brief(
     let parts = [
         render_situation(resolved, process_mem),
         render_intent(resolved),
-        super::intent::render_intent_findings(intent_findings, &resolved.name),
+        memstead_base::binding_intent::render_intent_findings(intent_findings, &resolved.name),
         render_goal_and_avoid(guidance),
         render_operative_data(
             resolved,
@@ -1416,7 +1416,7 @@ fn render_open_findings(findings: &[Finding], binding_id: &str) -> String {
 /// Render the authored-exclusion block for the sync brief: what is in force
 /// (artifact, source, rationale) and what the reconcile dropped because its
 /// source left the declaration. Empty when the ledger is empty.
-fn render_exclusions(ledger: &crate::ingest::advance::ExclusionLedger) -> String {
+fn render_exclusions(ledger: &crate::advance::ExclusionLedger) -> String {
     if ledger.active.is_empty() && ledger.dropped.is_empty() {
         return String::new();
     }
@@ -1705,7 +1705,7 @@ pub fn render_sync_brief(
     findings: &[Finding],
     prune: &[PruneProposal],
     adopt: bool,
-    exclusions: &crate::ingest::advance::ExclusionLedger,
+    exclusions: &crate::advance::ExclusionLedger,
 ) -> String {
     render_sync_brief_with(
         resolved,
@@ -1730,7 +1730,7 @@ pub fn render_sync_brief_with(
     findings: &[Finding],
     prune: &[PruneProposal],
     adopt: bool,
-    exclusions: &crate::ingest::advance::ExclusionLedger,
+    exclusions: &crate::advance::ExclusionLedger,
     steered: &SteeredEntities,
     budget: usize,
     include: &[String],
@@ -1788,8 +1788,8 @@ pub fn render_sync_brief_with(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ingest::resolve::Source;
-    use crate::pipeline::{IngestTrigger, PatternEntry};
+    use memstead_base::binding_run::Source;
+    use memstead_base::pipeline::{IngestTrigger, PatternEntry};
 
     fn guidance(goal: Option<&str>, avoid: Option<&str>) -> ResolvedGuidance {
         ResolvedGuidance {
@@ -2153,7 +2153,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         let plain = render_anchor_instruction(&resolved);
         assert!(!plain.contains("hash a prepared form"));
         if let Some(ResolvedSource::Primary(src)) = resolved.sources.first_mut() {
-            src.preparation = Some(crate::preparation::CODE_MAP.to_string());
+            src.preparation = Some(memstead_base::preparation::CODE_MAP.to_string());
         }
         let prepared = render_anchor_instruction(&resolved);
         assert!(
@@ -2171,7 +2171,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
     /// class lists (a file-level id in the same slice still lists there).
     #[test]
     fn changed_slice_renders_delivery_sequences_in_order() {
-        use crate::preparation::UnitChange;
+        use memstead_base::preparation::UnitChange;
         let unit = |id: &str, order: &str, change: UnitChange, disposed: bool| DeliveredUnit {
             id: id.to_string(),
             order_key: order.to_string(),
@@ -2555,7 +2555,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
 
     fn finding(class: FindingClass, target: FindingTarget, detail: &str) -> Finding {
         Finding {
-            key: crate::ingest::findings::FindingKey {
+            key: crate::findings::FindingKey {
                 binding_hash: "h".to_string(),
                 source_head: "s".to_string(),
             },
@@ -2680,7 +2680,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &findings,
             &[],
             false,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         // Both inputs present in one brief (C2).
         assert!(out.contains("## Source changes since the last sync"));
@@ -2712,7 +2712,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &findings,
             &[],
             false,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         // Five conservatism rules.
         assert!(out.contains("Unsure whether an entity is affected — skip it."));
@@ -2750,7 +2750,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &[],
             &[],
             true,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         assert!(out.contains("## First sync — adopting `engine`"));
         assert!(out.contains("0% anchored is expected — this is onboarding, not a failure."));
@@ -2772,7 +2772,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &[],
             &[],
             false,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         assert!(out.contains("No usable sync baseline exists for"));
         assert!(out.contains("Treating the current source state as the baseline"));
@@ -2789,7 +2789,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &[],
             &[],
             false,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         assert!(out.contains("## Nothing to sync"));
         assert!(!out.contains("## How to repair"));
@@ -2815,7 +2815,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &findings,
             &[],
             false,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         // Verify: no repair section, no repair verbs as instructions.
         assert!(!verify.contains("## How to repair"));
@@ -2850,7 +2850,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &[],
             &[],
             false,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         assert!(out.contains("## Stale claims beyond the slice — search, then judge"));
         // The search is bound to the changed facts and the destination mem.
@@ -2888,7 +2888,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &findings,
             &[],
             false,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         assert!(!out.contains(heading), "findings-only pass must not search");
 
@@ -2901,7 +2901,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &[],
             &[],
             false,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         assert!(!out.contains(heading), "reseed-only pass must not search");
 
@@ -2912,7 +2912,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &[],
             &[],
             false,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         assert!(!out.contains(heading));
     }
@@ -2937,7 +2937,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &findings,
             &[],
             false,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         assert!(out.contains("- …and 4 more"));
         // The last few beyond the cap are not rendered inline.
@@ -2987,7 +2987,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             &findings,
             &[],
             false,
-            &crate::ingest::advance::ExclusionLedger::default(),
+            &crate::advance::ExclusionLedger::default(),
         );
         let headings: Vec<&str> = out
             .lines()
@@ -3096,7 +3096,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
                 &findings,
                 &[],
                 false,
-                &crate::ingest::advance::ExclusionLedger::default(),
+                &crate::advance::ExclusionLedger::default(),
             ),
         );
         assert_clean(
@@ -3107,7 +3107,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
                 &findings,
                 &[],
                 false,
-                &crate::ingest::advance::ExclusionLedger::default(),
+                &crate::advance::ExclusionLedger::default(),
             ),
         );
         assert_clean(
@@ -3118,7 +3118,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
                 &[],
                 &[],
                 false,
-                &crate::ingest::advance::ExclusionLedger::default(),
+                &crate::advance::ExclusionLedger::default(),
             ),
         );
         assert_clean(
@@ -3129,7 +3129,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
                 &[],
                 &[],
                 true,
-                &crate::ingest::advance::ExclusionLedger::default(),
+                &crate::advance::ExclusionLedger::default(),
             ),
         );
     }

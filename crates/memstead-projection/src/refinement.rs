@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::cursor::enumerate_source_artifacts;
-use super::resolve::{ResolvedIngest, ResolvedSource};
-use crate::Engine;
+use memstead_base::Engine;
+use memstead_base::binding_run::{ResolvedIngest, ResolvedSource};
 
 /// The rotation key the verify uncovered-artifact sampler walks under. Named so
 /// independent verify samples (uncovered files, anchor spot-checks) each get
@@ -281,9 +281,9 @@ pub fn next_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::binding::BuildMode;
-    use crate::ingest::resolve::Source;
-    use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
+    use memstead_base::binding::BuildMode;
+    use memstead_base::binding_run::Source;
+    use memstead_base::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
 
     fn resolved(name: &str, batch_size: u32) -> ResolvedIngest {
         ResolvedIngest {

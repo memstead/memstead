@@ -18,11 +18,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   reads the findings store itself. The CLI's JSON and the MCP
   `structured_content` are byte-identical to before; an embedder that read
   `Engine::health()` for the unanchored-mention axis must compose through
-  the assembly instead. First step of moving the maintenance loop out of the
-  kernel crate: source-scope enumeration (`source_scope`), the deny-path
-  oracle (`check_path`), binding-run resolution (`binding_run`) and the
-  binding-intent check (`binding_intent`) are kernel modules now, each
-  re-exported under its former `ingest::` path.
+  the assembly instead.
+- **The maintenance loop is its own crate, `memstead-projection`.** What
+  `memstead_base::ingest` held (briefs, change detection, cursors, findings
+  and verify reports, the advance gate, prune proposals, refinement,
+  selection, status, the health assembly) now lives in
+  `memstead-projection`, a workspace crate above the kernel and below the
+  binaries; `memstead-base` carries no `ingest` module and no reference to
+  the loop, and the wasm build proves the kernel unchanged. The declaration
+  layer the write gate consults stays kernel and reaches the loop by name:
+  source-scope enumeration (`source_scope`), the deny-path oracle
+  (`check_path`), binding-run resolution (`binding_run`, formerly
+  `ingest::resolve`) and the binding-intent check (`binding_intent`,
+  formerly `ingest::intent`). Consumers that named `memstead_base::ingest::…`
+  name `memstead_projection::…` now; the kernel's artifact-path helpers
+  (`engine::query::{anchor_base_path, join_pointer, artifact_candidates,
+  resolve_across_sources}`) and `Engine::validate_anchor_inputs` are public
+  because the loop calls them across the crate boundary. A `test-support`
+  feature on `memstead-base` exposes the anchor-figure test accessor to a
+  downstream suite; it is never on in a product.
 
 ## [0.20.0] - 2026-09-10
 

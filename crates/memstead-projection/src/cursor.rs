@@ -33,7 +33,7 @@
 //! exemption is designed, not an omission.
 //!
 //! **One deny dialect.** A `deny_paths` entry is a **workspace-relative glob**,
-//! resolved by [`super::check_path::DenyOracle`] — the glob match plus the
+//! resolved by [`memstead_base::check_path::DenyOracle`] — the glob match plus the
 //! literal-base directory-prefix rule plus the malformed-entry fallback — the
 //! same resolver the path-check command answers with. The git strategy pushes
 //! what git's own pathspec dialect can express and filters its diff through
@@ -47,9 +47,9 @@
 //! relative to. The plugin's
 //! PreToolUse deny hook enforces the *identical* dialect against the ingest
 //! agent's Read/Glob/Grep by asking the engine itself: `projection
-//! check-path` answers through [`super::check_path::check_deny_paths`], which
+//! check-path` answers through [`memstead_base::check_path::check_deny_paths`], which
 //! reads the active binding's record fresh on every call (the pointer channel
-//! is [`super::check_path::write_active_binding_file`], published on
+//! is [`memstead_base::check_path::write_active_binding_file`], published on
 //! consuming brief renders). A deny entry that selects **no file** in
 //! the project tree is surfaced as a rendered brief warning
 //! ([`SourceCursor::dead_denies`]) rather than silently no-op'ing — catching
@@ -81,31 +81,31 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use crate::Engine;
-use crate::pipeline::{MediumType, PatternMode};
+use memstead_base::Engine;
+use memstead_base::pipeline::{MediumType, PatternMode};
 
 use super::brief::{DeliveredUnit, DeliverySequence, NoSignalNote, SourceCursor, SyncCommand};
 use super::change_detection::{
     StatMap, compute_stat_map, digest_stat_map, parse_digest_token, serialize_digest_token,
 };
-use super::resolve::{
-    ChangeStrategy, ResolvedIngest, ResolvedSource, find_git_root, resolve_change_strategy,
-};
 use super::slice::{
     NoSignalReason, Slice, SliceOutcome, graph_slice_outcome, is_git_token, mtime_slice_outcome,
 };
-use crate::pipeline::Source;
+use memstead_base::binding_run::{
+    ChangeStrategy, ResolvedIngest, ResolvedSource, find_git_root, resolve_change_strategy,
+};
+use memstead_base::pipeline::Source;
 
-// The scope-enumeration cluster lives in the kernel (`crate::source_scope`)
+// The scope-enumeration cluster lives in the kernel (`memstead_base::source_scope`)
 // since 2026-09-10; these re-exports keep every `ingest::cursor::` path.
-pub use crate::source_scope::{
+pub use memstead_base::source_scope::{
     EntitySelector, ScopeEnumeration, ScopePatternNote, enumerate_facet_files,
     enumerate_facet_files_reported, enumerate_graph_entities, enumerate_source_artifacts,
     enumerate_source_artifacts_reported, medium_base, parse_entity_selector, scope_migration_notes,
 };
 #[cfg(test)]
-pub(crate) use crate::source_scope::{allow_could_match_under, glob_literal_prefix};
-pub(crate) use crate::source_scope::{
+pub(crate) use memstead_base::source_scope::{allow_could_match_under, glob_literal_prefix};
+pub(crate) use memstead_base::source_scope::{
     build_glob_set, engine_state_denies, normalize_lexical, relative_path, selector_matches,
 };
 
@@ -131,9 +131,9 @@ pub fn relative_to(from: &Path, to: &Path) -> PathBuf {
 pub fn out_of_root_layout_warning(
     pointer: &str,
     workspace_root: &Path,
-    medium_type: crate::pipeline::MediumType,
+    medium_type: memstead_base::pipeline::MediumType,
 ) -> Option<String> {
-    use crate::pipeline::MediumType;
+    use memstead_base::pipeline::MediumType;
     if !matches!(medium_type, MediumType::Codebase | MediumType::Filesystem) {
         return None;
     }
@@ -383,7 +383,7 @@ fn compute_git_slice(
     // is what makes deny enforcement genuinely strategy-invariant — before
     // this, a `broken[` entry excluded a file from `S(D)` and left it in the
     // git slice.
-    let ws_oracle = super::check_path::DenyOracle::new(
+    let ws_oracle = memstead_base::check_path::DenyOracle::new(
         &ws_denies
             .iter()
             .map(|d| (*d).to_string())
@@ -465,7 +465,7 @@ fn filter_graph_slice_to_scope(engine: &Engine, source: &Source, slice: &mut Sli
     let type_of = |id: &str| {
         engine
             .store()
-            .get(&crate::entity::EntityId::canonical(id))
+            .get(&memstead_base::entity::EntityId::canonical(id))
             .map(|e| e.entity_type.clone())
     };
     slice
@@ -650,7 +650,7 @@ fn walk_tree_bounded(base: &Path, workspace_root: &Path, cap: usize) -> Option<V
 /// root (so a cross-medium workspace-relative deny like `../dev/**`, whose
 /// target lives outside a sub-medium, still resolves against real files),
 /// falling back to the workspace root. Answers through the *same*
-/// [`super::check_path::DenyOracle`] the strategies and the path-check command
+/// [`memstead_base::check_path::DenyOracle`] the strategies and the path-check command
 /// use, so "does this deny select anything" is decided by the resolution that
 /// actually enforces it — including the literal-base directory-prefix rule and
 /// the malformed-entry fallback. Answering with the raw glob alone told an
@@ -661,7 +661,7 @@ fn walk_tree_bounded(base: &Path, workspace_root: &Path, cap: usize) -> Option<V
 /// ever raised on a confirmed zero-match.
 ///
 /// The scaffold's own default hygiene entries
-/// ([`crate::binding::DEFAULT_SCAFFOLD_DENY_PATHS`]) are exempt: `projection
+/// ([`memstead_base::binding::DEFAULT_SCAFFOLD_DENY_PATHS`]) are exempt: `projection
 /// init` writes them into every codebase/filesystem binding, and most trees
 /// carry none of the debris they name. The exemption is a membership check
 /// against that constant, not a prediction about what the enumerator walks —
@@ -680,10 +680,10 @@ fn dead_deny_entries(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<St
     };
     let mut dead: Vec<String> = Vec::new();
     for entry in &resolved.deny_paths {
-        if crate::binding::DEFAULT_SCAFFOLD_DENY_PATHS.contains(&entry.as_str()) {
+        if memstead_base::binding::DEFAULT_SCAFFOLD_DENY_PATHS.contains(&entry.as_str()) {
             continue;
         }
-        let oracle = super::check_path::DenyOracle::new(std::slice::from_ref(entry));
+        let oracle = memstead_base::check_path::DenyOracle::new(std::slice::from_ref(entry));
         if oracle.is_empty() {
             // An empty entry resolves to nothing either way — not a confirmed
             // zero-match, so it is not reported here.
@@ -916,29 +916,30 @@ pub fn compute_source_cursor(
                 // delivers units in its own total order instead of files. A
                 // source declaring none keeps the file-granularity outcome
                 // computed above, byte-for-byte.
-                let outcome =
-                    match crate::preparation::delivery_preparation(p.preparation.as_deref()) {
-                        Some(prep)
-                            if matches!(
-                                p.medium_type,
-                                MediumType::Codebase | MediumType::Filesystem | MediumType::Git
-                            ) =>
-                        {
-                            let (outcome, sequence) = deliver_units(
-                                p,
-                                prep.id,
-                                &resolved.deny_paths,
-                                workspace_root,
-                                baseline,
-                                resolved.batch_size as usize,
-                                disposed_units(),
-                                outcome,
-                            );
-                            delivery.extend(sequence);
-                            outcome
-                        }
-                        _ => outcome,
-                    };
+                let outcome = match memstead_base::preparation::delivery_preparation(
+                    p.preparation.as_deref(),
+                ) {
+                    Some(prep)
+                        if matches!(
+                            p.medium_type,
+                            MediumType::Codebase | MediumType::Filesystem | MediumType::Git
+                        ) =>
+                    {
+                        let (outcome, sequence) = deliver_units(
+                            p,
+                            prep.id,
+                            &resolved.deny_paths,
+                            workspace_root,
+                            baseline,
+                            resolved.batch_size as usize,
+                            disposed_units(),
+                            outcome,
+                        );
+                        delivery.extend(sequence);
+                        outcome
+                    }
+                    _ => outcome,
+                };
                 (p.name.clone(), outcome)
             }
             ResolvedSource::Reference { mem } => {
@@ -1261,7 +1262,7 @@ pub fn steered_entities(
         .iter()
         .chain(slice.modified.iter())
         .chain(slice.deleted.iter())
-        .map(|a| crate::preparation::split_unit_id(a).0.to_string())
+        .map(|a| memstead_base::preparation::split_unit_id(a).0.to_string())
         .collect();
     artifacts.sort();
     artifacts.dedup();
@@ -1303,7 +1304,7 @@ pub fn steered_entities(
         }
         let eid = entity.id.to_string();
         for (section, body) in &entity.sections {
-            let masked = crate::markdown::mask_code_blocks(body);
+            let masked = memstead_base::markdown::mask_code_blocks(body);
             let mut hits: Vec<(String, MentionKind)> = Vec::new();
             for token in path_tokens(&masked) {
                 if let Some(artifact) = resolve_mention(&token, &pointers, &artifact_set) {
@@ -1366,7 +1367,7 @@ pub fn steered_entities(
 /// it was collected.
 pub(crate) fn sequence_units(units: &mut Vec<DeliveredUnit>) {
     fn rank(id: &str) -> (&str, u64, &str) {
-        let (path, key) = crate::preparation::split_unit_id(id);
+        let (path, key) = memstead_base::preparation::split_unit_id(id);
         let key = key.unwrap_or("");
         let ordinal = key
             .rsplit_once('.')
@@ -1401,7 +1402,7 @@ fn deliver_units(
     disposed: &BTreeSet<String>,
     outcome: SliceOutcome,
 ) -> (SliceOutcome, Option<DeliverySequence>) {
-    use crate::preparation::{DeliveryUnit, UnitChange, diff_units, unit_id, unitize};
+    use memstead_base::preparation::{DeliveryUnit, UnitChange, diff_units, unit_id, unitize};
 
     let units_of =
         |text: &str| -> Vec<DeliveryUnit> { unitize(preparation, text).unwrap_or_default() };
@@ -1580,8 +1581,8 @@ mod tests {
         );
     }
 
-    use crate::ingest::resolve::Source;
-    use crate::pipeline::{MediumType, PatternEntry};
+    use memstead_base::binding_run::Source;
+    use memstead_base::pipeline::{MediumType, PatternEntry};
 
     fn git(repo: &Path, args: &[&str]) {
         let status = std::process::Command::new("git")
@@ -1613,7 +1614,7 @@ mod tests {
     }
 
     /// One dialect, one implementation: the SAME entry list must exclude the
-    /// SAME files from an engine slice as [`super::check_path::check_deny_paths`]
+    /// SAME files from an engine slice as [`memstead_base::check_path::check_deny_paths`]
     /// denies. Successor to the retired cross-boundary fixture test that
     /// pinned the engine against the plugin's JS dialect clone — both callers
     /// now run engine code, and this test keeps the two engine consumers
@@ -1674,7 +1675,7 @@ mod tests {
         // the dialect can never drift apart silently.
         let all: Vec<String> = blocked.iter().chain(allowed.iter()).cloned().collect();
         let checks =
-            super::super::check_path::check_deny_paths(&entries, &all, ws.path(), ws.path());
+            memstead_base::check_path::check_deny_paths(&entries, &all, ws.path(), ws.path());
         for c in &checks {
             let expect = blocked.contains(&c.path);
             assert_eq!(
@@ -2037,7 +2038,7 @@ mod tests {
         );
 
         // The same entries, answered by the hook's own surface.
-        let verdicts = super::super::check_path::check_deny_paths(
+        let verdicts = memstead_base::check_path::check_deny_paths(
             &denies,
             &[
                 "bare/f.rs".to_string(),
@@ -2063,15 +2064,15 @@ mod tests {
     /// path-check command both proved it working.
     #[test]
     fn the_dead_deny_lint_agrees_with_the_resolution_that_enforces() {
-        use crate::binding::BuildMode;
-        use crate::pipeline::IngestTrigger;
+        use memstead_base::binding::BuildMode;
+        use memstead_base::pipeline::IngestTrigger;
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join("bare")).unwrap();
         std::fs::write(root.join("bare/f.md"), "").unwrap();
         std::fs::write(root.join("keep.md"), "").unwrap();
 
-        let live = super::super::check_path::DenyOracle::new(&["bare".to_string()]);
+        let live = memstead_base::check_path::DenyOracle::new(&["bare".to_string()]);
         assert!(
             live.is_denied("bare/f.md"),
             "the enforcing resolution blocks a bare name by its literal base"
@@ -2207,21 +2208,22 @@ mod tests {
     /// records written before this gate existed.
     #[test]
     fn validation_refuses_a_malformed_scope_pattern_by_name() {
-        use crate::binding::CapabilityError;
-        let mut binding = crate::binding::scaffold_binding(crate::binding::ScaffoldParams {
-            destination_mem: "home",
-            source_name: "src",
-            medium_type: MediumType::Codebase,
-            pointer: "src",
-            intent: None,
-            additional_deny_paths: Vec::new(),
-        })
-        .binding;
+        use memstead_base::binding::CapabilityError;
+        let mut binding =
+            memstead_base::binding::scaffold_binding(memstead_base::binding::ScaffoldParams {
+                destination_mem: "home",
+                source_name: "src",
+                medium_type: MediumType::Codebase,
+                pointer: "src",
+                intent: None,
+                additional_deny_paths: Vec::new(),
+            })
+            .binding;
         binding.sources[0].scope.push(PatternEntry {
             path: "[unclosed".to_string(),
             mode: PatternMode::Allow,
         });
-        let errs = crate::binding::validate_binding(&binding).unwrap_err();
+        let errs = memstead_base::binding::validate_binding(&binding).unwrap_err();
         assert!(
             errs.iter().any(|e| matches!(
                 e,
@@ -2360,10 +2362,10 @@ mod tests {
     /// measurement that never happened.
     #[test]
     fn graph_enumeration_selects_the_source_mems_entities() {
-        use crate::workspace::{
+        use memstead_base::workspace::{
             Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
         };
-        use crate::workspace_store::WorkspaceStoreAdapter;
+        use memstead_base::workspace_store::WorkspaceStoreAdapter;
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -2392,7 +2394,7 @@ mod tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -2412,7 +2414,7 @@ mod tests {
             )
             .unwrap();
 
-        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
 
         let graph_source = |patterns: Vec<(&str, PatternMode)>| Source {
             name: "g".to_string(),
@@ -2421,7 +2423,7 @@ mod tests {
             change_detection: None,
             scope: patterns
                 .into_iter()
-                .map(|(p, mode)| crate::pipeline::PatternEntry {
+                .map(|(p, mode)| memstead_base::pipeline::PatternEntry {
                     path: p.to_string(),
                     mode,
                 })
@@ -2498,14 +2500,14 @@ mod tests {
     /// structurally undetectable while the matrix claimed full parity.
     #[test]
     fn a_stale_entity_anchor_over_a_changed_entity_is_drifted() {
-        use crate::anchor::{
+        use memstead_base::anchor::{
             Anchor, AnchorGrain, AnchorProvenanceClass, AnchorSidecar, AnchorState,
         };
-        use crate::entity::EntityId;
-        use crate::workspace::{
+        use memstead_base::entity::EntityId;
+        use memstead_base::workspace::{
             Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
         };
-        use crate::workspace_store::WorkspaceStoreAdapter;
+        use memstead_base::workspace_store::WorkspaceStoreAdapter;
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -2533,7 +2535,7 @@ mod tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -2554,11 +2556,11 @@ mod tests {
             .unwrap();
 
         // Hash the entities as they stand, so the anchors start out honest.
-        let engine = crate::Engine::from_workspace_root(root).unwrap();
-        let hash_of = |engine: &crate::Engine, id: &str| {
+        let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
+        let hash_of = |engine: &memstead_base::Engine, id: &str| {
             let e = engine.store().get(&EntityId::canonical(id)).unwrap();
-            crate::anchor::prepared_content_hash(
-                crate::render::render_entity_markdown(e, None).as_bytes(),
+            memstead_base::anchor::prepared_content_hash(
+                memstead_base::render::render_entity_markdown(e, None).as_bytes(),
             )
         };
         let pinned_hash = hash_of(&engine, "mem--pinned");
@@ -2573,7 +2575,7 @@ mod tests {
             binding: None,
             at_version: None,
             derived_from: Vec::new(),
-            hash_stability: crate::anchor::AnchorHashStability::Stable,
+            hash_stability: memstead_base::anchor::AnchorHashStability::Stable,
             span_unvalidated: false,
             hash_source: None,
             last_observed: None,
@@ -2607,7 +2609,7 @@ mod tests {
         )
         .unwrap();
 
-        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
         let resolved = engine.entity_anchors_resolved(&EntityId::canonical("mem--holder"));
         let state_of = |artifact: &str| {
             resolved
@@ -2648,7 +2650,7 @@ mod tests {
                 binding: None,
                 at_version: None,
                 derived_from: Vec::new(),
-                hash_stability: crate::anchor::AnchorHashStability::Stable,
+                hash_stability: memstead_base::anchor::AnchorHashStability::Stable,
                 span_unvalidated: false,
                 hash_source: None,
                 last_observed: None,
@@ -2659,7 +2661,7 @@ mod tests {
             sc2.to_bytes(),
         )
         .unwrap();
-        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
         let url_state =
             engine.entity_anchors_resolved(&EntityId::canonical("mem--holder"))[0].state;
         assert_eq!(
@@ -2680,18 +2682,20 @@ mod tests {
     /// by hand computes no form: its anchors stay unobserved, never scored.
     #[test]
     fn entity_load_bearing_preparation_ignores_notes_edits_and_catches_claim_edits() {
-        use crate::anchor::{
+        use memstead_base::anchor::{
             Anchor, AnchorGrain, AnchorProvenanceClass, AnchorSidecar, AnchorState,
         };
-        use crate::binding::{
+        use memstead_base::binding::{
             BINDING_VERSION, Binding, BuildMode, BuildOperation, Operations, VerifyOperation,
         };
-        use crate::entity::EntityId;
-        use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode, Source};
-        use crate::workspace::{
+        use memstead_base::entity::EntityId;
+        use memstead_base::pipeline::{
+            IngestTrigger, MediumType, PatternEntry, PatternMode, Source,
+        };
+        use memstead_base::workspace::{
             Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
         };
-        use crate::workspace_store::WorkspaceStoreAdapter;
+        use memstead_base::workspace_store::WorkspaceStoreAdapter;
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -2728,7 +2732,7 @@ mod tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -2788,14 +2792,15 @@ mod tests {
                 }),
             },
         };
-        let prepared_binding = binding_with(Some(crate::preparation::ENTITY_LOAD_BEARING));
-        assert!(crate::binding::validate_binding(&prepared_binding).is_ok());
-        crate::pipeline_store::write_binding(root, "home", "claims", &prepared_binding).unwrap();
+        let prepared_binding = binding_with(Some(memstead_base::preparation::ENTITY_LOAD_BEARING));
+        assert!(memstead_base::binding::validate_binding(&prepared_binding).is_ok());
+        memstead_base::pipeline_store::write_binding(root, "home", "claims", &prepared_binding)
+            .unwrap();
 
         // Record both anchors honestly against the entity as it stands: one
         // produced by the `claims` source (prepared form), one hand-authored
         // (no source: the default form, the canonical rendered markdown).
-        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
         let pinned = engine
             .store()
             .get(&EntityId::canonical("home--pinned"))
@@ -2805,20 +2810,21 @@ mod tests {
             .and_then(|s| s.get_type("assertion"))
             .expect("default@1.0.0 declares assertion");
         assert!(
-            crate::preparation::load_bearing_sections(&type_def)
+            memstead_base::preparation::load_bearing_sections(&type_def)
                 .iter()
                 .map(|s| s.key.as_str())
                 .eq(["claim", "evidence"]),
             "the required sections are the load-bearing set"
         );
-        let prepared_hash = crate::preparation::entity_prepared_hash(
+        let prepared_hash = memstead_base::preparation::entity_prepared_hash(
             pinned,
             Some(&type_def),
-            Some(crate::preparation::ENTITY_LOAD_BEARING),
+            Some(memstead_base::preparation::ENTITY_LOAD_BEARING),
         )
         .unwrap();
         let default_hash =
-            crate::preparation::entity_prepared_hash(pinned, Some(&type_def), None).unwrap();
+            memstead_base::preparation::entity_prepared_hash(pinned, Some(&type_def), None)
+                .unwrap();
         assert_ne!(prepared_hash, default_hash);
 
         let anchor = |source: Option<&str>, hash: &str| Anchor {
@@ -2830,7 +2836,7 @@ mod tests {
             binding: None,
             at_version: None,
             derived_from: Vec::new(),
-            hash_stability: crate::anchor::AnchorHashStability::Stable,
+            hash_stability: memstead_base::anchor::AnchorHashStability::Stable,
             span_unvalidated: false,
             hash_source: None,
             last_observed: None,
@@ -2852,7 +2858,7 @@ mod tests {
         .unwrap();
 
         let states = |root: &std::path::Path| {
-            let engine = crate::Engine::from_workspace_root(root).unwrap();
+            let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
             let state_of = |holder: &str| {
                 engine.entity_anchors_resolved(&EntityId::canonical(holder))[0].state
             };
@@ -2902,7 +2908,7 @@ mod tests {
         // Complement: a hand-edited record naming an identifier the registry
         // does not know computes no form — its anchors are unobserved, never
         // scored as drift or resolution; the source-less anchor is unaffected.
-        crate::pipeline_store::write_binding(
+        memstead_base::pipeline_store::write_binding(
             root,
             "home",
             "claims",
@@ -2930,7 +2936,7 @@ mod tests {
     /// shuffled collection sorts into the identical sequence.
     #[test]
     fn shuffled_discovery_sequences_identically() {
-        use crate::preparation::UnitChange;
+        use memstead_base::preparation::UnitChange;
         let unit = |id: &str, order: &str| DeliveredUnit {
             id: id.to_string(),
             order_key: order.to_string(),
@@ -2987,22 +2993,22 @@ mod tests {
     /// the file.
     #[test]
     fn dated_entries_deliver_in_a_total_order_across_first_and_change_runs() {
-        use crate::anchor::{
+        use crate::advance::{DispositionInput, advance_baseline};
+        use crate::brief::render_changed_slice;
+        use memstead_base::anchor::{
             Anchor, AnchorGrain, AnchorProvenanceClass, AnchorSidecar, AnchorState,
         };
-        use crate::binding::{
+        use memstead_base::binding::{
             BINDING_VERSION, Binding, BuildMode, BuildOperation, Operations, VerifyOperation,
         };
-        use crate::entity::EntityId;
-        use crate::ingest::advance::{DispositionInput, advance_baseline};
-        use crate::ingest::brief::render_changed_slice;
-        use crate::ingest::resolve::resolve_binding_run;
-        use crate::pipeline::{IngestTrigger, PatternMode};
-        use crate::preparation::{DATED_ENTRIES, UnitChange, unitize};
-        use crate::workspace::{
+        use memstead_base::binding_run::resolve_binding_run;
+        use memstead_base::entity::EntityId;
+        use memstead_base::pipeline::{IngestTrigger, PatternMode};
+        use memstead_base::preparation::{DATED_ENTRIES, UnitChange, unitize};
+        use memstead_base::workspace::{
             Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
         };
-        use crate::workspace_store::WorkspaceStoreAdapter;
+        use memstead_base::workspace_store::WorkspaceStoreAdapter;
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -3027,7 +3033,7 @@ mod tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -3109,15 +3115,15 @@ mod tests {
             },
         };
         assert!(
-            crate::binding::validate_binding(&binding).is_ok(),
+            memstead_base::binding::validate_binding(&binding).is_ok(),
             "{:?}",
-            crate::binding::validate_binding(&binding)
+            memstead_base::binding::validate_binding(&binding)
         );
-        crate::pipeline_store::write_binding(root, "home", "corpus", &binding).unwrap();
+        memstead_base::pipeline_store::write_binding(root, "home", "corpus", &binding).unwrap();
         let resolved = resolve_binding_run("home/corpus", &binding).unwrap();
 
         // ---- First run: every unit, in stamp order, interleaved across files.
-        let mut engine = crate::Engine::from_workspace_root(root).unwrap();
+        let mut engine = memstead_base::Engine::from_workspace_root(root).unwrap();
         let cursor = compute_source_cursor(&engine, &resolved, root);
         let expected: Vec<&str> = vec![
             "corpus/notes.md#whole",
@@ -3239,13 +3245,14 @@ mod tests {
             binding: None,
             at_version: None,
             derived_from: Vec::new(),
-            hash_stability: crate::anchor::AnchorHashStability::Stable,
+            hash_stability: memstead_base::anchor::AnchorHashStability::Stable,
             span_unvalidated: false,
             hash_source: None,
             last_observed: None,
         };
-        let b_file_hash =
-            crate::anchor::prepared_content_hash(&std::fs::read(corpus.join("b.md")).unwrap());
+        let b_file_hash = memstead_base::anchor::prepared_content_hash(
+            &std::fs::read(corpus.join("b.md")).unwrap(),
+        );
         let mut sidecar = AnchorSidecar::default();
         sidecar.set(
             "home--holder",
@@ -3259,7 +3266,7 @@ mod tests {
             sidecar.to_bytes(),
         )
         .unwrap();
-        let mut engine = crate::Engine::from_workspace_root(root).unwrap();
+        let mut engine = memstead_base::Engine::from_workspace_root(root).unwrap();
         let outcome = advance_baseline(&mut engine, root, &resolved, &BTreeMap::new()).unwrap();
         assert_eq!(
             outcome.pending, 2,
@@ -3294,7 +3301,7 @@ mod tests {
         write("b.md", "2026-08-22 beta two\nbody b2, revised\n");
         git(&corpus, &["add", "."]);
         git(&corpus, &["commit", "-q", "-m", "grow, edit, remove"]);
-        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
         let cursor = compute_source_cursor(&engine, &resolved, root);
         let seq = &cursor.delivery[0];
         assert!(!seq.first_run && !seq.degraded);
@@ -3338,7 +3345,7 @@ mod tests {
             sidecar.to_bytes(),
         )
         .unwrap();
-        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
         let resolved_anchors = engine.entity_anchors_resolved(&EntityId::canonical("home--holder"));
         let state_of = |artifact: &str| {
             resolved_anchors
@@ -3375,20 +3382,20 @@ mod tests {
     /// code-map source records the digest hash, never the raw one.
     #[test]
     fn code_map_anchors_drift_on_interface_changes_only() {
-        use crate::anchor::{
+        use memstead_base::anchor::{
             Anchor, AnchorGrain, AnchorInput, AnchorProvenanceClass, AnchorSidecar, AnchorState,
         };
-        use crate::binding::{
+        use memstead_base::binding::{
             BINDING_VERSION, Binding, BuildMode, BuildOperation, Operations, VerifyOperation,
         };
-        use crate::entity::EntityId;
-        use crate::ingest::resolve::Source;
-        use crate::pipeline::{IngestTrigger, PatternMode};
-        use crate::preparation::{CODE_MAP, code_map_digest, code_map_tree_digest};
-        use crate::workspace::{
+        use memstead_base::binding_run::Source;
+        use memstead_base::entity::EntityId;
+        use memstead_base::pipeline::{IngestTrigger, PatternMode};
+        use memstead_base::preparation::{CODE_MAP, code_map_digest, code_map_tree_digest};
+        use memstead_base::workspace::{
             Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
         };
-        use crate::workspace_store::WorkspaceStoreAdapter;
+        use memstead_base::workspace_store::WorkspaceStoreAdapter;
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -3411,7 +3418,7 @@ mod tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -3486,18 +3493,18 @@ mod tests {
                 }),
             },
         };
-        assert!(crate::binding::validate_binding(&binding).is_ok());
-        crate::pipeline_store::write_binding(root, "home", "code", &binding).unwrap();
+        assert!(memstead_base::binding::validate_binding(&binding).is_ok());
+        memstead_base::pipeline_store::write_binding(root, "home", "code", &binding).unwrap();
 
         let digest_hash = |rel: &str, text: &str| {
-            crate::anchor::prepared_content_hash(code_map_digest(rel, text).as_bytes())
+            memstead_base::anchor::prepared_content_hash(code_map_digest(rel, text).as_bytes())
         };
         let tree_hash = |files: &[(&str, &str)]| {
             let owned: Vec<(String, String)> = files
                 .iter()
                 .map(|(p, t)| (p.to_string(), t.to_string()))
                 .collect();
-            crate::anchor::prepared_content_hash(code_map_tree_digest(&owned).as_bytes())
+            memstead_base::anchor::prepared_content_hash(code_map_tree_digest(&owned).as_bytes())
         };
         let anchor = |artifact: &str, grain: AnchorGrain, source: &str, hash: &str| Anchor {
             artifact: artifact.to_string(),
@@ -3508,14 +3515,14 @@ mod tests {
             binding: None,
             at_version: None,
             derived_from: Vec::new(),
-            hash_stability: crate::anchor::AnchorHashStability::Stable,
+            hash_stability: memstead_base::anchor::AnchorHashStability::Stable,
             span_unvalidated: false,
             hash_source: None,
             last_observed: None,
         };
-        let plain_raw = crate::anchor::prepared_content_hash(b"export const N = 1\n");
-        let plain_tree = crate::anchor::prepared_content_hash(
-            crate::preparation::plain_tree_digest(&[(
+        let plain_raw = memstead_base::anchor::prepared_content_hash(b"export const N = 1\n");
+        let plain_tree = memstead_base::anchor::prepared_content_hash(
+            memstead_base::preparation::plain_tree_digest(&[(
                 "corpus/plain/notes.js".to_string(),
                 b"export const N = 1\n".to_vec(),
             )])
@@ -3559,7 +3566,7 @@ mod tests {
         .unwrap();
 
         let states = |root: &std::path::Path| {
-            let engine = crate::Engine::from_workspace_root(root).unwrap();
+            let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
             let resolved = engine.entity_anchors_resolved(&EntityId::canonical("home--holder"));
             let of = |artifact: &str| {
                 let r = resolved
@@ -3666,7 +3673,7 @@ mod tests {
         );
 
         // Write time: `content` on a code-map source records the digest hash.
-        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
         let input = AnchorInput {
             artifact: Some("corpus/src/b.js".to_string()),
             grain: Some("file".to_string()),
@@ -3682,7 +3689,7 @@ mod tests {
         );
         assert_ne!(
             validated[0].hash.as_deref(),
-            Some(crate::anchor::prepared_content_hash(B.as_bytes()).as_str())
+            Some(memstead_base::anchor::prepared_content_hash(B.as_bytes()).as_str())
         );
         let plain_input = AnchorInput {
             artifact: Some("corpus/plain/notes.js".to_string()),
@@ -3712,7 +3719,7 @@ mod tests {
     /// unscoped graph facet silently proceeded.
     #[test]
     fn graph_scoping_changes_only_the_unscoped_arm() {
-        use crate::binding::BuildMode;
+        use memstead_base::binding::BuildMode;
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -3735,11 +3742,11 @@ mod tests {
         )
         .unwrap();
         {
-            use crate::workspace::{
+            use memstead_base::workspace::{
                 Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
             };
-            use crate::workspace_store::WorkspaceStoreAdapter;
-            crate::FileWorkspaceStore::new()
+            use memstead_base::workspace_store::WorkspaceStoreAdapter;
+            memstead_base::FileWorkspaceStore::new()
                 .save_state(
                     root,
                     &Workspace {
@@ -3759,12 +3766,12 @@ mod tests {
                 )
                 .unwrap();
         }
-        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
 
-        let resolved_with = |scope: Vec<crate::pipeline::PatternEntry>| ResolvedIngest {
+        let resolved_with = |scope: Vec<memstead_base::pipeline::PatternEntry>| ResolvedIngest {
             name: "srcmem/p".to_string(),
             mode: BuildMode::Discovery,
-            trigger: crate::pipeline::IngestTrigger::Manual,
+            trigger: memstead_base::pipeline::IngestTrigger::Manual,
             batch_size: 20,
             deny_paths: Vec::new(),
             projection_ref: "srcmem/p".to_string(),
@@ -3787,7 +3794,7 @@ mod tests {
 
         let scoped = compute_source_cursor(
             &engine,
-            &resolved_with(vec![crate::pipeline::PatternEntry {
+            &resolved_with(vec![memstead_base::pipeline::PatternEntry {
                 path: "*".to_string(),
                 mode: PatternMode::Allow,
             }]),
@@ -3828,7 +3835,7 @@ mod tests {
             medium_type: medium,
             pointer: ".".to_string(),
             change_detection: None,
-            scope: vec![crate::pipeline::PatternEntry {
+            scope: vec![memstead_base::pipeline::PatternEntry {
                 path: "**/*.rs".to_string(),
                 mode: PatternMode::Allow,
             }],
@@ -3849,7 +3856,7 @@ mod tests {
                  enumerable with a path namespace must actually enumerate"
             );
             assert!(
-                crate::binding::medium_capabilities(medium).enumerable,
+                memstead_base::binding::medium_capabilities(medium).enumerable,
                 "{medium:?} claims enumerability, and now delivers it"
             );
         }
@@ -3864,10 +3871,10 @@ mod tests {
     /// the defect this pins closed.
     #[test]
     fn a_narrowing_selector_bounds_the_changed_slice_too() {
-        use crate::workspace::{
+        use memstead_base::workspace::{
             Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
         };
-        use crate::workspace_store::WorkspaceStoreAdapter;
+        use memstead_base::workspace_store::WorkspaceStoreAdapter;
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -3893,7 +3900,7 @@ mod tests {
             "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
         )
         .unwrap();
-        crate::FileWorkspaceStore::new()
+        memstead_base::FileWorkspaceStore::new()
             .save_state(
                 root,
                 &Workspace {
@@ -3912,14 +3919,14 @@ mod tests {
                 },
             )
             .unwrap();
-        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let engine = memstead_base::Engine::from_workspace_root(root).unwrap();
 
         let source = Source {
             name: "g".to_string(),
             medium_type: MediumType::Graph,
             pointer: "srcmem".to_string(),
             change_detection: None,
-            scope: vec![crate::pipeline::PatternEntry {
+            scope: vec![memstead_base::pipeline::PatternEntry {
                 path: "type:decision".to_string(),
                 mode: PatternMode::Allow,
             }],
@@ -3958,7 +3965,7 @@ mod tests {
             deleted: Vec::new(),
         };
         let mut all = source.clone();
-        all.scope = vec![crate::pipeline::PatternEntry {
+        all.scope = vec![memstead_base::pipeline::PatternEntry {
             path: "*".to_string(),
             mode: PatternMode::Allow,
         }];
@@ -4080,9 +4087,9 @@ mod tests {
     /// file tree.
     #[test]
     fn deny_paths_excluded_from_every_strategy_and_token() {
-        use crate::binding::BuildMode;
-        use crate::ingest::refinement::next_batch;
-        use crate::pipeline::IngestTrigger;
+        use crate::refinement::next_batch;
+        use memstead_base::binding::BuildMode;
+        use memstead_base::pipeline::IngestTrigger;
 
         let repo = tempfile::tempdir().unwrap();
         let root = repo.path();
@@ -4182,7 +4189,7 @@ mod tests {
             rules: None,
             post_actions: None,
         };
-        let engine = crate::Engine::from_mounts(Vec::new()).unwrap();
+        let engine = memstead_base::Engine::from_mounts(Vec::new()).unwrap();
         let batch = next_batch(&engine, &resolved, root, &cache, 20).unwrap();
         assert!(
             batch.files.contains(&"keep.rs".to_string()),
@@ -4269,9 +4276,9 @@ mod tests {
     /// refinement batch — the refusal, not a silent empty batch.
     #[test]
     fn unscoped_facet_emits_no_refinement_batch() {
-        use crate::binding::BuildMode;
-        use crate::ingest::refinement::next_batch;
-        use crate::pipeline::IngestTrigger;
+        use crate::refinement::next_batch;
+        use memstead_base::binding::BuildMode;
+        use memstead_base::pipeline::IngestTrigger;
 
         let ws = tempfile::tempdir().unwrap();
         let root = ws.path();
@@ -4296,7 +4303,7 @@ mod tests {
         };
         assert!(
             next_batch(
-                &crate::Engine::from_mounts(Vec::new()).unwrap(),
+                &memstead_base::Engine::from_mounts(Vec::new()).unwrap(),
                 &resolved,
                 root,
                 &cache,
@@ -4314,10 +4321,10 @@ mod tests {
     /// unscoped reason distinctly.
     #[test]
     fn compute_source_cursor_notes_no_signal_reasons() {
-        use crate::binding::BuildMode;
-        use crate::pipeline::IngestTrigger;
+        use memstead_base::binding::BuildMode;
+        use memstead_base::pipeline::IngestTrigger;
 
-        let engine = crate::Engine::from_mounts(Vec::new()).unwrap();
+        let engine = memstead_base::Engine::from_mounts(Vec::new()).unwrap();
         // No `.git` over the workspace → mtime strategy for `auto`/`mtime`.
         let ws = tempfile::tempdir().unwrap();
         let root = ws.path();
@@ -4381,7 +4388,7 @@ mod tests {
         assert!(cursor.reseed.iter().any(|c| c.key == "ing/watched#synced"));
 
         // The rendered preface names signal:none and the unscoped reason.
-        let out = crate::ingest::brief::render_changed_slice(&cursor);
+        let out = crate::brief::render_changed_slice(&cursor);
         assert!(out.contains("- `plan`: `signal:none`"));
         assert!(out.contains("- `blind`: unscoped facet"));
     }
@@ -4557,8 +4564,8 @@ mod tests {
     /// matches stays silent.
     #[test]
     fn dead_deny_lint_exempts_scaffold_defaults_but_not_user_typos() {
-        use crate::binding::{BuildMode, DEFAULT_SCAFFOLD_DENY_PATHS};
-        use crate::pipeline::IngestTrigger;
+        use memstead_base::binding::{BuildMode, DEFAULT_SCAFFOLD_DENY_PATHS};
+        use memstead_base::pipeline::IngestTrigger;
 
         let repo = tempfile::tempdir().unwrap();
         let root = repo.path();

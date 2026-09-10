@@ -11,21 +11,23 @@
 
 use std::path::Path;
 
-use crate::Engine;
-use crate::binding::{Binding, BuildMode};
-use crate::pipeline_store::{BindingConfigs, load_pipeline_configs};
+use memstead_base::Engine;
+use memstead_base::binding::{Binding, BuildMode};
+use memstead_base::pipeline_store::{BindingConfigs, load_pipeline_configs};
 
 use super::brief::{
     ProcessMemInfo, assemble_discovery_brief, assemble_one_shot_brief, render_changed_slice,
     render_sync_brief_with, render_verify_brief,
 };
-use super::check_path::write_active_binding_file;
 use super::cursor::compute_source_cursor;
 use super::findings::{FindingClass, current_findings};
 use super::guidance::{GuidanceDefaults, MemGuidance, ResolvedGuidance, resolve_writing_guidance};
-use super::intent::{binding_intent_findings, render_intent_findings};
 use super::prune::prune_proposals;
-use super::resolve::{ResolveError, ResolvedIngest, ResolvedSource, resolve_binding_run};
+use memstead_base::binding_intent::{binding_intent_findings, render_intent_findings};
+use memstead_base::binding_run::{
+    ResolveError, ResolvedIngest, ResolvedSource, resolve_binding_run,
+};
+use memstead_base::check_path::write_active_binding_file;
 
 /// Why [`render_ingest_brief`] could not produce a brief.
 #[derive(Debug, thiserror::Error)]
@@ -61,9 +63,9 @@ pub enum RenderBriefError {
 }
 
 /// If any primary source declares a preparation the engine's registry
-/// ([`crate::preparation`]) does not know, return the unsupported-and-skipped
+/// ([`memstead_base::preparation`]) does not know, return the unsupported-and-skipped
 /// message; `None` when every declared preparation is registered (or none
-/// is declared). Mirrors [`crate::binding::validate_binding`]'s registry
+/// is declared). Mirrors [`memstead_base::binding::validate_binding`]'s registry
 /// rule for a record that acquired an unknown identifier by hand — accepted
 /// at rest, refused here rather than run over content the engine cannot
 /// prepare — so the two refusal paths carry one semantics.
@@ -72,7 +74,7 @@ fn preparation_refusal(resolved: &ResolvedIngest) -> Option<String> {
         ResolvedSource::Primary(p) => p
             .preparation
             .as_deref()
-            .filter(|prep| !crate::preparation::is_registered(prep))
+            .filter(|prep| !memstead_base::preparation::is_registered(prep))
             .map(|prep| {
                 format!(
                     "> **[ingest] Ingest \"{}\" is unsupported: source \"{}\" declares \
@@ -81,7 +83,7 @@ fn preparation_refusal(resolved: &ResolvedIngest) -> Option<String> {
                     resolved.name,
                     p.name,
                     prep,
-                    crate::preparation::registered_identifiers().join(", ")
+                    memstead_base::preparation::registered_identifiers().join(", ")
                 )
             }),
         ResolvedSource::Reference { .. } => None,
@@ -291,13 +293,11 @@ pub fn render_sync_brief_budgeted(
     let adopt = mem_predates_binding(engine, &resolved);
     // The exclusion ledger against the binding as declared now: in force,
     // and dropped (a removed source), reported once here.
-    let exclusions =
-        crate::ingest::advance::reconcile_exclusions(engine, workspace_root, &resolved).map_err(
-            |e| RenderBriefError::FindingsRead {
-                binding: binding_id.clone(),
-                detail: format!("exclusion ledger: {e}"),
-            },
-        )?;
+    let exclusions = crate::advance::reconcile_exclusions(engine, workspace_root, &resolved)
+        .map_err(|e| RenderBriefError::FindingsRead {
+            binding: binding_id.clone(),
+            detail: format!("exclusion ledger: {e}"),
+        })?;
     let intent = render_intent_findings(
         &binding_intent_findings(
             engine,
@@ -395,8 +395,8 @@ fn dest_guidance(engine: &Engine, dest: &str) -> ResolvedGuidance {
 
 /// The `--medium-type` flag value for a medium — the wire spelling a
 /// caller can paste back into `projection init`.
-fn medium_type_wire(t: crate::pipeline::MediumType) -> &'static str {
-    use crate::pipeline::MediumType as M;
+fn medium_type_wire(t: memstead_base::pipeline::MediumType) -> &'static str {
+    use memstead_base::pipeline::MediumType as M;
     match t {
         M::Codebase => "codebase",
         M::Filesystem => "filesystem",
@@ -420,9 +420,9 @@ fn absent_source_names(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<
         .filter(|p| {
             matches!(
                 p.medium_type,
-                crate::pipeline::MediumType::Codebase
-                    | crate::pipeline::MediumType::Filesystem
-                    | crate::pipeline::MediumType::Git
+                memstead_base::pipeline::MediumType::Codebase
+                    | memstead_base::pipeline::MediumType::Filesystem
+                    | memstead_base::pipeline::MediumType::Git
             ) && !super::cursor::medium_base(&p.pointer, workspace_root).exists()
         })
         .map(|p| p.name.clone())
@@ -477,17 +477,18 @@ fn absent_destination_note(
         .map(String::as_str)
         .collect();
     writable.sort_unstable();
-    let remedy = if crate::workspace_store::is_mem_repo_shaped(workspace_root) {
+    let remedy = if memstead_base::workspace_store::is_mem_repo_shaped(workspace_root) {
         // `mem init` is refused by default: a mem-repo workspace creates
         // nothing until a `[[mem_management.create]]` rule admits the name.
         // Naming the second step only would hand the reader a command that
         // refuses `MEM_PATH_NOT_ALLOWED` on a workspace fresh from
         // `mem-repo init` — which is the workspace this brief most often
         // renders against.
-        let admitted =
-            crate::mem_management::CreateRuleSet::new(engine.settings().mem_create_rules.clone())
-                .ok()
-                .is_some_and(|set| set.matches(std::path::Path::new(dest)));
+        let admitted = memstead_base::mem_management::CreateRuleSet::new(
+            engine.settings().mem_create_rules.clone(),
+        )
+        .ok()
+        .is_some_and(|set| set.matches(std::path::Path::new(dest)));
         // Both steps name the SAME concrete pin. A placeholder here would be
         // the one point on the first-session path where the reader must fetch
         // vocabulary from somewhere else; and naming a pin on the rule while
@@ -517,8 +518,8 @@ fn absent_destination_note(
             .sources
             .iter()
             .find_map(|s| match s {
-                crate::ingest::resolve::ResolvedSource::Primary(p) => Some(p),
-                crate::ingest::resolve::ResolvedSource::Reference { .. } => None,
+                memstead_base::binding_run::ResolvedSource::Primary(p) => Some(p),
+                memstead_base::binding_run::ResolvedSource::Reference { .. } => None,
             })
             .map(|p| {
                 format!(
@@ -612,7 +613,7 @@ fn build_process_mem(engine: &Engine, resolved: &ResolvedIngest) -> ProcessMemIn
     // destination's declaration wins, the ingest-name convention is
     // the fallback. A declared-but-unmounted process mem is a stated
     // notice, never a silent fallback to derivation.
-    let resolution = crate::ingest::resolve::resolve_process_mem(
+    let resolution = memstead_base::binding_run::resolve_process_mem(
         engine,
         &resolved.destination_mem,
         &resolved.name,
@@ -641,9 +642,9 @@ fn build_process_mem(engine: &Engine, resolved: &ResolvedIngest) -> ProcessMemIn
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::binding::BuildMode;
-    use crate::ingest::resolve::Source;
-    use crate::pipeline::{IngestTrigger, MediumType};
+    use memstead_base::binding::BuildMode;
+    use memstead_base::binding_run::Source;
+    use memstead_base::pipeline::{IngestTrigger, MediumType};
 
     fn ingest_with(sources: Vec<ResolvedSource>) -> ResolvedIngest {
         ResolvedIngest {
@@ -695,7 +696,7 @@ mod tests {
         assert_eq!(
             preparation_refusal(&ingest_with(vec![primary(
                 "claims",
-                Some(crate::preparation::ENTITY_LOAD_BEARING),
+                Some(memstead_base::preparation::ENTITY_LOAD_BEARING),
             )])),
             None,
             "a registered preparation is not refused at render"
@@ -709,7 +710,7 @@ mod tests {
             msg,
             format!(
                 "> **[ingest] Ingest \"ing\" is unsupported: source \"manuals\" declares preparation \"pdf-to-markdown\", which is not in this engine's preparation registry (registered: {}). Skipping.**\n",
-                crate::preparation::registered_identifiers().join(", ")
+                memstead_base::preparation::registered_identifiers().join(", ")
             )
         );
         assert!(msg.contains("entity-load-bearing, dated-entries, code-map"));

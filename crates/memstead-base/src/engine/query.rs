@@ -3070,7 +3070,7 @@ impl Engine {
 /// The base path of an anchor artifact ref — the locator suffixes a
 /// medium may append (`@<commit>`, `#<span>`) stripped so the reverse
 /// lookup compares paths, not versioned/located refs.
-pub(crate) fn anchor_base_path(artifact: &str) -> &str {
+pub fn anchor_base_path(artifact: &str) -> &str {
     let cut = artifact.find(['@', '#']).unwrap_or(artifact.len());
     &artifact[..cut]
 }
@@ -3489,7 +3489,7 @@ fn path_references(base: &str, is_tree: bool, path: &str) -> bool {
 /// bridge. Plain string concatenation with a separator: the pointer is
 /// workspace-relative (and may climb out via `..`), the artifact is
 /// source-relative; no canonicalization here, the filesystem resolves it.
-pub(crate) fn join_pointer(pointer: &str, base: &str) -> String {
+pub fn join_pointer(pointer: &str, base: &str) -> String {
     let pointer = pointer.trim_end_matches('/');
     if pointer.is_empty() || pointer == "." {
         base.to_string()
@@ -3511,7 +3511,7 @@ pub(crate) fn join_pointer(pointer: &str, base: &str) -> String {
 /// binding silently won, which is the wrong-target write this type exists to
 /// prevent.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CrossSourceArtifact {
+pub enum CrossSourceArtifact {
     /// No source's join lands on a member of the enumerated set.
     Unresolved,
     /// Exactly one does; this is the canonical id to record.
@@ -3529,7 +3529,7 @@ pub(crate) enum CrossSourceArtifact {
 /// membership test differs by surface; what is shared, and what lives here,
 /// is the rule that several matches are an ambiguity to refuse rather than a
 /// choice to make silently.
-pub(crate) fn resolve_across_sources<'a, I, F>(
+pub fn resolve_across_sources<'a, I, F>(
     bases: I,
     requested: &str,
     canonical_for: F,
@@ -3568,7 +3568,7 @@ where
 /// in-scope for a `**` glob. An artifact already carrying the pointer prefix
 /// is NOT suppressed: on a self-nested layout both readings exist and the
 /// decision's priority — source-join wins — settles it deterministically.
-pub(crate) fn artifact_candidates(pointer: &str, base: &str) -> Vec<String> {
+pub fn artifact_candidates(pointer: &str, base: &str) -> Vec<String> {
     let pointer = pointer.trim_end_matches('/');
     if pointer.is_empty() || pointer == "." {
         return vec![base.to_string()];
