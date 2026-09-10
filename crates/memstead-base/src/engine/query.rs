@@ -3451,7 +3451,7 @@ fn observe_path_anchor(
         // set that is not the population would silently change a stored
         // tree-anchor hash; no-hash resolves `recheck`, the same posture as
         // a failed read.
-        let enumeration = crate::ingest::cursor::enumerate_facet_files_reported(
+        let enumeration = crate::source_scope::enumerate_facet_files_reported(
             &join.source,
             &join.deny_paths,
             root,

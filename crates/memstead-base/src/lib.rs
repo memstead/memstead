@@ -18,6 +18,7 @@ pub mod backend;
 pub mod binding;
 pub mod build_info;
 pub mod check;
+pub mod check_path;
 pub mod chunking;
 pub mod derivation;
 pub mod domain_authority_wire;
@@ -44,6 +45,7 @@ pub mod schema_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod search_index;
 pub mod section_format;
+pub mod source_scope;
 pub mod storage;
 pub mod store;
 pub mod validator;

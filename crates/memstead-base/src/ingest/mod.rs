@@ -25,7 +25,7 @@ pub mod advance;
 pub mod anchor_population;
 pub mod brief;
 pub mod change_detection;
-pub mod check_path;
+pub use crate::check_path;
 pub mod cursor;
 pub mod findings;
 pub mod guidance;

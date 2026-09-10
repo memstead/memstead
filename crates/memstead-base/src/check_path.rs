@@ -36,7 +36,7 @@ use std::path::{Component, Path, PathBuf};
 
 use globset::Glob;
 
-use super::cursor::{normalize_lexical, relative_path};
+use crate::source_scope::{normalize_lexical, relative_path};
 
 /// One candidate's verdict.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -191,7 +191,7 @@ pub fn health_vital_signs_axis(
             let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
             for join in roots.values() {
                 sources_enumerated += 1;
-                for file in crate::ingest::cursor::enumerate_source_artifacts(
+                for file in crate::source_scope::enumerate_source_artifacts(
                     engine,
                     &join.source,
                     &join.deny_paths,
