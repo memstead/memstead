@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-10
+
 ### Fixed
 
 - **A mem-repo boot is linear in the mem size, not quadratic.** Loading a
@@ -5532,7 +5534,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/memstead/memstead/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/memstead/memstead/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/memstead/memstead/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/memstead/memstead/compare/v0.17.0...v0.18.0
