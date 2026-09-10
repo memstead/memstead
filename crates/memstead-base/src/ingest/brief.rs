@@ -1355,7 +1355,7 @@ fn render_open_findings(findings: &[Finding], binding_id: &str) -> String {
         "Unresolvable anchor — the artifact is gone",
         "The source artifact an anchor references is no longer present. Delete the entity \
          **only** if the concept is removed entirely; otherwise leave it. Concept-level \
-         removals are a prune concern with its own never-clobber / conflict-flag rules — \
+         removals are a prune concern and arrive as proposals in the prune block — \
          do not delete on a hunch here.",
         &group(FindingClass::UnresolvableAnchor),
     );
@@ -1461,7 +1461,7 @@ fn render_exclusions(ledger: &crate::ingest::advance::ExclusionLedger) -> String
 }
 
 /// Render the prune-proposals block for the sync brief (group F) — the deletion
-/// proposals prune surfaced, each with its guarantee-appropriate treatment.
+/// proposals prune surfaced, grouped by disposition.
 /// Empty string when there are no proposals.
 ///
 /// **F3 / A5, structural:** every proposal here is exactly that — a *proposal*.
@@ -1489,57 +1489,32 @@ fn render_prune_proposals(proposals: &[PruneProposal]) -> String {
         proposals.iter().filter(|p| p.disposition == d).collect()
     };
 
-    // Clean-delete — never-clobber, base retrieved, merge clean: a confident
-    // (still agent-enacted) delete proposal.
-    let clean = group(PruneDisposition::CleanDelete);
-    if !clean.is_empty() {
-        lines.push("### Clean delete — never-clobber three-way merge is clean".to_string());
+    // Proposed — both sides presented, the agent decides. Never an auto-write.
+    let proposed = group(PruneDisposition::Proposed);
+    if !proposed.is_empty() {
+        lines.push("### Proposed removals — the call is yours".to_string());
         lines.push(String::new());
         lines.push(
-            "The source base leg was retrievable and the three-way merge found no model-side \
-             divergence, so removal is safe. **Confirm, then delete via the mutation surface** — \
-             this is still your call, not an auto-delete."
+            "The source no longer holds the artifact(s) these entities describe. Prune states \
+             only what it observed; it cannot know whether the entity still earns its place. \
+             The rule: **delete** the entity through the mutation surface when its subject is \
+             gone from the source and no knowledge mem cites it; **keep** it, with a dated note \
+             naming what retired its subject, when one does. Both sides are listed so the call \
+             is yours."
                 .to_string(),
         );
         lines.push(String::new());
-        let shown = clean.len().min(FINDINGS_CAP);
-        for p in &clean[..shown] {
-            lines.push(format!(
-                "- `{}` — source artifact(s) gone: {}",
-                p.entity,
-                artifact_list(&p.artifacts)
-            ));
-        }
-        if clean.len() > shown {
-            lines.push(format!("- …and {} more", clean.len() - shown));
-        }
-        lines.push(String::new());
-    }
-
-    // Conflict-flag — both sides presented, never an auto-write over an edit.
-    let conflict = group(PruneDisposition::ConflictFlag);
-    if !conflict.is_empty() {
-        lines.push("### Conflict-flag — decide, never overwrite a model-side edit".to_string());
-        lines.push(String::new());
-        lines.push(
-            "No retrievable base leg to merge against (a non-git source, or an anchor with no \
-             pinned version). **Both sides are shown — decide deliberately.** If the concept is \
-             truly gone, delete via the mutation surface; if the model side was edited on \
-             purpose, keep it. Prune never overwrites a model-side edit for you."
-                .to_string(),
-        );
-        lines.push(String::new());
-        let shown = conflict.len().min(FINDINGS_CAP);
-        for p in &conflict[..shown] {
+        let shown = proposed.len().min(FINDINGS_CAP);
+        for p in &proposed[..shown] {
             lines.push(format!(
                 "- `{}` — **source side:** artifact(s) gone: {}; **model side:** the entity is \
-                 still present (may carry edits) — you decide.",
+                 still present — you decide.",
                 p.entity,
                 artifact_list(&p.artifacts)
             ));
         }
-        if conflict.len() > shown {
-            lines.push(format!("- …and {} more", conflict.len() - shown));
+        if proposed.len() > shown {
+            lines.push(format!("- …and {} more", proposed.len() - shown));
         }
         lines.push(String::new());
     }
@@ -1676,8 +1651,8 @@ fn render_sync_conservatism() -> String {
          with no existing entity.** Prefer updating the entity that already owns the \
          concept.",
         "- **Do not delete an entity unless the change removes the concept entirely.** \
-         Deletions a prune pass surfaces follow prune's own never-clobber / conflict-flag \
-         rules — never delete on a hunch here.",
+         Deletions a prune pass surfaces arrive as proposals in the prune block, never as \
+         instructions — never delete on a hunch here.",
         "- **Never rewrite a section that has not changed** — touch only the part the \
          change or finding actually affects.",
         "- **No speculative edges — add only relationships the diff literally introduces** \

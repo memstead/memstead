@@ -22,9 +22,7 @@
     "**/node_modules/**",
     "**/Thumbs.db"
   ],
-  "prune": {
-    "guarantee": "never-clobber"
-  },
+  "prune": {},
   "operations": {
     "build": {
       "mode": "discovery",

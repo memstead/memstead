@@ -148,7 +148,7 @@ Memstead's category is agent memory: the systems that give AI agents durable sta
 
 Obsidian and Notion are adjacent tools with a different job, not competitors. Obsidian shares the substrate — markdown, wikilinks, a graph view — but is a thinking-and-writing environment for humans; the shared substrate is why an Obsidian user's mental model transfers to Memstead in minutes, not a sign of product overlap. Notion demonstrated typed structured records for human teams inside a closed SaaS; Memstead takes the typed-record idea and moves it to open files, write-time schema validation, and an agent-first MCP surface. Both are excellent at what they do; neither validates writes, types relationships, or offers agents the graph as a first-class query surface — because that was never their job.
 
-Differentiators: schema-driven structure, typed and validated relationships, MCP-native AI access, drift detection at the data layer, community clustering for navigation, and git-native versioning with structured provenance that travels inside the published package — each entity's authoring rationale ships in the sealed `.mem`, so an installer can ask "why should I trust this entity?" offline, with no running engine.
+Differentiators: schema-driven structure, typed and validated relationships, MCP-native AI access, drift detection at the data layer, community clustering for navigation, and git-native versioning with structured provenance that travels inside the published package: the sealed `.mem` carries a provenance record for every entity, with the authoring rationale where one was recorded, so an installer can ask "why should I trust this entity?" offline, with no running engine, and sees plainly where no rationale exists.
 
 ## Open-core go-to-market
 

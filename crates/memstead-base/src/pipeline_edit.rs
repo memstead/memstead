@@ -648,7 +648,7 @@ fn parse_json<T: serde::de::DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::binding::{PruneGuarantee, SyncOperation};
+    use crate::binding::SyncOperation;
     use tempfile::TempDir;
 
     /// The base payload with one inline codebase source.
@@ -681,7 +681,7 @@ mod tests {
           "deny_paths": ["dev/**"],
           "coverage_semantics": "curated",
           "rules": { "routing": "r" },
-          "prune": { "guarantee": "never-clobber" },
+          "prune": {},
           "operations": {
             "build": { "mode": "discovery", "trigger": "loop", "batch_size": 20 },
             "sync": { "trigger": "manual", "batch_size": 20 },
@@ -723,10 +723,7 @@ mod tests {
         assert!(b.operations.verify.is_some());
         assert_eq!(b.deny_paths, vec!["dev/**"]);
         assert_eq!(b.coverage_semantics, Some(CoverageSemantics::Curated));
-        assert_eq!(
-            b.prune.as_ref().unwrap().guarantee,
-            PruneGuarantee::NeverClobber
-        );
+        assert!(b.prune.is_some(), "the prune block is written as given");
     }
 
     #[test]

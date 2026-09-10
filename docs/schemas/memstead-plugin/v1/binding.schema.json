@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://memstead.io/schemas/memstead-plugin/v1/binding",
   "title": "memstead-plugin/v1 binding",
-  "description": "A Binding is ONE versioned record per pipeline at `.memstead/projections/<mem>/<name>.json`: the whole declaration (`intent`, inline `sources`, `reference_mems`, `destination_mem`, `deny_paths`, `coverage_semantics`, `rules`) plus an `operations { build, sync, verify }` block. The 2026-07 consolidation folded the retired standalone medium and facet records into the binding's `sources[]` — each source carries the medium half (where it lives: `type` / `pointer` / `change_detection`) and the facet half (which part of it: `scope` / `engagement` / `preparation`) under a `name` that keys per-source sync/verify state. `reference_mems` supply read-only cross-mem context; `destination_mem` is the mem the binding writes into. Every operation is optional: an absent build/sync makes that mutating operation refuse at run time with a `projection enable <op>` remedy; an absent verify means engine defaults. Verify mutates no entity, but it is not a pure read: a completed run records its findings store, backfills observed hashes onto hash-less anchors, and records a `#verified` baseline. The `prune` block, when present, requests a deletion-proposal guarantee validated against the source medium at binding time.",
+  "description": "A Binding is ONE versioned record per pipeline at `.memstead/projections/<mem>/<name>.json`: the whole declaration (`intent`, inline `sources`, `reference_mems`, `destination_mem`, `deny_paths`, `coverage_semantics`, `rules`) plus an `operations { build, sync, verify }` block. The 2026-07 consolidation folded the retired standalone medium and facet records into the binding's `sources[]` — each source carries the medium half (where it lives: `type` / `pointer` / `change_detection`) and the facet half (which part of it: `scope` / `engagement` / `preparation`) under a `name` that keys per-source sync/verify state. `reference_mems` supply read-only cross-mem context; `destination_mem` is the mem the binding writes into. Every operation is optional: an absent build/sync makes that mutating operation refuse at run time with a `projection enable <op>` remedy; an absent verify means engine defaults. Verify mutates no entity, but it is not a pure read: a completed run records its findings store, backfills observed hashes onto hash-less anchors, and records a `#verified` baseline. The `prune` block, when present, enables deletion proposals in the sync brief.",
   "type": "object",
   "required": [
     "version",
@@ -60,18 +60,9 @@
       "type": "object"
     },
     "prune": {
-      "description": "Prune policy — additive, optional. Absent means prune is disabled (no deletion proposals). Present means prune produces deletion proposals in the sync brief under the requested guarantee. Prune has no independent schedule: it rides the sync brief, so it carries no trigger/batch_size.",
+      "description": "Prune policy — additive, optional. Absent means prune is disabled (no deletion proposals). Present (an empty object) means prune produces deletion proposals in the sync brief: the source no longer holds the artifacts an entity describes, both sides are shown, and the agent acting on the brief decides. Prune has no independent schedule (it rides the sync brief, so it carries no trigger/batch_size) and no guarantee level: a source artifact and the entity about it share no merge base, so there is nothing for the engine to decide on the entity's behalf. The retired `guarantee` key of earlier records is ignored on read.",
       "type": "object",
-      "properties": {
-        "guarantee": {
-          "description": "The guarantee the binding requests, validated against the medium's base-leg retrievability at binding-validation time. `never-clobber` is a full three-way merge, supportable only where the source base leg is retrievable (git-backed sources); `conflict-flag` (the default) presents both sides and never auto-writes over a model-side edit.",
-          "type": "string",
-          "enum": [
-            "never-clobber",
-            "conflict-flag"
-          ]
-        }
-      },
+      "properties": {},
       "additionalProperties": false
     },
     "operations": {

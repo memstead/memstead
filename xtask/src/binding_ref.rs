@@ -16,7 +16,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use memstead_base::MediumType;
-use memstead_base::binding::{medium_capabilities, prune_guarantee_for_medium};
+use memstead_base::binding::medium_capabilities;
 use memstead_base::preparation::{self, Touchpoint};
 use serde_json::Value;
 
@@ -210,20 +210,19 @@ fn render(schema: &Value) -> String {
          nothing.\n\n",
     );
     md.push_str(
-        "| Medium | Enumerable | Change signal | Base retrievable | Anchor namespace | Glob `deny_paths` | Prune guarantee |\n",
+        "| Medium | Enumerable | Change signal | Base retrievable | Anchor namespace | Glob `deny_paths` |\n",
     );
-    md.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
+    md.push_str("| --- | --- | --- | --- | --- | --- |\n");
     for medium in MEDIA {
         let caps = medium_capabilities(medium);
         md.push_str(&format!(
-            "| `{}` | {} | {} | {} | `{}` | {} | `{}` |\n",
+            "| `{}` | {} | {} | {} | `{}` | {} |\n",
             medium_wire(medium),
             yes_no(caps.enumerable),
             yes_no(caps.change_signal),
             yes_no(caps.base_version_retrievable),
             caps.anchor_namespace,
             yes_no(caps.glob_deny_legal),
-            prune_guarantee_for_medium(medium).as_wire(),
         ));
     }
     md.push('\n');
@@ -232,10 +231,9 @@ fn render(schema: &Value) -> String {
          a medium whose **Glob `deny_paths`** column is *no* is refused at binding validation.\n",
     );
     md.push_str(
-        "- The **Prune guarantee** column is the strongest guarantee the medium can *support*: \
-         `never-clobber` (full three-way merge) only where a base version is retrievable, otherwise \
-         `conflict-flag`. Requesting a stronger guarantee than the medium supports is refused at \
-         binding validation.\n",
+        "- **Base retrievable** states whether the medium can hand back a prior version of an \
+         artifact; it is a fact about the source the fidelity report restates per facet. Nothing \
+         gates on it: prune produces proposals only and never merges.\n",
     );
     // A `graph` source selects entities, so its scope is not a path glob.
     // Named here, next to the row, rather than only in the concepts page a

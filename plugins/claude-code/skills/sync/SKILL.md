@@ -56,8 +56,8 @@ baseline, no entity writes). Source read-only; refusals verbatim.
    destination mem only; walk a mention-steered entity exactly like an anchored one,
    and anchor its claim while there. Unchanged-meaning drift is an **annotation**, not
    a rewrite; an ambiguous change is **skipped, finding left open**, never guessed; a
-   removal with no retrievable base is **conflict-flagged** — present both sides,
-   never auto-delete. Four measured disciplines bind here and in steps 7–8: **claim
+   removal arrives as a **prune proposal** — both sides shown; delete only when the
+   subject is gone from the source and no knowledge mem cites it, never auto-delete. Four measured disciplines bind here and in steps 7–8: **claim
    walk on drift** (check a flagged entity assertion by assertion against the source
    before any re-baseline — never a gestalt "reads fine", the measured top miss
    cause); **post-edit recheck** (re-read the whole edited entity once against the

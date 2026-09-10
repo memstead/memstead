@@ -34,9 +34,7 @@
   "rules": {
     "routing": "route public-API items to the api mem, internals to engine"
   },
-  "prune": {
-    "guarantee": "conflict-flag"
-  },
+  "prune": {},
   "operations": {
     "build": {
       "mode": "one-shot",

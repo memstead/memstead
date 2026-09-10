@@ -36,13 +36,31 @@ use crate::validator::canonical::canonical_json;
 /// different mem name. For each entity, keeps the most recent record
 /// that carries a non-empty note — the entity's *current* rationale.
 ///
-/// No-fabrication: records with no entity (batch) or no note are skipped,
-/// so an entity authored without rationale is simply absent from the
-/// payload (the read path reports it absent). Returns `None` when no
-/// entity carried a note — the export then ships no provenance member,
-/// distinct from an empty payload.
-pub fn build_archive_provenance(records: &[Provenance]) -> Option<ArchiveProvenance> {
-    build_redacted_archive_provenance(records).0
+/// No-fabrication: records with no entity (batch) or no note contribute no
+/// rationale. Every path in `entity_paths` (the entities the archive
+/// carries) gets a record regardless: one with the rationale where a noted
+/// mutation exists, an explicit no-rationale record otherwise. The member
+/// therefore always ships, and a reader tells "never noted" apart from
+/// "member missing" (an archive from an earlier engine).
+pub fn build_archive_provenance(
+    records: &[Provenance],
+    entity_paths: &[String],
+) -> ArchiveProvenance {
+    build_redacted_archive_provenance(records, entity_paths).0
+}
+
+/// The mem-relative entity paths (`EntityId::path` form, the provenance
+/// payload's key) of a set of entity-bearing file paths, in one place so
+/// every export site keys the payload the way the sealed read looks it up.
+pub fn entity_paths_of(rels: &[PathBuf]) -> Vec<String> {
+    rels.iter()
+        .map(|rel| {
+            let s = rel.to_string_lossy().replace('\\', "/");
+            crate::entity::id::file_path_to_id(&s, "m")
+                .path()
+                .to_string()
+        })
+        .collect()
 }
 
 /// The builder proper: every rationale passes through the private-pattern
@@ -53,8 +71,9 @@ pub fn build_archive_provenance(records: &[Provenance]) -> Option<ArchiveProvena
 /// not counted).
 pub fn build_redacted_archive_provenance(
     records: &[Provenance],
+    entity_paths: &[String],
 ) -> (
-    Option<ArchiveProvenance>,
+    ArchiveProvenance,
     Vec<crate::ops::redaction::RedactionCount>,
 ) {
     use std::collections::BTreeMap;
@@ -90,8 +109,16 @@ pub fn build_redacted_archive_provenance(
             }
         }
     }
-    if by_path.is_empty() {
-        return (None, Vec::new());
+    // Every carried entity gets a record: no rationale where none was
+    // noted, never an absent key that a reader could mistake for a lost
+    // member.
+    for path in entity_paths {
+        by_path.entry(path.clone()).or_insert_with(|| {
+            (
+                SystemTime::UNIX_EPOCH,
+                (EntityProvenance::default(), BTreeMap::new()),
+            )
+        });
     }
     let mut redacted_total: BTreeMap<&'static str, usize> = BTreeMap::new();
     let mut entities = BTreeMap::new();
@@ -100,7 +127,7 @@ pub fn build_redacted_archive_provenance(
         entities.insert(k, v);
     }
     (
-        Some(ArchiveProvenance::summarised(entities)),
+        ArchiveProvenance::summarised(entities),
         crate::ops::redaction::counts_to_list(&redacted_total),
     )
 }
@@ -253,14 +280,17 @@ pub fn export_mem_to_bytes(
     // Source the per-entity authoring provenance from the folder mem's
     // own mutation log (`.memstead/changes.jsonl`), read through the folder
     // backend so the JSONL parsing has one home. A mem with no changelog
-    // yields no records → no provenance member (absent, not empty).
+    // yields no rationale, but every entity still gets its record.
     use crate::backend::MemBackend;
     let backend = crate::storage::FilesystemMemWriter::new(mem_dir.to_path_buf());
-    let (provenance, redactions) = backend
-        .read_provenance(None)
-        .ok()
-        .map(|records| build_redacted_archive_provenance(&records))
-        .unwrap_or((None, Vec::new()));
+    let entity_paths = entity_paths_of(
+        &md_entries
+            .iter()
+            .map(|(p, _)| p.clone())
+            .collect::<Vec<_>>(),
+    );
+    let records = backend.read_provenance(None).unwrap_or_default();
+    let (provenance, redactions) = build_redacted_archive_provenance(&records, &entity_paths);
 
     // Source the engine-owned anchors sidecar (`.memstead/anchors.json`)
     // through the same backend so it travels inside the `.mem` archive.
@@ -275,7 +305,7 @@ pub fn export_mem_to_bytes(
         workspace_schemas_dir,
         explicit_name,
         md_entries,
-        provenance.as_ref(),
+        Some(&provenance),
         anchors_bytes.as_deref(),
         ref_schema_source,
     )

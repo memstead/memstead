@@ -8,93 +8,47 @@
 //! or writes a mem entity). [`prune_proposals`] takes a shared `&Engine`, so it
 //! is structurally incapable of a mem mutation.
 //!
-//! ## Guarantee (F1) and degradation (F2)
+//! ## Why prune proposes and never decides
 //!
-//! A binding requests a [`crate::binding::PruneGuarantee`]. The guarantee a
-//! medium can *support* is stated at binding-validation time (a `never-clobber`
-//! request over a non-base-retrievable medium is refused there, never at run
-//! time). At proposal time prune resolves the **effective** posture per
-//! candidate:
-//!
-//! - **never-clobber** — where the candidate's source **base leg is
-//!   retrievable** (a git-pinned anchor: `at_version` is a commit), a three-way
-//!   merge can tell a model-side edit apart from a clean removal, so a clean
-//!   removal can be proposed as a confident (agent-enacted) delete.
-//! - **conflict-flag degradation** — everywhere else (a `conflict-flag`
-//!   request, or a candidate with **no** retrievable base leg — a non-git
-//!   source): prune presents **both** sides and never proposes a clean delete,
-//!   so a model-side edit is never silently clobbered. This is the decided
-//!   posture; span-snapshot base legs for non-git sources are out of scope (no
-//!   current payer).
+//! A source-derived mem is a rebuildable mirror of its source, and every
+//! entity in it is agent-authored prose *about* a source artifact, not a copy
+//! of it. The artifact and the entity share no common ancestor a three-way
+//! merge could compare, and the sync loop edits anchored entities as its
+//! ordinary work, so "has the model side changed since the build" has no
+//! mechanical answer and no meaning as a guard. The engine therefore states
+//! what it observed — every anchor of the entity resolves orphaned — and
+//! leaves the disposition to the agent reading the brief, whose rule the
+//! engineering mem records: delete, unless a knowledge mem cites the subject,
+//! then keep the entity as a frozen historical record. (The never-clobber /
+//! conflict-flag merge vocabulary that once framed this was retired on
+//! 2026-09-10; the operator's decision of 2026-08-19 had already fixed the
+//! posture.)
 //!
 //! ## Provenance guards (F3)
 //!
 //! - an `authored`-provenance entity is **never** a prune target (excluded
 //!   entirely — no proposal is produced);
-//! - a `derived` entity is **flagged with its inputs**, never auto-proposed for
+//! - a `derived` entity is **flagged with its inputs**, never proposed for
 //!   deletion — its inputs must be re-examined first;
 //! - only `anchored` / `informed-by` entities whose whole source basis vanished
-//!   become delete proposals, and only conservatively (every anchor orphaned).
+//!   become proposals, and only conservatively (every anchor orphaned).
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::Engine;
-use crate::anchor::{AnchorProvenanceClass, AnchorState, AnchorVersion};
-use crate::binding::{Binding, PruneGuarantee};
+use crate::anchor::{AnchorProvenanceClass, AnchorState};
+use crate::binding::Binding;
 
 use super::resolve::ResolvedIngest;
 
-/// The **effective** prune posture for a candidate (F1/F2) — the requested
-/// guarantee resolved against what is actually retrievable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PruneMode {
-    /// Never-clobber three-way merge is in force (a `never-clobber` request).
-    /// Whether a *given* candidate can use it still depends on that candidate's
-    /// base-leg retrievability — a candidate with no retrievable base degrades
-    /// to conflict-flagging.
-    NeverClobber,
-    /// Conflict-flag degradation is in force (a `conflict-flag` request): both
-    /// sides are always presented, a clean delete is never proposed.
-    ConflictFlag,
-}
-
-impl PruneMode {
-    /// The effective posture a binding's requested guarantee selects.
-    pub fn from_guarantee(guarantee: PruneGuarantee) -> Self {
-        match guarantee {
-            PruneGuarantee::NeverClobber => PruneMode::NeverClobber,
-            PruneGuarantee::ConflictFlag => PruneMode::ConflictFlag,
-        }
-    }
-}
-
-/// The three-way-merge outcome for a never-clobber candidate whose base leg was
-/// retrieved: did the model side diverge from the retrieved base?
-///
-/// The model-divergence signal (comparing the current entity against the base
-/// leg) is not wired, so [`prune_proposals`] supplies `None` and
-/// every candidate conservatively conflict-flags. The [`PruneMerge::Clean`]
-/// branch is the reachable, tested seam a future model-divergence check drives.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PruneMerge {
-    /// Base retrieved, model side unchanged from it — a clean removal.
-    Clean,
-    /// Base retrieved, model side diverged (a hand edit) — a real conflict.
-    Conflict,
-}
-
-/// The disposition a prune proposal carries (F2/F3).
+/// The disposition a prune proposal carries (F3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PruneDisposition {
-    /// Never-clobber, base leg retrieved, three-way merge clean → a confident
-    /// (still agent-enacted) delete proposal.
-    CleanDelete,
-    /// Both sides presented; the agent decides. Never an auto-write — the model
-    /// side may carry a deliberate edit. Conflict-flag degradation, or a
-    /// never-clobber merge that found (or could not rule out) a divergence.
-    ConflictFlag,
-    /// A `derived` entity — flagged with its inputs, never auto-proposed for
+    /// The entity's whole source basis is gone; both sides are presented and
+    /// the agent decides. Never an auto-write.
+    Proposed,
+    /// A `derived` entity — flagged with its inputs, never proposed for
     /// deletion (F3).
     DerivedFlagged,
 }
@@ -103,8 +57,7 @@ impl PruneDisposition {
     /// Stable wire form.
     pub fn as_wire(&self) -> &'static str {
         match self {
-            PruneDisposition::CleanDelete => "clean-delete",
-            PruneDisposition::ConflictFlag => "conflict-flag",
+            PruneDisposition::Proposed => "proposed",
             PruneDisposition::DerivedFlagged => "derived-flagged",
         }
     }
@@ -117,35 +70,17 @@ impl PruneDisposition {
 /// - `authored` → `None` (never targeted);
 /// - `derived` → [`PruneDisposition::DerivedFlagged`] (flagged with inputs,
 ///   never a delete);
-/// - `anchored` / `informed-by`:
-///   - conflict-flag mode → [`PruneDisposition::ConflictFlag`] (both sides);
-///   - never-clobber mode → [`PruneDisposition::CleanDelete`] **only** when the
-///     base leg is retrievable **and** the merge is clean; otherwise
-///     [`PruneDisposition::ConflictFlag`] (no retrievable base, or a divergent /
-///     undetermined merge — never a silent clobber).
-pub fn classify_prune_candidate(
-    class: AnchorProvenanceClass,
-    mode: PruneMode,
-    base_retrievable: bool,
-    merge: Option<PruneMerge>,
-) -> Option<PruneDisposition> {
+/// - `anchored` / `informed-by` → [`PruneDisposition::Proposed`] (both sides
+///   presented, the agent decides).
+pub fn classify_prune_candidate(class: AnchorProvenanceClass) -> Option<PruneDisposition> {
     match class {
         // F3 — an authored entity is never a prune target.
         AnchorProvenanceClass::Authored => None,
         // F3 — a derived entity is flagged with its inputs, never a delete.
         AnchorProvenanceClass::Derived => Some(PruneDisposition::DerivedFlagged),
-        AnchorProvenanceClass::Anchored | AnchorProvenanceClass::InformedBy => match mode {
-            PruneMode::ConflictFlag => Some(PruneDisposition::ConflictFlag),
-            PruneMode::NeverClobber => {
-                if base_retrievable && matches!(merge, Some(PruneMerge::Clean)) {
-                    Some(PruneDisposition::CleanDelete)
-                } else {
-                    // No retrievable base, a divergent merge, or an
-                    // undetermined merge — degrade, never clobber.
-                    Some(PruneDisposition::ConflictFlag)
-                }
-            }
-        },
+        AnchorProvenanceClass::Anchored | AnchorProvenanceClass::InformedBy => {
+            Some(PruneDisposition::Proposed)
+        }
     }
 }
 
@@ -162,12 +97,8 @@ pub struct PruneProposal {
     /// The entity's dominant provenance class wire string (the class the
     /// disposition was decided from).
     pub class: String,
-    /// The disposition (F2/F3).
+    /// The disposition (F3).
     pub disposition: PruneDisposition,
-    /// Whether the candidate's source base leg is retrievable (a git-pinned
-    /// anchor). Drives the never-clobber vs. conflict-flag posture and is
-    /// surfaced so the brief can state which one applies.
-    pub base_retrievable: bool,
     /// For a `derived` candidate: the input artifact refs to re-examine before
     /// any removal (F3). Empty for every other class.
     pub derived_inputs: Vec<String>,
@@ -190,10 +121,9 @@ pub fn prune_proposals(
     resolved: &ResolvedIngest,
 ) -> Vec<PruneProposal> {
     // Prune disabled → no proposals.
-    let Some(prune) = binding.prune.as_ref() else {
+    if binding.prune.is_none() {
         return Vec::new();
-    };
-    let mode = PruneMode::from_guarantee(prune.guarantee);
+    }
 
     // Group THIS BINDING'S anchors by entity (consistency-sweep 03/01).
     // Proposing deletion over another binding's anchors, or over artifacts
@@ -202,7 +132,6 @@ pub fn prune_proposals(
     struct Acc {
         classes: Vec<AnchorProvenanceClass>,
         artifacts: Vec<String>,
-        base_retrievable: bool,
         derived_inputs: Vec<String>,
         all_orphaned: bool,
         any: bool,
@@ -217,7 +146,6 @@ pub fn prune_proposals(
         let entry = by_entity.entry(eid.as_ref().to_string()).or_insert(Acc {
             classes: Vec::new(),
             artifacts: Vec::new(),
-            base_retrievable: false,
             derived_inputs: Vec::new(),
             all_orphaned: true,
             any: false,
@@ -226,10 +154,6 @@ pub fn prune_proposals(
         let anchor = &resolved_anchor.anchor;
         entry.classes.push(anchor.class);
         entry.artifacts.push(anchor.artifact.clone());
-        // A git-pinned commit is a retrievable base leg for the three-way merge.
-        if matches!(anchor.at_version, Some(AnchorVersion::Commit(_))) {
-            entry.base_retrievable = true;
-        }
         if anchor.class == AnchorProvenanceClass::Derived {
             entry
                 .derived_inputs
@@ -261,10 +185,7 @@ pub fn prune_proposals(
             AnchorProvenanceClass::InformedBy
         };
 
-        // Merge outcome is unwired → None → conservative conflict-flag.
-        let Some(disposition) =
-            classify_prune_candidate(dominant, mode, acc.base_retrievable, None)
-        else {
+        let Some(disposition) = classify_prune_candidate(dominant) else {
             // Authored → excluded, never a prune target (F3).
             continue;
         };
@@ -281,7 +202,6 @@ pub fn prune_proposals(
             artifacts,
             class: dominant.as_wire().to_string(),
             disposition,
-            base_retrievable: acc.base_retrievable,
             derived_inputs,
         });
     }
@@ -292,129 +212,45 @@ pub fn prune_proposals(
 mod tests {
     use super::*;
 
-    // ---- F2/F3: pure classifier -----------------------------------------
+    // ---- F3: pure classifier ------------------------------------------------
 
-    /// F3 — an authored entity is never a prune target: excluded (no proposal),
-    /// in either mode.
+    /// F3 — an authored entity is never a prune target: excluded (no proposal).
     #[test]
     fn authored_is_never_a_prune_target() {
-        for mode in [PruneMode::NeverClobber, PruneMode::ConflictFlag] {
-            assert_eq!(
-                classify_prune_candidate(
-                    AnchorProvenanceClass::Authored,
-                    mode,
-                    true,
-                    Some(PruneMerge::Clean),
-                ),
-                None,
-                "authored must never be proposed for deletion"
-            );
-        }
+        assert_eq!(
+            classify_prune_candidate(AnchorProvenanceClass::Authored),
+            None
+        );
     }
 
-    /// F3 — a derived entity is flagged (with inputs), never auto-proposed for
-    /// deletion, in either mode.
+    /// F3 — a derived entity is flagged with its inputs, never proposed.
     #[test]
     fn derived_is_flagged_not_deleted() {
-        for mode in [PruneMode::NeverClobber, PruneMode::ConflictFlag] {
+        assert_eq!(
+            classify_prune_candidate(AnchorProvenanceClass::Derived),
+            Some(PruneDisposition::DerivedFlagged)
+        );
+    }
+
+    /// An anchored or informed-by entity whose basis is gone is proposed —
+    /// both sides shown, the agent decides — never anything stronger.
+    #[test]
+    fn anchored_and_informed_by_are_proposed() {
+        for class in [
+            AnchorProvenanceClass::Anchored,
+            AnchorProvenanceClass::InformedBy,
+        ] {
             assert_eq!(
-                classify_prune_candidate(
-                    AnchorProvenanceClass::Derived,
-                    mode,
-                    true,
-                    Some(PruneMerge::Clean),
-                ),
-                Some(PruneDisposition::DerivedFlagged),
-                "derived is flagged, never a clean delete"
+                classify_prune_candidate(class),
+                Some(PruneDisposition::Proposed),
+                "{class:?} is proposed, never auto-deleted"
             );
         }
-    }
-
-    /// F2 — conflict-flag mode always presents both sides (never a clean
-    /// delete), whatever the base/merge state.
-    #[test]
-    fn conflict_flag_mode_never_clean_deletes() {
-        for base in [true, false] {
-            for merge in [None, Some(PruneMerge::Clean), Some(PruneMerge::Conflict)] {
-                assert_eq!(
-                    classify_prune_candidate(
-                        AnchorProvenanceClass::Anchored,
-                        PruneMode::ConflictFlag,
-                        base,
-                        merge,
-                    ),
-                    Some(PruneDisposition::ConflictFlag),
-                    "conflict-flag mode never auto-clean-deletes"
-                );
-            }
-        }
-    }
-
-    /// F2 — never-clobber degrades to conflict-flag when the base leg is not
-    /// retrievable (a non-git source), or when the merge is divergent /
-    /// undetermined; it clean-deletes only with a retrievable base AND a clean
-    /// merge.
-    #[test]
-    fn never_clobber_clean_delete_needs_base_and_clean_merge() {
-        let anchored = AnchorProvenanceClass::Anchored;
-        // Retrievable base + clean merge → the one clean-delete path.
-        assert_eq!(
-            classify_prune_candidate(
-                anchored,
-                PruneMode::NeverClobber,
-                true,
-                Some(PruneMerge::Clean)
-            ),
-            Some(PruneDisposition::CleanDelete)
-        );
-        // No retrievable base (non-git) → conflict-flag degradation.
-        assert_eq!(
-            classify_prune_candidate(
-                anchored,
-                PruneMode::NeverClobber,
-                false,
-                Some(PruneMerge::Clean)
-            ),
-            Some(PruneDisposition::ConflictFlag),
-            "no base leg degrades to conflict-flag"
-        );
-        // Divergent merge → conflict-flag (never clobber the model edit).
-        assert_eq!(
-            classify_prune_candidate(
-                anchored,
-                PruneMode::NeverClobber,
-                true,
-                Some(PruneMerge::Conflict)
-            ),
-            Some(PruneDisposition::ConflictFlag),
-            "a divergent merge is never a clean delete"
-        );
-        // Undetermined merge (signal unwired) → conflict-flag (safe default).
-        assert_eq!(
-            classify_prune_candidate(anchored, PruneMode::NeverClobber, true, None),
-            Some(PruneDisposition::ConflictFlag),
-            "an undetermined merge conservatively conflict-flags"
-        );
-    }
-
-    /// `informed-by` is a delete candidate too (a non-hash class that still owns
-    /// a concept), following the same mode rules as `anchored`.
-    #[test]
-    fn informed_by_follows_the_same_mode_rules() {
-        assert_eq!(
-            classify_prune_candidate(
-                AnchorProvenanceClass::InformedBy,
-                PruneMode::ConflictFlag,
-                false,
-                None,
-            ),
-            Some(PruneDisposition::ConflictFlag)
-        );
     }
 
     // ---- F2/F3: end-to-end over a real engine ----------------------------
 
-    use crate::anchor::{Anchor, AnchorGrain, AnchorHashStability, AnchorSidecar};
+    use crate::anchor::{Anchor, AnchorGrain, AnchorHashStability, AnchorSidecar, AnchorVersion};
     use crate::binding::{
         BINDING_VERSION, BuildMode, BuildOperation, DEFAULT_ADJUDICATION_CAP,
         DEFAULT_FULL_RESYNC_EVERY, Operations, PruneConfig, VerifyOperation,
@@ -453,14 +289,10 @@ mod tests {
     }
 
     /// Scaffold a filesystem-medium mem whose anchors reference **absent** source
-    /// files (so every anchor resolves orphaned), with a `prune` block at
-    /// `guarantee`. Returns the engine, workspace root, binding and resolved run.
-    /// The source is deliberately **non-git** (a plain filesystem medium, no
-    /// `at_version` unless the fixture pins one) so the base leg is not
-    /// retrievable — the F2 degradation case.
+    /// files (so every anchor resolves orphaned), with prune enabled. Returns
+    /// the engine, workspace root, binding and resolved run.
     fn setup(
         tmp: &Path,
-        guarantee: PruneGuarantee,
         entity_anchors: &[(&str, Vec<Anchor>)],
     ) -> (Engine, std::path::PathBuf, Binding, ResolvedIngest) {
         let root = tmp.to_path_buf();
@@ -530,7 +362,7 @@ mod tests {
         .unwrap();
 
         // A filesystem-source binding (namespace `path`, so mem_anchors_resolved
-        // observes it) with the requested prune guarantee.
+        // observes it) with prune enabled.
         let binding = Binding {
             version: BINDING_VERSION,
             intent: None,
@@ -551,7 +383,7 @@ mod tests {
             deny_paths: Vec::new(),
             coverage_semantics: None,
             rules: None,
-            prune: Some(PruneConfig { guarantee }),
+            prune: Some(PruneConfig::default()),
             operations: Operations {
                 build: Some(BuildOperation {
                     mode: BuildMode::Discovery,
@@ -578,10 +410,6 @@ mod tests {
         (engine, root, binding, resolved)
     }
 
-    /// F2 — conflict-flag degradation on a **non-git** source: a model-side
-    /// entity whose source artifact was removed surfaces BOTH sides in the sync
-    /// brief and is NEVER auto-deleted. Requesting never-clobber over a non-git
-    /// anchor (no retrievable base leg) degrades to conflict-flag.
     /// Criterion 6 (consistency-sweep 03/02): prune must not propose deleting
     /// an entity that is already gone. Its anchor is orphaned, which is
     /// precisely the shape that made a phantom entity a candidate: prune
@@ -592,7 +420,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (engine, root, binding, resolved) = setup(
             tmp.path(),
-            PruneGuarantee::ConflictFlag,
             &[
                 (
                     "!engine--phantom",
@@ -626,20 +453,20 @@ mod tests {
         );
     }
 
+    /// An entity whose source artifact was removed surfaces BOTH sides in the
+    /// sync brief as a proposal and is NEVER auto-deleted.
     #[test]
-    fn f2_conflict_flag_on_non_git_surfaces_both_sides_no_auto_delete() {
+    fn proposal_presents_both_sides_and_never_deletes() {
         let tmp = tempfile::tempdir().unwrap();
-        // Request never-clobber; the non-git anchor has no base leg → degrades.
         let (engine, root, binding, resolved) = setup(
             tmp.path(),
-            PruneGuarantee::NeverClobber,
             &[(
                 "engine--removed",
                 vec![orphan_anchor(
                     "src/removed.rs",
                     AnchorProvenanceClass::Anchored,
                     vec![],
-                    None, // non-git: no retrievable base leg
+                    None,
                 )],
             )],
         );
@@ -648,14 +475,10 @@ mod tests {
         assert_eq!(proposals.len(), 1, "the orphaned entity is a candidate");
         let p = &proposals[0];
         assert_eq!(p.entity, "engine--removed");
-        assert!(
-            !p.base_retrievable,
-            "non-git anchor has no retrievable base"
-        );
         assert_eq!(
             p.disposition,
-            PruneDisposition::ConflictFlag,
-            "no base leg → conflict-flag degradation, never a clean delete"
+            PruneDisposition::Proposed,
+            "an orphaned anchored entity is proposed, never auto-deleted"
         );
 
         // The rendered sync brief presents BOTH sides and frames it as a proposal.
@@ -664,8 +487,8 @@ mod tests {
         assert!(brief.contains("source side:"), "source side surfaced");
         assert!(brief.contains("model side:"), "model side surfaced");
         assert!(
-            brief.contains("never overwrites a model-side edit"),
-            "no auto-overwrite is stated"
+            brief.contains("the call is yours"),
+            "the brief leaves the decision to the agent"
         );
         // A5: the pass never mutated the mem — the entity's anchor is still there
         // (prune_proposals took a shared &Engine; a delete is structurally
@@ -685,7 +508,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (engine, root, binding, resolved) = setup(
             tmp.path(),
-            PruneGuarantee::ConflictFlag,
             &[
                 (
                     "engine--handwritten",
@@ -738,12 +560,12 @@ mod tests {
             "the derived entity carries its inputs to re-examine"
         );
 
-        // The plain anchored entity IS proposed (conflict-flag).
+        // The plain anchored entity IS proposed.
         let plain = proposals
             .iter()
             .find(|p| p.entity == "engine--plain")
             .expect("a plain anchored entity is proposed");
-        assert_eq!(plain.disposition, PruneDisposition::ConflictFlag);
+        assert_eq!(plain.disposition, PruneDisposition::Proposed);
 
         // The rendered sync brief flags the derived entity as NOT-for-deletion,
         // never emits an auto-delete instruction, and never names the authored one.
@@ -757,16 +579,13 @@ mod tests {
         assert!(brief.contains("nothing is auto-deleted"));
     }
 
-    /// A `never-clobber` binding whose anchor IS git-pinned has a retrievable
-    /// base leg — the proposal reports it (the never-clobber posture), while
-    /// still degrading to conflict-flag until the model-divergence merge signal
-    /// is wired (the gatherer supplies no merge outcome).
+    /// A git-pinned anchor is proposed exactly like an unpinned one: the pin
+    /// names a source version, not a merge base the engine could decide from.
     #[test]
-    fn git_pinned_anchor_reports_a_retrievable_base_leg() {
+    fn git_pinned_anchor_is_proposed_like_any_other() {
         let tmp = tempfile::tempdir().unwrap();
         let (engine, root, binding, resolved) = setup(
             tmp.path(),
-            PruneGuarantee::NeverClobber,
             &[(
                 "engine--pinned",
                 vec![orphan_anchor(
@@ -779,12 +598,7 @@ mod tests {
         );
         let proposals = prune_proposals(&engine, &root, &binding, &resolved);
         assert_eq!(proposals.len(), 1);
-        assert!(
-            proposals[0].base_retrievable,
-            "a git-pinned anchor exposes a retrievable base leg"
-        );
-        // Merge outcome unwired → still conflict-flag (never a silent clobber).
-        assert_eq!(proposals[0].disposition, PruneDisposition::ConflictFlag);
+        assert_eq!(proposals[0].disposition, PruneDisposition::Proposed);
     }
 
     /// An entity with a **still-resolving** anchor is NOT a prune candidate —
@@ -795,7 +609,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (engine, root, binding, resolved) = setup(
             tmp.path(),
-            PruneGuarantee::ConflictFlag,
             &[(
                 "engine--partly-gone",
                 vec![

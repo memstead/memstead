@@ -223,13 +223,16 @@ impl Engine {
                 // log (commit trailers) via the mount's backend and hand the
                 // serialised payload to the hook to embed — the hook walks
                 // no history itself.
-                let (provenance, redactions) = mount
-                    .backend
-                    .read_provenance(None)
-                    .ok()
-                    .map(|records| crate::ops::export::build_redacted_archive_provenance(&records))
-                    .unwrap_or((None, Vec::new()));
-                let provenance_bytes = provenance.and_then(|prov| prov.to_archive_bytes().ok());
+                let entity_paths = crate::ops::export::entity_paths_of(
+                    &mount
+                        .backend
+                        .list_entities()
+                        .map_err(EngineError::Backend)?,
+                );
+                let records = mount.backend.read_provenance(None).unwrap_or_default();
+                let (provenance, redactions) =
+                    crate::ops::export::build_redacted_archive_provenance(&records, &entity_paths);
+                let provenance_bytes = provenance.to_archive_bytes().ok();
                 // Source the anchors sidecar from the branch tip so the
                 // git-branch `.mem` carries anchors like the other backends.
                 let anchors_bytes = mount.backend.read_anchors_sidecar().ok().flatten();
@@ -257,6 +260,7 @@ impl Engine {
             MountStorage::InMemory => {
                 let backend = mount.backend.as_ref();
                 let rels = backend.list_entities().map_err(EngineError::Backend)?;
+                let entity_paths = crate::ops::export::entity_paths_of(&rels);
                 let mut md_entries: Vec<(std::path::PathBuf, Vec<u8>)> =
                     Vec::with_capacity(rels.len());
                 for rel in rels {
@@ -267,11 +271,9 @@ impl Engine {
                 // Source per-entity provenance from the backend's mutation
                 // log so an in-memory mem exports a provenance-bearing
                 // `.mem` identical in shape to the folder/git-branch paths.
-                let (provenance, redactions) = backend
-                    .read_provenance(None)
-                    .ok()
-                    .map(|records| crate::ops::export::build_redacted_archive_provenance(&records))
-                    .unwrap_or((None, Vec::new()));
+                let records = backend.read_provenance(None).unwrap_or_default();
+                let (provenance, redactions) =
+                    crate::ops::export::build_redacted_archive_provenance(&records, &entity_paths);
                 // Source the anchors sidecar from the in-memory backend so a
                 // sketch-session mem exports a `.mem` carrying its anchors —
                 // the serve session-export → re-import round-trip.
@@ -284,7 +286,7 @@ impl Engine {
                     workspace_schemas_dir,
                     mem_name,
                     md_entries,
-                    provenance.as_ref(),
+                    Some(&provenance),
                     anchors_bytes.as_deref(),
                     self.ref_schema_source_for(config),
                 )
@@ -571,9 +573,12 @@ mod tests {
             prov.entity("alpha").and_then(|r| r.kind.as_deref()),
             Some("create"),
         );
+        let beta = prov
+            .entity("beta")
+            .expect("every carried entity has a record, noted or not");
         assert!(
-            prov.entity("beta").is_none(),
-            "entity authored without a note is absent — no fabricated provenance"
+            beta.rationale.is_none() && beta.kind.is_none(),
+            "entity authored without a note carries an explicit no-rationale record — nothing fabricated"
         );
     }
 

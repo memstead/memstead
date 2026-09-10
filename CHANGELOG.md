@@ -7,6 +7,36 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **Prune proposes and never merges: the `never-clobber` / `conflict-flag`
+  guarantee vocabulary is gone.** A binding's `prune` block is now an empty
+  object that enables deletion proposals; the `guarantee` key, the
+  `PruneGuarantee` type, `prune_guarantee_for_medium`, the
+  `PRUNE_GUARANTEE_UNSUPPORTED` refusal, the `clean-delete` disposition and
+  the proposal's `base_retrievable` flag are removed, and the fidelity
+  report no longer lists a `base-version-unretrievable` degradation. A
+  source artifact and the agent-authored entity about it share no common
+  ancestor a three-way merge could compare, and the sync loop edits
+  anchored entities as its ordinary work, so "has the model side changed
+  since the build" had no mechanical answer; the operator fixed
+  conflict-flag as the only posture on 2026-08-19 and the vocabulary that
+  promised more is now retired. Every proposal presents both sides and
+  states the rule the agent decides by: delete when the subject is gone
+  from the source and no knowledge mem cites it, keep it as a frozen record
+  when one does. A record written with the old `guarantee` key still loads;
+  the key is ignored. The binding reference's capability matrix drops its
+  "Prune guarantee" column.
+- **A `.mem` archive carries a provenance record for every entity.**
+  `.memstead/provenance.json` was written only when at least one entity
+  carried a rationale note, so an installer could not tell "never noted"
+  from "member missing", and the public claim that each entity's rationale
+  ships in the archive held only under `require_notes`. The exporter now
+  writes the member on every export with a record per carried entity: the
+  latest rationale where a noted mutation exists, an explicit no-rationale
+  record otherwise. Archives sealed by earlier engines still install; a
+  missing member or entity reads as provenance absent, as before.
+
 ### Fixed
 
 - **`projection advance` refuses a `worked` artifact whose anchor rows still

@@ -315,9 +315,9 @@ impl FacetCapability {
             // Effective, not the static ceiling: a base version is retrievable
             // only when the *resolved* strategy actually holds prior content.
             // `mtime` reports that an artifact changed, not its previous bytes,
-            // and `none` detects nothing — either degrades prune to
-            // conflict-flagging even on a medium whose type-level capability
-            // row (e.g. filesystem) advertises base retrievability.
+            // and `none` detects nothing — so a medium whose type-level
+            // capability row (e.g. filesystem) advertises base retrievability
+            // reports `false` here under those strategies.
             base_version_retrievable: caps.base_version_retrievable
                 && strategy_retrieves_base(strategy),
             anchor_namespace: caps.anchor_namespace.to_string(),
@@ -1946,12 +1946,6 @@ pub fn compute_fidelity_report(
                 c.facet
             ));
         }
-        if !c.base_version_retrievable {
-            degradations.push(format!(
-                "base-version-unretrievable:`{}` — prune degrades to conflict-flagging",
-                c.facet
-            ));
-        }
     }
     // The figure closes here, with the population it was computed over: rows
     // and artifacts differ whenever one artifact carries several legitimate
@@ -2012,13 +2006,11 @@ pub fn compute_fidelity_report(
 }
 
 /// Whether a resolved change-detection strategy can retrieve a prior base
-/// version for a three-way merge (B1). Only git-backed strategies (`git`,
-/// `graph`) hold prior content; `mtime` reports *that* an artifact changed but
-/// not its previous bytes, and `none` detects nothing — both leave prune with
-/// no base leg, so it degrades to conflict-flagging regardless of the medium
-/// type's static base-retrievability ceiling. This is why filesystem+mtime —
-/// a common non-git binding in this project's own workspace — must surface the conflict-flag
-/// degradation even though `MediumType::Filesystem` advertises retrievability.
+/// version of an artifact (B1). Only git-backed strategies (`git`, `graph`)
+/// hold prior content; `mtime` reports *that* an artifact changed but not its
+/// previous bytes, and `none` detects nothing. The report states this as a
+/// fact about the source; nothing in the engine acts on it (prune proposes
+/// and never merges).
 fn strategy_retrieves_base(strategy: ChangeStrategy) -> bool {
     matches!(strategy, ChangeStrategy::Git | ChangeStrategy::Graph)
 }
@@ -2238,10 +2230,9 @@ mod tests {
     /// B1 — base retrievability is *effective*, keyed on the resolved
     /// change-detection strategy, not the medium type's static ceiling. A
     /// filesystem binding that resolves to `mtime` (no prior content, only a
-    /// mod-time signal) has no retrievable base leg, so its facet capability
-    /// reports `base_version_retrievable: false` — which is exactly what the
-    /// degradation loop keys on to surface the conflict-flag posture. The same
-    /// filesystem medium backed by `git` keeps the full never-clobber base leg.
+    /// mod-time signal) has no retrievable base version, so its facet
+    /// capability reports `base_version_retrievable: false`; the same
+    /// filesystem medium backed by `git` reports `true`.
     #[test]
     fn b1_base_retrievability_follows_resolved_strategy_not_medium_ceiling() {
         use crate::pipeline::MediumType;
@@ -2258,7 +2249,7 @@ mod tests {
         );
         assert!(
             !fs_mtime.base_version_retrievable,
-            "filesystem+mtime has no retrievable base leg — degrades to conflict-flag"
+            "filesystem+mtime has no retrievable base version"
         );
         assert_eq!(fs_mtime.signal, "mtime");
 
@@ -2270,7 +2261,7 @@ mod tests {
         );
         assert!(
             fs_git.base_version_retrievable,
-            "filesystem backed by git keeps the never-clobber base leg"
+            "filesystem backed by git retrieves a base version"
         );
 
         // A detection-less strategy also has no base leg.
@@ -2278,25 +2269,6 @@ mod tests {
         assert!(!strategy_retrieves_base(ChangeStrategy::Mtime));
         assert!(strategy_retrieves_base(ChangeStrategy::Git));
         assert!(strategy_retrieves_base(ChangeStrategy::Graph));
-
-        // The linkage the fix restores: a false effective flag drives the
-        // conflict-flag degradation the report renders (mirrors the derivation
-        // in compute_fidelity_report's degradation loop).
-        let mut r = base_report();
-        r.capabilities = vec![fs_mtime.clone()];
-        r.degradations = if !fs_mtime.base_version_retrievable {
-            vec![format!(
-                "base-version-unretrievable:`{}` — prune degrades to conflict-flagging",
-                fs_mtime.facet
-            )]
-        } else {
-            Vec::new()
-        };
-        let md = render_fidelity_report(&r, 8_000, &[]).markdown;
-        assert!(
-            md.contains("base-version-unretrievable:`prose` — prune degrades to conflict-flagging"),
-            "filesystem+mtime surfaces the conflict-flag degradation in the report"
-        );
     }
 
     /// B3 — aggregates always ship at budget 0 (mode overbudget, every heavy

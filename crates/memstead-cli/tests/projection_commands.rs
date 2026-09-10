@@ -182,12 +182,8 @@ fn init_codebase_scaffolds_all_three_with_full_operations() {
     );
     assert!(b.operations.sync.is_some());
     assert!(b.operations.verify.is_some());
-    // F1 — a git-backed (codebase) source scaffolds a prune block with the
-    // strongest supported guarantee: never-clobber (base leg retrievable).
-    assert_eq!(
-        b.prune.as_ref().unwrap().guarantee,
-        memstead_base::binding::PruneGuarantee::NeverClobber
-    );
+    // A prune block is scaffolded wherever sync survived.
+    assert!(b.prune.is_some());
     let round = serde_json::to_string(&b).unwrap();
     let back: Binding = serde_json::from_str(&round).unwrap();
     assert_eq!(back, b);
@@ -3624,7 +3620,7 @@ fn graph_binding_workspace() -> TempDir {
     write_store(
         root,
         "projections/dest/mirror.json",
-        r#"{"version":2,"intent":"mirror srcmem into dest","sources":[{"name":"src-graph","type":"graph","pointer":"srcmem","scope":[{"path":"*","mode":"allow"}]}],"reference_mems":[],"destination_mem":"dest","deny_paths":[],"coverage_semantics":"exhaustive","prune":{"guarantee":"conflict-flag"},"operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
+        r#"{"version":2,"intent":"mirror srcmem into dest","sources":[{"name":"src-graph","type":"graph","pointer":"srcmem","scope":[{"path":"*","mode":"allow"}]}],"reference_mems":[],"destination_mem":"dest","deny_paths":[],"coverage_semantics":"exhaustive","prune":{},"operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
     );
 
     // `concept` with definition/explanation is a real `default@1.0.0` type with

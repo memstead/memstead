@@ -95,8 +95,12 @@ pub struct EntityProvenance {
 }
 
 /// The archive-borne provenance payload. Keyed by entity id (the
-/// `mem:slug` form the changelog/commit trailers record). An entity not
-/// present in `entities` has provenance reported as absent.
+/// `mem:slug` form the changelog/commit trailers record). The exporter
+/// writes a record for every entity the archive carries (a `None`
+/// rationale where no noted mutation exists), so on a current archive the
+/// member is always present and complete; an entity absent from
+/// `entities`, or a missing member, marks an archive sealed by an earlier
+/// engine and reads as provenance absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArchiveProvenance {
     pub format: u32,

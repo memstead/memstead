@@ -96,8 +96,9 @@ Every refusal carries a typed code (add `--json` and branch on `.code`):
 
 ## Provenance is redacted at export
 
-A `.mem` archive carries each entity's latest authoring rationale in
-`.memstead/provenance.json` (the note recorded with the mutation). Those
+A `.mem` archive carries a provenance record for every entity in
+`.memstead/provenance.json`: the latest authoring rationale where a mutation
+recorded a note, and an explicit no-rationale record otherwise. Those
 notes are written inside your workspace and can name what a public archive
 must not: internal plan paths, a legacy domain, an absolute user path, a
 credential. `memstead export --format mem` redacts every such span to

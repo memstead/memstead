@@ -19,8 +19,7 @@ and what a maintenance run does not.
   operation.
 - Conservative by default: a drift finding on an unchanged claim is an
   annotation, not a rewrite; an ambiguous change is skipped and left open; a
-  removal over a non-retrievable base version (mtime/web) is conflict-flagged,
-  never auto-applied.
+  removal arrives as a prune proposal with both sides shown, never auto-applied.
 - Records per-artifact dispositions via `memstead projection advance` so the
   sync baseline moves forward only over what was actually handled.
 - Carries source-provenance `anchors` on its writes when the installed engine

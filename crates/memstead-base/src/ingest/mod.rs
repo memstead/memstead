@@ -73,10 +73,7 @@ pub use intent::{
     BINDING_INTENT_UNKNOWN_RELATIONSHIP_CODE, IntentFinding, binding_intent_findings,
     intent_findings, known_relationship_names, relationship_vocabulary, render_intent_findings,
 };
-pub use prune::{
-    PruneDisposition, PruneMerge, PruneMode, PruneProposal, classify_prune_candidate,
-    prune_proposals,
-};
+pub use prune::{PruneDisposition, PruneProposal, classify_prune_candidate, prune_proposals};
 pub use refinement::{
     Batch, ROTATION_ANCHOR_ADJUDICATION, ROTATION_UNCOVERED_FILES, bump_verify_runs, next_batch,
     next_rotation_batch,
