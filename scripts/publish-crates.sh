@@ -14,9 +14,9 @@
 #   memstead-mcp          -> base, git-branch, projection, schema
 #   memstead-cli          -> base, git-branch, projection, schema
 #
-# Two of the six are products: memstead-cli and memstead-mcp, the crates a
-# user installs and release-verify.sh reads on crates.io. The other four
-# are published because cargo refuses to publish a crate whose path
+# Two are products: memstead-cli and memstead-mcp, the crates a user
+# installs and release-verify.sh reads on crates.io. The others (the
+# CRATES list below is the roster) are published because cargo refuses to publish a crate whose path
 # dependencies are not on the registry at the same version; they are
 # dependencies of the two products, not supported libraries, and their
 # READMEs say so. Deliberately NOT published (see the `publish = false`

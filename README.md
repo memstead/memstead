@@ -34,7 +34,7 @@ brew install memstead/memstead/memstead-cli memstead/memstead/memstead-mcp
 
 Or build from source: with the [Rust toolchain](https://rustup.rs) installed, run `./build-engine.sh` from a clone of this repo; it compiles the workspace and installs both binaries to `~/.cargo/bin`. Whichever path you took, `memstead --version` should now work.
 
-The two products are also on crates.io, so `cargo install memstead-cli` and `cargo install memstead-mcp` work: [`memstead-cli`](https://crates.io/crates/memstead-cli) and [`memstead-mcp`](https://crates.io/crates/memstead-mcp). Four more crates are published only because they are their dependencies, with no API promise: [`memstead-base`](https://crates.io/crates/memstead-base) (the engine kernel), [`memstead-schema`](https://crates.io/crates/memstead-schema), [`memstead-git-branch`](https://crates.io/crates/memstead-git-branch) (the git-backed storage backend) and [`memstead-projection`](https://crates.io/crates/memstead-projection) (the maintenance loop that keeps a bound mem current with its source). They ride the engine's version line, so a set pinned to one version works together, but they are pre-1.0 and change without deprecation cycles whenever the products need it. The binaries above stay the supported way to *install* Memstead.
+The two products are also on crates.io, so `cargo install memstead-cli` and `cargo install memstead-mcp` work: [`memstead-cli`](https://crates.io/crates/memstead-cli) and [`memstead-mcp`](https://crates.io/crates/memstead-mcp). The other crates are published only because they are their dependencies, with no API promise: [`memstead-base`](https://crates.io/crates/memstead-base) (the engine kernel), [`memstead-schema`](https://crates.io/crates/memstead-schema), [`memstead-git-branch`](https://crates.io/crates/memstead-git-branch) (the git-backed storage backend) and [`memstead-projection`](https://crates.io/crates/memstead-projection) (the maintenance loop that keeps a bound mem current with its source). They ride the engine's version line, so a set pinned to one version works together, but they are pre-1.0 and change without deprecation cycles whenever the products need it. The binaries above stay the supported way to *install* Memstead.
 
 **2. Bootstrap a workspace.** Either in a fresh directory:
 
@@ -187,7 +187,7 @@ The schema drives all engine behaviour; there are no hardcoded field names. Any 
 
 | Folder | What it is |
 |---|---|
-| `crates/` | The Rust engine: schema layer, in-memory store, the two storage backends (folder + git-branch), the `memstead` CLI, the `memstead-mcp` server, plus the wasm crate. The serve and bridge crates live in the private commercial repository (see [LICENSING.md](LICENSING.md)) |
+| `crates/` | The Rust engine: schema layer, in-memory store, the two storage backends (folder + git-branch), the maintenance loop (`memstead-projection`), the `memstead` CLI, the `memstead-mcp` server, plus the wasm crate. The serve and bridge crates live in the private commercial repository (see [LICENSING.md](LICENSING.md)) |
 | `xtask/` | Internal build tooling (`cargo run -p xtask -- <subcommand>`): the generated reference, the release cut, the sizing curve |
 | `plugins/claude-code/` | The Claude Code plugin (skills + guard hooks). Self-contained, no npm dependencies |
 | [`docs/`](docs/) | The documentation index plus the pages that live beside the code (build, sizing curve, the measured proofs) |

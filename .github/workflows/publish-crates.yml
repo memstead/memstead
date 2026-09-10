@@ -56,5 +56,5 @@ jobs:
       # until each crate is index-visible, and SKIPS any version already
       # live — so a re-run after a partial failure resumes rather than
       # erroring.
-      - name: Publish the five crates, two products and their three dependencies
+      - name: Publish the workspace crates, two products and their dependencies, in path-dependency order
         run: bash scripts/publish-crates.sh
