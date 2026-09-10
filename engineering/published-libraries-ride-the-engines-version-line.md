@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-15T06:14:17Z
-last_modified: 2026-09-09T00:33:17Z
+last_modified: 2026-09-10T17:54:47Z
 status: accepted
 decided_on: 2026-08-15
 deciders: operator, implementing agent
@@ -48,3 +48,6 @@ The cost: a library with no engine-visible change still gets a version bump each
 ## Notes
 
 Extended 2026-09-09 at the close of the public-binary bundle: of the five crates on that version line only memstead-cli and memstead-mcp are products (documented, verified by release-verify.sh as channels); memstead-schema, memstead-base and memstead-git-branch are published as their dependencies and not as supported libraries, because cargo refuses to publish a crate whose path dependencies are not on the registry at the same version. Their READMEs and crate descriptions say so, release-verify.sh names them without a verdict, and publish-crates.yml states the rule. The pre-release check is the multi-package scripts/publish-crates.sh --dry-run; a per-crate cargo publish --dry-run resolves the internal crates from crates.io and breaks whenever the unreleased tree moves a dependency range, as it did on 2026-09-09 over a tinyvec pin.
+
+
+Extended 2026-09-10 with the projection-crate cut: the version line carries six crates. `memstead-projection`, the maintenance loop that left `memstead-base` that day, is published as a dependency of the two products under the same posture (README and description say so), and `publish-crates.sh`, the publish workflow and `release-verify.sh` name it beside the other three dependency crates.
