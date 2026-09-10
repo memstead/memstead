@@ -1,11 +1,14 @@
 # Sizing curve — measured operating limits
 
-**Measured:** 2026-08-06 · engine at commit `c48cd07` (post-0.4.0, pre-0.5) ·
-Apple M5 Max (macOS, aarch64), release binary. **All numbers are
-hardware-relative** — treat the shape of the curve as portable and the
-absolute milliseconds as this machine's. The field deployment that
-motivated this measurement ran on different hardware and saw ~0.5 ms/entity;
-this machine sits in the same band.
+**Measured:** 2026-09-10 · engine at 0.20.0 (the release that carries the
+linear-boot fix and this page) · Apple M5 Max (macOS, aarch64),
+release binary. **All numbers are hardware-relative** — treat the shape of
+the curve as portable and the absolute milliseconds as this machine's.
+The first measurement (2026-08-06, commit `c48cd07`) is kept below as a
+dated record: it found the cost super-linear, a profile on 2026-09-10
+named the cause, and the fix made the curve linear the same day. The
+field deployment that motivated the first measurement ran on different
+hardware and saw ~0.5 ms/entity on the pre-fix engine.
 
 The engine's MCP instructions describe a mem as "designed for 1,000–5,000
 entities". Until this document, that span was advertised, not measured.
@@ -64,27 +67,51 @@ Median milliseconds per operation (full per-run samples in the JSON):
 
 | Entities | Generation | Boot | Update | Search | Overview | Boot ms/entity |
 |---:|---:|---:|---:|---:|---:|---:|
-| 500 | 233 | 181 | 182 | 185 | 181 | 0.36 |
-| 2,500 | 1,048 | 1,162 | 1,166 | 1,179 | 1,163 | 0.46 |
-| 5,000 | 2,918 | 3,043 | 3,071 | 3,044 | 3,040 | 0.61 |
-| 7,500 | 4,739 | 5,647 | 5,656 | 5,639 | 5,640 | 0.75 |
+| 500 | 324 | 59 | 60 | 62 | 60 | 0.12 |
+| 2,500 | 1,223 | 145 | 142 | 148 | 144 | 0.06 |
+| 5,000 | 2,801 | 255 | 247 | 255 | 252 | 0.05 |
+| 7,500 | 4,976 | 371 | 356 | 369 | 365 | 0.05 |
 
 Two findings carry the whole page:
 
 1. **Every cold operation costs the same as boot.** At every size, update,
    search-after-mutation, and overview sit within noise of the plain boot
-   (±10 ms at 7,500 against a 5,600 ms baseline). Index rebuild, the
+   (±15 ms at 7,500 against a 371 ms baseline). Index rebuild, the
    mutation commit, and community detection are invisible next to loading
    the workspace. On the cold CLI path there is exactly one cost: **load**.
-2. **Per-entity load cost grows super-linearly.** 15× the entities costs
-   31× the time (0.36 → 0.75 ms/entity from 500 → 7,500). The advertised
-   span's ceiling (5,000) costs ~3 s per cold command on this hardware;
-   the largest real deployment's size (7,414) costs ~5.6 s — matching the
-   ~4 s the field measured on slower hardware at 7.4k.
+2. **Load is linear in the entity count.** 15× the entities costs 6× the
+   time; the per-entity figure falls from 0.12 to 0.05 ms because the
+   small end is dominated by process spawn and repository open (~40 ms
+   flat), not by entities. The advertised span's ceiling (5,000) costs a
+   quarter of a second per cold command on this hardware; the largest
+   real deployment's size (7,414) sits under 0.4 s.
 
-Calibration anchors from the field (different hardware, real content):
-boot ~0.5 ms/entity at a 7,414-entity workspace; a 6,900-entity ingest at
-~4 s/CLI-call. Both sit on this curve's shape.
+### Dated record: the 2026-08-06 curve and its cause
+
+The first measurement (commit `c48cd07`, same hardware, same corpus):
+
+| Entities | Boot | Boot ms/entity |
+|---:|---:|---:|
+| 500 | 181 | 0.36 |
+| 2,500 | 1,162 | 0.46 |
+| 5,000 | 3,043 | 0.61 |
+| 7,500 | 5,647 | 0.75 |
+
+15× the entities cost 31× the time, and the page read that as the
+price of loading, with lazy mounts and mem splitting as the levers. A
+CPU profile of the 7,500-entity boot on 2026-09-10 (Instruments, Time
+Profiler, 6.2 s sampled) put 96 % of the time in the per-entity read of
+the git-branch backend: the boot listed every entity (a walk that
+already read every blob and dropped the bytes), then read each one
+through `read_entity`, which opened the repository, peeled the ref and
+inflated the root tree afresh on every call. A 7,500-entry tree
+inflated 7,500 times is quadratic; the markdown parser and the
+validators were under one percent. The fix is one backend primitive,
+`read_all_entities`: the whole mem in one tree walk, taken by boot and
+reload, under the same source-selection rules as the per-path read.
+Field calibration from that era (boot ~0.5 ms/entity at 7,414 entities,
+a 6,900-entity ingest at ~4 s per CLI call) measured the quadratic path
+and no longer predicts the engine.
 
 Generation context: one `batch-create` call lands 7,500 entities in
 ~4.7 s — the batch path exists precisely because per-call cold boots made
@@ -93,7 +120,11 @@ per-entity creation scale to hours.
 ## What the numbers imply for the deferred redesigns
 
 Data, not decisions — each paragraph states what the curve says, the
-backlog items decide.
+backlog items decide. The three paragraphs below were argued from the
+2026-08-06 curve and carry its per-entity multipliers (0.36–0.75 ms);
+the mechanisms they decided stand, the multipliers are a twentieth of
+that on the linear engine, and the cold-path share each lever removes
+is proportionally smaller.
 
 **Real lazy mounts (landed 2026-08-21, measured).** The curve
 says load is the only cold-path cost and it grows super-linearly with
@@ -136,10 +167,9 @@ loads, and no change to any subsequent cold command.
 
 ## Relation to the advertised range
 
-Inside 1,000–5,000, a cold CLI command costs roughly 0.5–3 s on this
+Inside 1,000–5,000, a cold CLI command costs roughly 0.1–0.25 s on this
 hardware; the warm MCP path pays load once per server start. The span
 remains a design statement about model granularity — the curve attaches
-its measured price and shows the price keeps rising past the ceiling
-(super-linearly, not catastrophically: 7.5k works, at ~5.6 s per cold
-command). The MCP instructions now cite this document as the measured
-grounding.
+its measured price and shows the price rising linearly past the ceiling
+(7.5k works, at ~0.4 s per cold command). The MCP instructions cite this
+document as the measured grounding.

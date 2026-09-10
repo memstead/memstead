@@ -31,6 +31,31 @@ use crate::provenance::Provenance;
 use crate::storage::{CommitId, MemWriterError};
 use crate::vcs::CommitContext;
 
+/// One row of [`MemBackend::read_all_entities`]: the mem-relative
+/// path and either its bytes or the failure reading them.
+pub type EntityRead = (PathBuf, Result<Vec<u8>, BackendError>);
+
+/// The per-path form of [`MemBackend::read_all_entities`]: list, then
+/// read each path through the backend's own `read_entity`, so the
+/// pending-buffer precedence and snapshot rules of that method hold
+/// row by row. The trait default, and the route a one-walk backend
+/// falls back to while a transaction is staged.
+pub fn read_entities_one_by_one<B: MemBackend + ?Sized>(
+    backend: &B,
+) -> Result<Vec<EntityRead>, BackendError> {
+    let paths = backend.list_entities()?;
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        match backend.read_entity(&path) {
+            Ok(Some(bytes)) => out.push((path, Ok(bytes))),
+            // Listed-but-absent: list/read race. Skip silently.
+            Ok(None) => {}
+            Err(e) => out.push((path, Err(e))),
+        }
+    }
+    Ok(out)
+}
+
 /// Mem-backend trait. Implementations live next to the backend's
 /// other code (folder under `crate::storage::filesystem`; git-branch
 /// in the renamed-from-`memstead-git-branch` crate; archive under the
@@ -69,6 +94,24 @@ pub trait MemBackend: Send + Sync {
     /// primitive for this question).
     fn entity_exists(&self, rel_path: &Path) -> Result<bool, BackendError> {
         Ok(self.read_entity(rel_path)?.is_some())
+    }
+
+    /// Every entity-bearing file with its bytes, in one pass — the
+    /// primitive a whole-mem load (boot, reload) asks for. One row per
+    /// listed path: `Ok(bytes)` or the per-path read failure, so a
+    /// caller can carry on past one unreadable entity; a path listed
+    /// but gone by read time is dropped (list/read race). The outer
+    /// `Err` is a listing failure. Order is not specified.
+    ///
+    /// The default walks `list_entities` and reads each path — correct
+    /// everywhere, and on a backend whose per-path read re-resolves
+    /// its snapshot it is quadratic: the git-branch backend's
+    /// `read_entity` opens the repository, peels the ref and inflates
+    /// the root tree on every call, so a 7,500-entity boot inflated a
+    /// 7,500-entry tree 7,500 times (96 % of the measured boot,
+    /// 2026-09-10). Backends with a one-walk answer override it.
+    fn read_all_entities(&self) -> Result<Vec<EntityRead>, BackendError> {
+        read_entities_one_by_one(self)
     }
 
     /// Does the storage location this backend names exist at all: the

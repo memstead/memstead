@@ -41,6 +41,7 @@ use crate::vcs::{CommitContext, acquire_branch_mutex, author_identity, format_co
 /// Per-path final state for the buffered op log. Move operations
 /// resolve at call time into a `Delete(from)` + `Upsert(to, bytes)`
 /// pair so commit-time replay only ever sees these two terminal states.
+#[derive(Clone)]
 enum PendingState {
     Upsert(Vec<u8>),
     Delete,
@@ -605,6 +606,63 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
                 .map_err(memstead_base::backend::BackendError::from),
             None => Ok(None),
         }
+    }
+
+    /// The whole mem in one walk: open the repository, peel the ref
+    /// and inflate each tree exactly once, then read every blob. The
+    /// per-path route (`list_entities`, which already reads every
+    /// blob and drops the bytes, then `read_entity` per path, which
+    /// re-opens the repository and re-inflates the root tree each
+    /// time) made a boot quadratic in the mem size. Source selection is
+    /// `read_entity`'s: the snapshotted parent while writes are staged,
+    /// the live tip between transactions; the pending buffer is then
+    /// composed over the rows (a staged delete hides its row, a staged
+    /// upsert replaces or adds one), so the answer is what per-path
+    /// reads would have given, in one walk.
+    fn read_all_entities(
+        &self,
+    ) -> Result<Vec<memstead_base::backend::EntityRead>, memstead_base::backend::BackendError> {
+        let is_entity = |path: &str| path.ends_with(".md") && !path.starts_with(".memstead/");
+        let (snapshot_parent, ops) = {
+            let pending = self.pending.lock().map_err(|_| {
+                memstead_base::backend::BackendError::Other(
+                    "git-tree backend pending state poisoned".to_string(),
+                )
+            })?;
+            let parent = if pending.ops.is_empty() {
+                None
+            } else {
+                pending.parent
+            };
+            (parent, pending.ops.clone())
+        };
+        let source = match snapshot_parent {
+            Some(p) => Some(p),
+            None => self
+                .live_tip()
+                .map_err(memstead_base::backend::BackendError::from)?,
+        };
+        let mut rows: Vec<memstead_base::backend::EntityRead> = match source {
+            None => Vec::new(),
+            Some(id) => read_commit_blobs(&self.gitdir, id)
+                .map_err(|e| {
+                    memstead_base::backend::BackendError::Other(format!(
+                        "git-tree backend read_all_entities: {e}"
+                    ))
+                })?
+                .into_iter()
+                .filter(|b| is_entity(&b.path) && !ops.contains_key(&b.path))
+                .map(|b| (PathBuf::from(b.path), Ok(b.bytes)))
+                .collect(),
+        };
+        for (path, state) in ops {
+            if let PendingState::Upsert(bytes) = state
+                && is_entity(path.as_str())
+            {
+                rows.push((PathBuf::from(path), Ok(bytes)));
+            }
+        }
+        Ok(rows)
     }
 
     /// Existence probe with `read_entity`'s exact source-selection
@@ -1259,6 +1317,27 @@ pub fn read_branch_blobs(
             ref_name: ref_name.to_string(),
             message: e.to_string(),
         })?;
+    read_commit_blobs_in(&repo, id.detach())
+}
+
+/// Every blob under one commit's tree, by commit id rather than by
+/// ref: the form a reader holding a snapshotted parent uses so that
+/// its rows come from the same commit its staged writes compose onto.
+pub fn read_commit_blobs(
+    gitdir: &Path,
+    commit: gix::ObjectId,
+) -> Result<Vec<BranchBlob>, BranchReadError> {
+    let repo = gix::open(gitdir).map_err(|e| BranchReadError::Open {
+        path: gitdir.display().to_string(),
+        source: e,
+    })?;
+    read_commit_blobs_in(&repo, commit)
+}
+
+fn read_commit_blobs_in(
+    repo: &gix::Repository,
+    id: gix::ObjectId,
+) -> Result<Vec<BranchBlob>, BranchReadError> {
     let commit = repo
         .find_object(id)
         .map_err(|e| BranchReadError::Read {
@@ -1270,7 +1349,7 @@ pub fn read_branch_blobs(
     })?;
 
     let mut out: Vec<BranchBlob> = Vec::new();
-    walk_tree(&repo, &tree, "", &mut out)?;
+    walk_tree(repo, &tree, "", &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
 }
@@ -1430,6 +1509,63 @@ mod tests {
         assert!(
             !MemBackend::entity_exists(&writer, Path::new("notes/a.md")).unwrap(),
             "staged delete answers false while the branch tip still holds the blob"
+        );
+    }
+
+    /// `read_all_entities` is the one-walk form of list-then-read: the
+    /// same rows between transactions (the sidecar under `.memstead/`
+    /// excluded, an unborn ref empty), and the same pending precedence
+    /// while writes are staged — a staged upsert is served, a staged
+    /// delete hides the committed blob.
+    #[test]
+    fn read_all_entities_matches_per_path_reads_and_pending_precedence() {
+        use memstead_base::backend::{MemBackend, read_entities_one_by_one};
+        let tmp = TempDir::new().unwrap();
+        let gitdir = fresh_repo_dir(tmp.path());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+
+        assert!(
+            MemBackend::read_all_entities(&writer).unwrap().is_empty(),
+            "unborn ref reads as no entities"
+        );
+
+        MemBackend::write_entity(&writer, Path::new("notes/a.md"), b"# a\n").unwrap();
+        MemBackend::write_entity(&writer, Path::new("notes/b.md"), b"# b\n").unwrap();
+        writer
+            .write_anchors_sidecar(b"{\"version\":1,\"entities\":{}}")
+            .unwrap();
+        MemWriter::commit(&writer, "land a and b", &ctx_for_test()).unwrap();
+
+        let rows = |reads: Vec<memstead_base::backend::EntityRead>| {
+            let mut rows: Vec<(String, Vec<u8>)> = reads
+                .into_iter()
+                .map(|(p, r)| (p.to_string_lossy().into_owned(), r.unwrap()))
+                .collect();
+            rows.sort();
+            rows
+        };
+        let one_walk = rows(MemBackend::read_all_entities(&writer).unwrap());
+        let per_path = rows(read_entities_one_by_one(&writer).unwrap());
+        assert_eq!(one_walk, per_path);
+        assert_eq!(
+            one_walk,
+            vec![
+                ("notes/a.md".to_string(), b"# a\n".to_vec()),
+                ("notes/b.md".to_string(), b"# b\n".to_vec()),
+            ],
+            "entities only: the anchors sidecar under .memstead/ is not an entity"
+        );
+
+        MemBackend::write_entity(&writer, Path::new("notes/c.md"), b"# c\n").unwrap();
+        MemBackend::delete_entity(&writer, Path::new("notes/a.md")).unwrap();
+        let staged = rows(MemBackend::read_all_entities(&writer).unwrap());
+        assert_eq!(
+            staged,
+            vec![
+                ("notes/b.md".to_string(), b"# b\n".to_vec()),
+                ("notes/c.md".to_string(), b"# c\n".to_vec()),
+            ],
+            "with writes staged, a staged delete hides a.md and a staged upsert serves c.md"
         );
     }
 

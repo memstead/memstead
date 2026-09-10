@@ -9,6 +9,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A mem-repo boot is linear in the mem size, not quadratic.** Loading a
+  git-branch mem read every entity through the per-path read, and that read
+  opened the repository, peeled the ref and inflated the root tree afresh
+  each time, so a 7,500-entity mem inflated a 7,500-entry tree 7,500 times:
+  a profile of the cold boot (2026-09-10, 6.2 s on the sizing corpus) put
+  96 % of it there, and the sizing curve's super-linear per-entity cost was
+  this and nothing else. The backend trait now carries `read_all_entities`,
+  one pass over the whole mem; the git-branch backend answers it with a
+  single tree walk under `read_entity`'s exact source selection (snapshotted
+  parent while writes are staged, live tip between transactions, the
+  pending buffer composed over the rows), and the boot and reload paths
+  read through it. Folder and archive backends keep the per-path default.
+
 - **`projection advance` no longer drops an authored exclusion under a bare
   `worked`.** A disposition without a rationale over an artifact the
   exclusion ledger holds refuses before any write

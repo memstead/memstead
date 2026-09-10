@@ -1005,12 +1005,17 @@ pub(super) fn unbacked_mount_warning(
 pub(super) fn collect_source_entries(
     backend: &dyn MemBackend,
 ) -> Result<(Vec<SourceEntry>, Vec<SourceReadError>), EngineError> {
-    let paths = backend.list_entities()?;
-    let mut entries: Vec<SourceEntry> = Vec::with_capacity(paths.len());
+    // One backend pass for the whole mem: the git-branch backend
+    // answers with a single tree walk, where the per-path route
+    // re-inflated the root tree once per entity (quadratic in the
+    // mem size — the boot cost the sizing curve reported as
+    // super-linear).
+    let reads = backend.read_all_entities()?;
+    let mut entries: Vec<SourceEntry> = Vec::with_capacity(reads.len());
     let mut errors: Vec<SourceReadError> = Vec::new();
-    for path in paths {
-        match backend.read_entity(&path) {
-            Ok(Some(bytes)) => match String::from_utf8(bytes) {
+    for (path, read) in reads {
+        match read {
+            Ok(bytes) => match String::from_utf8(bytes) {
                 Ok(content) => entries.push(SourceEntry {
                     relative_path: path.to_string_lossy().into_owned(),
                     source_path: path.clone(),
@@ -1021,9 +1026,6 @@ pub(super) fn collect_source_entries(
                     error: std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
                 }),
             },
-            Ok(None) => {
-                // Listed-but-absent: list/read race. Skip silently.
-            }
             Err(e) => errors.push(SourceReadError {
                 source_path: path,
                 error: std::io::Error::other(e.to_string()),

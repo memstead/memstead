@@ -220,6 +220,16 @@ fn build_release_binary() -> Result<PathBuf> {
 /// surface: `mem-repo init` → `mem init bench` → one `batch-create`.
 fn generate_workspace(binary: &Path, ws: &Path, n: usize) -> Result<()> {
     run_ok(binary, ws, &["mem-repo", "init", "."])?;
+    // Mem creation is refused by default (`MEM_PATH_NOT_ALLOWED` without
+    // an allowlist rule); the grant is the operator act the harness
+    // performs on its own throwaway workspace. `--schema *` keeps the
+    // harness version-agnostic: `mem init` still pins the binary's
+    // default generation.
+    run_ok(
+        binary,
+        ws,
+        &["workspace", "allow-create", "bench", "--schema", "*"],
+    )?;
     run_ok(binary, ws, &["mem", "init", "bench", "--no-gitignore"])?;
 
     let corpus = corpus_json(n);
