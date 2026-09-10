@@ -458,7 +458,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
 
     match ctx.cli_engine()? {
-        CliEngine::MemRepo(mut engine) => {
+        CliEngine::MemRepo(engine) => {
+            let mut engine = memstead_base::OperationScope::begin(engine);
             let lookup_id = crate::setup::preflight_id(&mut engine, &entity_id)?;
             check_template_identity(
                 engine.get_entity(&lookup_id),
@@ -535,7 +536,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             let result = engine
                 .update_entity_with_ctx(update_args, &crate::setup::cli_ctx_with_note(note.clone()))
                 .map_err(CliError::from_engine_op)?;
-            let mem_changed = engine.take_mem_changed_notices();
+            let (_engine, mem_changed) = engine.finish();
 
             if ctx.json {
                 let mut body = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);

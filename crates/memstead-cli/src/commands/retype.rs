@@ -113,7 +113,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let section_map = parse_section_map(&args.section_map)?;
 
     let outcome = match ctx.cli_engine()? {
-        CliEngine::MemRepo(mut engine) => {
+        CliEngine::MemRepo(engine) => {
+            let mut engine = memstead_base::OperationScope::begin(engine);
             // The hash preflight reads the entity the verb will act on,
             // so a bare slug has to be resolved through the engine's one
             // rule first — same seam `update`, `delete` and `rename` use.
@@ -139,7 +140,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     args.note.as_deref(),
                 )
                 .map_err(CliError::from_engine_op)?;
-            let mem_changed = engine.take_mem_changed_notices();
+            let (_engine, mem_changed) = engine.finish();
             (outcome, mem_changed)
         }
         CliEngine::Filesystem(mut engine) => {

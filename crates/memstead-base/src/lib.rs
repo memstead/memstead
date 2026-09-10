@@ -67,6 +67,7 @@ pub use anchor::{
     resolve_anchor,
 };
 pub use backend::{BackendError, MemBackend};
+pub use engine::drift::{EngineHandle, OperationScope};
 pub use engine::{
     BackendFactory, BootError, CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs,
     DeleteEntityOutcome, DeleteReferrers, Engine, EngineError, EntityHistoryReport, EntityTouch,

@@ -23,7 +23,11 @@ pub mod lifecycle;
 pub mod read_mems;
 pub mod server;
 
-/// Acquire an engine mutex on a tool dispatch path. A poisoned lock
+/// Acquire an engine mutex on a tool dispatch path and open the
+/// operation scope over it: the guard comes back wrapped in a
+/// `memstead_base::OperationScope`, which derefs to the engine and is
+/// the only channel for the reload notices (`finish` hands them out
+/// with the guard; a dropped scope discards them). A poisoned lock
 /// (a prior tool call panicked) early-returns the typed
 /// `ENGINE_LOCK_POISONED` envelope instead of panicking the server —
 /// usable only inside functions returning `CallToolResult`.
@@ -31,7 +35,7 @@ pub mod server;
 macro_rules! lock_engine {
     ($mutex:expr) => {
         match $mutex.lock() {
-            Ok(guard) => guard,
+            Ok(guard) => ::memstead_base::OperationScope::begin(guard),
             Err(_) => return $crate::error_envelopes::engine_lock_poisoned(),
         }
     };

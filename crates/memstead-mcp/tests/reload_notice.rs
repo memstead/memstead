@@ -12,7 +12,25 @@
 use indexmap::IndexMap;
 use memstead_base::ops::NoticeChanges;
 use memstead_base::vcs::{Actor, ClientId};
-use memstead_base::{CreateEntityArgs, EngineError, EntityId, UpdateEntityArgs};
+use memstead_base::{
+    CreateEntityArgs, Engine, EngineError, EntityId, OperationScope, UpdateEntityArgs,
+};
+
+/// Close the engine's operation scope, read the notices it recorded,
+/// and open the next one over the same engine: the test's stand-in
+/// for a response builder finishing one operation and the server
+/// starting the next.
+fn cycle(scope: &mut OperationScope<Engine>) -> Vec<memstead_base::ops::MemChangedNotice> {
+    // `finish` consumes the scope, so swap a placeholder in: a scope
+    // over the finished engine is rebuilt right after.
+    let taken = std::mem::replace(
+        scope,
+        OperationScope::begin(Engine::from_mounts(Vec::new()).expect("placeholder engine")),
+    );
+    let (engine, notices) = taken.finish();
+    *scope = OperationScope::begin(engine);
+    notices
+}
 use memstead_git_branch::test_support::init_real_mem_repo;
 use memstead_git_branch::workspace_store::engine_from_workspace_root;
 use memstead_projection::Slice;
@@ -234,8 +252,10 @@ fn second_engine_reloads_and_surfaces_mem_changed_on_create() {
 
     // Both engines boot from the same workspace, cached at the same
     // (empty-tree) head before any write.
-    let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
-    let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
+    let mut a =
+        OperationScope::begin(engine_from_workspace_root(tmp.path()).expect("engine A boots"));
+    let mut b =
+        OperationScope::begin(engine_from_workspace_root(tmp.path()).expect("engine B boots"));
 
     // A creates E_a, advancing the shared mem ref.
     a.create_entity(
@@ -262,7 +282,7 @@ fn second_engine_reloads_and_surfaces_mem_changed_on_create() {
         "B reloaded to A's head before its write — E_a is present in B's graph",
     );
 
-    let notices = b.take_mem_changed_notices();
+    let notices = cycle(&mut b);
     assert_eq!(
         notices.len(),
         1,
@@ -292,7 +312,7 @@ fn second_engine_reloads_and_surfaces_mem_changed_on_create() {
     // follow-up quiescent reload attaches no notice.
     b.reload_if_stale(Some("specs"));
     assert!(
-        b.take_mem_changed_notices().is_empty(),
+        cycle(&mut b).is_empty(),
         "quiescent op after the reload attaches no notice",
     );
 }
@@ -304,7 +324,8 @@ fn single_engine_no_sibling_attaches_no_notice() {
     // reloads and no notice is ever stashed.
     let tmp = TempDir::new().unwrap();
     init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
-    let mut a = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    let mut a =
+        OperationScope::begin(engine_from_workspace_root(tmp.path()).expect("engine boots"));
 
     a.create_entity(
         create_args("specs", "Entity One"),
@@ -314,7 +335,7 @@ fn single_engine_no_sibling_attaches_no_notice() {
     )
     .expect("create one");
     assert!(
-        a.take_mem_changed_notices().is_empty(),
+        cycle(&mut a).is_empty(),
         "first op has nothing to reload past",
     );
 
@@ -329,7 +350,7 @@ fn single_engine_no_sibling_attaches_no_notice() {
     )
     .expect("create two");
     assert!(
-        a.take_mem_changed_notices().is_empty(),
+        cycle(&mut a).is_empty(),
         "no sibling moved the ref — no notice on the engine's own follow-on write",
     );
 }
@@ -343,7 +364,8 @@ fn read_after_sibling_modify_returns_fresh_content_with_mem_changed() {
     let tmp = TempDir::new().unwrap();
     init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
 
-    let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
+    let mut a =
+        OperationScope::begin(engine_from_workspace_root(tmp.path()).expect("engine A boots"));
     a.create_entity(
         create_args("specs", "Shared X"),
         Actor::Cli,
@@ -351,7 +373,8 @@ fn read_after_sibling_modify_returns_fresh_content_with_mem_changed() {
         None,
     )
     .expect("A create X");
-    let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
+    let mut b =
+        OperationScope::begin(engine_from_workspace_root(tmp.path()).expect("engine B boots"));
 
     let x = EntityId::new("specs", "shared-x");
     let stale_hash = b.get_entity(&x).expect("B knows X").content_hash.clone();
@@ -377,7 +400,7 @@ fn read_after_sibling_modify_returns_fresh_content_with_mem_changed() {
         "B's read sees A's fresh content, not the stale boot snapshot",
     );
 
-    let notices = b.take_mem_changed_notices();
+    let notices = cycle(&mut b);
     assert_eq!(
         notices.len(),
         1,
@@ -401,7 +424,8 @@ fn write_collision_surfaces_hash_mismatch_with_mem_changed() {
 
     // A creates the shared entity X first; B boots afterwards so B's
     // graph already holds X (cached at X's create head).
-    let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
+    let mut a =
+        OperationScope::begin(engine_from_workspace_root(tmp.path()).expect("engine A boots"));
     a.create_entity(
         create_args("specs", "Shared X"),
         Actor::Cli,
@@ -409,7 +433,8 @@ fn write_collision_surfaces_hash_mismatch_with_mem_changed() {
         None,
     )
     .expect("A create X");
-    let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
+    let mut b =
+        OperationScope::begin(engine_from_workspace_root(tmp.path()).expect("engine B boots"));
 
     let x = EntityId::new("specs", "shared-x");
     // The hash B holds for X — about to go stale.
@@ -441,7 +466,7 @@ fn write_collision_surfaces_hash_mismatch_with_mem_changed() {
     );
 
     // The notice still rides the (refused) operation.
-    let notices = b.take_mem_changed_notices();
+    let notices = cycle(&mut b);
     assert_eq!(notices.len(), 1, "the reload stashed one notice");
     match &notices[0].changes {
         NoticeChanges::Detailed { entries } => assert!(
@@ -459,7 +484,8 @@ fn unrelated_concurrent_write_proceeds_with_mem_changed() {
     let tmp = TempDir::new().unwrap();
     init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
 
-    let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
+    let mut a =
+        OperationScope::begin(engine_from_workspace_root(tmp.path()).expect("engine A boots"));
     a.create_entity(
         create_args("specs", "Entity X"),
         Actor::Cli,
@@ -474,7 +500,8 @@ fn unrelated_concurrent_write_proceeds_with_mem_changed() {
         None,
     )
     .expect("A create Y");
-    let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
+    let mut b =
+        OperationScope::begin(engine_from_workspace_root(tmp.path()).expect("engine B boots"));
 
     let x = EntityId::new("specs", "entity-x");
     let y = EntityId::new("specs", "entity-y");
@@ -501,7 +528,7 @@ fn unrelated_concurrent_write_proceeds_with_mem_changed() {
     )
     .expect("disjoint update commits");
 
-    let notices = b.take_mem_changed_notices();
+    let notices = cycle(&mut b);
     assert_eq!(notices.len(), 1);
     match &notices[0].changes {
         NoticeChanges::Detailed { entries } => {
@@ -529,7 +556,8 @@ fn sync_state_write_surfaces_via_per_mem_reload() {
     let tmp = TempDir::new().unwrap();
     init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
 
-    let mut a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
+    let mut a =
+        OperationScope::begin(engine_from_workspace_root(tmp.path()).expect("engine A boots"));
     // Seed one entity so both engines cache a common non-empty head.
     a.create_entity(
         create_args("specs", "Entity One"),
@@ -538,7 +566,8 @@ fn sync_state_write_surfaces_via_per_mem_reload() {
         None,
     )
     .expect("A create");
-    let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
+    let mut b =
+        OperationScope::begin(engine_from_workspace_root(tmp.path()).expect("engine B boots"));
 
     // A writes a projection baseline into the mem's `sync_state`, out of band
     // from B (advancing the shared mem ref with a config-only commit).

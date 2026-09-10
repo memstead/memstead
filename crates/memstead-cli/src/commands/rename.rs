@@ -48,7 +48,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let new_title = args.new_title.clone();
 
     match ctx.cli_engine()? {
-        CliEngine::MemRepo(mut engine) => {
+        CliEngine::MemRepo(engine) => {
+            let mut engine = memstead_base::OperationScope::begin(engine);
             let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
             let expected_hash = resolve_expected_hash_mem_repo(&engine, &lookup_id, &args)?;
             let result = engine
@@ -59,7 +60,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     &crate::setup::cli_ctx_with_note(args.note.clone()),
                 )
                 .map_err(CliError::from_engine_op)?;
-            let mem_changed = engine.take_mem_changed_notices();
+            let (_engine, mem_changed) = engine.finish();
             if ctx.json {
                 let mut body = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
                 super::merge_mem_changed_json(&mut body, &mem_changed);

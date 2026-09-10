@@ -46,6 +46,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **One write trait, one backend error.** The `MemWriter` trait and
+  `MemWriterError` are folded into `MemBackend` and `BackendError` (which
+  now carries `Path` and `HashMismatch` directly); the two implementors
+  are `FilesystemBackend` and `GitTreeBackend`. The engine maps a
+  backend's commit-tip CAS conflict onto its `HashMismatch` envelope, so
+  the wire carries one `HASH_MISMATCH` code whichever level detected the
+  conflict. Library consumers rename; the wire is unchanged.
+
+- **Reload notices ride an operation scope, not the engine.**
+  `Engine::take_mem_changed_notices` is gone. A caller opens a
+  `memstead_base::OperationScope` over its engine handle (the MCP lock
+  macro does so for every tool call); `reload_if_stale` records its
+  `mem_changed` notices into that scope, `finish` hands them out as a
+  value together with the handle, opening a scope discards what an
+  unscoped caller left, and a dropped scope discards its own. No
+  operation can carry another operation's notice into its response, and
+  nothing on the engine hands accumulated notices out on demand.
+
 - **The per-mem topology projection is a store-level function.**
   `memstead_base::graph::topology::project_mem_topology(store, louvain,
   mem, chain)` is the one derivation of `{nodes, edges, communities}`;

@@ -362,18 +362,16 @@ pub struct Engine {
     /// and then invokes the callbacks — so a callback that re-enters
     /// the engine for a read does not deadlock against the registry.
     event_subscribers: Arc<std::sync::Mutex<events::SubscriberRegistry>>,
-    /// Reload-before-operation notices accumulated by
+    /// Reload-before-operation notices recorded by
     /// [`Self::reload_if_stale`] when an operation triggered a mem
     /// reload. Built at reload time — when the backend's current head
     /// equals the head we reloaded to, *before* any mutation in the
     /// same operation commits — so the delta describes only the
-    /// sibling's change, never the engine's own follow-on write. The
-    /// response layer drains them via
-    /// [`Self::take_mem_changed_notices`] and attaches the structured
-    /// `mem_changed` notice to the operation's response. Every entity
-    /// op that can reload drains after; an undrained accumulation would
-    /// leak into the next operation's response, so callers that reload
-    /// must take.
+    /// sibling's change, never the engine's own follow-on write.
+    /// Reachable only through an [`drift::OperationScope`]: `begin`
+    /// clears, `finish` hands the notices out as a value, and a
+    /// dropped scope clears again, so no operation inherits another's
+    /// notice and nothing on the engine hands them out on demand.
     pending_mem_changed: Vec<crate::ops::MemChangedNotice>,
     /// The mount roster as last reconciled (`roster.rs`): `None` until the
     /// first observation captures the baseline.

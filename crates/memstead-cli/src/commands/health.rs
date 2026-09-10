@@ -129,12 +129,11 @@ pub struct Args {
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let mut cli_engine = ctx.cli_engine()?;
-    let engine = cli_engine.base_mut();
+    let mut engine = memstead_base::OperationScope::begin(cli_engine.base_mut());
     // Mirror the MCP handler: the full lazy-mount load, then the drift
     // pass whose warnings ride in the report.
     engine.ensure_mems_loaded(None);
     let drift_warnings = engine.reload_if_stale(args.mem.as_deref());
-    let _ = engine.take_mem_changed_notices();
 
     let (mutations, plugin) =
         memstead_base::ops::health::config_projection_from_settings(engine.settings());
@@ -149,7 +148,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         today: args.today.as_deref(),
     };
 
-    let result = match compose_health(engine, &health_args, drift_warnings, &config) {
+    let result = match compose_health(&mut engine, &health_args, drift_warnings, &config) {
         Ok(v) => v,
         Err(ComposeHealthError::MemQuarantined(name)) => {
             return Err(crate::CliError::from_engine_op(engine.unknown_mem_error(&name)).into());

@@ -104,7 +104,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let to = EntityId::canonical(&to_str);
     let remove = args.remove;
 
-    let mut engine = ctx.cli_engine()?.into_base();
+    let mut engine = memstead_base::OperationScope::begin(ctx.cli_engine()?.into_base());
     // Pass the `memstead-cli@<version>` client identity so the relate
     // commit body carries the same `Client:` provenance trailer as
     // create / update / rename (which set it via `cli_ctx_with_note`).
@@ -125,7 +125,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             args.note.as_deref(),
         )
         .map_err(CliError::from_engine_op)?;
-    let mem_changed = engine.take_mem_changed_notices();
+    let (_engine, mem_changed) = engine.finish();
     if ctx.json {
         // Always surface `orphan_stubs_removed` so agents and scripts branch
         // uniformly — empty array on add paths and no-op removes,

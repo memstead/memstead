@@ -1663,11 +1663,13 @@ mod folder_drift_tests {
                 None,
             )
             .unwrap();
+        let mut op = crate::OperationScope::begin(&mut engine);
         assert!(
-            engine.reload_if_stale(None).is_empty(),
+            op.reload_if_stale(None).is_empty(),
             "the engine's own write must not read as sibling drift"
         );
-        assert!(engine.take_mem_changed_notices().is_empty());
+        let (_, notices) = op.finish();
+        assert!(notices.is_empty());
 
         // Sibling write: a separate writer instance (a stand-in for a
         // second process) commits + appends provenance out-of-band.
@@ -1693,7 +1695,8 @@ mod folder_drift_tests {
         )
         .unwrap();
 
-        let warnings = engine.reload_if_stale(None);
+        let mut op = crate::OperationScope::begin(&mut engine);
+        let warnings = op.reload_if_stale(None);
         assert_eq!(
             warnings.len(),
             1,
@@ -1703,7 +1706,7 @@ mod folder_drift_tests {
             crate::ops::WarningHint::MemReloaded { mem, .. } => assert_eq!(mem, "specs"),
             other => panic!("expected MemReloaded, got {other:?}"),
         }
-        let notices = engine.take_mem_changed_notices();
+        let (_, notices) = op.finish();
         assert_eq!(notices.len(), 1);
         // Post-reload the sibling entity is visible.
         assert!(
@@ -1712,7 +1715,47 @@ mod folder_drift_tests {
                 .is_some(),
             "reload must surface the sibling's entity"
         );
-        // Idempotent probe: no repeat notice.
-        assert!(engine.reload_if_stale(None).is_empty());
+        // Idempotent probe: no repeat notice, and a second scope over
+        // the same engine starts empty — the first operation's notice
+        // cannot be inherited.
+        let mut second = crate::OperationScope::begin(&mut engine);
+        assert!(second.reload_if_stale(None).is_empty());
+        let (_, notices) = second.finish();
+        assert!(notices.is_empty(), "a later scope inherits nothing");
+
+        // A notice recorded OUTSIDE any scope (a caller that reloaded
+        // without opening one) is discarded when the next scope opens:
+        // the scope is the only channel, and it never hands out what
+        // another operation produced.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        MemBackend::write_entity(
+            &sibling,
+            std::path::Path::new("sibling-two.md"),
+            SIBLING_ENTITY
+                .replace("specs--sibling", "specs--sibling-two")
+                .replace("# Sibling", "# Sibling two")
+                .as_bytes(),
+        )
+        .unwrap();
+        MemBackend::commit(&sibling, "sibling two", &CommitContext::internal()).unwrap();
+        crate::backend::MemBackend::append_provenance(
+            &sibling,
+            &Provenance::new(
+                std::time::SystemTime::now(),
+                ProvenanceKind::Create,
+                Some("specs--sibling-two".into()),
+                Actor::Cli,
+                None,
+                None,
+            ),
+        )
+        .unwrap();
+        let unscoped = engine.reload_if_stale(None);
+        assert_eq!(unscoped.len(), 1, "the unscoped reload still reports drift");
+        let (_, notices) = crate::OperationScope::begin(&mut engine).finish();
+        assert!(
+            notices.is_empty(),
+            "the next scope discards what an unscoped reload recorded: {notices:?}"
+        );
     }
 }

@@ -282,7 +282,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let note = args.note.clone().or_else(|| payload.note.clone());
 
     match ctx.cli_engine()? {
-        CliEngine::MemRepo(mut engine) => {
+        CliEngine::MemRepo(engine) => {
+            let mut engine = memstead_base::OperationScope::begin(engine);
             let mem = match payload.mem {
                 Some(v) => v,
                 None => first_writable_mem(&engine)?,
@@ -310,7 +311,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             let result = engine
                 .create_entity_with_ctx(create_args, &crate::setup::cli_ctx_with_note(note.clone()))
                 .map_err(CliError::from_engine_op)?;
-            let mem_changed = engine.take_mem_changed_notices();
+            let (_engine, mem_changed) = engine.finish();
 
             if ctx.json {
                 let mut body = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);

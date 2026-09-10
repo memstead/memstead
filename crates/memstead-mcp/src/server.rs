@@ -638,7 +638,7 @@ fn notices_as_reload_warnings(notices: &[MemChangedNotice]) -> Vec<WarningHint> 
 /// text channel gets only the warning line.
 ///
 /// Every error early-return reachable *after* a
-/// `take_mem_changed_notices()` drain routes through this so a reload
+/// `OperationScope::finish()` hand-out routes through this so a reload
 /// that happened during the operation reaches the agent whether the
 /// operation then succeeded or failed. No-op when both inputs are empty,
 /// so the common no-drift path stays byte-identical to pre-fix.
@@ -2076,7 +2076,7 @@ impl McpServer {
         // Drain the stashed structured notices: attached to the
         // response's `structured_content` below (and the markdown
         // `MEM_RELOADED` warning still rides the text channel).
-        let mem_changed_notices = engine.take_mem_changed_notices();
+        let (engine, mem_changed_notices) = engine.finish();
         let entity = match engine.get_entity(&id) {
             Some(e) => e.clone(),
             // Drift must survive the error path too: a sibling that
@@ -2363,7 +2363,7 @@ impl McpServer {
             engine.ensure_mems_loaded(None);
         }
         let drift_warnings = engine.reload_if_stale(mem_filter.as_deref());
-        let mem_changed_notices = engine.take_mem_changed_notices();
+        let (engine, mem_changed_notices) = engine.finish();
         let result = match engine.search(&scope) {
             Ok(r) => r,
             Err(e) => {
@@ -2428,7 +2428,6 @@ impl McpServer {
         // would be a different partition presented as the global one.
         engine.ensure_mems_loaded(None);
         let drift_warnings = engine.reload_if_stale(p.mem.as_deref());
-        let _ = engine.take_mem_changed_notices(); // leak-proof drain; see memstead_entity
 
         let include = p.include.clone().unwrap_or_default();
         let args = memstead_base::overview::OverviewArgs {
@@ -2526,7 +2525,7 @@ impl McpServer {
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
         let drift_warnings = engine.reload_if_stale(None);
-        let mem_changed_notices = engine.take_mem_changed_notices();
+        let (engine, mem_changed_notices) = engine.finish();
 
         // Resolve the effective schema name. Accept exactly one of
         // `name` (canonical) or `mem` (mount-roster lookup); the
@@ -2824,7 +2823,8 @@ impl McpServer {
                         .unwrap_or(serde_json::Value::Null);
                 }
                 attach_durability(&mut body, &engine, &outcome.mem);
-                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+                let (engine, finished_notices) = engine.finish();
+                attach_mem_changed(&mut body, finished_notices);
                 let res = json_response(&body);
                 match mem_schema_ref_unified(&engine, &mem) {
                     Some(s) => with_mem_schema_anchor(res, &s),
@@ -2839,7 +2839,7 @@ impl McpServer {
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
-                let notices = engine.take_mem_changed_notices();
+                let (engine, notices) = engine.finish();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -3039,7 +3039,8 @@ impl McpServer {
                         .unwrap_or(serde_json::Value::Null);
                 }
                 attach_durability(&mut body, &engine, outcome.id.mem());
-                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+                let (engine, finished_notices) = engine.finish();
+                attach_mem_changed(&mut body, finished_notices);
                 let res = json_response(&body);
                 match mem_schema_ref_unified(&engine, &mem_for_anchor) {
                     Some(s) => with_mem_schema_anchor(res, &s),
@@ -3054,7 +3055,7 @@ impl McpServer {
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
-                let notices = engine.take_mem_changed_notices();
+                let (engine, notices) = engine.finish();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -3162,7 +3163,8 @@ impl McpServer {
                             .collect::<Vec<_>>(),
                     });
                     attach_durability(&mut body, &engine, outcome.from.mem());
-                    attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+                    let (engine, finished_notices) = engine.finish();
+                    attach_mem_changed(&mut body, finished_notices);
                     let res = json_response(&body);
                     match mem_schema_ref_unified(&engine, &mem_for_anchor) {
                         Some(sr) => with_mem_schema_anchor(res, &sr),
@@ -3170,7 +3172,7 @@ impl McpServer {
                     }
                 }
                 Err(e) => {
-                    let notices = engine.take_mem_changed_notices();
+                    let (engine, notices) = engine.finish();
                     let warnings = notices_as_reload_warnings(&notices);
                     attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
                 }
@@ -3192,7 +3194,7 @@ impl McpServer {
         let result = match engine.batch_relate(ops, Actor::Agent, client.as_ref(), dry_run) {
             Ok(r) => r,
             Err(e) => {
-                let notices = engine.take_mem_changed_notices();
+                let (engine, notices) = engine.finish();
                 let warnings = notices_as_reload_warnings(&notices);
                 return attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices);
             }
@@ -3226,7 +3228,7 @@ impl McpServer {
                     e
                 })
                 .collect();
-            let notices = engine.take_mem_changed_notices();
+            let (_engine, notices) = engine.finish();
             let drift = notices_as_reload_warnings(&notices);
             let msg = format!(
                 "batch refused — {} of {} operation(s) failed, nothing committed",
@@ -3341,7 +3343,8 @@ impl McpServer {
                 .collect::<Vec<_>>(),
         });
         attach_durability(&mut body, &engine, mem_for_anchor.as_str());
-        attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+        let (engine, finished_notices) = engine.finish();
+        attach_mem_changed(&mut body, finished_notices);
         let res = json_response(&body);
         match mem_schema_ref_unified(&engine, &mem_for_anchor) {
             Some(s) => with_mem_schema_anchor(res, &s),
@@ -3418,7 +3421,8 @@ impl McpServer {
                     );
                 }
                 attach_durability(&mut body, &engine, id.mem());
-                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+                let (_engine, finished_notices) = engine.finish();
+                attach_mem_changed(&mut body, finished_notices);
                 let mut res = json_response(&body);
                 if let Some(s) = mem_for_anchor.as_deref() {
                     res = with_mem_schema_anchor(res, s);
@@ -3440,7 +3444,7 @@ impl McpServer {
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
-                let notices = engine.take_mem_changed_notices();
+                let (engine, notices) = engine.finish();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -3641,7 +3645,8 @@ impl McpServer {
                     "warnings": outcome.warnings,
                 });
                 attach_durability(&mut body, &engine, id.mem());
-                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+                let (engine, finished_notices) = engine.finish();
+                attach_mem_changed(&mut body, finished_notices);
                 let res = json_response(&body);
                 match mem_schema_ref_unified(&engine, &mem_for_anchor) {
                     Some(s) => with_mem_schema_anchor(res, &s),
@@ -3656,7 +3661,7 @@ impl McpServer {
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
-                let notices = engine.take_mem_changed_notices();
+                let (engine, notices) = engine.finish();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -3731,7 +3736,8 @@ impl McpServer {
                     obj.insert("dry_run".into(), serde_json::json!(dry_run));
                 }
                 attach_durability(&mut body, &engine, id.mem());
-                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+                let (engine, finished_notices) = engine.finish();
+                attach_mem_changed(&mut body, finished_notices);
                 let res = json_response(&body);
                 match mem_schema_ref_unified(&engine, &mem_for_anchor) {
                     Some(s) => with_mem_schema_anchor(res, &s),
@@ -3739,7 +3745,7 @@ impl McpServer {
                 }
             }
             Err(e) => {
-                let notices = engine.take_mem_changed_notices();
+                let (engine, notices) = engine.finish();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -3801,7 +3807,7 @@ impl McpServer {
         // forbidden rendering.
         engine.ensure_mems_loaded(None);
         let drift_warnings = engine.reload_if_stale(p.mem.as_deref());
-        let mem_changed_notices = engine.take_mem_changed_notices();
+        let (mut engine, mem_changed_notices) = engine.finish();
 
         let include = p.include.unwrap_or_default();
         let args = memstead_base::ops::health_compose::HealthArgs {
@@ -3923,7 +3929,7 @@ impl McpServer {
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
         let drift_warnings = engine.reload_if_stale(Some(&p.mem));
-        let mem_changed_notices = engine.take_mem_changed_notices();
+        let (engine, mem_changed_notices) = engine.finish();
         let mem_for_anchor = p.mem.clone();
         let res = match engine.changes_since(&p.mem, &p.since, p.rename_similarity) {
             Ok(mut report) => {
@@ -4123,7 +4129,8 @@ impl McpServer {
                     "new_version": outcome.new_version.to_string(),
                     "warnings": outcome.warnings,
                 });
-                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+                let (_engine, finished_notices) = engine.finish();
+                attach_mem_changed(&mut body, finished_notices);
                 json_response(&body)
             }
             Err(e) => {
@@ -4134,7 +4141,7 @@ impl McpServer {
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
-                let notices = engine.take_mem_changed_notices();
+                let (engine, notices) = engine.finish();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -4180,7 +4187,7 @@ impl McpServer {
             match engine.set_mem_title(&p.name, value, p.note.as_deref()) {
                 Ok(o) => warnings.extend(o.warnings),
                 Err(e) => {
-                    let notices = engine.take_mem_changed_notices();
+                    let (engine, notices) = engine.finish();
                     let drift = notices_as_reload_warnings(&notices);
                     return attach_drift_to_error(engine_err_unified(e, &engine), &drift, notices);
                 }
@@ -4191,7 +4198,7 @@ impl McpServer {
             match engine.set_mem_description(&p.name, value, p.note.as_deref()) {
                 Ok(o) => warnings.extend(o.warnings),
                 Err(e) => {
-                    let notices = engine.take_mem_changed_notices();
+                    let (engine, notices) = engine.finish();
                     let drift = notices_as_reload_warnings(&notices);
                     return attach_drift_to_error(engine_err_unified(e, &engine), &drift, notices);
                 }
@@ -4202,7 +4209,7 @@ impl McpServer {
             match engine.set_mem_subject(&p.name, value, p.note.as_deref()) {
                 Ok(o) => warnings.extend(o.warnings),
                 Err(e) => {
-                    let notices = engine.take_mem_changed_notices();
+                    let (engine, notices) = engine.finish();
                     let drift = notices_as_reload_warnings(&notices);
                     return attach_drift_to_error(engine_err_unified(e, &engine), &drift, notices);
                 }
@@ -4215,7 +4222,7 @@ impl McpServer {
             p.title.is_none() && p.description.is_none() && p.subject.is_none() && !p.clear_subject;
         if no_field && engine.mount(&p.name).is_none() {
             let e = engine.unknown_mem_error(&p.name);
-            let notices = engine.take_mem_changed_notices();
+            let (engine, notices) = engine.finish();
             let drift = notices_as_reload_warnings(&notices);
             return attach_drift_to_error(engine_err_unified(e, &engine), &drift, notices);
         }
@@ -4237,7 +4244,8 @@ impl McpServer {
             }))),
             "warnings": warnings,
         });
-        attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+        let (_engine, finished_notices) = engine.finish();
+        attach_mem_changed(&mut body, finished_notices);
         json_response(&body)
     }
 
@@ -4274,11 +4282,12 @@ impl McpServer {
         match engine.set_mem_schema(&p.mem, &target) {
             Ok(outcome) => {
                 let mut body = serde_json::to_value(&outcome).expect("SetSchemaOutcome serialises");
-                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+                let (_engine, finished_notices) = engine.finish();
+                attach_mem_changed(&mut body, finished_notices);
                 json_response(&body)
             }
             Err(e) => {
-                let notices = engine.take_mem_changed_notices();
+                let (engine, notices) = engine.finish();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
             }
@@ -6103,7 +6112,6 @@ mod tests {
             let unified = server.unified_engine();
             let mut engine = unified.lock().unwrap();
             let drift = engine.reload_if_stale(None);
-            let _ = engine.take_mem_changed_notices();
             let args = memstead_base::ops::health_compose::HealthArgs {
                 mem: None,
                 include: &include,

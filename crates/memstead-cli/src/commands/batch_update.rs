@@ -173,7 +173,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
     }
 
-    let mut engine = crate::setup::full_engine(ctx)?;
+    let mut engine = memstead_base::OperationScope::begin(crate::setup::full_engine(ctx)?);
 
     let updates: Vec<(UpdateEntityArgs, Option<String>)> = entries
         .into_iter()
@@ -188,8 +188,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         )
         .map_err(CliError::from_engine_op)?;
     // Reload-before-op runs inside `batch_update` for every mem the
-    // batch touches; drain any `mem_changed` notice it stashed.
-    let mem_changed = engine.take_mem_changed_notices();
+    // batch touches; the scope hands out any `mem_changed` notice it recorded.
+    let (_engine, mem_changed) = engine.finish();
 
     // A SUCCESSFUL batch renders exactly as before — the structured
     // result on stdout (`--json`) or the per-entry breakdown (human) —

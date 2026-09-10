@@ -319,17 +319,6 @@ impl Engine {
         self.emit_mem_changed(&event);
     }
 
-    /// Drain the reload-before-operation notices accumulated since the
-    /// last drain. The response layer calls this after an operation
-    /// completes to attach the structured `mem_changed` notice. Every
-    /// handler that can trigger a reload (directly via
-    /// [`Self::reload_if_stale`] or indirectly through a mutation) must
-    /// drain, or an undrained notice leaks into the next operation's
-    /// response.
-    pub fn take_mem_changed_notices(&mut self) -> Vec<crate::ops::MemChangedNotice> {
-        std::mem::take(&mut self.pending_mem_changed)
-    }
-
     /// Build a [`crate::ops::MemChangedNotice`] describing the
     /// per-entity delta a reload applied to `mem` (from `from_head`
     /// to `to_head`). Derived from [`Self::changes_since`] so it
@@ -2422,6 +2411,124 @@ mod remote_status_source_scan {
                 !body.contains(forbidden),
                 "remote_status must never reach {forbidden}: a status read moves no ref"
             );
+        }
+    }
+}
+
+/// Anything that hands out an [`Engine`]: the engine itself, a mutable
+/// borrow, a boxed engine, or a mutex guard. What [`OperationScope`]
+/// wraps.
+pub trait EngineHandle {
+    fn engine(&self) -> &Engine;
+    fn engine_mut(&mut self) -> &mut Engine;
+}
+
+impl EngineHandle for Engine {
+    fn engine(&self) -> &Engine {
+        self
+    }
+    fn engine_mut(&mut self) -> &mut Engine {
+        self
+    }
+}
+
+impl EngineHandle for &mut Engine {
+    fn engine(&self) -> &Engine {
+        self
+    }
+    fn engine_mut(&mut self) -> &mut Engine {
+        self
+    }
+}
+
+impl EngineHandle for Box<Engine> {
+    fn engine(&self) -> &Engine {
+        self
+    }
+    fn engine_mut(&mut self) -> &mut Engine {
+        self
+    }
+}
+
+impl EngineHandle for std::sync::MutexGuard<'_, Engine> {
+    fn engine(&self) -> &Engine {
+        self
+    }
+    fn engine_mut(&mut self) -> &mut Engine {
+        self
+    }
+}
+
+/// The scope of one operation against the engine, and the only way
+/// the reload-before-operation notices reach a response.
+///
+/// [`Engine::reload_if_stale`] runs before every operation and, when
+/// it reloaded a mem a sibling had advanced, records a
+/// [`crate::ops::MemChangedNotice`] describing the delta. Until
+/// 2026-09-11 those notices accumulated on the engine and every
+/// response builder had to remember to drain them, or the next
+/// operation's response carried a notice that was not its own (the
+/// hazard the old drain's doc comment named, guarded by convention at
+/// some fifty call sites). Now the notices belong to a scope: opening
+/// one ([`OperationScope::begin`]) discards whatever an unscoped
+/// caller left behind, [`OperationScope::finish`] hands the notices
+/// out as a value together with the engine handle, and dropping a
+/// scope without finishing discards them. No operation can inherit
+/// another operation's notice, and there is no method on the engine
+/// that hands accumulated notices out on demand.
+///
+/// The scope derefs to the engine, so a handler uses it exactly as it
+/// used the engine handle before.
+#[must_use = "an operation scope hands its notices out through `finish`; dropping it discards them"]
+pub struct OperationScope<G: EngineHandle> {
+    inner: Option<G>,
+}
+
+impl<G: EngineHandle> OperationScope<G> {
+    /// Open the scope: whatever notices an unscoped caller left on the
+    /// engine are discarded first, so this operation starts clean.
+    pub fn begin(mut handle: G) -> Self {
+        handle.engine_mut().pending_mem_changed.clear();
+        Self {
+            inner: Some(handle),
+        }
+    }
+
+    /// Close the scope: the engine handle comes back together with the
+    /// notices this operation's reloads recorded, in order.
+    pub fn finish(mut self) -> (G, Vec<crate::ops::MemChangedNotice>) {
+        let mut handle = self
+            .inner
+            .take()
+            .expect("an operation scope is finished at most once");
+        let notices = std::mem::take(&mut handle.engine_mut().pending_mem_changed);
+        (handle, notices)
+    }
+}
+
+impl<G: EngineHandle> std::ops::Deref for OperationScope<G> {
+    type Target = Engine;
+    fn deref(&self) -> &Engine {
+        self.inner
+            .as_ref()
+            .expect("an operation scope holds its engine until finished")
+            .engine()
+    }
+}
+
+impl<G: EngineHandle> std::ops::DerefMut for OperationScope<G> {
+    fn deref_mut(&mut self) -> &mut Engine {
+        self.inner
+            .as_mut()
+            .expect("an operation scope holds its engine until finished")
+            .engine_mut()
+    }
+}
+
+impl<G: EngineHandle> Drop for OperationScope<G> {
+    fn drop(&mut self) {
+        if let Some(handle) = self.inner.as_mut() {
+            handle.engine_mut().pending_mem_changed.clear();
         }
     }
 }

@@ -45,10 +45,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
 fn run_mem_repo(
     ctx: &CliContext,
-    mut engine: memstead_base::Engine,
+    engine: memstead_base::Engine,
     id: EntityId,
     args: Args,
 ) -> anyhow::Result<()> {
+    let mut engine = memstead_base::OperationScope::begin(engine);
     let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
     if args.dry_run {
         let entity = engine
@@ -102,7 +103,7 @@ fn run_mem_repo(
             &crate::setup::cli_ctx_with_note(args.note.clone()),
         )
         .map_err(CliError::from_engine_op)?;
-    let mem_changed = engine.take_mem_changed_notices();
+    let (_engine, mem_changed) = engine.finish();
 
     if ctx.json {
         let mut body = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
