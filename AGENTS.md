@@ -7,6 +7,8 @@
 
 This repository is the open-source engine: the Rust crates, the `memstead-mcp` server, the `memstead` CLI, the Claude Code plugin, and the docs. Why it exists: [VISION.md](VISION.md). Terms: [GLOSSARY.md](GLOSSARY.md). Build & test: [docs/build.md](docs/build.md) — the engine suite is `./run-tests.sh` (the engine and plugin legs). **External contributors start at [CONTRIBUTING.md](CONTRIBUTING.md).**
 
+**Is this by design?** [`engineering/`](engineering/README.md) is a live Memstead mem holding this project's standing decisions and principles. Consult it before opening an issue or proposing a change: its README says how to mount it as a mem, and the entities are plain Markdown you can read straight from the checkout.
+
 This file states only what binds every agent working in this repo.
 
 ## The binding rule — the engine owns mem-repo state
