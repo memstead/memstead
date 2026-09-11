@@ -81,7 +81,7 @@ The `--repo` form is version-gated on the recorded binary (a binary older than 0
 node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" gate "$(pwd)" repo
 ```
 
-**capable** → use `--repo .` as decided above; **not capable** (no record, a version below 0.10.0, or a binary that is not a release build and so cannot be placed on the version ladder at all) → run the plain form and say the gate's `reason` sentence verbatim (it names what was found and what the flag needs). On a first-ever `/setup` there is no record yet; the plain form is the safe one until step 2.5 records the binary, after which the next `/setup` in a repository can use `--repo .`.
+**capable** → use `--repo .` as decided above; **not capable** (no record, or a version below 0.10.0; a dev build at or above it is capable, its base version being the floor of what it carries) → run the plain form and say the gate's `reason` sentence verbatim (it names what was found and what the flag needs). On a first-ever `/setup` there is no record yet; the plain form is the safe one until step 2.5 records the binary, after which the next `/setup` in a repository can use `--repo .`.
 
 Handle its outcomes:
 

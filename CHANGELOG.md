@@ -36,6 +36,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The plugin's capability gate trusts a dev build's base version.**
+  `binary-version.mjs` read the `+g<sha>` build metadata as doubt and
+  answered "cannot confirm" for every development build at or above a
+  capability's threshold, which is every build from the tree between two
+  releases; two inventory sessions overrode it by hand. The crate version
+  moves only in the release commit, so a build's base version is the floor
+  of the features it carries: a record at or above the threshold is now
+  `capable: true`, release build or not, with the reason naming the build.
+  The fail-closed states are unchanged: no record, an unparseable banner,
+  or a base version below the threshold still degrade with their reasons.
+
 - **`health --include open_questions` lists a process mem's `open_entries`
   and `already_searched` in a stable order.** Both lists were pushed in the
   store's hash order, so two runs over the same workspace could differ in

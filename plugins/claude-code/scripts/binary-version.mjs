@@ -5,24 +5,24 @@
 // mechanism (a version-gated capability reads `anchorsGate`, and future gates
 // can add their own threshold the same way).
 //
-// The gate FAILS CLOSED TO DEGRADED: a missing, unparseable, below-threshold
-// or UNCONFIRMABLE record means "proceed without the capability and say so" —
-// never probe by sending a capability-bearing call and catching the engine's
-// rejection.
+// The gate FAILS CLOSED TO DEGRADED: a missing, unparseable or below-threshold
+// record means "proceed without the capability and say so" — never probe by
+// sending a capability-bearing call and catching the engine's rejection.
 //
-// "Unconfirmable" is the third state, and it is why the record keeps the raw
-// banner and not just three numbers. Thresholds below are RELEASE numbers, so
-// only a release binary can be placed on that ladder. A binary reporting
-// `0.18.0+g1a2b3c` is some build that calls itself 0.18.0 — between releases
-// the crate version does not move, so a build from any commit after the 0.17.0
-// tag still says 0.17.0, including builds predating the commit that added the
-// capability. Reading such a build as "at least 0.17.0, therefore capable" is
-// how the plugin talked itself into sending a parameter the engine rejected.
-// The engine cooperates: `crates/memstead-base/build.rs` emits the sha for
-// every build EXCEPT a clean release build, so bare semver means release and
-// `+g<sha>` means "cannot confirm". (A published release binary carries no sha
-// from 0.18.0 on; 0.17.0 and earlier did, so on those the gate degrades — the
-// safe direction, and it clears on upgrade.)
+// A build's base version is the floor of the features it carries. The crate
+// version moves only in the release commit (`cargo run -p xtask -- release`
+// bumps it, and the tag follows), so a binary reporting `0.18.0+g1a2b3c` is a
+// build that descends from the 0.18.0 release commit and carries every
+// feature 0.18.0 shipped: the thresholds below are release numbers, and a
+// base version at or above one places the build on the ladder, metadata or
+// not. The engine's `crates/memstead-base/build.rs` emits the sha for every
+// build except a clean release build; the gate keeps it so the reason can
+// name the build, never as doubt. (Until 2026-09-11 the metadata was read as
+// "cannot confirm", on the premise that a build could call itself X before
+// the commit that added an X feature; the release process rules that out,
+// and the posture degraded every development workspace: two inventory
+// sessions overrode it by hand. The record keeps the raw banner for the same
+// reason as before: the build is named in the reason.)
 //
 // The record is also REFRESHED on read: `record` runs once at setup, but the
 // binary it measured gets upgraded and nothing re-ran setup. The gate compares
@@ -101,8 +101,8 @@ export function parseVersion(text) {
 
 /**
  * The `+g<sha>` build metadata in a `memstead --version` line, or null when
- * there is none. Its presence is the "not a release build" signal; the value
- * is carried only so the degraded sentence can name the build.
+ * there is none. Its presence marks a build that is not a release; the value
+ * is carried so the gate's reason can name the build.
  *
  * Matched on the semver build-metadata suffix that follows the version core,
  * so a sha-looking string elsewhere in the banner cannot be mistaken for one.
@@ -202,23 +202,22 @@ function refreshedRecord(workspaceRoot, { bin = process.env.MEMSTEAD_BIN || 'mem
 
 /**
  * One capability gate by name (`anchors` | `repo` | `consume`). Returns
- * `{capable, version, reason}`: `capable: true` only when the binary's
- * version is present, >= the capability's threshold, AND identifies a
- * release. Any other state (no record, unparseable, older, or a build that
- * is not a release) → `capable: false` with a one-line reason that names
- * what was found and what was needed, which the caller prints — never a
- * probe-by-error. An unknown capability name is a programming error and
- * throws.
+ * `{capable, version, reason}` (plus `build` when the banner carries build
+ * metadata): `capable: true` when the binary's version is present and >=
+ * the capability's threshold, release build or not, since the base version
+ * is the floor of what a build carries (see the header). The two states
+ * that stay fail-closed: no record or an unparseable one, and a base
+ * version below the threshold → `capable: false` with a one-line reason
+ * that names what was found and what was needed, which the caller prints —
+ * never a probe-by-error. An unknown capability name is a programming error
+ * and throws.
  *
  * The record is refreshed against the live binary first; pass `run` to
  * control that probe (tests, and any caller that has already measured).
  *
- * Order of the two failing states is deliberate. Below-threshold is checked
- * BEFORE not-a-release, because it is the sounder statement of the two: a
- * build calling itself 0.2.0 is necessarily older than the 0.3.0 that first
- * carried the capability, dev build or not, and "predates support" tells the
- * user more than "cannot confirm". Only at-or-above the threshold does the
- * release question decide anything.
+ * A below-threshold dev build reads "predates", never a metadata sentence:
+ * a build calling itself 0.2.0 is necessarily older than the 0.3.0 that
+ * first carried the capability, dev build or not.
  */
 export function capabilityGate(workspaceRoot, name, opts = {}) {
   const cap = CAPABILITIES[name];
@@ -234,7 +233,7 @@ export function capabilityGate(workspaceRoot, name, opts = {}) {
     return { capable: false, version, reason: `recorded binary ${v} predates ${cap.what} support (needs ${min}); ${cap.without}` };
   }
   if (build) {
-    return { capable: false, version, build, reason: `cannot confirm ${cap.what} support — binary ${v} is a dev build at ${build}, not release ${v} (needs ${min}); ${cap.without}` };
+    return { capable: true, version, build, reason: `recorded binary ${v} supports ${cap.what} (needs ${min}); a dev build at ${build}, whose base version ${v} is the floor of what it carries` };
   }
   return { capable: true, version, reason: `recorded binary ${v} supports ${cap.what}` };
 }

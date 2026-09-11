@@ -155,7 +155,7 @@ test('repo and consume gates: a below-minimum record degrades with a sentence na
 test('repo and consume gates: an at-or-above record passes silently (capable, no degraded sentence)', () => {
   const root = ws();
   // A RELEASE banner: bare semver, no build metadata. The sha-bearing form of
-  // the same version is the "cannot confirm" case, asserted separately below.
+  // the same version passes too, asserted separately below.
   recordBinaryVersion(root, { run: () => ({ status: 0, stdout: 'memstead 0.10.0' }) });
   for (const name of ['repo', 'consume']) {
     const g = capabilityGate(root, name, noProbe);
@@ -175,6 +175,9 @@ test('repo and consume gates: a missing or unparseable record degrades like belo
     assert.equal(g.version, null);
     assert.match(g.reason, /no recorded binary version/);
   }
+  // An unparseable banner records nothing, so the gate stays at no-record.
+  assert.equal(recordBinaryVersion(root, { run: () => ({ status: 0, stdout: 'memstead (unknown)' }) }).ok, false);
+  assert.equal(readRecordedVersion(root), null);
   mkdirSync(join(root, '.memstead.cache', 'plugin'), { recursive: true });
   writeFileSync(join(root, '.memstead.cache', 'plugin', 'binary-version.json'), '{not json');
   assert.equal(capabilityGate(root, 'consume', noProbe).capable, false);
@@ -185,7 +188,7 @@ test('repo and consume gates: a missing or unparseable record degrades like belo
   rmSync(root, { recursive: true, force: true });
 });
 
-// ── the third state: a build that is not a release cannot be placed on the ladder
+// ── a build that is not a release: its base version is the floor of what it carries
 
 test('parseBuildMetadata picks the +g<sha> suffix, and only from the version', () => {
   assert.equal(parseBuildMetadata('memstead 0.17.0+gbea3438'), 'gbea3438');
@@ -196,35 +199,43 @@ test('parseBuildMetadata picks the +g<sha> suffix, and only from the version', (
   assert.equal(parseBuildMetadata(undefined), null);
 });
 
-test('gate CANNOT CONFIRM an at-threshold dev build — the C9 path back', () => {
+test('gate trusts the base version of an at-threshold dev build', () => {
   const root = ws();
-  // The exact shape that bit us: the crate version does not move between
-  // releases, so a build from any commit after the 0.10.0 tag still reports
-  // 0.10.0 — including builds predating the commit that added `--consume`.
-  // Passing it as "at least 0.10.0, therefore capable" is how the plugin
-  // talked itself into sending a parameter the engine rejects.
+  // The crate version moves only in the release commit, so a build reporting
+  // 0.10.0+g<sha> descends from the 0.10.0 release commit and carries every
+  // feature 0.10.0 shipped, `--consume` included. Reading the metadata as
+  // doubt degraded every development workspace (two inventory sessions
+  // overrode the gate by hand, 2026-09-11); the base version is the floor.
   recordBinaryVersion(root, { run: () => ({ status: 0, stdout: 'memstead 0.10.0+gdeadbee' }) });
   for (const name of ['repo', 'consume']) {
     const g = capabilityGate(root, name, noProbe);
-    assert.equal(g.capable, false, name);
+    assert.equal(g.capable, true, name);
     assert.equal(g.build, 'gdeadbee');
-    assert.match(g.reason, /cannot confirm/);
+    assert.match(g.reason, /supports/);
     assert.match(g.reason, /dev build at gdeadbee/);
+    assert.doesNotMatch(g.reason, /cannot confirm|proceeding|pure read/);
   }
-  // ...and the degraded path is still named, so the caller can print one line.
-  assert.match(capabilityGate(root, 'consume', noProbe).reason, /rendering the brief as a pure read/);
-  // A dirty build of the same version is no more confirmable.
+  // A dirty build of the same version is on the same floor.
   recordBinaryVersion(root, { run: () => ({ status: 0, stdout: 'memstead 0.10.0+gdeadbee-dirty' }) });
-  assert.equal(capabilityGate(root, 'consume', noProbe).capable, false);
+  const dirty = capabilityGate(root, 'consume', noProbe);
+  assert.equal(dirty.capable, true);
+  assert.equal(dirty.build, 'gdeadbee-dirty');
+  // A dev build above the threshold: the same answer; a release banner
+  // carries no `build` key at all.
+  recordBinaryVersion(root, { run: () => ({ status: 0, stdout: 'memstead 0.20.0+gabc123' }) });
+  const above = anchorsGate(root, noProbe);
+  assert.equal(above.capable, true);
+  assert.match(above.reason, /dev build at gabc123/);
+  recordBinaryVersion(root, { run: () => ({ status: 0, stdout: 'memstead 0.20.0' }) });
+  assert.equal('build' in anchorsGate(root, noProbe), false);
   rmSync(root, { recursive: true, force: true });
 });
 
-test('below-threshold outranks cannot-confirm: the sounder sentence wins', () => {
+test('a below-threshold dev build still predates: the metadata never rescues it', () => {
   const root = ws();
   // 0.2.0+g… IS confidently below the 0.3.0 anchors threshold — the crate
-  // version never reached 0.3.0 — so "predates" is true and more useful than
-  // "cannot confirm". Only at or above the threshold does the release
-  // question decide anything.
+  // version never reached 0.3.0 — so "predates" is the sentence, and the
+  // build metadata plays no part in a fail-closed state.
   recordBinaryVersion(root, { run: () => ({ status: 0, stdout: 'memstead 0.2.0+gfeed123' }) });
   const g = anchorsGate(root, noProbe);
   assert.equal(g.capable, false);
