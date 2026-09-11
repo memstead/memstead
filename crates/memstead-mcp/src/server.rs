@@ -4301,6 +4301,11 @@ impl McpServer {
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
         let mut engine = crate::lock_engine!(unified);
+        // The session's declared role and identity ride the seed
+        // commit like every entity mutation's commit (see the delete
+        // wrapper for the same rule).
+        engine.set_role(self.default_role);
+        engine.set_identity(self.default_identity.clone());
 
         let schema_ref = match p.schema.parse::<memstead_schema::SchemaRef>() {
             Ok(r) => r,
@@ -4485,6 +4490,11 @@ impl McpServer {
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
         let mut engine = crate::lock_engine!(unified);
+        // The session's declared role and identity ride the prune
+        // commit like every entity mutation's commit; without this the
+        // engine carried whatever the previous tool call left on it.
+        engine.set_role(self.default_role);
+        engine.set_identity(self.default_identity.clone());
 
         // MCP `memstead_mem_delete`
         // always means destructive. The wire shape no longer exposes
@@ -4495,6 +4505,8 @@ impl McpServer {
             name: p.name,
             delete_files: true,
             note: p.note,
+            actor: Actor::Agent,
+            client: self.client.get().cloned(),
             operator_mode: self.operator_mode,
             detach_incoming: false,
         };

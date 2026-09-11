@@ -416,6 +416,12 @@ pub trait MemBackend: Send + Sync {
     /// orchestrator handles its `remove_dir_all` separately at the
     /// outer layer.
     ///
+    /// `ctx` is the deletion's commit context — actor, client, tool,
+    /// the agent-authored note, role and identity — so the one commit
+    /// a deletion produces carries the same provenance every other
+    /// mutation's commit carries. A backend that produces no commit
+    /// ignores it.
+    ///
     /// Implementations:
     /// - Folder backend keeps the default — its disk state is the
     ///   mem directory, which the orchestrator rmdirs.
@@ -423,11 +429,12 @@ pub trait MemBackend: Send + Sync {
     ///   nothing additional to prune.
     /// - Git-branch backend deletes `refs/heads/<branch_leaf>` and
     ///   commits a tree edit on `refs/heads/__MEMSTEAD` that removes
-    ///   `mems/<branch_leaf>/config.json`. `<branch_leaf>` is the
-    ///   mem's full hierarchical path (e.g.
-    ///   `planning/plan-q4-revamp` or the bare `<name>` for flat
-    ///   layouts).
-    fn delete_artifacts(&self) -> Result<(), BackendError> {
+    ///   `mems/<branch_leaf>/config.json`, with `ctx` formatted into
+    ///   the prune commit's message. `<branch_leaf>` is the mem's
+    ///   full hierarchical path (e.g. `planning/plan-q4-revamp` or
+    ///   the bare `<name>` for flat layouts).
+    fn delete_artifacts(&self, ctx: &crate::vcs::CommitContext<'_>) -> Result<(), BackendError> {
+        let _ = ctx;
         Ok(())
     }
 }

@@ -365,9 +365,11 @@ pub struct DeleteArgs {
     /// Name of the mem to destroy.
     pub name: String,
 
-    /// Optional provenance note (≤280 chars). Captured on the engine
-    /// trace surface; surfaces via the outer-repo Stop hook. No
-    /// per-mem commit is produced by delete on any backend.
+    /// Optional provenance note (≤280 chars). On a mem-repo workspace
+    /// it rides the prune commit on the schema-and-config ref, the one
+    /// commit a deletion produces, beside the Role and Identity
+    /// trailers; a folder-mem deletion produces no commit to carry
+    /// it. Under `require_notes` a missing note warns `NOTE_MISSING`.
     #[arg(long)]
     pub note: Option<String>,
 
@@ -409,8 +411,10 @@ pub struct UnregisterArgs {
     /// Name of the mem to unregister.
     pub name: String,
 
-    /// Optional provenance note (≤280 chars). Captured on the engine
-    /// trace surface; surfaces via the outer-repo Stop hook.
+    /// Optional provenance note (≤280 chars). An unregister produces
+    /// no commit (the branch and its config blob stay), so the note
+    /// has no commit to ride; under `require_notes` a missing note
+    /// warns `NOTE_MISSING`.
     #[arg(long)]
     pub note: Option<String>,
 
@@ -777,6 +781,10 @@ fn run_delete_inner(
         name: name.clone(),
         delete_files,
         note: note.clone(),
+        // CLI-direct provenance, matching the entity mutations'
+        // `Actor::Cli, None` convention.
+        actor: memstead_base::vcs::Actor::Cli,
+        client: None,
         operator_mode,
         detach_incoming,
     };

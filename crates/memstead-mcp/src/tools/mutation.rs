@@ -6,12 +6,12 @@ use rmcp::schemars;
 /// Shared `note` description rendered identically on every mutation-tool
 /// parameter. One sentence, ≤280 chars, agent-authored — it lands in the
 /// commit body between the subject and the provenance trailers, and is
-/// what outer-repo session-bundling hooks aggregate per session.
+/// what the notes surface reads back per commit.
 pub(crate) const NOTE_PARAM_DESCRIPTION: &str = "Agent-authored provenance note (≤280 chars, one sentence describing \
      why this mutation happened). Lands in the per-mem commit body between \
      the mechanical subject line and the provenance trailers (`Tool:`, \
-     `Actor:`, `Client:`), and is surfaced by the outer-repo Stop hook when \
-     aggregating session activity. Omit for pure-housekeeping edits; when \
+     `Actor:`, `Client:`), where `memstead_changes_since` with \
+     `include_notes` reads it back. Omit for pure-housekeeping edits; when \
      `[mutations].require_notes = true` in workspace config a missing note \
      adds a `NOTE_MISSING` `WarningHint` to the response (the mutation still \
      commits).";

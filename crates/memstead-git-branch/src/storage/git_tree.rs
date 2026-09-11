@@ -890,7 +890,10 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         )
     }
 
-    fn delete_artifacts(&self) -> Result<(), memstead_base::backend::BackendError> {
+    fn delete_artifacts(
+        &self,
+        ctx: &CommitContext<'_>,
+    ) -> Result<(), memstead_base::backend::BackendError> {
         // The branch leaf is the per-mem ref minus the
         // `refs/heads/` prefix — symmetric with the resolution done
         // by `read_mem_config` / `write_mem_config` above.
@@ -900,17 +903,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
             .ref_name
             .strip_prefix("refs/heads/")
             .unwrap_or(&self.ref_name);
-        let ctx = CommitContext {
-            actor: memstead_base::vcs::Actor::Agent,
-            client: None,
-            tool: Some("memstead_mem_delete"),
-            note: None,
-            role: Default::default(),
-            identity: None,
-            logical_operation_id: None,
-            entity_ids: None,
-        };
-        crate::storage_memstead::delete_mem_artifacts_at_gitdir(&self.gitdir, branch_leaf, &ctx)
+        crate::storage_memstead::delete_mem_artifacts_at_gitdir(&self.gitdir, branch_leaf, ctx)
             .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
     }
 

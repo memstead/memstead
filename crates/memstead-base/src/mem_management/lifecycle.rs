@@ -170,8 +170,16 @@ pub struct MemDeleteParams {
     /// backends only) after unregistering. Default `false` —
     /// unregister-only.
     pub delete_files: bool,
-    /// Agent-authored provenance note (≤[`NOTE_MAX_LEN`] chars).
+    /// Agent-authored provenance note (≤[`NOTE_MAX_LEN`] chars). On a
+    /// mem-repo workspace it rides the `__MEMSTEAD` prune commit, the
+    /// one commit a deletion produces, beside the role and identity
+    /// trailers; a folder-mem deletion produces no commit to carry it.
     pub note: Option<String>,
+    /// Who performs the deletion: `Actor::Agent` for MCP-sourced calls,
+    /// `Actor::Cli` for CLI-direct ones. Recorded on the prune commit.
+    pub actor: crate::vcs::Actor,
+    /// The MCP client id the transport established, when any.
+    pub client: Option<crate::vcs::ClientId>,
     /// Process-scoped operator-mode posture. When `true`, the
     /// orchestrator skips the `[[mem_management.delete]]` allowlist
     /// gate. Every other check (input validation, name resolution,
@@ -634,7 +642,21 @@ pub fn delete_mem(
     // `files_deleted: false` silently (the archive-workflow contract).
     let mut warnings: Vec<crate::ops::WarningHint> = Vec::new();
     let files_deleted = if params.delete_files {
-        let backend_ok = match backend.delete_artifacts() {
+        // The deletion's provenance: the same context every other
+        // mutation's commit carries, so the prune commit on
+        // `__MEMSTEAD` names the actor, the note, the role and the
+        // identity a reader of the mem-repo's history expects.
+        let prune_ctx = crate::vcs::CommitContext {
+            actor: params.actor,
+            client: params.client.clone(),
+            tool: Some("memstead_mem_delete"),
+            note: params.note.clone(),
+            role: engine.current_role(),
+            identity: engine.current_identity().map(str::to_string),
+            logical_operation_id: None,
+            entity_ids: None,
+        };
+        let backend_ok = match backend.delete_artifacts(&prune_ctx) {
             Ok(()) => true,
             Err(e) => {
                 tracing::warn!(
@@ -1702,7 +1724,7 @@ pub fn create_mem(
         client: params.client.clone(),
         tool: Some("memstead_mem_create"),
         note: params.note.clone(),
-        role: Default::default(),
+        role: engine.current_role(),
         identity: engine.current_identity().map(str::to_string),
         logical_operation_id: None,
         entity_ids: None,

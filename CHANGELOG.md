@@ -36,6 +36,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A mem deletion carries its provenance note.** `memstead mem delete
+  --note` and `memstead_mem_delete`'s `note` reached the engine and were
+  lost there: the `__MEMSTEAD` prune commit, the one commit a deletion
+  produces on a mem-repo workspace, was written with a context that
+  carried no note, no role and no identity. `MemBackend::delete_artifacts`
+  now takes the deletion's commit context and the git-branch backend
+  formats it into the prune commit like every other mutation's commit;
+  `MemDeleteParams` carries `actor` and `client` as the create params
+  do. The MCP lifecycle tools (`memstead_mem_create`, `memstead_mem_delete`)
+  now set the session's declared role and identity on the engine before
+  they mutate, as every entity tool does, and the create's seed commit
+  records the session role it used to drop; so both commits carry the
+  `Role:` and `Identity:` trailers. A folder-mem deletion still produces
+  no commit, and both surfaces' descriptions say where the note lands (the
+  retired outer-repo Stop hook is no longer named). Library consumers
+  constructing `MemDeleteParams` or implementing the trait adjust; the
+  wire is unchanged.
+
 - **The plugin's capability gate trusts a dev build's base version.**
   `binary-version.mjs` read the `+g<sha>` build metadata as doubt and
   answered "cannot confirm" for every development build at or above a

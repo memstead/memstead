@@ -2104,7 +2104,7 @@ fn health_with_include_config_surfaces_per_mem_vcs_subobject() {
     // mem entry. Paths must be absolute and canonical, and must
     // match what `Engine::gitdir_for` / `worktree_for` return when
     // called directly — the MCP payload is the public form of
-    // those primitives for the Stop-hook flow.
+    // those primitives for tooling that needs the paths.
     //
     // `memstead_health_unified` emits the vcs subobject for
     // git-branch mounts when the workspace root carries the
@@ -9628,6 +9628,86 @@ fn memstead_mem_delete_path_not_allowed_emits_structured_envelope() {
         .get("details")
         .expect("envelope must carry details");
     assert_eq!(details["reason"], "no_allowlist_configured");
+}
+
+/// The session's declared role and identity ride the one commit a
+/// lifecycle tool produces, the create's seed commit and the delete's
+/// prune commit on the schema-and-config ref, exactly as they ride
+/// every entity mutation's commit. Until 2026-09-11 the two wrappers
+/// never set them on the engine, so the trailers were whatever the
+/// previous tool call had left there (a grader found the prune commit
+/// of a session's first call carrying neither).
+#[test]
+fn lifecycle_commits_carry_the_sessions_role_and_identity() {
+    let tmp = TempDir::new().unwrap();
+    let server = setup_lifecycle_server_with_delete(&tmp)
+        .with_default_role(memstead_base::vcs::Role::Author)
+        .with_default_identity(Some("session-42".to_string()));
+    let tip_message = |reference: &str| {
+        let repo = gix::open(tmp.path().join("mem-repo").join(".git")).expect("open mem-repo");
+        let tip = repo
+            .find_reference(reference)
+            .expect("ref exists")
+            .into_fully_peeled_id()
+            .expect("peel");
+        let commit = repo
+            .find_object(tip.detach())
+            .expect("commit")
+            .into_commit();
+        String::from_utf8_lossy(commit.message_raw().expect("message")).to_string()
+    };
+
+    let target = tmp.path().join("noted");
+    let created = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        title: None,
+        description: None,
+        subject: None,
+        schema_verbosity: None,
+        write_guidance: Default::default(),
+        name: "noted".to_string(),
+        location: target.to_string_lossy().into_owned(),
+        schema: "default@1.0.0".to_string(),
+        vcs: None,
+        note: Some("seeded for the trailer pin".to_string()),
+        recovery: None,
+        include_schema: false,
+    }));
+    assert!(created.is_error.is_none() || created.is_error == Some(false));
+    // The seed commit lands on the mem's own branch; the config blob
+    // on the schema-and-config ref is a separate write.
+    let seed = tip_message("refs/heads/noted");
+    for needle in [
+        "seeded for the trailer pin",
+        "Tool: memstead_mem_create",
+        "Actor: agent",
+        "Role: author",
+        "Identity: session-42",
+    ] {
+        assert!(
+            seed.contains(needle),
+            "seed commit lacks {needle:?}: {seed:?}"
+        );
+    }
+
+    let deleted = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        name: "noted".to_string(),
+        note: Some("retired after the pin".to_string()),
+    }));
+    assert!(deleted.is_error.is_none() || deleted.is_error == Some(false));
+    let prune = tip_message("refs/heads/__MEMSTEAD");
+    assert!(prune.starts_with("memstead: prune __MEMSTEAD:mems/noted/config.json"));
+    for needle in [
+        "\n\nretired after the pin\n\n",
+        "Tool: memstead_mem_delete",
+        "Actor: agent",
+        "Role: author",
+        "Identity: session-42",
+    ] {
+        assert!(
+            prune.contains(needle),
+            "prune commit lacks {needle:?}: {prune:?}"
+        );
+    }
 }
 
 #[test]

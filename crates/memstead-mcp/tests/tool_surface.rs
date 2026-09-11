@@ -1724,7 +1724,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "mem_management.delete",
             // `[mutations]`,
             // `[plugin.*]`, and per-mem `vcs: { gitdir, worktree }` all
-            // surface under `include_config: true` so the Stop hook can
+            // surface under `include_config: true` so a caller can
             // resolve gitdirs and plugins can read their opaque config
             // sub-tables in one round-trip.
             "mutations",

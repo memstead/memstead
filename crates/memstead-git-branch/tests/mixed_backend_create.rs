@@ -457,6 +457,8 @@ fn detach_incoming_delete_supports_same_name_rehoming() {
             name: "target-mem".to_string(),
             delete_files: true,
             note: None,
+            actor: Actor::Cli,
+            client: None,
             operator_mode: true,
             detach_incoming: false,
         },
@@ -470,6 +472,8 @@ fn detach_incoming_delete_supports_same_name_rehoming() {
             name: "target-mem".to_string(),
             delete_files: true,
             note: None,
+            actor: Actor::Cli,
+            client: None,
             operator_mode: true,
             detach_incoming: true,
         },
@@ -572,4 +576,96 @@ fn agent_mode_out_of_root_location_refuses_outside_workspace() {
         !tmp.path().join("side").exists(),
         "the refused create must leave no disk residue outside the root"
     );
+}
+
+/// Read the `__MEMSTEAD` tip commit's full message from the mem-repo.
+fn memstead_tip_message(workspace_root: &std::path::Path) -> String {
+    let gitdir = workspace_root.join("mem-repo").join(".git");
+    let repo = gix::open(&gitdir).expect("open mem-repo");
+    let tip = repo
+        .find_reference("refs/heads/__MEMSTEAD")
+        .expect("__MEMSTEAD exists")
+        .into_fully_peeled_id()
+        .expect("peel");
+    let commit = repo
+        .find_object(tip.detach())
+        .expect("commit")
+        .into_commit();
+    String::from_utf8_lossy(commit.message_raw().expect("message")).to_string()
+}
+
+/// A deletion's provenance rides the one commit it produces: the
+/// `__MEMSTEAD` prune commit carries the note, the actor, the tool and
+/// the session's role and identity trailers, exactly as a create's seed
+/// commit does. A noteless deletion carries no note line. Until
+/// 2026-09-11 the backend fabricated an empty context for the prune, so
+/// every delete note reached the engine and was lost there.
+#[test]
+fn delete_note_and_trailers_ride_the_prune_commit() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(
+        tmp.path(),
+        &[("noted", "default@1.0.0"), ("silent", "default@1.0.0")],
+    );
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    engine.set_role(memstead_base::vcs::Role::Author);
+    engine.set_identity(Some("session-42".to_string()));
+
+    mem_management::delete_mem(
+        &mut engine,
+        mem_management::MemDeleteParams {
+            name: "noted".to_string(),
+            delete_files: true,
+            note: Some("retired after its bundle archived".to_string()),
+            actor: Actor::Cli,
+            client: None,
+            operator_mode: true,
+            detach_incoming: false,
+        },
+    )
+    .expect("delete with a note succeeds");
+    let message = memstead_tip_message(tmp.path());
+    assert!(
+        message.starts_with("memstead: prune __MEMSTEAD:mems/noted/config.json"),
+        "the prune subject is unchanged: {message:?}"
+    );
+    assert!(
+        message.contains("\n\nretired after its bundle archived\n\n"),
+        "the note rides the body: {message:?}"
+    );
+    for trailer in [
+        "Tool: memstead_mem_delete",
+        "Actor: cli",
+        "Role: author",
+        "Identity: session-42",
+    ] {
+        assert!(
+            message.contains(trailer),
+            "missing trailer {trailer:?} in {message:?}"
+        );
+    }
+
+    mem_management::delete_mem(
+        &mut engine,
+        mem_management::MemDeleteParams {
+            name: "silent".to_string(),
+            delete_files: true,
+            note: None,
+            actor: Actor::Cli,
+            client: None,
+            operator_mode: true,
+            detach_incoming: false,
+        },
+    )
+    .expect("delete without a note succeeds");
+    let message = memstead_tip_message(tmp.path());
+    assert!(message.starts_with("memstead: prune __MEMSTEAD:mems/silent/config.json"));
+    let body = message
+        .trim_start_matches("memstead: prune __MEMSTEAD:mems/silent/config.json")
+        .trim();
+    assert!(
+        body.lines().all(|l| l.contains(": ")),
+        "a noteless prune carries only trailers: {message:?}"
+    );
+    assert!(message.contains("Identity: session-42"));
 }

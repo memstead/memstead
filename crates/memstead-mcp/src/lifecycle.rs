@@ -188,7 +188,7 @@ pub struct MemDeleteParams {
     #[schemars(description = "Name of the mem to destroy.")]
     pub name: String,
     #[schemars(
-        description = "Agent-authored provenance note (≤280 chars). Surfaces in the outer-repo Stop-hook aggregation via the engine's trace surface; no per-mem commit is produced by delete."
+        description = "Agent-authored provenance note (≤280 chars). On a mem-repo workspace it rides the prune commit on the schema-and-config ref, the one commit a deletion produces, beside the role and identity trailers; a folder-mem deletion produces no commit to carry it. Under `require_notes` a missing note warns `NOTE_MISSING`."
     )]
     pub note: Option<String>,
 }
