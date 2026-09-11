@@ -66,9 +66,7 @@ impl Engine {
             }
             crate::ops::signals::snapshot_levels(&self.store, &self.schemas, candidates.iter())
         };
-        // Only when the update carried anchors or unsets that change
-        // the sidecar.
-        self.stage_prepared_update(&prepared, prepared.anchors_changed == Some(true))?;
+        self.stage_prepared_update(&prepared)?;
         let backend = self.mounts[prepared.mount_idx].backend.as_ref();
         // Anchor-only commits carry the distinct `anchor` verb so their
         // otherwise-invisible sidecar change is legible in the note log;

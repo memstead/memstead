@@ -226,9 +226,7 @@ impl Engine {
         // per-mem pending buffer so they ride the batch commit
         // atomically.
         for p in &prepared {
-            if let Err(e) =
-                self.stage_prepared_update(p, !p.anchors.is_empty() || !p.anchor_unsets.is_empty())
-            {
+            if let Err(e) = self.stage_prepared_update(p) {
                 self.store = store_snapshot;
                 self.discard_all_pending();
                 return Err(e);

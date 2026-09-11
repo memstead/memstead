@@ -12,20 +12,20 @@ use super::{Engine, EngineError, PreparedUpdate};
 
 impl Engine {
     /// Stage one prepared update's write and sidecars into its mount's
-    /// pending buffer. `stage_anchors` says whether the anchors sidecar
-    /// is staged at all: the single-item path stages it only when the
-    /// merge changes the sidecar (`anchors_changed == Some(true)`), the
-    /// batch whenever the item carries anchors or unsets.
+    /// pending buffer. The anchors sidecar is staged exactly when the
+    /// prepared item's own verdict says the merge changes it
+    /// (`anchors_changed == Some(true)`), the verdict the wire's
+    /// `anchors_changed` reports: a row that restates what is stored
+    /// writes nothing, on the single path and in a batch alike.
     pub(super) fn stage_prepared_update(
         &self,
         prepared: &PreparedUpdate,
-        stage_anchors: bool,
     ) -> Result<(), EngineError> {
         let backend = self.mounts[prepared.mount_idx].backend.as_ref();
         backend.write_entity(Path::new(&prepared.file_path), prepared.markdown.as_bytes())?;
         // Stage the anchors sidecar into the same commit as the entity
         // write.
-        if stage_anchors {
+        if prepared.anchors_changed == Some(true) {
             stage_anchors_sidecar(
                 backend,
                 &prepared.id,
