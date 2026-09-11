@@ -11,6 +11,7 @@ suite as seeded adversarial tests:
 | `frontmatter` | frontmatter/markdown family (public entry points) | `crates/memstead-base/src/entity/adversarial.rs` |
 | `archive` | archive validator, nested parsers transitively | `crates/memstead-base/src/validator/adversarial.rs` |
 | `content_expr` | content-expression parse + match | `#[cfg(test)]` module in `crates/memstead-schema/src/content_expr.rs` |
+| `search_normalization` | search tokenizer + query path (Unicode normalisation invariance: as typed, NFC and NFD return the same hits) | `search_is_invariant_under_canonical_normalization` in `crates/memstead-base/src/search_index/query.rs` |
 
 Both tiers share the committed seed corpus under `corpus/<target>/`
 (`seed-*` files must stay valid — the smoke tier replays and asserts

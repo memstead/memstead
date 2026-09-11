@@ -23,6 +23,15 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 memstead-base = { path = "../crates/memstead-base" }
 memstead-schema = { path = "../crates/memstead-schema" }
+indexmap = "2"
+unicode-normalization = "0.1"
+
+[[bin]]
+name = "search_normalization"
+path = "fuzz_targets/search_normalization.rs"
+test = false
+doc = false
+bench = false
 
 [[bin]]
 name = "frontmatter"

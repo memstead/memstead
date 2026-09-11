@@ -445,6 +445,90 @@ mod tests {
         assert_eq!(hits.len(), 1, "ASCII fold must match `Häuser`");
     }
 
+    fn any_hits(idx: &MemIndex, schema: &Arc<Schema>, term: &str) -> usize {
+        let q = Query {
+            any: vec![term.to_string()],
+            ..Default::default()
+        };
+        execute_on_mem(idx, Some(schema), &q, 100).unwrap().len()
+    }
+
+    /// The defect this pins: a decomposed `ä` (a + U+0308) used to split
+    /// `Änderung` into `a` + `nderung` at the word splitter, so the
+    /// decomposed query never met the composed stored text, and the
+    /// reverse. The tokenizer now normalises to NFC before splitting.
+    #[test]
+    fn composed_and_decomposed_spellings_find_each_other() {
+        use unicode_normalization::UnicodeNormalization;
+        let nfc = "Große Änderung";
+        let nfd: String = nfc.nfd().collect();
+        assert_ne!(nfd, nfc);
+
+        // Stored composed, queried in both spellings.
+        let (idx, schema) = build_idx(&[make_entity("alpha", "specs", nfc)]);
+        let nfd_word: String = "Änderung".nfd().collect();
+        for q in [nfc, nfd.as_str(), "Änderung", nfd_word.as_str()] {
+            assert_eq!(
+                any_hits(&idx, &schema, q),
+                1,
+                "query {q:?} against NFC text"
+            );
+        }
+
+        // Stored decomposed (content that arrived that way), queried composed,
+        // as a term and as a phrase.
+        let (idx, schema) = build_idx(&[make_entity("beta", "specs", &nfd)]);
+        assert_eq!(any_hits(&idx, &schema, "änderung"), 1);
+        let phrase = Query {
+            phrase: Some("große änderung".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            execute_on_mem(&idx, Some(&schema), &phrase, 100)
+                .unwrap()
+                .len(),
+            1,
+            "phrase adjacency must hold across spellings"
+        );
+    }
+
+    /// Seeded smoke tier of the `search_normalization` fuzz target: for
+    /// every corpus string, the canonical spellings (as typed, NFC, NFD)
+    /// return the same hit count when that string is what was indexed.
+    /// Compatibility forms (NFKC/NFKD: ligatures, the ohm sign) are
+    /// deliberately not folded and not asserted here.
+    #[test]
+    fn search_is_invariant_under_canonical_normalization() {
+        use unicode_normalization::UnicodeNormalization;
+        let corpus = [
+            "Große Änderung",
+            "Straße und Fußweg",
+            "café crème brûlée",
+            "naïve façade Ångström",
+            "e\u{0301}cole de\u{0301}ja\u{0300} vu", // decomposed as typed
+            "İstanbul ığdır",
+            "Ǆ dž ǅ",
+            "Ελληνικά ώρα",
+            "日本語のテキスト 検索",
+            "한국어 텍스트",
+            "العربية نص",
+            "עברית טקסט",
+            "emoji 🎉 test",
+            "zero\u{200B}width joiner\u{200D}here",
+            "tab\tand\nnewline",
+            "mixed ÄÖÜ äöü ẞ ß",
+        ];
+        for s in corpus {
+            let (idx, schema) = build_idx(&[make_entity("alpha", "specs", s)]);
+            let forms: [String; 3] = [s.to_string(), s.nfc().collect(), s.nfd().collect()];
+            let counts: Vec<usize> = forms.iter().map(|f| any_hits(&idx, &schema, f)).collect();
+            assert!(
+                counts.iter().all(|c| *c == counts[0]),
+                "normalization forms of {s:?} disagree: {counts:?}"
+            );
+        }
+    }
+
     #[test]
     fn empty_query_returns_no_hits() {
         let entities = vec![make_entity("alpha", "specs", "whatever")];

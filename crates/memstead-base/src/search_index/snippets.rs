@@ -272,6 +272,15 @@ fn fold_with_map(s: &str) -> (String, Vec<usize>) {
     let mut folded = String::with_capacity(s.len());
     let mut positions: Vec<usize> = Vec::with_capacity(s.len());
     for (byte_pos, ch) in s.char_indices() {
+        // A combining mark (the second half of a decomposed `ä`) folds to
+        // nothing, so the decomposed and the composed spelling reach the
+        // same folded string — the search tokenizer normalises to NFC for
+        // the same reason. Dropping the mark here (instead of normalising
+        // the haystack first) keeps every folded byte mapped to a raw
+        // offset in `s`, which the snippet slicing depends on.
+        if unicode_normalization::char::is_combining_mark(ch) {
+            continue;
+        }
         for fc in fold_char(ch).chars() {
             let n = fc.len_utf8();
             folded.push(fc);
@@ -386,6 +395,22 @@ mod tests {
     fn find_folded_diacritic() {
         let (s, e) = find_folded("Schöne Häuser hier", "hauser").unwrap();
         assert_eq!(&"Schöne Häuser hier"[s..e], "Häuser");
+    }
+
+    #[test]
+    fn find_folded_decomposed_spelling_on_either_side() {
+        use unicode_normalization::UnicodeNormalization;
+        // Decomposed needle (a + U+0308) against a composed haystack.
+        let hay = "Schöne Häuser hier";
+        let needle: String = "Häuser".nfd().collect();
+        assert_ne!(needle, "Häuser");
+        let (s, e) = find_folded(hay, &needle).unwrap();
+        assert_eq!(&hay[s..e], "Häuser");
+        // Composed needle against a decomposed haystack: the raw slice
+        // still covers the whole word, combining mark included.
+        let hay_nfd: String = hay.nfd().collect();
+        let (s, e) = find_folded(&hay_nfd, "hauser").unwrap();
+        assert_eq!(&hay_nfd[s..e], "Ha\u{0308}user");
     }
 
     #[test]

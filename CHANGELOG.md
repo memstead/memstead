@@ -36,6 +36,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Search finds a word whatever Unicode spelling it arrives in.** The
+  search tokenizer now normalises text to NFC before splitting it into
+  words. Until now a decomposed umlaut (`a` + U+0308, the spelling macOS
+  keyboards, Finder-copied names and some IMEs produce) hit the word
+  splitter as a non-letter, so a query for `Änderung` typed that way
+  became `a` + `nderung` and silently missed every title stored in the
+  composed form, and the reverse; every other id surface (slugs,
+  wiki-links, entity reads) already folded the two spellings together.
+  Indexing and query parsing share the analyzer, so both sides now see
+  one canonical form; the snippet renderer drops combining marks when it
+  folds, so matched-term offsets hold for either spelling too. Pinned by
+  a tokenizer test, a query test in both directions (term and phrase), a
+  seeded invariance corpus (`search_is_invariant_under_canonical_normalization`,
+  sixteen scripts and spellings) and a new coverage-guided fuzz target
+  (`fuzz/fuzz_targets/search_normalization.rs`) asserting that as-typed,
+  NFC and NFD queries return the same hits. Compatibility forms
+  (NFKC/NFKD: ligatures, the ohm sign) are deliberately not folded.
+
 - **A mem's binding records and their state follow the mem through its
   lifecycle.** A `mem rename` moves every per-mem store directory
   (`projections/<mem>`, `state/findings/<mem>`, `state/advance/<mem>`)
