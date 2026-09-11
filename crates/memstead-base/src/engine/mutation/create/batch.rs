@@ -17,8 +17,7 @@ use crate::entity::store_builder::push_entities_into_store;
 use crate::ops::WarningHint;
 use crate::provenance::{Provenance, ProvenanceKind};
 
-use super::super::make_stub;
-use super::outcome::{batch_receipt, batch_refusal};
+use super::super::{batch_empty, batch_receipt, batch_refusal, make_stub};
 use super::{
     Actor, ClientId, CreateEntityArgs, CreatePrepareOutcome, Engine, EngineError, PreparedCreate,
 };
@@ -64,16 +63,7 @@ impl Engine {
         use std::collections::HashSet;
 
         if creates.is_empty() {
-            return Ok(crate::ops::BatchResult {
-                warnings: Vec::new(),
-                orphan_stubs_removed: Vec::new(),
-                errors_suppressed: 0,
-                applied: true,
-                results: Vec::new(),
-                succeeded: 0,
-                failed: 0,
-                write_id: String::new(),
-            });
+            return Ok(batch_empty());
         }
 
         // Reload every touched mem once, up front.
@@ -246,7 +236,12 @@ impl Engine {
         if dry_run {
             self.store = store_snapshot;
             self.discard_all_pending();
-            return Ok(batch_receipt(prepared, Vec::new(), String::new()));
+            return Ok(batch_receipt(
+                created_actions(prepared),
+                Vec::new(),
+                Vec::new(),
+                String::new(),
+            ));
         }
 
         // --- Stage every write + anchors, then commit once per mem.
@@ -359,6 +354,19 @@ impl Engine {
             .last()
             .map(|(_, s)| s.clone())
             .unwrap_or_default();
-        Ok(batch_receipt(prepared, batch_warnings, write_id))
+        Ok(batch_receipt(
+            created_actions(prepared),
+            batch_warnings,
+            Vec::new(),
+            write_id,
+        ))
     }
+}
+
+/// The create verb's one action word: every prepared item was `created`.
+fn created_actions(prepared: Vec<PreparedCreate>) -> Vec<(EntityId, String)> {
+    prepared
+        .into_iter()
+        .map(|p| (p.id, "created".to_string()))
+        .collect()
 }

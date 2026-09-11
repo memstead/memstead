@@ -9,7 +9,7 @@ use crate::entity::EntityId;
 use crate::ops::WarningHint;
 use crate::provenance::{Provenance, ProvenanceKind};
 
-use super::outcome::{batch_receipt, batch_refusal};
+use super::super::{batch_empty, batch_receipt, batch_refusal};
 use super::{
     Actor, ClientId, Engine, EngineError, PrepareOutcome, PreparedUpdate, UpdateEntityArgs,
 };
@@ -75,16 +75,7 @@ impl Engine {
         dry_run: bool,
     ) -> Result<crate::ops::BatchResult, EngineError> {
         if updates.is_empty() {
-            return Ok(crate::ops::BatchResult {
-                warnings: Vec::new(),
-                orphan_stubs_removed: Vec::new(),
-                errors_suppressed: 0,
-                applied: true,
-                results: Vec::new(),
-                succeeded: 0,
-                failed: 0,
-                write_id: String::new(),
-            });
+            return Ok(batch_empty());
         }
 
         // Reload-before-operation: refresh every mem this batch
@@ -207,7 +198,10 @@ impl Engine {
             // `errors_suppressed` counting the rest.
             self.store = store_snapshot;
             self.discard_all_pending();
-            return Ok(batch_refusal(items, errors));
+            return Ok(batch_refusal(
+                items.into_iter().map(|(id, _)| id).collect(),
+                errors,
+            ));
         }
 
         // Rehearsal: every item validated (the pass above is the same
@@ -218,7 +212,12 @@ impl Engine {
         if dry_run {
             self.store = store_snapshot;
             self.discard_all_pending();
-            return Ok(batch_receipt(items, Vec::new(), String::new()));
+            return Ok(batch_receipt(
+                update_actions(items),
+                Vec::new(),
+                Vec::new(),
+                String::new(),
+            ));
         }
 
         // --- Phase 2: stage every prepared write, then commit once
@@ -319,7 +318,12 @@ impl Engine {
             .last()
             .map(|(_, s)| s.clone())
             .unwrap_or_default();
-        Ok(batch_receipt(items, batch_warnings, write_id))
+        Ok(batch_receipt(
+            update_actions(items),
+            batch_warnings,
+            Vec::new(),
+            write_id,
+        ))
     }
 
     /// Best-effort discard of every backend's staged-but-uncommitted
@@ -331,4 +335,20 @@ impl Engine {
             let _ = mount.backend.discard_pending();
         }
     }
+}
+
+/// The update verb's action words: `updated` for a prepared item,
+/// `noop` for an applied no-op.
+fn update_actions(items: Vec<(EntityId, BatchItem)>) -> Vec<(EntityId, String)> {
+    items
+        .into_iter()
+        .map(|(id, item)| {
+            let action = match item {
+                BatchItem::Prepared => "updated",
+                BatchItem::Noop => "noop",
+                BatchItem::Error => unreachable!("refusal path returned above"),
+            };
+            (id, action.to_string())
+        })
+        .collect()
 }

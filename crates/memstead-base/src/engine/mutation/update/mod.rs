@@ -32,8 +32,6 @@ use crate::vcs::{Actor, ClientId, CommitContext};
 
 use super::super::{Engine, EngineError, UpdateEntityArgs, UpdateEntityOutcome};
 
-pub(super) use outcome::batch_error_envelope;
-
 /// Result of [`Engine::prepare_update`] — the validation + markdown
 /// step split out of the commit so the batch path can prepare every
 /// item before committing the whole set atomically.

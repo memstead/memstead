@@ -16,6 +16,9 @@ use crate::store::Store;
 
 use super::EngineError;
 
+pub(super) use batch::{batch_empty, batch_receipt, batch_refusal};
+
+mod batch;
 pub mod create;
 pub mod delete;
 pub mod mem_sweep;

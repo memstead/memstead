@@ -61,6 +61,30 @@ pub(super) enum RelatePrepareOutcome {
     Prepared(PreparedRelate),
 }
 
+/// Per-item state of a batch relate, carrying the applied item's
+/// action label from its prepared state.
+enum ItemState {
+    Applied(&'static str),
+    Noop,
+    Error,
+}
+
+/// The relate verb's action words: the applied item's own label,
+/// `noop` for an applied no-op.
+fn relate_actions(items: Vec<(EntityId, ItemState)>) -> Vec<(EntityId, String)> {
+    items
+        .into_iter()
+        .map(|(id, state)| {
+            let action = match state {
+                ItemState::Applied(label) => label,
+                ItemState::Noop => "noop",
+                ItemState::Error => unreachable!("refusal path returned above"),
+            };
+            (id, action.to_string())
+        })
+        .collect()
+}
+
 impl Engine {
     /// Add or remove a typed relationship on `args.source`.
     ///
@@ -1058,16 +1082,7 @@ impl Engine {
         dry_run: bool,
     ) -> Result<crate::ops::BatchResult, EngineError> {
         if relates.is_empty() {
-            return Ok(crate::ops::BatchResult {
-                warnings: Vec::new(),
-                orphan_stubs_removed: Vec::new(),
-                errors_suppressed: 0,
-                applied: true,
-                results: Vec::new(),
-                succeeded: 0,
-                failed: 0,
-                write_id: String::new(),
-            });
+            return Ok(super::batch_empty());
         }
 
         // Reload every touched mem (sources and targets) once, up
@@ -1146,11 +1161,6 @@ impl Engine {
         // pending buffer. Any early-return added below MUST do both.
         let store_snapshot = self.store.clone();
 
-        enum ItemState {
-            Applied(&'static str),
-            Noop,
-            Error,
-        }
         let mut items: Vec<(EntityId, ItemState)> = Vec::with_capacity(relates.len());
         let mut prepared: Vec<PreparedRelate> = Vec::new();
         let mut notes: Vec<Option<String>> = Vec::new();
@@ -1243,49 +1253,10 @@ impl Engine {
             // Refuse the whole batch; roll back every staged entry.
             self.store = store_snapshot;
             self.discard_all_pending();
-            let failed = errors.len();
-            let mut error_map: std::collections::HashMap<usize, EngineError> =
-                errors.into_iter().collect();
-            let mut reported = 0usize;
-            let mut suppressed = 0usize;
-            let results: Vec<crate::ops::BatchEntry> = items
-                .into_iter()
-                .enumerate()
-                .map(|(i, (id, _))| match error_map.remove(&i) {
-                    Some(e) => {
-                        if reported < Self::BATCH_ERROR_REPORT_CAP {
-                            reported += 1;
-                            crate::ops::BatchEntry {
-                                id,
-                                action: "error".to_string(),
-                                error: Some(super::update::batch_error_envelope(&e)),
-                            }
-                        } else {
-                            suppressed += 1;
-                            crate::ops::BatchEntry {
-                                id,
-                                action: "error".to_string(),
-                                error: None,
-                            }
-                        }
-                    }
-                    None => crate::ops::BatchEntry {
-                        id,
-                        action: "not_applied".to_string(),
-                        error: None,
-                    },
-                })
-                .collect();
-            return Ok(crate::ops::BatchResult {
-                warnings: Vec::new(),
-                orphan_stubs_removed: Vec::new(),
-                errors_suppressed: suppressed,
-                applied: false,
-                results,
-                succeeded: 0,
-                failed,
-                write_id: String::new(),
-            });
+            return Ok(super::batch_refusal(
+                items.into_iter().map(|(id, _)| id).collect(),
+                errors,
+            ));
         }
 
         // Rehearsal: every entry validated in order against the state
@@ -1303,29 +1274,12 @@ impl Engine {
                 super::gc_orphan_stubs_among(&mut self.store, removed_targets.iter());
             self.store = store_snapshot;
             self.discard_all_pending();
-            let succeeded = items.len();
-            let results: Vec<crate::ops::BatchEntry> = items
-                .into_iter()
-                .map(|(id, state)| crate::ops::BatchEntry {
-                    id,
-                    action: match state {
-                        ItemState::Applied(label) => label.to_string(),
-                        ItemState::Noop => "noop".to_string(),
-                        ItemState::Error => unreachable!("refusal path returned above"),
-                    },
-                    error: None,
-                })
-                .collect();
-            return Ok(crate::ops::BatchResult {
-                warnings: Vec::new(),
+            return Ok(super::batch_receipt(
+                relate_actions(items),
+                Vec::new(),
                 orphan_stubs_removed,
-                errors_suppressed: 0,
-                applied: true,
-                results,
-                succeeded,
-                failed: 0,
-                write_id: String::new(),
-            });
+                String::new(),
+            ));
         }
 
         // --- Commit once per touched mount, in first-seen order. ---
@@ -1425,30 +1379,12 @@ impl Engine {
             .last()
             .map(|(_, s)| s.clone())
             .unwrap_or_default();
-        let succeeded = items.len();
-        let results: Vec<crate::ops::BatchEntry> = items
-            .into_iter()
-            .map(|(id, state)| crate::ops::BatchEntry {
-                id,
-                action: match state {
-                    ItemState::Applied(label) => label.to_string(),
-                    ItemState::Noop => "noop".to_string(),
-                    ItemState::Error => unreachable!("refusal path returned above"),
-                },
-                error: None,
-            })
-            .collect();
-
-        Ok(crate::ops::BatchResult {
-            warnings: batch_warnings,
+        Ok(super::batch_receipt(
+            relate_actions(items),
+            batch_warnings,
             orphan_stubs_removed,
-            errors_suppressed: 0,
-            applied: true,
-            results,
-            succeeded,
-            failed: 0,
             write_id,
-        })
+        ))
     }
 
     /// Positional-args alias for [`Self::relate_entity`]. Bundles

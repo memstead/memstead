@@ -75,6 +75,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The write gate's two preserved divergences are decided.** Internal,
+  wire unchanged. The anchors sidecar is staged under one predicate on
+  both update paths: the prepared item's own `anchors_changed` verdict,
+  which is what the wire reports (a row that restates what is stored
+  writes nothing, in a batch as on the single path; the batch's broader
+  "whenever rows are present" predicate could only stage a write that
+  changed nothing). The batch refusal (report-all, capped at
+  `BATCH_ERROR_REPORT_CAP` with `errors_suppressed` and `not_applied`),
+  the rehearsal and applied receipts and the empty-batch result are built
+  once in the mutation module and called from batch create, batch update
+  and batch relate, each verb passing its own action words; the three
+  copies are gone. The golden of the fixture mutation sequence over the
+  MCP binary is byte-identical before and after.
+
 - **Every mutating MCP tool takes the per-call `role` and `identity`.**
   `memstead_mem_create`, `memstead_mem_configure`, `memstead_mem_delete`,
   `memstead_mem_set_schema` and `memstead_mem_set_version` accept the two
