@@ -92,6 +92,7 @@ pub fn set_mem_schema_below_boot(
     workspace_root: &Path,
     mem: &str,
     target: &memstead_schema::SchemaRef,
+    ctx: &memstead_base::vcs::CommitContext<'_>,
 ) -> Result<BelowBootSetSchema, BootError> {
     let mut workspace = crate::workspace_store::load_workspace_description(workspace_root)?;
     let mount_idx = workspace
@@ -126,7 +127,7 @@ pub fn set_mem_schema_below_boot(
     // backend is instantiated — no workspace-wide boot.
     let backend = crate::storage::instantiate_full_backend(&workspace.mounts[mount_idx])
         .map_err(|e| BootError::Engine(EngineError::Mem(e.to_string())))?;
-    let config_updated = bump_backend_schema_pin(backend.as_ref(), target)
+    let config_updated = bump_backend_schema_pin(backend.as_ref(), target, ctx)
         .map_err(BootError::Engine)?
         .is_some();
 

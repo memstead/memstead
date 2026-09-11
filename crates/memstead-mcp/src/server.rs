@@ -4629,6 +4629,15 @@ impl ServerHandler for McpServer {
             name: info.name.clone(),
             version: info.version.clone(),
         };
+        // The commits this session causes as itself (config writes,
+        // sync-state stamps, the anchor writers) carry the agent actor
+        // and this client id like every entity mutation's commit.
+        {
+            let unified = self.unified_engine();
+            let mut engine = unified.lock().unwrap_or_else(|p| p.into_inner());
+            engine.set_actor(Actor::Agent);
+            engine.set_client(Some(cid.clone()));
+        }
         if let Err(existing) = self.client.set(cid) {
             tracing::warn!(
                 existing = ?existing,

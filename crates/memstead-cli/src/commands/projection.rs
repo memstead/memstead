@@ -36,8 +36,7 @@ use memstead_base::binding::{
     DEFAULT_FULL_RESYNC_EVERY, ScaffoldParams, SyncOperation, VerifyOperation, validate_binding,
 };
 use memstead_base::pipeline::{IngestTrigger, MediumType};
-use memstead_base::pipeline_store::{load_pipeline_configs, read_binding, write_binding};
-use memstead_base::workspace_store::StoreError;
+use memstead_base::pipeline_store::{load_pipeline_configs, read_binding};
 use memstead_projection::advance::{
     AdvanceError, DispositionInput, ExcludeError, advance_baseline, record_exclusions,
 };
@@ -384,6 +383,10 @@ pub struct InitArgs {
     /// path component of `--source`.
     #[arg(long)]
     pub name: Option<String>,
+    /// Optional provenance note (≤280 chars) recorded on the binding-store
+    /// commit in the destination mem.
+    #[arg(long)]
+    pub note: Option<String>,
 }
 
 /// The operation `projection enable` adds to a binding. Mirror of the binding's
@@ -417,6 +420,10 @@ pub struct EnableArgs {
     pub operation: EnableOperationArg,
     /// The binding id `<mem>/<stem>` — e.g. `engine/graph`.
     pub binding: String,
+    /// Optional provenance note (≤280 chars) recorded on the binding-store
+    /// commit in the destination mem.
+    #[arg(long)]
+    pub note: Option<String>,
 }
 
 #[derive(ClapArgs, Debug)]
@@ -429,6 +436,10 @@ pub struct EditArgs {
     /// legal, a present block replaces that block whole.
     #[arg(long)]
     pub patch: String,
+    /// Optional provenance note (≤280 chars) recorded on the binding-store
+    /// commit in the destination mem.
+    #[arg(long)]
+    pub note: Option<String>,
 }
 
 #[derive(ClapArgs, Debug)]
@@ -1015,7 +1026,7 @@ fn intent_refusal(binding_id: &str, findings: &[IntentFinding]) -> CliError {
     }))
 }
 
-fn init_write_error(binding_id: &str, err: StoreError) -> CliError {
+fn init_write_error(binding_id: &str, err: impl std::fmt::Display) -> CliError {
     CliError::new(
         ExitKind::Generic,
         "PROJECTION_INIT_FAILED",
@@ -1132,22 +1143,23 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // The schema comes from a scoped engine boot (the destination mem only);
     // a destination that is not mounted has no vocabulary, so the rule
     // does not apply and the absent-destination warning above stands.
-    {
-        let cli_engine = ctx.cli_engine_scoped(&mem)?;
-        let engine = cli_engine.base();
-        if let Some((pin, schema, known)) = engine.destination_schema_for(&mem) {
-            let found = intent_findings(binding.intent.as_deref(), &pin, &schema, &known);
-            if !found.is_empty() {
-                return Err(intent_refusal(&binding_id, &found).into());
-            }
+    let mut cli_engine = ctx.cli_engine_scoped(&mem)?;
+    if let Some((pin, schema, known)) = cli_engine.base().destination_schema_for(&mem) {
+        let found = intent_findings(binding.intent.as_deref(), &pin, &schema, &known);
+        if !found.is_empty() {
+            return Err(intent_refusal(&binding_id, &found).into());
         }
     }
 
-    // Write the one record. The id-collision refusal above already
-    // guaranteed a fresh binding, so this path only runs on a clean
-    // scaffold; a store IO failure surfaces the typed
-    // `PROJECTION_INIT_FAILED`.
-    write_binding(&root, &mem, &stem, &binding).map_err(|e| init_write_error(&binding_id, e))?;
+    // Write the one record through the engine, so the binding-store
+    // commit in the destination mem carries the session's provenance
+    // and the note. The id-collision refusal above already guaranteed a
+    // fresh binding, so this path only runs on a clean scaffold; a store
+    // IO failure surfaces the typed `PROJECTION_INIT_FAILED`.
+    cli_engine
+        .base_mut()
+        .write_projection_record(&mem, &stem, &binding, "add", args.note.as_deref())
+        .map_err(|e| init_write_error(&binding_id, e))?;
 
     let created = vec![format!(".memstead/projections/{mem}/{stem}.json")];
 
@@ -1233,7 +1245,7 @@ fn invalid_binding_id(binding_id: &str) -> CliError {
 /// missing-binding case is handled separately (existence pre-check →
 /// `PROJECTION_NOT_FOUND`); this covers a present-but-unreadable/unparseable
 /// binding file and write failures.
-fn enable_failed(binding_id: &str, err: StoreError) -> CliError {
+fn enable_failed(binding_id: &str, err: impl std::fmt::Display) -> CliError {
     CliError::new(
         ExitKind::Generic,
         "PROJECTION_ENABLE_FAILED",
@@ -1374,7 +1386,12 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
         .into());
     }
 
-    write_binding(&root, &mem, &stem, &binding).map_err(|e| enable_failed(&binding_id, e))?;
+    // The write goes through the engine so the binding-store commit in
+    // the destination mem carries the session's provenance and the note.
+    ctx.cli_engine_scoped(&mem)?
+        .base_mut()
+        .write_projection_record(&mem, &stem, &binding, "update", args.note.as_deref())
+        .map_err(|e| enable_failed(&binding_id, e))?;
 
     let mut operations: Vec<&str> = Vec::new();
     if binding.operations.build.is_some() {
@@ -1437,20 +1454,15 @@ fn edit(ctx: &CliContext, args: EditArgs) -> anyhow::Result<()> {
         return Err(binding_miss_error(&configs, &binding_id).into());
     }
 
-    // The destination schema for the intent rule — a scoped boot of the
-    // destination mem only; `None` (unmounted, no schema) skips the rule.
-    let cli_engine = ctx.cli_engine_scoped(&mem)?;
-    let destination_schema = cli_engine.base().destination_schema_for(&mem);
-    let binding = memstead_base::pipeline_edit::update_binding_json_against(
-        &root,
-        &mem,
-        &stem,
-        &args.patch,
-        destination_schema
-            .as_ref()
-            .map(|(pin, schema, known)| (pin.as_str(), &**schema, known.as_slice())),
-    )
-    .map_err(|e| edit_refused(&binding_id, e))?;
+    // The patch lands through the engine: a scoped boot of the
+    // destination mem only supplies the schema for the intent rule
+    // (`None` when unmounted skips it), and the binding-store commit
+    // carries the session's provenance and the note.
+    let binding = ctx
+        .cli_engine_scoped(&mem)?
+        .base_mut()
+        .update_projection_json(&mem, &stem, &args.patch, args.note.as_deref())
+        .map_err(|e| edit_refused(&binding_id, e))?;
 
     let source_names: Vec<&str> = binding.sources.iter().map(|s| s.name.as_str()).collect();
     let mut operations: Vec<&str> = Vec::new();

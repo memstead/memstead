@@ -27,7 +27,7 @@ use std::path::Path;
 use crate::entity::id::file_path_to_id;
 use crate::entity::{EntityId, loader, parser, source::EntitySource};
 use crate::provenance::{Provenance, ProvenanceKind};
-use crate::vcs::{Actor, ClientId, CommitContext};
+use crate::vcs::{Actor, ClientId};
 use crate::workspace::{MountCapability, MountStorage};
 
 use super::{Engine, EngineError};
@@ -315,16 +315,12 @@ impl Engine {
 
         let backend = self.mounts[mount_idx].backend.as_ref();
         backend.write_entity(Path::new(&entry.relative_path), resolved.as_bytes())?;
-        let ctx = CommitContext {
+        let ctx = self.commit_context(
+            Some("resolve_conflict"),
             actor,
-            client: client.cloned(),
-            tool: Some("resolve_conflict"),
-            note: note.map(String::from),
-            role: self.current_role,
-            identity: self.current_identity.clone(),
-            logical_operation_id: None,
-            entity_ids: None,
-        };
+            client.cloned(),
+            note.map(String::from),
+        );
         let write_id = backend.commit(
             &format!("memstead: resolve-conflict {id} (side: {})", side.as_wire()),
             &ctx,

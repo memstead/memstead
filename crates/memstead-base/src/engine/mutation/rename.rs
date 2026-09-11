@@ -488,16 +488,13 @@ impl Engine {
         // old). A no-op when the entity had no anchors (byte-identical).
         super::stage_anchors_rename(backend, id, &new_id)?;
         let commit_subject = format!("memstead: rename {} → {new_id}", id);
-        let ctx = CommitContext {
+        let mut ctx = self.commit_context(
+            Some("rename_entity"),
             actor,
-            client: client.cloned(),
-            tool: Some("rename_entity"),
-            note: note.map(String::from),
-            role: self.current_role,
-            identity: self.current_identity.clone(),
-            logical_operation_id: Some(logical_op_id.as_str()),
-            entity_ids: None,
-        };
+            client.cloned(),
+            note.map(String::from),
+        );
+        ctx.logical_operation_id = Some(logical_op_id.as_str());
         let write_id = backend.commit(&commit_subject, &ctx)?;
 
         backend.append_provenance(
@@ -553,16 +550,13 @@ impl Engine {
                 "memstead: rename {} → {new_id} (cross-mem rewrite in `{}`)",
                 id, plan.mem
             );
-            let peer_ctx = CommitContext {
+            let mut peer_ctx = self.commit_context(
+                Some("rename_entity"),
                 actor,
-                client: client.cloned(),
-                tool: Some("rename_entity"),
-                note: note.map(String::from),
-                role: self.current_role,
-                identity: self.current_identity.clone(),
-                logical_operation_id: Some(logical_op_id.as_str()),
-                entity_ids: None,
-            };
+                client.cloned(),
+                note.map(String::from),
+            );
+            peer_ctx.logical_operation_id = Some(logical_op_id.as_str());
             let expected = peer_snapshots.get(&plan.mem).cloned().unwrap_or(None);
             let peer_commit_result = peer_backend.commit_with_expected_parent(
                 &peer_commit_subject,

@@ -500,7 +500,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         // CLI-direct provenance, matching the entity mutations'
         // `Actor::Cli, None` convention.
         actor: memstead_base::vcs::Actor::Cli,
-        client: None,
+        client: Some(crate::setup::cli_client_id()),
     };
 
     let mut engine = match ctx.cli_engine()? {
@@ -784,7 +784,7 @@ fn run_delete_inner(
         // CLI-direct provenance, matching the entity mutations'
         // `Actor::Cli, None` convention.
         actor: memstead_base::vcs::Actor::Cli,
-        client: None,
+        client: Some(crate::setup::cli_client_id()),
         operator_mode,
         detach_incoming,
     };
@@ -1346,8 +1346,13 @@ fn run_set_schema_below_boot(
     mem: &str,
     target: &memstead_schema::SchemaRef,
 ) -> anyhow::Result<()> {
-    let outcome = memstead_git_branch::repair::set_mem_schema_below_boot(root, mem, target)
-        .map_err(|e| crate::setup::boot_error_to_cli(root, e))?;
+    let outcome = memstead_git_branch::repair::set_mem_schema_below_boot(
+        root,
+        mem,
+        target,
+        &ctx.commit_ctx_with_note(None),
+    )
+    .map_err(|e| crate::setup::boot_error_to_cli(root, e))?;
     if ctx.json {
         crate::output::print_json(&serde_json::json!({
             "mem": outcome.mem,

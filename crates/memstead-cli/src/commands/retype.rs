@@ -122,7 +122,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             // `ENTITY_NOT_FOUND` before the resolver ever ran.
             let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
             let expected_hash = resolve_expected_hash(&engine, &lookup_id, &args)?;
-            let mem_repo_ctx = crate::setup::cli_ctx_with_note(args.note.clone());
+            let mem_repo_ctx = ctx.commit_ctx_with_note(args.note.clone());
             engine.set_role(mem_repo_ctx.role);
             engine.set_identity(mem_repo_ctx.identity.clone());
             let outcome = engine

@@ -307,6 +307,34 @@ pub fn author_identity(ctx: &CommitContext<'_>) -> Option<(String, String)> {
 /// Public so both adapters share the same trailer block — the two paths
 /// must produce byte-identical commit messages for the same logical
 /// input.
+impl<'a> CommitContext<'a> {
+    /// The one place a commit context is built. Every commit the engine
+    /// writes carries the same provenance: the tool that caused it, the
+    /// actor and client of the transport, the agent-authored note, and
+    /// the session's declared role and identity. `logical_operation_id`
+    /// and `entity_ids` start absent; a multi-commit operation sets them
+    /// on the value it gets back.
+    pub fn new(
+        tool: Option<&'a str>,
+        actor: Actor,
+        client: Option<ClientId>,
+        note: Option<String>,
+        role: Role,
+        identity: Option<String>,
+    ) -> Self {
+        CommitContext {
+            actor,
+            client,
+            tool,
+            note,
+            role,
+            identity,
+            logical_operation_id: None,
+            entity_ids: None,
+        }
+    }
+}
+
 pub fn format_commit_message(prose: &str, ctx: &CommitContext<'_>) -> String {
     let trimmed = prose.trim_end_matches('\n');
     let mut trailers: Vec<String> = Vec::with_capacity(4);

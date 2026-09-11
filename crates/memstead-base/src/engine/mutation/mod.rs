@@ -409,16 +409,10 @@ impl super::Engine {
             return Ok(0);
         }
         backend.write_anchors_sidecar(&sidecar.to_bytes())?;
-        let ctx = crate::vcs::CommitContext {
-            actor: crate::vcs::Actor::Agent,
-            client: None,
-            tool: Some("record_anchor_observed_hashes"),
-            note: note.map(String::from),
-            role: self.current_role,
-            identity: self.current_identity.clone(),
-            logical_operation_id: None,
-            entity_ids: None,
-        };
+        let ctx = self.session_commit_context(
+            Some("record_anchor_observed_hashes"),
+            note.map(String::from),
+        );
         let write_id = backend.commit(
             &format!("memstead: anchor-hash backfill ({written} anchor(s))"),
             &ctx,
@@ -499,16 +493,8 @@ impl super::Engine {
             return Ok(0);
         }
         backend.write_anchors_sidecar(&sidecar.to_bytes())?;
-        let ctx = crate::vcs::CommitContext {
-            actor: crate::vcs::Actor::Agent,
-            client: None,
-            tool: Some("record_anchor_observations"),
-            note: note.map(String::from),
-            role: self.current_role,
-            identity: self.current_identity.clone(),
-            logical_operation_id: None,
-            entity_ids: None,
-        };
+        let ctx =
+            self.session_commit_context(Some("record_anchor_observations"), note.map(String::from));
         let write_id = backend.commit(
             &format!("memstead: anchor observations recorded ({written} row(s))"),
             &ctx,
@@ -602,6 +588,7 @@ impl super::Engine {
         match self.write_mem_config_merged(
             mount_idx,
             &mem,
+            "stamp_mutation_versions",
             Some("engine version stamp"),
             &move |c: &mut memstead_schema::config::MemConfig| {
                 c.mutation_stamp = Some(stamp.clone());
@@ -2054,7 +2041,18 @@ mod tests {
 
         // A write against the stale expectation is refused, not applied.
         let wrote = backend
-            .write_mem_config_cas(Some(&observed), b"{\"schema\": \"default@1.0.0\"}", None)
+            .write_mem_config_cas(
+                Some(&observed),
+                b"{\"schema\": \"default@1.0.0\"}",
+                &crate::vcs::CommitContext::new(
+                    Some("test"),
+                    crate::vcs::Actor::Cli,
+                    None,
+                    None,
+                    crate::vcs::Role::Unspecified,
+                    None,
+                ),
+            )
             .unwrap();
         assert!(!wrote, "a stale expectation must not overwrite");
         let on_disk = std::fs::read_to_string(&path).unwrap();
@@ -2067,7 +2065,18 @@ mod tests {
         let current = backend.read_mem_config().unwrap().unwrap();
         assert!(
             backend
-                .write_mem_config_cas(Some(&current), b"{\"schema\": \"default@1.0.0\"}", None)
+                .write_mem_config_cas(
+                    Some(&current),
+                    b"{\"schema\": \"default@1.0.0\"}",
+                    &crate::vcs::CommitContext::new(
+                        Some("test"),
+                        crate::vcs::Actor::Cli,
+                        None,
+                        None,
+                        crate::vcs::Role::Unspecified,
+                        None
+                    )
+                )
                 .unwrap(),
             "a current expectation writes"
         );

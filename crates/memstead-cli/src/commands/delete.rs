@@ -100,7 +100,7 @@ fn run_mem_repo(
         .delete_entity_with_ctx(
             &id,
             &current_hash,
-            &crate::setup::cli_ctx_with_note(args.note.clone()),
+            &ctx.commit_ctx_with_note(args.note.clone()),
         )
         .map_err(CliError::from_engine_op)?;
     let (_engine, mem_changed) = engine.finish();

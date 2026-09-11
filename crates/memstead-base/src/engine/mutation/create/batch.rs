@@ -20,8 +20,7 @@ use crate::provenance::{Provenance, ProvenanceKind};
 use super::super::make_stub;
 use super::outcome::{batch_receipt, batch_refusal};
 use super::{
-    Actor, ClientId, CommitContext, CreateEntityArgs, CreatePrepareOutcome, Engine, EngineError,
-    PreparedCreate,
+    Actor, ClientId, CreateEntityArgs, CreatePrepareOutcome, Engine, EngineError, PreparedCreate,
 };
 
 impl Engine {
@@ -285,20 +284,17 @@ impl Engine {
                 .filter(|(p, _)| p.mount_idx == m)
                 .filter_map(|(p, n)| n.as_ref().map(|n| format!("{}: {n}", p.id)))
                 .collect();
-            let ctx = CommitContext {
+            let mut ctx = self.commit_context(
+                Some("batch_create"),
                 actor,
-                client: client.cloned(),
-                tool: Some("batch_create"),
-                note: if note_lines.is_empty() {
+                client.cloned(),
+                if note_lines.is_empty() {
                     None
                 } else {
                     Some(note_lines.join("\n"))
                 },
-                role: self.current_role,
-                identity: self.current_identity.clone(),
-                logical_operation_id: None,
-                entity_ids: Some(entity_ids),
-            };
+            );
+            ctx.entity_ids = Some(entity_ids);
             match self.mounts[m].backend.commit(&subject, &ctx) {
                 Ok(sha) => mount_commits.push((m, sha)),
                 Err(e) => {

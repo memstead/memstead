@@ -288,7 +288,17 @@ fn in_memory_mem_exports_to_mem_archive_that_mounts_standalone() {
     // boot, so `mem_config_for` resolves it and export can project it.
     let backend = InMemoryBackend::new();
     backend
-        .write_mem_config(br#"{"version":"0.1.0","schema":"default@1.0.0"}"#)
+        .write_mem_config(
+            br#"{"version":"0.1.0","schema":"default@1.0.0"}"#,
+            &crate::vcs::CommitContext::new(
+                Some("test"),
+                crate::vcs::Actor::Cli,
+                None,
+                None,
+                crate::vcs::Role::Unspecified,
+                None,
+            ),
+        )
         .expect("in-memory backend accepts a config write");
     let mount = Mount {
         mem: "playground".to_string(),

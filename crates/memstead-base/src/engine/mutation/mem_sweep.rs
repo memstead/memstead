@@ -31,7 +31,6 @@
 use std::path::Path;
 
 use crate::engine::{Engine, EngineError};
-use crate::vcs::{Actor, CommitContext};
 
 /// Outcome of [`Engine::rewrite_mem_references`].
 #[derive(Debug, Clone)]
@@ -162,16 +161,8 @@ impl Engine {
             let subject = format!(
                 "memstead: rename mem `{old_mem}` → `{new_mem}` (reference rewrite in `{mem_name}`)"
             );
-            let ctx = CommitContext {
-                actor: Actor::Agent,
-                client: None,
-                tool: Some("mem rename"),
-                note: note.map(String::from),
-                role: self.current_role,
-                identity: self.current_identity.clone(),
-                logical_operation_id: Some(logical_op_id.as_str()),
-                entity_ids: None,
-            };
+            let mut ctx = self.session_commit_context(Some("mem rename"), note.map(String::from));
+            ctx.logical_operation_id = Some(logical_op_id.as_str());
             let commit_result =
                 backend.commit_with_expected_parent(&subject, &ctx, head_snapshot.as_deref());
             let write_id = match commit_result {

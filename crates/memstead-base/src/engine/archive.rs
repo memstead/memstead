@@ -924,7 +924,17 @@ mod tests {
         // is written to the backend before boot so export can project it.
         let backend = InMemoryBackend::new();
         backend
-            .write_mem_config(br#"{"version":"0.1.0","schema":"default@1.0.0"}"#)
+            .write_mem_config(
+                br#"{"version":"0.1.0","schema":"default@1.0.0"}"#,
+                &crate::vcs::CommitContext::new(
+                    Some("test"),
+                    crate::vcs::Actor::Cli,
+                    None,
+                    None,
+                    crate::vcs::Role::Unspecified,
+                    None,
+                ),
+            )
             .unwrap();
         let mount = Mount {
             mem: "sketch".to_string(),

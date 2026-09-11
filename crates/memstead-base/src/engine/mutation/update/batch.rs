@@ -11,8 +11,7 @@ use crate::provenance::{Provenance, ProvenanceKind};
 
 use super::outcome::{batch_receipt, batch_refusal};
 use super::{
-    Actor, ClientId, CommitContext, Engine, EngineError, PrepareOutcome, PreparedUpdate,
-    UpdateEntityArgs,
+    Actor, ClientId, Engine, EngineError, PrepareOutcome, PreparedUpdate, UpdateEntityArgs,
 };
 
 /// What each batch item is, in submission order, so the result
@@ -262,23 +261,17 @@ impl Engine {
                 .filter(|(p, _)| p.mount_idx == m)
                 .filter_map(|(p, n)| n.as_ref().map(|n| format!("{}: {n}", p.id)))
                 .collect();
-            let ctx = CommitContext {
+            let mut ctx = self.commit_context(
+                Some("batch_update"),
                 actor,
-                client: client.cloned(),
-                tool: Some("batch_update"),
-                note: if note_lines.is_empty() {
+                client.cloned(),
+                if note_lines.is_empty() {
                     None
                 } else {
                     Some(note_lines.join("\n"))
                 },
-                role: self.current_role,
-                identity: self.current_identity.clone(),
-                logical_operation_id: None,
-                // F13: name every entity this batch commit touched so an
-                // `--include-notes` reader can recover them from the note
-                // record alone — the subject only says `(N entities)`.
-                entity_ids: Some(entity_ids),
-            };
+            );
+            ctx.entity_ids = Some(entity_ids);
             match self.mounts[m].backend.commit(&subject, &ctx) {
                 Ok(sha) => mount_commits.push((m, sha)),
                 Err(e) => {

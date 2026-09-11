@@ -13,9 +13,7 @@ use crate::ops::project_incoming;
 use crate::provenance::{Provenance, ProvenanceKind};
 
 use super::super::make_stub;
-use super::{
-    Actor, ClientId, CommitContext, CreateEntityOutcome, Engine, EngineError, PreparedCreate,
-};
+use super::{Actor, ClientId, CreateEntityOutcome, Engine, EngineError, PreparedCreate};
 
 impl Engine {
     /// Stage the prepared disk write, commit it, append provenance, and
@@ -59,16 +57,12 @@ impl Engine {
         } = prepared;
         let backend = self.mounts[mount_idx].backend.as_ref();
         let commit_subject = format!("memstead: create {id}");
-        let ctx = CommitContext {
+        let ctx = self.commit_context(
+            Some("create_entity"),
             actor,
-            client: client.cloned(),
-            tool: Some("create_entity"),
-            note: note.map(String::from),
-            role: self.current_role,
-            identity: self.current_identity.clone(),
-            logical_operation_id: None,
-            entity_ids: None,
-        };
+            client.cloned(),
+            note.map(String::from),
+        );
         let write_id = backend.commit(&commit_subject, &ctx)?;
 
         // 9. Append provenance. Folder writes a JSONL line; git-branch

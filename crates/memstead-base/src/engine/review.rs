@@ -110,6 +110,7 @@ impl Engine {
         let (_, intervened) = self.write_mem_config_merged(
             mount_idx,
             mem_name,
+            "set_review_mark",
             note,
             &|c: &mut memstead_schema::config::MemConfig| {
                 *seen.borrow_mut() = c.review_mark.clone();

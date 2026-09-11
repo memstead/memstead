@@ -907,14 +907,10 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
             .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
     }
 
-    fn write_mem_config(&self, bytes: &[u8]) -> Result<(), memstead_base::backend::BackendError> {
-        self.write_mem_config_with_note(bytes, None)
-    }
-
-    fn write_mem_config_with_note(
+    fn write_mem_config(
         &self,
         bytes: &[u8],
-        note: Option<&str>,
+        ctx: &CommitContext<'_>,
     ) -> Result<(), memstead_base::backend::BackendError> {
         // Write `__MEMSTEAD:mems/<mem>/config.json` only. The legacy
         // `mem_repo_config::read_config` consumer chain reads
@@ -933,28 +929,18 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         // Hierarchical-path semantics for fresh mems need a
         // small lift in a follow-up (pass full path explicitly).
         //
-        // `note` rides the commit body so a version bump (or any
-        // config write that supplies one) carries the same provenance
-        // reason the other commit-producing lifecycle operations do.
+        // The caller's context rides the commit, so a version bump or
+        // a sync-state stamp carries the same provenance every other
+        // commit-producing operation does.
         let leaf = self
             .ref_name
             .strip_prefix("refs/heads/")
             .unwrap_or(&self.ref_name);
-        let ctx = CommitContext {
-            actor: memstead_base::vcs::Actor::Agent,
-            client: None,
-            tool: Some("memstead_mem_config_write"),
-            note: note.map(str::to_string),
-            role: Default::default(),
-            identity: None,
-            logical_operation_id: None,
-            entity_ids: None,
-        };
         crate::storage_memstead::commit_config_to_memstead_at_gitdir(
             &self.gitdir,
             leaf,
             bytes,
-            &ctx,
+            ctx,
             &format!("memstead: commit __MEMSTEAD:mems/{leaf}/config.json"),
         )
         .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
@@ -964,7 +950,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         &self,
         kind: &str,
         edits: &[(String, Option<Vec<u8>>)],
-        note: Option<&str>,
+        ctx: &CommitContext<'_>,
         verb: &str,
     ) -> Result<(), memstead_base::backend::BackendError> {
         // Mirror the pipeline-config edit under
@@ -979,21 +965,11 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
             .iter()
             .map(|(name, bytes)| (format!("pipeline/{kind}/{leaf}/{name}.json"), bytes.clone()))
             .collect();
-        let ctx = CommitContext {
-            actor: memstead_base::vcs::Actor::Agent,
-            client: None,
-            tool: Some("memstead_pipeline_edit"),
-            note: note.map(str::to_string),
-            role: Default::default(),
-            identity: None,
-            logical_operation_id: None,
-            entity_ids: None,
-        };
         let names: Vec<&str> = edits.iter().map(|(n, _)| n.as_str()).collect();
         crate::storage_memstead::commit_paths_to_memstead_at_gitdir(
             &self.gitdir,
             &tree_edits,
-            &ctx,
+            ctx,
             &format!("memstead: {verb} {kind} {leaf}/{}", names.join(", ")),
         )
         .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))

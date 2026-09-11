@@ -605,6 +605,8 @@ impl Engine {
             mutation_clock: Arc::new(crate::engine::mutation::wall_clock_now),
             current_role: crate::vcs::Role::Unspecified,
             current_identity: None,
+            current_actor: crate::vcs::Actor::Agent,
+            current_client: None,
         })
     }
 

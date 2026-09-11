@@ -246,16 +246,12 @@ impl Engine {
 
         let backend = self.mounts[prepared.mount_idx].backend.as_ref();
         let commit_subject = format!("memstead: relate {}", prepared.from);
-        let ctx = CommitContext {
+        let ctx = self.commit_context(
+            Some("relate_entity"),
             actor,
-            client: client.cloned(),
-            tool: Some("relate_entity"),
-            note: note.map(String::from),
-            role: self.current_role,
-            identity: self.current_identity.clone(),
-            logical_operation_id: None,
-            entity_ids: None,
-        };
+            client.cloned(),
+            note.map(String::from),
+        );
         let write_id = backend.commit(&commit_subject, &ctx)?;
 
         backend.append_provenance(
@@ -384,16 +380,12 @@ impl Engine {
         );
         let backend = self.mounts[mount_idx].backend.as_ref();
         super::stage_derivation_sidecar(backend, |s| s.set(&from, &rel, &to, &hash))?;
-        let ctx = CommitContext {
+        let ctx = self.commit_context(
+            Some("relate_entity"),
             actor,
-            client: client.cloned(),
-            tool: Some("relate_entity"),
-            note: note.map(String::from),
-            role: self.current_role,
-            identity: self.current_identity.clone(),
-            logical_operation_id: None,
-            entity_ids: None,
-        };
+            client.cloned(),
+            note.map(String::from),
+        );
         let write_id = backend.commit(
             &format!("memstead: derivation re-baseline {}", outcome.from),
             &ctx,
@@ -1367,20 +1359,17 @@ impl Engine {
                 .filter(|(p, _)| p.mount_idx == m)
                 .filter_map(|(p, n)| n.as_ref().map(|n| format!("{}: {n}", p.from)))
                 .collect();
-            let ctx = CommitContext {
+            let mut ctx = self.commit_context(
+                Some("batch_relate"),
                 actor,
-                client: client.cloned(),
-                tool: Some("batch_relate"),
-                note: if note_lines.is_empty() {
+                client.cloned(),
+                if note_lines.is_empty() {
                     None
                 } else {
                     Some(note_lines.join("\n"))
                 },
-                role: self.current_role,
-                identity: self.current_identity.clone(),
-                logical_operation_id: None,
-                entity_ids: Some(entity_ids),
-            };
+            );
+            ctx.entity_ids = Some(entity_ids);
             match self.mounts[m].backend.commit(&subject, &ctx) {
                 Ok(sha) => mount_commits.push((m, sha)),
                 Err(e) => {

@@ -471,6 +471,8 @@ impl CliContext {
                     engine_from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
                 engine.set_role(self.role);
                 engine.set_identity(self.identity.clone());
+                engine.set_actor(Actor::Cli);
+                engine.set_client(Some(cli_client_id()));
                 return Ok(CliEngine::MemRepo(engine));
             }
         }
@@ -478,6 +480,8 @@ impl CliContext {
             BaseEngine::from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
         engine.set_role(self.role);
         engine.set_identity(self.identity.clone());
+        engine.set_actor(Actor::Cli);
+        engine.set_client(Some(cli_client_id()));
         Ok(CliEngine::Filesystem(engine))
     }
 
@@ -571,25 +575,11 @@ pub fn find_filesystem_workspace_root(start: &Path) -> Option<PathBuf> {
     find_workspace_root(start)
 }
 
-/// Provenance bundle for every CLI-initiated mutation. `Actor::Cli` +
-/// `memstead-cli@<CARGO_PKG_VERSION>`. The `Tool:` trailer stays `None`: CLI
-/// subcommands aren't MCP tools and the commit subject (`memstead: create …`)
-/// already carries the action verb — a second taxonomy would drift.
-///
-/// Only used by mem-repo write paths today; filesystem-mem write
-/// paths assemble their own provenance directly. The function therefore
-/// only compiles when `mem-repo` is enabled.
-pub fn cli_ctx() -> CommitContext<'static> {
-    cli_ctx_with_note(None)
-}
-
 /// The `memstead-cli@<version>` client identity stamped into the commit
 /// body's `Client:` provenance trailer. Shared by every CLI mutation
 /// path so the trailer is uniform across `create` / `update` / `relate`
-/// / `rename`. Un-gated (unlike [`cli_ctx_with_note`]) because the
-/// `relate` path passes the client to `relate_entity` directly rather
-/// than through a `CommitContext`, and that path serves both
-/// workspace shapes.
+/// / `rename`, and set on the engine at boot so the commits the session
+/// causes as itself carry it too.
 pub fn cli_client_id() -> ClientId {
     ClientId {
         name: "memstead-cli".to_string(),
@@ -601,16 +591,19 @@ pub fn cli_client_id() -> ClientId {
 /// The note rides into the same payload slot the MCP `note` parameter
 /// uses; the engine's `require_notes` policy gate fires `NOTE_MISSING`
 /// symmetrically across both surfaces.
-pub fn cli_ctx_with_note(note: Option<String>) -> CommitContext<'static> {
-    CommitContext {
-        actor: Actor::Cli,
-        client: Some(cli_client_id()),
-        tool: None,
-        note,
-        role: Default::default(),
-        identity: None,
-        logical_operation_id: None,
-        entity_ids: None,
+impl CliContext {
+    /// The CLI's own commit context for one mutation: the CLI actor and
+    /// client id, the optional `--note`, and the invocation's declared
+    /// `--role` and `--identity`; built through the one constructor.
+    pub fn commit_ctx_with_note(&self, note: Option<String>) -> CommitContext<'static> {
+        CommitContext::new(
+            None,
+            Actor::Cli,
+            Some(cli_client_id()),
+            note,
+            self.role,
+            self.identity.clone(),
+        )
     }
 }
 

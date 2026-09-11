@@ -139,6 +139,62 @@ impl Engine {
         self.current_identity = identity;
     }
 
+    /// Set the transport's actor for the commits this session causes
+    /// without a per-call actor (config writes, sync-state stamps, the
+    /// anchor writers). The CLI sets `Cli` at boot; the MCP server
+    /// sets `Agent`.
+    pub fn set_actor(&mut self, actor: crate::vcs::Actor) {
+        self.current_actor = actor;
+    }
+
+    /// The transport's actor (see [`Self::set_actor`]).
+    pub fn current_actor(&self) -> crate::vcs::Actor {
+        self.current_actor
+    }
+
+    /// Set the transport's client id, when it has one (the MCP client
+    /// after `initialize`; the CLI's own id).
+    pub fn set_client(&mut self, client: Option<crate::vcs::ClientId>) {
+        self.current_client = client;
+    }
+
+    /// The transport's client id (see [`Self::set_client`]).
+    pub fn current_client(&self) -> Option<&crate::vcs::ClientId> {
+        self.current_client.as_ref()
+    }
+
+    /// The commit context of one mutation: its tool, actor, client and
+    /// note, with the session's declared role and identity. Every
+    /// commit the engine writes is built through here (or through
+    /// [`Self::session_commit_context`]), so no path can drop a trailer.
+    pub fn commit_context<'a>(
+        &self,
+        tool: Option<&'a str>,
+        actor: crate::vcs::Actor,
+        client: Option<crate::vcs::ClientId>,
+        note: Option<String>,
+    ) -> crate::vcs::CommitContext<'a> {
+        crate::vcs::CommitContext::new(
+            tool,
+            actor,
+            client,
+            note,
+            self.current_role,
+            self.current_identity.clone(),
+        )
+    }
+
+    /// The commit context of a mutation the session causes as itself:
+    /// the transport's actor and client (see [`Self::set_actor`] and
+    /// [`Self::set_client`]) with the session's role and identity.
+    pub fn session_commit_context<'a>(
+        &self,
+        tool: Option<&'a str>,
+        note: Option<String>,
+    ) -> crate::vcs::CommitContext<'a> {
+        self.commit_context(tool, self.current_actor, self.current_client.clone(), note)
+    }
+
     /// The currently declared identity — what the next mutation or
     /// check records.
     pub fn current_identity(&self) -> Option<&str> {
@@ -1433,9 +1489,14 @@ impl Engine {
         &mut self,
         mount_idx: usize,
         mem_name: &str,
+        tool: &'static str,
         note: Option<&str>,
         apply: &dyn Fn(&mut memstead_schema::config::MemConfig),
     ) -> Result<(memstead_schema::config::MemConfig, Vec<String>), EngineError> {
+        // The config-write commit carries the operation's provenance
+        // like every other commit: the tool that caused it, the
+        // session's actor, client, role and identity, and the note.
+        let ctx = self.session_commit_context(Some(tool), note.map(String::from));
         let backend = self.mounts[mount_idx].backend.as_ref();
         let read = |b: &dyn crate::backend::MemBackend| -> Result<Vec<u8>, EngineError> {
             b.read_mem_config()
@@ -1485,7 +1546,7 @@ impl Engine {
             let wrote = self.mounts[mount_idx].backend.write_mem_config_cas(
                 Some(&expected),
                 &bytes,
-                note,
+                &ctx,
             )?;
             if wrote {
                 break;
@@ -1518,7 +1579,8 @@ impl Engine {
         mount_idx: usize,
         target: &memstead_schema::SchemaRef,
     ) -> Result<(), EngineError> {
-        let value = bump_backend_schema_pin(self.mounts[mount_idx].backend.as_ref(), target)?;
+        let ctx = self.session_commit_context(Some("set_mem_schema"), None);
+        let value = bump_backend_schema_pin(self.mounts[mount_idx].backend.as_ref(), target, &ctx)?;
         // Refresh the cached parsed config so in-session reads observe the
         // new pin without a reload.
         if let Some(value) = value
@@ -1840,8 +1902,10 @@ impl Engine {
         note: Option<&str>,
         verb: &str,
     ) -> Result<(), crate::backend::BackendError> {
+        let ctx =
+            self.session_commit_context(Some("memstead_pipeline_edit"), note.map(String::from));
         match self.mounts.iter().find(|m| m.mount.mem == mem) {
-            Some(m) => m.backend.record_pipeline_edit(kind, edits, note, verb),
+            Some(m) => m.backend.record_pipeline_edit(kind, edits, &ctx, verb),
             None => Ok(()),
         }
     }
@@ -1890,6 +1954,7 @@ impl Engine {
         let (_, intervened) = self.write_mem_config_merged(
             mount_idx,
             mem_name,
+            "set_mem_version",
             note,
             &move |c: &mut memstead_schema::config::MemConfig| {
                 c.version = Some(target.clone());
@@ -1944,6 +2009,7 @@ impl Engine {
         let (_, intervened) = self.write_mem_config_merged(
             mount_idx,
             mem_name,
+            "set_mem_description",
             note,
             &move |c: &mut memstead_schema::config::MemConfig| {
                 c.description = target.clone();
@@ -1996,6 +2062,7 @@ impl Engine {
         let (_, intervened) = self.write_mem_config_merged(
             mount_idx,
             mem_name,
+            "set_mem_title",
             note,
             &move |c: &mut memstead_schema::config::MemConfig| {
                 c.title = target.clone();
@@ -2047,6 +2114,7 @@ impl Engine {
         let (_, intervened) = self.write_mem_config_merged(
             mount_idx,
             mem_name,
+            "set_mem_subject",
             note,
             &move |c: &mut memstead_schema::config::MemConfig| {
                 c.subject = target.clone();
@@ -2098,6 +2166,7 @@ impl Engine {
         let (_, intervened) = self.write_mem_config_merged(
             mount_idx,
             mem_name,
+            "set_mem_internal",
             note,
             &move |c: &mut memstead_schema::config::MemConfig| {
                 if internal {
@@ -2189,6 +2258,7 @@ impl Engine {
         let (_, intervened) = self.write_mem_config_merged(
             mount_idx,
             mem_name,
+            "set_mem_sync_state",
             note,
             &|c: &mut memstead_schema::config::MemConfig| {
                 *seen.borrow_mut() = if token_owned.is_empty() {
@@ -2398,7 +2468,8 @@ impl Engine {
         self.quarantined[q_idx].mount.schema = Some(target.clone());
         self.quarantined[q_idx].mount.migration_target = None;
         if let Ok(backend) = (self.backend_factory)(&self.quarantined[q_idx].mount) {
-            let _ = bump_backend_schema_pin(backend.as_ref(), target);
+            let ctx = self.session_commit_context(Some("set_mem_schema"), None);
+            let _ = bump_backend_schema_pin(backend.as_ref(), target, &ctx);
         }
         self.persist_state()?;
         // Re-attempt the attach. Failure keeps the quarantine (fresh
@@ -2997,6 +3068,7 @@ fn changed_config_fields(
 pub fn bump_backend_schema_pin(
     backend: &dyn crate::backend::MemBackend,
     target: &memstead_schema::SchemaRef,
+    ctx: &crate::vcs::CommitContext<'_>,
 ) -> Result<Option<serde_json::Value>, EngineError> {
     let Some(bytes) = backend
         .read_mem_config()
@@ -3010,7 +3082,7 @@ pub fn bump_backend_schema_pin(
     let new_bytes = serde_json::to_vec_pretty(&value)
         .map_err(|e| EngineError::Mem(format!("serialize mem config for pin update: {e}")))?;
     backend
-        .write_mem_config(&new_bytes)
+        .write_mem_config(&new_bytes, ctx)
         .map_err(|e| EngineError::Mem(format!("write mem config for pin update: {e}")))?;
     Ok(Some(value))
 }

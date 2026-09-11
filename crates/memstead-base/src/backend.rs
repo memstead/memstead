@@ -288,23 +288,12 @@ pub trait MemBackend: Send + Sync {
     /// [`Self::read_entity`] / [`Self::write_entity`]: the trait
     /// surface stays balanced so the engine doesn't branch on
     /// backend type for write paths.
-    fn write_mem_config(&self, _bytes: &[u8]) -> Result<(), BackendError> {
-        Err(BackendError::Sealed)
-    }
-
-    /// Like [`Self::write_mem_config`] but records `note` (an optional
-    /// agent/operator-supplied provenance reason) on the resulting
-    /// commit body. The default delegates to the note-less form, so
-    /// backends without a commit (folder) simply ignore the note; the
-    /// git-branch backend overrides this to thread `note` into the
-    /// `__MEMSTEAD`-ref commit. Lets `set_mem_version` carry a `--note`
-    /// like the other commit-producing mem-lifecycle operations.
-    fn write_mem_config_with_note(
+    fn write_mem_config(
         &self,
-        bytes: &[u8],
-        _note: Option<&str>,
+        _bytes: &[u8],
+        _ctx: &crate::vcs::CommitContext<'_>,
     ) -> Result<(), BackendError> {
-        self.write_mem_config(bytes)
+        Err(BackendError::Sealed)
     }
 
     /// Compare-and-set the mem config: write `bytes` only if the stored
@@ -328,9 +317,9 @@ pub trait MemBackend: Send + Sync {
         &self,
         _expected: Option<&[u8]>,
         bytes: &[u8],
-        note: Option<&str>,
+        ctx: &crate::vcs::CommitContext<'_>,
     ) -> Result<bool, BackendError> {
-        self.write_mem_config_with_note(bytes, note)?;
+        self.write_mem_config(bytes, ctx)?;
         Ok(true)
     }
 
@@ -356,7 +345,7 @@ pub trait MemBackend: Send + Sync {
         &self,
         _kind: &str,
         _edits: &[(String, Option<Vec<u8>>)],
-        _note: Option<&str>,
+        _ctx: &crate::vcs::CommitContext<'_>,
         _verb: &str,
     ) -> Result<(), BackendError> {
         Ok(())

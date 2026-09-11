@@ -42,7 +42,7 @@ use crate::runtime_validator::{
     missing_required_fields, missing_required_sections, parse_metadata_value,
     validate_cross_mem_edge, validate_rel_shape, validate_section_content, validate_section_keys,
 };
-use crate::vcs::{Actor, ClientId, CommitContext};
+use crate::vcs::{Actor, ClientId};
 use crate::workspace::MountCapability;
 
 use super::super::{Engine, EngineError, RetypeEntityArgs, RetypeEntityOutcome};
@@ -456,16 +456,12 @@ impl Engine {
         // attributes touches by; the type change rides the outcome and the
         // provenance verb, not the subject.
         let commit_subject = format!("memstead: retype {id}");
-        let ctx = CommitContext {
+        let ctx = self.commit_context(
+            Some("retype_entity"),
             actor,
-            client: client.cloned(),
-            tool: Some("retype_entity"),
-            note: note.map(String::from),
-            role: self.current_role,
-            identity: self.current_identity.clone(),
-            logical_operation_id: None,
-            entity_ids: None,
-        };
+            client.cloned(),
+            note.map(String::from),
+        );
         let write_id = backend.commit(&commit_subject, &ctx)?;
         backend.append_provenance(
             &Provenance::new(

@@ -349,7 +349,11 @@ impl crate::backend::MemBackend for FilesystemBackend {
         }
     }
 
-    fn write_mem_config(&self, bytes: &[u8]) -> Result<(), BackendError> {
+    fn write_mem_config(
+        &self,
+        bytes: &[u8],
+        _ctx: &crate::vcs::CommitContext<'_>,
+    ) -> Result<(), BackendError> {
         // Folder backend writes `<root>/.memstead/config.json` to disk.
         // Creates the `.memstead/` directory if missing. Existing config
         // is overwritten — caller's responsibility to gate against
@@ -376,7 +380,7 @@ impl crate::backend::MemBackend for FilesystemBackend {
         &self,
         expected: Option<&[u8]>,
         bytes: &[u8],
-        _note: Option<&str>,
+        _ctx: &crate::vcs::CommitContext<'_>,
     ) -> Result<bool, BackendError> {
         let memstead_dir = self.root.join(crate::mem::MEM_META_DIR);
         std::fs::create_dir_all(&memstead_dir).map_err(BackendError::Io)?;
@@ -946,7 +950,19 @@ mod tests {
 
         // Write — creates `.memstead/` umbrella + the config blob.
         let bytes = br#"{"version":"0.1.0","schema":"default@1.0.0"}"#.to_vec();
-        backend.write_mem_config(&bytes).unwrap();
+        backend
+            .write_mem_config(
+                &bytes,
+                &crate::vcs::CommitContext::new(
+                    Some("test"),
+                    crate::vcs::Actor::Cli,
+                    None,
+                    None,
+                    crate::vcs::Role::Unspecified,
+                    None,
+                ),
+            )
+            .unwrap();
 
         // Read returns the same bytes.
         let read_back = backend.read_mem_config().unwrap();

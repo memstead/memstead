@@ -4915,3 +4915,113 @@ fn intent_naming_only_the_vocabulary_is_silent() {
             .exists()
     );
 }
+
+/// The binding store's writes on the CLI surface commit with the
+/// session's provenance: `projection init`, `projection enable` and
+/// `projection edit` each land one commit in the destination mem that
+/// carries the tool name, the CLI actor, the declared role and identity
+/// and the note. Until 2026-09-11 all three wrote the record with no
+/// commit at all, so a binding edit made from the CLI left no trace in
+/// the mem-repo while the same edit through MCP did.
+#[test]
+fn binding_store_writes_commit_with_the_sessions_provenance() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    std::process::Command::new("git")
+        .args(["init", "-q", "mem-repo"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    write_store(
+        root,
+        "workspace.toml",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    );
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src").join("lib.rs"), "pub fn lib() {}\n").unwrap();
+
+    let run = |args: &[&str]| {
+        memstead()
+            .current_dir(root)
+            .args(["--role", "author", "--identity", "cli-who"])
+            .args(args)
+            .assert()
+            .success();
+    };
+    run(&[
+        "workspace",
+        "allow-create",
+        "*",
+        "--schema",
+        "default@1.0.0",
+    ]);
+    run(&[
+        "mem",
+        "init",
+        "dest",
+        "--schema",
+        "default@1.0.0",
+        "--storage",
+        "git-branch",
+    ]);
+    run(&[
+        "projection",
+        "init",
+        "--mem",
+        "dest",
+        "--source",
+        "src",
+        "--medium-type",
+        "codebase",
+        "--name",
+        "code",
+        "--note",
+        "bound from the cli",
+    ]);
+    // The codebase scaffold enables every operation; a patch that
+    // replaces the operations block with build alone leaves room for
+    // `enable` to switch sync back on.
+    run(&[
+        "projection",
+        "edit",
+        "dest/code",
+        "--patch",
+        r#"{"intent":"keep the module map current","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20}}}"#,
+        "--note",
+        "intent stated",
+    ]);
+    run(&[
+        "projection",
+        "enable",
+        "sync",
+        "dest/code",
+        "--note",
+        "sync switched on",
+    ]);
+
+    let log = std::process::Command::new("git")
+        .args(["log", "--all", "--format=%H%n%B%n----"])
+        .current_dir(root.join("mem-repo"))
+        .output()
+        .unwrap();
+    assert!(log.status.success());
+    let log = String::from_utf8(log.stdout).unwrap();
+    for note in ["bound from the cli", "intent stated", "sync switched on"] {
+        let commit = log
+            .split("----")
+            .find(|c| c.contains(note))
+            .unwrap_or_else(|| panic!("no commit carries the note {note:?}:\n{log}"));
+        for trailer in [
+            "Tool: memstead_pipeline_edit",
+            "Actor: cli",
+            "Role: author",
+            "Identity: cli-who",
+        ] {
+            assert!(
+                commit.contains(trailer),
+                "the commit for {note:?} lacks {trailer:?}:\n{commit}"
+            );
+        }
+    }
+}

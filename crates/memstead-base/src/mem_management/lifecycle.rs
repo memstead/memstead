@@ -344,6 +344,16 @@ pub fn delete_mem(
         ))
         .into());
     }
+    // The deletion's provenance: the same context every other
+    // mutation's commit carries, so the tombstone write and the prune
+    // commit name the actor, the note, the role and the identity a
+    // reader of the mem-repo's history expects.
+    let delete_ctx = engine.commit_context(
+        Some("memstead_mem_delete"),
+        params.actor,
+        params.client.clone(),
+        params.note.clone(),
+    );
 
     // Populated only under `detach_incoming: true` — see Step 3a.
     let mut detached_referrers: Vec<crate::ReferrerInfo> = Vec::new();
@@ -585,7 +595,7 @@ pub fn delete_mem(
                         match serde_json::to_vec_pretty(&cfg) {
                             Ok(mut new_bytes) => {
                                 new_bytes.push(b'\n');
-                                if let Err(e) = backend.write_mem_config(&new_bytes) {
+                                if let Err(e) = backend.write_mem_config(&new_bytes, &delete_ctx) {
                                     tracing::warn!(
                                         mem = %params.name,
                                         error = %e,
@@ -646,17 +656,7 @@ pub fn delete_mem(
         // mutation's commit carries, so the prune commit on
         // `__MEMSTEAD` names the actor, the note, the role and the
         // identity a reader of the mem-repo's history expects.
-        let prune_ctx = crate::vcs::CommitContext {
-            actor: params.actor,
-            client: params.client.clone(),
-            tool: Some("memstead_mem_delete"),
-            note: params.note.clone(),
-            role: engine.current_role(),
-            identity: engine.current_identity().map(str::to_string),
-            logical_operation_id: None,
-            entity_ids: None,
-        };
-        let backend_ok = match backend.delete_artifacts(&prune_ctx) {
+        let backend_ok = match backend.delete_artifacts(&delete_ctx) {
             Ok(()) => true,
             Err(e) => {
                 tracing::warn!(
@@ -1014,6 +1014,15 @@ pub fn create_mem(
         ))
         .into());
     }
+    // The create's provenance, built once: the seed commit, the config
+    // blob on the schema-and-config ref, a tombstone clear on reattach
+    // and a force-overwrite prune all carry it.
+    let seed_ctx = engine.commit_context(
+        Some("memstead_mem_create"),
+        params.actor,
+        params.client.clone(),
+        params.note.clone(),
+    );
     // Hierarchical paths are first-class. `params.name` carries the
     // full path (e.g. `"team/sub-mem"`); the grammar validator
     // accepts both flat and hierarchical forms and refuses
@@ -1393,9 +1402,10 @@ pub fn create_mem(
                                 .to_string(),
                         )
                     })?;
-                    (ops.prune_residue)(&canonical_gitdir, &composed_branch_leaf).map_err(|e| {
-                        crate::EngineError::Mem(format!("force_overwrite prune: {e}"))
-                    })?;
+                    (ops.prune_residue)(&canonical_gitdir, &composed_branch_leaf, &seed_ctx)
+                        .map_err(|e| {
+                            crate::EngineError::Mem(format!("force_overwrite prune: {e}"))
+                        })?;
                     // Fall through to Step 3 — the residue is gone,
                     // create proceeds normally and the fresh seed
                     // commit is the new branch tip.
@@ -1444,7 +1454,7 @@ pub fn create_mem(
                         updated.unregistered_at = None;
                         if let Ok(mut bytes) = serde_json::to_vec_pretty(&updated) {
                             bytes.push(b'\n');
-                            if let Err(e) = backend.write_mem_config(&bytes) {
+                            if let Err(e) = backend.write_mem_config(&bytes, &seed_ctx) {
                                 tracing::warn!(
                                     mem = %params.name,
                                     error = %e,
@@ -1633,7 +1643,7 @@ pub fn create_mem(
                         updated.unregistered_at = None;
                         if let Ok(mut bytes) = serde_json::to_vec_pretty(&updated) {
                             bytes.push(b'\n');
-                            if let Err(e) = backend.write_mem_config(&bytes) {
+                            if let Err(e) = backend.write_mem_config(&bytes, &seed_ctx) {
                                 tracing::warn!(
                                     mem = %params.name,
                                     error = %e,
@@ -1719,16 +1729,6 @@ pub fn create_mem(
     let factory = engine.backend_factory();
     let backend = factory(&mount)
         .map_err(|e| crate::EngineError::Mem(format!("instantiate backend: {e}")))?;
-    let seed_ctx = crate::vcs::CommitContext {
-        actor: params.actor,
-        client: params.client.clone(),
-        tool: Some("memstead_mem_create"),
-        note: params.note.clone(),
-        role: engine.current_role(),
-        identity: engine.current_identity().map(str::to_string),
-        logical_operation_id: None,
-        entity_ids: None,
-    };
     // For git-branch mounts, write the per-mem config blob to the
     // workspace's `__MEMSTEAD` ref before sealing the per-mem branch.
     // Folder mounts already wrote the config to disk in Step 4;
@@ -1736,7 +1736,7 @@ pub fn create_mem(
     // folder.
     if is_git_branch {
         backend
-            .write_mem_config(&config_bytes)
+            .write_mem_config(&config_bytes, &seed_ctx)
             .map_err(|e| crate::EngineError::Mem(format!("write mem config: {e}")))?;
     }
     let seed_write_id = backend
@@ -1917,6 +1917,9 @@ pub fn rename_mem(
         ))
         .into());
     }
+    // The rename's provenance for the commits it causes as the session:
+    // the storage move and the sync-state rewrite.
+    let rename_ctx = engine.session_commit_context(Some("rename_mem"), params.note.clone());
     if params.old == params.new {
         return Err(crate::EngineError::InvalidInput(
             "rename source and target are the same name".to_string(),
@@ -2104,7 +2107,7 @@ pub fn rename_mem(
                     })?;
                     out.push(b'\n');
                     backend_ref
-                        .write_mem_config(&out)
+                        .write_mem_config(&out, &rename_ctx)
                         .map_err(|e| crate::EngineError::Mem(format!("write mem config: {e}")))?;
                 }
             }
@@ -2128,7 +2131,7 @@ pub fn rename_mem(
                 // same form the old one used.
                 let had_prefix = branch.starts_with("refs/heads/");
                 let old_leaf = branch.strip_prefix("refs/heads/").unwrap_or(branch);
-                (ops.rename_mem_storage)(&canonical_gitdir, old_leaf, &params.new)
+                (ops.rename_mem_storage)(&canonical_gitdir, old_leaf, &params.new, &rename_ctx)
                     .map_err(|e| crate::EngineError::Mem(format!("storage rename: {e}")))?;
                 let new_branch = if had_prefix {
                     format!("refs/heads/{}", params.new)

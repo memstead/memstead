@@ -145,7 +145,17 @@ fn migrate_legacy_read_mems(
             config.read_mems = retained;
             if let Ok(mut out) = serde_json::to_vec_pretty(&config) {
                 out.push(b'\n');
-                if let Err(e) = backend.write_mem_config(&out) {
+                // Boot-time bookkeeping: no session, no caller; the
+                // context records that (unspecified role, no identity).
+                let ctx = memstead_base::vcs::CommitContext::new(
+                    Some("readMems migration"),
+                    memstead_base::vcs::Actor::Agent,
+                    None,
+                    None,
+                    memstead_base::vcs::Role::Unspecified,
+                    None,
+                );
+                if let Err(e) = backend.write_mem_config(&out, &ctx) {
                     tracing::warn!(
                         mem = %host_mount.mem,
                         error = %e,

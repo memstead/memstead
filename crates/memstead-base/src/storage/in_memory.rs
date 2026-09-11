@@ -257,7 +257,11 @@ impl MemBackend for InMemoryBackend {
         Ok(state.config.clone())
     }
 
-    fn write_mem_config(&self, bytes: &[u8]) -> Result<(), BackendError> {
+    fn write_mem_config(
+        &self,
+        bytes: &[u8],
+        _ctx: &crate::vcs::CommitContext<'_>,
+    ) -> Result<(), BackendError> {
         // Writable backend — unlike the sealed archive (whose default
         // impl returns `Sealed`), the in-memory mem stores the config
         // so the create path can write it and boot can read it back.
@@ -416,8 +420,18 @@ mod tests {
     fn mem_config_round_trips() {
         let b = InMemoryBackend::new();
         assert_eq!(b.read_mem_config().unwrap(), None);
-        b.write_mem_config(b"{\"schema\":\"default@1.0.0\"}")
-            .unwrap();
+        b.write_mem_config(
+            b"{\"schema\":\"default@1.0.0\"}",
+            &crate::vcs::CommitContext::new(
+                Some("test"),
+                crate::vcs::Actor::Cli,
+                None,
+                None,
+                crate::vcs::Role::Unspecified,
+                None,
+            ),
+        )
+        .unwrap();
         assert_eq!(
             b.read_mem_config().unwrap(),
             Some(b"{\"schema\":\"default@1.0.0\"}".to_vec())

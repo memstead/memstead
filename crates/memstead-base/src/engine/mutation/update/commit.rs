@@ -12,9 +12,7 @@ use crate::entity::parser::parse_markdown;
 use crate::entity::store_builder::push_entities_into_store;
 use crate::provenance::{Provenance, ProvenanceKind};
 
-use super::{
-    Actor, ClientId, CommitContext, Engine, EngineError, PreparedUpdate, UpdateEntityOutcome,
-};
+use super::{Actor, ClientId, Engine, EngineError, PreparedUpdate, UpdateEntityOutcome};
 
 /// The store-side results of applying a prepared write — filled in
 /// after the commit lands by [`Engine::apply_prepared_to_store`].
@@ -82,16 +80,12 @@ impl Engine {
         } else {
             format!("memstead: update {}", prepared.id)
         };
-        let ctx = CommitContext {
+        let ctx = self.commit_context(
+            Some("update_entity"),
             actor,
-            client: client.cloned(),
-            tool: Some("update_entity"),
-            note: note.map(String::from),
-            role: self.current_role,
-            identity: self.current_identity.clone(),
-            logical_operation_id: None,
-            entity_ids: None,
-        };
+            client.cloned(),
+            note.map(String::from),
+        );
         let write_id = backend.commit(&commit_subject, &ctx)?;
         backend.append_provenance(
             &Provenance::new(

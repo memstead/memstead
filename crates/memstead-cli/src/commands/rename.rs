@@ -57,7 +57,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     &id,
                     &new_title,
                     &expected_hash,
-                    &crate::setup::cli_ctx_with_note(args.note.clone()),
+                    &ctx.commit_ctx_with_note(args.note.clone()),
                 )
                 .map_err(CliError::from_engine_op)?;
             let (_engine, mem_changed) = engine.finish();

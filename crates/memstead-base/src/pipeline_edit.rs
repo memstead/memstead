@@ -450,6 +450,14 @@ pub fn rename_binding(
     Ok(())
 }
 
+/// The bytes a binding edit records as its provenance payload.
+fn binding_edit_bytes(binding: &Binding) -> Result<Vec<u8>, PipelineEditError> {
+    serde_json::to_vec_pretty(binding).map_err(|e| PipelineEditError::InvalidJson {
+        primitive: "config",
+        message: e.to_string(),
+    })
+}
+
 // --- Engine surface --------------------------------------------------------
 //
 // Thin wrappers that route an edit through the free functions above (disk +
@@ -511,7 +519,7 @@ impl Engine {
         name: &str,
         projection_json: &str,
         note: Option<&str>,
-    ) -> Result<(), PipelineEditError> {
+    ) -> Result<Binding, PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         let binding = add_binding_json_against(
             &root,
@@ -522,7 +530,42 @@ impl Engine {
                 .as_ref()
                 .map(|(p, s, k)| (p.as_str(), &**s, k.as_slice())),
         )?;
-        self.record_binding_edit(mem, name, &binding, &root, note, "add")
+        self.record_binding_edit(mem, name, &binding, &root, note, "add")?;
+        Ok(binding)
+    }
+
+    /// Write a caller-validated binding record and record the edit:
+    /// the one path a surface takes when it has already shaped and
+    /// checked the record itself (the CLI's `projection init` scaffold,
+    /// its `projection enable` operation switch). `verb` is `add` for a
+    /// new record and `update` for a replaced one; the provenance
+    /// commit rides the session's context like every other engine
+    /// write, and a destination this engine does not mount records
+    /// nothing (the file still lands). The snapshot refresh is the
+    /// lenient load: a sibling record the store quarantines stays
+    /// quarantined in the snapshot, since the caller's own front door
+    /// (the CLI's quarantine consult) already decided how to treat it,
+    /// and the record and its commit have landed by then.
+    pub fn write_projection_record(
+        &mut self,
+        mem: &str,
+        name: &str,
+        binding: &Binding,
+        verb: &str,
+        note: Option<&str>,
+    ) -> Result<(), PipelineEditError> {
+        let root = self.pipeline_edit_root()?;
+        pipeline_store::write_binding(&root, mem, name, binding)?;
+        let bytes = binding_edit_bytes(binding)?;
+        self.pipeline_provenance(
+            mem,
+            "projections",
+            &[(name.to_string(), Some(bytes))],
+            note,
+            verb,
+        )?;
+        self.set_pipeline_configs(pipeline_store::load_pipeline_configs(&root)?);
+        Ok(())
     }
 
     /// Patch a binding from a JSON [`BindingPatch`] — absent fields are
@@ -537,7 +580,7 @@ impl Engine {
         name: &str,
         projection_json: &str,
         note: Option<&str>,
-    ) -> Result<(), PipelineEditError> {
+    ) -> Result<Binding, PipelineEditError> {
         let root = self.pipeline_edit_root()?;
         let binding = update_binding_json_against(
             &root,
@@ -548,7 +591,8 @@ impl Engine {
                 .as_ref()
                 .map(|(p, s, k)| (p.as_str(), &**s, k.as_slice())),
         )?;
-        self.record_binding_edit(mem, name, &binding, &root, note, "update")
+        self.record_binding_edit(mem, name, &binding, &root, note, "update")?;
+        Ok(binding)
     }
 
     /// Delete a binding and refresh the snapshot. See [`delete_binding`].
@@ -617,11 +661,7 @@ impl Engine {
         note: Option<&str>,
         verb: &str,
     ) -> Result<(), PipelineEditError> {
-        let bytes =
-            serde_json::to_vec_pretty(binding).map_err(|e| PipelineEditError::InvalidJson {
-                primitive: "config",
-                message: e.to_string(),
-            })?;
+        let bytes = binding_edit_bytes(binding)?;
         self.pipeline_provenance(
             mem,
             "projections",

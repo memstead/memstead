@@ -411,6 +411,12 @@ pub struct Engine {
     /// `None` records as absence. An opaque caller-chosen string —
     /// the engine neither generates, interprets, nor enriches it.
     current_identity: Option<String>,
+    /// The transport's actor for commits the session causes without a
+    /// per-call actor (config writes, sync-state stamps, the anchor
+    /// writers): `Cli` under the CLI, `Agent` under the MCP server.
+    current_actor: crate::vcs::Actor,
+    /// The transport's client id, when it has one (the MCP client).
+    current_client: Option<crate::vcs::ClientId>,
 }
 
 /// Clock the engine reads when stamping mutation timestamps. `Arc`'d
@@ -622,8 +628,11 @@ pub type GitBranchBranchResetFn = fn(
 /// flows). Surfaces as a function pointer so `crate::mem_management`
 /// can drive a prune against an unmounted gitdir without depending on
 /// `memstead-git-branch`.
-pub type GitBranchPruneResidueFn =
-    fn(gitdir: &Path, branch_full_path: &str) -> Result<(), BackendError>;
+pub type GitBranchPruneResidueFn = fn(
+    gitdir: &Path,
+    branch_full_path: &str,
+    ctx: &crate::vcs::CommitContext<'_>,
+) -> Result<(), BackendError>;
 
 /// `rename_mem` dispatch for the git-branch backend: move the mem's
 /// content branch `refs/heads/<old>` to `refs/heads/<new>` at the same
@@ -631,8 +640,12 @@ pub type GitBranchPruneResidueFn =
 /// config blob to `mems/<new>/`, all in one ref-edit transaction.
 /// Refuses (no mutation) when the source branch is missing or the
 /// target branch already exists.
-pub type GitBranchRenameMemStorageFn =
-    fn(gitdir: &Path, old_leaf: &str, new_leaf: &str) -> Result<(), BackendError>;
+pub type GitBranchRenameMemStorageFn = fn(
+    gitdir: &Path,
+    old_leaf: &str,
+    new_leaf: &str,
+    ctx: &crate::vcs::CommitContext<'_>,
+) -> Result<(), BackendError>;
 
 /// `Engine::install_schema` dispatch for the git-branch backend: write a
 /// schema package (`(relative-path, bytes)` pairs) onto the workspace's

@@ -215,16 +215,12 @@ impl Engine {
             // A no-op when the entity had no anchors (byte-identical).
             super::stage_anchors_removal(backend, id)?;
             let commit_subject = format!("memstead: delete {id}");
-            let ctx = CommitContext {
+            let ctx = self.commit_context(
+                Some("delete_entity"),
                 actor,
-                client: client.cloned(),
-                tool: Some("delete_entity"),
-                note: note.map(String::from),
-                role: self.current_role,
-                identity: self.current_identity.clone(),
-                logical_operation_id: None,
-                entity_ids: None,
-            };
+                client.cloned(),
+                note.map(String::from),
+            );
             backend.commit(&commit_subject, &ctx)?
         };
 

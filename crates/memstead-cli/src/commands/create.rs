@@ -309,7 +309,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             };
 
             let result = engine
-                .create_entity_with_ctx(create_args, &crate::setup::cli_ctx_with_note(note.clone()))
+                .create_entity_with_ctx(create_args, &ctx.commit_ctx_with_note(note.clone()))
                 .map_err(CliError::from_engine_op)?;
             let (_engine, mem_changed) = engine.finish();
 

@@ -148,18 +148,9 @@ fn read_schema_file_dispatch(
 fn prune_residue_dispatch(
     gitdir: &std::path::Path,
     branch_full_path: &str,
+    ctx: &memstead_base::vcs::CommitContext<'_>,
 ) -> Result<(), memstead_base::backend::BackendError> {
-    let ctx = memstead_base::vcs::CommitContext {
-        actor: memstead_base::vcs::Actor::Agent,
-        client: None,
-        tool: Some("memstead_mem_create (force_overwrite)"),
-        note: None,
-        role: Default::default(),
-        identity: None,
-        logical_operation_id: None,
-        entity_ids: None,
-    };
-    crate::storage_memstead::delete_mem_artifacts_at_gitdir(gitdir, branch_full_path, &ctx).map_err(
+    crate::storage_memstead::delete_mem_artifacts_at_gitdir(gitdir, branch_full_path, ctx).map_err(
         |e| {
             memstead_base::backend::BackendError::Other(format!(
                 "force_overwrite prune at {}: {e}",
@@ -176,18 +167,9 @@ fn rename_mem_storage_dispatch(
     gitdir: &std::path::Path,
     old_leaf: &str,
     new_leaf: &str,
+    ctx: &memstead_base::vcs::CommitContext<'_>,
 ) -> Result<(), memstead_base::backend::BackendError> {
-    let ctx = memstead_base::vcs::CommitContext {
-        actor: memstead_base::vcs::Actor::Agent,
-        client: None,
-        tool: Some("memstead mem rename"),
-        note: None,
-        role: Default::default(),
-        identity: None,
-        logical_operation_id: None,
-        entity_ids: None,
-    };
-    crate::storage_memstead::rename_mem_artifacts_at_gitdir(gitdir, old_leaf, new_leaf, &ctx)
+    crate::storage_memstead::rename_mem_artifacts_at_gitdir(gitdir, old_leaf, new_leaf, ctx)
         .map_err(|e| {
             memstead_base::backend::BackendError::Other(format!(
                 "mem rename {old_leaf} -> {new_leaf}: {e}",

@@ -75,6 +75,37 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Every commit the engine writes carries the mutation's context.**
+  A `CommitContext` is built in one place, `CommitContext::new`, and the
+  engine reaches it through `Engine::commit_context` (a mutation's tool,
+  actor, client and note with the session's role and identity) or
+  `Engine::session_commit_context` (the transport's actor and client, set
+  at boot by the CLI and at `initialize` by the MCP server). The config
+  writes on the schema-and-config ref (a create's config blob, version,
+  title, description, subject, sync-state and the engine's version
+  stamp), the binding-store edits, the force-overwrite prune and the mem
+  rename used to fabricate a context with no role, no identity and no
+  client; they now carry the same trailers as every entity mutation, and
+  their `Tool:` trailer names the operation (`set_mem_version`,
+  `set_mem_sync_state`, `memstead_mem_create`, ...) instead of the
+  backend's generic `memstead_mem_config_write`. The anchor writers and
+  the mem sweep record the transport's actor, so a CLI-driven
+  `projection verify --advance` or `mem rename` reads `Actor: cli` where
+  it read `agent`. `MemBackend::write_mem_config`, `write_mem_config_cas`
+  and `record_pipeline_edit` take the context; `write_mem_config_with_note`
+  is gone; the git-branch hook table's prune and rename dispatchers take
+  it too. The CLI's `projection init`, `projection enable` and
+  `projection edit` write the binding record through the engine and
+  take `--note`: each lands one `memstead_pipeline_edit` commit in the
+  destination mem with the session's trailers, where they wrote the file
+  with no commit at all (the same edit through MCP always committed). The
+  CLI's `mem init` and `mem delete` now carry `Client:` like every other
+  CLI commit. `Engine::add_projection_json` and `update_projection_json`
+  return the written record; `Engine::write_projection_record` is the
+  writer for a record a surface has already shaped and checked. Library
+  consumers implementing the trait or calling those writers adjust; the
+  wire is unchanged.
+
 - **One write trait, one backend error.** The `MemWriter` trait and
   `MemWriterError` are folded into `MemBackend` and `BackendError` (which
   now carries `Path` and `HashMismatch` directly); the two implementors
