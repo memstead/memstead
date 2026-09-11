@@ -24,6 +24,203 @@ use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 /// The subdirectory under the workspace store that holds the bindings.
 pub const PROJECTIONS_DIR: &str = "projections";
 
+/// Every directory the workspace store keeps per mem, relative to
+/// `.memstead/`: the binding records and the per-binding state the
+/// maintenance loop writes (findings, advance). A mem's lifecycle walks
+/// this list: a rename moves each, a destructive delete removes each,
+/// so a state kind added later joins both by joining the list.
+pub const PER_MEM_STORE_DIRS: &[&str] = &[PROJECTIONS_DIR, "state/findings", "state/advance"];
+
+/// The binding records on disk for `mem`, as `(name, bytes)` in name
+/// order: what the schema-and-config ref's mirror holds for the mem
+/// when the two agree. Empty when the mem has no records.
+pub fn mem_binding_records(
+    workspace_root: &Path,
+    mem: &str,
+) -> Result<Vec<(String, Vec<u8>)>, StoreError> {
+    // A mem whose name is not a single component (a hierarchical
+    // `team/sub`) has no store directory: the store keys by one
+    // component, so there is nothing for it here.
+    if validate_component("mem", mem).is_err() {
+        return Ok(Vec::new());
+    }
+    let dir = primitive_dir(workspace_root, PROJECTIONS_DIR).join(mem);
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut out: Vec<(String, Vec<u8>)> = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| StoreError::Io {
+        path: dir.clone(),
+        source: e,
+    })? {
+        let path = entry
+            .map_err(|e| StoreError::Io {
+                path: dir.clone(),
+                source: e,
+            })?
+            .path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let bytes = std::fs::read(&path).map_err(|e| StoreError::Io {
+            path: path.clone(),
+            source: e,
+        })?;
+        out.push((name.to_string(), bytes));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
+/// Move every per-mem store directory of `old` under `new` and rewrite
+/// every id inside that names the mem: the binding's `destination_mem`,
+/// and every `<old>/…` binding or artifact id and `<old>--…` entity id
+/// in the records and the state files, keys and values alike.
+/// Idempotent: a directory already moved is rewritten in place, so an
+/// interrupted rename completes on the next call. Returns the binding
+/// records under the new name, for the caller to mirror.
+pub fn relocate_mem_store(
+    workspace_root: &Path,
+    old: &str,
+    new: &str,
+) -> Result<Vec<(String, Vec<u8>)>, StoreError> {
+    if validate_component("mem", old).is_err() || validate_component("mem", new).is_err() {
+        return Ok(Vec::new());
+    }
+    for dir in PER_MEM_STORE_DIRS {
+        let old_dir = primitive_dir(workspace_root, dir).join(old);
+        let new_dir = primitive_dir(workspace_root, dir).join(new);
+        if old_dir.is_dir() && !new_dir.exists() {
+            if let Some(parent) = new_dir.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| StoreError::Io {
+                    path: parent.to_path_buf(),
+                    source: e,
+                })?;
+            }
+            std::fs::rename(&old_dir, &new_dir).map_err(|e| StoreError::Io {
+                path: old_dir.clone(),
+                source: e,
+            })?;
+        }
+        if !new_dir.is_dir() {
+            continue;
+        }
+        for entry in std::fs::read_dir(&new_dir).map_err(|e| StoreError::Io {
+            path: new_dir.clone(),
+            source: e,
+        })? {
+            let path = entry
+                .map_err(|e| StoreError::Io {
+                    path: new_dir.clone(),
+                    source: e,
+                })?
+                .path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).map_err(|e| StoreError::Io {
+                path: path.clone(),
+                source: e,
+            })?;
+            let Ok(mut doc) = serde_json::from_str::<serde_json::Value>(&text) else {
+                // A file this engine cannot parse is left as it is:
+                // the store's own loader quarantines it with its reason.
+                continue;
+            };
+            let mut changed = rewrite_mem_ids(&mut doc, old, new);
+            if *dir == PROJECTIONS_DIR
+                && doc.get("destination_mem").and_then(|v| v.as_str()) == Some(old)
+            {
+                doc["destination_mem"] = serde_json::Value::String(new.to_string());
+                changed = true;
+            }
+            if changed {
+                let mut out = serde_json::to_string_pretty(&doc).unwrap_or(text);
+                out.push('\n');
+                std::fs::write(&path, out).map_err(|e| StoreError::Io {
+                    path: path.clone(),
+                    source: e,
+                })?;
+            }
+        }
+    }
+    mem_binding_records(workspace_root, new)
+}
+
+/// Remove every per-mem store directory of `mem`: its binding records
+/// and its per-binding state. A directory that is not there is not an
+/// error, so a repeated call is a no-op.
+pub fn remove_mem_store(workspace_root: &Path, mem: &str) -> Result<(), StoreError> {
+    if validate_component("mem", mem).is_err() {
+        return Ok(());
+    }
+    for dir in PER_MEM_STORE_DIRS {
+        let path = primitive_dir(workspace_root, dir).join(mem);
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path).map_err(|e| StoreError::Io {
+                path: path.clone(),
+                source: e,
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Rewrite every string in `value` (object keys included) that names
+/// the mem `old` as an id prefix, `<old>/…` (a binding or artifact id)
+/// or `<old>--…` (an entity id), to name `new`. Returns whether
+/// anything changed.
+fn rewrite_mem_ids(value: &mut serde_json::Value, old: &str, new: &str) -> bool {
+    let slash_old = format!("{old}/");
+    let dash_old = format!("{old}--");
+    fn rewrite_str(s: &str, slash_old: &str, dash_old: &str, new: &str) -> Option<String> {
+        if let Some(rest) = s.strip_prefix(slash_old) {
+            return Some(format!("{new}/{rest}"));
+        }
+        if let Some(rest) = s.strip_prefix(dash_old) {
+            return Some(format!("{new}--{rest}"));
+        }
+        None
+    }
+    match value {
+        serde_json::Value::String(s) => match rewrite_str(s, &slash_old, &dash_old, new) {
+            Some(r) => {
+                *s = r;
+                true
+            }
+            None => false,
+        },
+        serde_json::Value::Array(items) => {
+            let mut changed = false;
+            for item in items {
+                changed |= rewrite_mem_ids(item, old, new);
+            }
+            changed
+        }
+        serde_json::Value::Object(map) => {
+            let mut changed = false;
+            let keys: Vec<String> = map.keys().cloned().collect();
+            for key in keys {
+                let mut inner = map.remove(&key).expect("key present");
+                changed |= rewrite_mem_ids(&mut inner, old, new);
+                let new_key = match rewrite_str(&key, &slash_old, &dash_old, new) {
+                    Some(r) => {
+                        changed = true;
+                        r
+                    }
+                    None => key,
+                };
+                map.insert(new_key, inner);
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+
 /// A per-mem binding record paired with the mem and name (file stem) that
 /// identify it on disk.
 #[derive(Debug, Clone, PartialEq, Serialize)]

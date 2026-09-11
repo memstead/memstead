@@ -1023,6 +1023,70 @@ pub fn commit_paths_to_memstead_at_gitdir(
 /// Both edits land in a single `edit_references` transaction — either
 /// the branch + `__MEMSTEAD` advance both succeed, or the whole call is
 /// rejected and no state changed.
+/// Every blob on `__MEMSTEAD` that belongs to the mem at `leaf`: its
+/// config blob under `mems/<leaf>/` and every mirrored pipeline record
+/// under `pipeline/<kind>/<leaf>/`. The one enumeration a delete prunes
+/// and a rename moves, so a record kind added later joins both.
+fn leaf_blobs(
+    repo: &gix::Repository,
+    tree: &gix::Tree<'_>,
+    leaf: &str,
+) -> Result<Vec<(String, gix::ObjectId)>, MemRepoWriteError> {
+    let mut out: Vec<(String, gix::ObjectId)> = Vec::new();
+    let config_path = format!("mems/{leaf}/config.json");
+    if let Some(entry) = tree
+        .lookup_entry_by_path(&config_path)
+        .map_err(|e| MemRepoWriteError::GitTree(format!("lookup {config_path}: {e}")))?
+    {
+        out.push((config_path, entry.object_id()));
+    }
+    let Some(pipeline) = tree
+        .lookup_entry_by_path("pipeline")
+        .map_err(|e| MemRepoWriteError::GitTree(format!("lookup pipeline: {e}")))?
+    else {
+        return Ok(out);
+    };
+    if !pipeline.mode().is_tree() {
+        return Ok(out);
+    }
+    let pipeline_tree = repo
+        .find_object(pipeline.object_id())
+        .map_err(|e| MemRepoWriteError::GitTree(format!("read pipeline tree: {e}")))?
+        .into_tree();
+    for kind_entry in pipeline_tree.iter() {
+        let kind_entry =
+            kind_entry.map_err(|e| MemRepoWriteError::GitTree(format!("pipeline entry: {e}")))?;
+        if !kind_entry.mode().is_tree() {
+            continue;
+        }
+        let kind = String::from_utf8_lossy(kind_entry.filename()).to_string();
+        let leaf_path = format!("pipeline/{kind}/{leaf}");
+        let Some(leaf_entry) = tree
+            .lookup_entry_by_path(&leaf_path)
+            .map_err(|e| MemRepoWriteError::GitTree(format!("lookup {leaf_path}: {e}")))?
+        else {
+            continue;
+        };
+        if !leaf_entry.mode().is_tree() {
+            continue;
+        }
+        let leaf_tree = repo
+            .find_object(leaf_entry.object_id())
+            .map_err(|e| MemRepoWriteError::GitTree(format!("read {leaf_path}: {e}")))?
+            .into_tree();
+        for record in leaf_tree.iter() {
+            let record = record
+                .map_err(|e| MemRepoWriteError::GitTree(format!("{leaf_path} entry: {e}")))?;
+            if record.mode().is_tree() {
+                continue;
+            }
+            let name = String::from_utf8_lossy(record.filename()).to_string();
+            out.push((format!("{leaf_path}/{name}"), record.object_id()));
+        }
+    }
+    Ok(out)
+}
+
 pub fn delete_mem_artifacts_at_gitdir(
     gitdir: &Path,
     branch_leaf: &str,
@@ -1056,22 +1120,20 @@ pub fn delete_mem_artifacts_at_gitdir(
             .tree()
             .map_err(|e| MemRepoWriteError::GitTree(format!("peel __MEMSTEAD tree: {e}")))?;
 
-        // Check whether the entry actually exists — skip the commit
-        // entirely when it doesn't (e.g. a parallel run already
-        // pruned it). Saves an empty no-op commit.
-        let tree_path = format!("mems/{branch_leaf}/config.json");
-        let entry_present = tree
-            .lookup_entry_by_path(&tree_path)
-            .map_err(|e| MemRepoWriteError::GitTree(format!("lookup {tree_path}: {e}")))?
-            .is_some();
+        // Every blob the mem owns on the ref: its config and its
+        // mirrored pipeline records. Skip the commit entirely when
+        // there is nothing (e.g. a parallel run already pruned it).
+        let owned = leaf_blobs(&repo, &tree, branch_leaf)?;
 
-        if entry_present {
+        if !owned.is_empty() {
             let mut editor = tree.edit().map_err(|e| {
                 MemRepoWriteError::GitTree(format!("editor init for __MEMSTEAD: {e}"))
             })?;
-            editor
-                .remove(tree_path.as_str())
-                .map_err(|e| MemRepoWriteError::GitTree(format!("tree remove {tree_path}: {e}")))?;
+            for (tree_path, _) in &owned {
+                editor.remove(tree_path.as_str()).map_err(|e| {
+                    MemRepoWriteError::GitTree(format!("tree remove {tree_path}: {e}"))
+                })?;
+            }
             // gix's tree writer prunes empty subtrees on write, so
             // removing `mems/<path>/<name>/config.json` collapses
             // the now-empty `<path>/<name>/` and any `<path>/`
@@ -1178,6 +1240,22 @@ pub fn delete_mem_artifacts_at_gitdir(
 ///
 /// Refusals (no mutation on any): `refs/heads/<old_leaf>` missing,
 /// `refs/heads/<new_leaf>` already present.
+/// The path a mem-owned blob takes after a rename: the leaf segment
+/// swapped, the rest of the path kept (`mems/<leaf>/config.json`,
+/// `pipeline/<kind>/<leaf>/<name>.json`).
+fn relocate_leaf_path(path: &str, old_leaf: &str, new_leaf: &str) -> String {
+    if let Some(rest) = path.strip_prefix(&format!("mems/{old_leaf}/")) {
+        return format!("mems/{new_leaf}/{rest}");
+    }
+    if let Some(rest) = path.strip_prefix("pipeline/")
+        && let Some((kind, tail)) = rest.split_once('/')
+        && let Some(name) = tail.strip_prefix(&format!("{old_leaf}/"))
+    {
+        return format!("pipeline/{kind}/{new_leaf}/{name}");
+    }
+    path.to_string()
+}
+
 pub fn rename_mem_artifacts_at_gitdir(
     gitdir: &Path,
     old_leaf: &str,
@@ -1235,23 +1313,31 @@ pub fn rename_mem_artifacts_at_gitdir(
             .tree()
             .map_err(|e| MemRepoWriteError::GitTree(format!("peel __MEMSTEAD tree: {e}")))?;
 
-        let old_path = format!("mems/{old_leaf}/config.json");
-        let new_path = format!("mems/{new_leaf}/config.json");
-        let config_blob_id = tree
-            .lookup_entry_by_path(&old_path)
-            .map_err(|e| MemRepoWriteError::GitTree(format!("lookup {old_path}: {e}")))?
-            .map(|e| e.object_id());
+        // Every blob the mem owns on the ref moves under the new leaf:
+        // its config and its mirrored pipeline records (whose bytes
+        // the engine re-records afterwards where the record names
+        // the mem).
+        let owned = leaf_blobs(&repo, &tree, old_leaf)?;
 
-        if let Some(blob_id) = config_blob_id {
+        if !owned.is_empty() {
             let mut editor = tree.edit().map_err(|e| {
                 MemRepoWriteError::GitTree(format!("editor init for __MEMSTEAD: {e}"))
             })?;
-            editor
-                .remove(old_path.as_str())
-                .map_err(|e| MemRepoWriteError::GitTree(format!("tree remove {old_path}: {e}")))?;
-            editor
-                .upsert(new_path.as_str(), gix::objs::tree::EntryKind::Blob, blob_id)
-                .map_err(|e| MemRepoWriteError::GitTree(format!("tree upsert {new_path}: {e}")))?;
+            for (old_path, blob_id) in &owned {
+                let new_path = relocate_leaf_path(old_path, old_leaf, new_leaf);
+                editor.remove(old_path.as_str()).map_err(|e| {
+                    MemRepoWriteError::GitTree(format!("tree remove {old_path}: {e}"))
+                })?;
+                editor
+                    .upsert(
+                        new_path.as_str(),
+                        gix::objs::tree::EntryKind::Blob,
+                        *blob_id,
+                    )
+                    .map_err(|e| {
+                        MemRepoWriteError::GitTree(format!("tree upsert {new_path}: {e}"))
+                    })?;
+            }
             let new_tree_id = editor
                 .write()
                 .map_err(|e| MemRepoWriteError::GitTree(format!("tree write for __MEMSTEAD: {e}")))?

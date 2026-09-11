@@ -165,3 +165,273 @@ fn note_is_accepted_without_commit_on_folder_workspaces() {
             .exists()
     );
 }
+
+// ---------------------------------------------------------------------------
+// The mirror follows the mem through its lifecycle: a rename moves the
+// binding records and the per-binding state with the mem, on disk and on
+// the schema-and-config ref, with every mem-prefixed id rewritten; a
+// destructive delete removes both; a create seeds the mirror from the
+// records already on disk for that name. Until 2026-09-11 a rename left
+// the old mirror rows under the old leaf and the advance state under the
+// old name, and a delete left the records and their mirror behind, a row
+// pointing at a mem that no longer existed.
+// ---------------------------------------------------------------------------
+
+/// The blob at `path` in `__MEMSTEAD`'s tip tree, if present.
+fn memstead_tree_blob(workspace_root: &std::path::Path, path: &str) -> Option<Vec<u8>> {
+    let gitdir = workspace_root.join("mem-repo").join(".git");
+    let repo = gix::open(&gitdir).expect("open mem-repo");
+    let tip = repo
+        .find_reference("refs/heads/__MEMSTEAD")
+        .expect("__MEMSTEAD exists")
+        .into_fully_peeled_id()
+        .expect("peel");
+    let tree = repo
+        .find_object(tip.detach())
+        .expect("commit")
+        .into_commit()
+        .tree()
+        .expect("tree");
+    let entry = tree.lookup_entry_by_path(path).ok().flatten()?;
+    Some(entry.object().expect("blob").data.clone())
+}
+
+fn seed_state_files(root: &std::path::Path, mem: &str) {
+    let findings = root.join(".memstead/state/findings").join(mem);
+    std::fs::create_dir_all(&findings).unwrap();
+    std::fs::write(
+        findings.join("graph.json"),
+        format!(
+            r#"{{"binding":"{mem}/graph","batches":[{{"key":{{"binding_hash":"h"}},"findings":[{{"key":{{"entity":"{mem}--one","artifact":"{mem}/graph/codebase#src/a.rs"}},"facet":"identity","target":{{"kind":"anchor","entity":"{mem}--one","artifact":"{mem}/graph/codebase#src/a.rs"}},"class":"drifted","detail":"{mem}/graph moved","created_at":"2026-09-11T00:00:00Z"}}]}}]}}"#
+        ),
+    )
+    .unwrap();
+    let advance = root.join(".memstead/state/advance").join(mem);
+    std::fs::create_dir_all(&advance).unwrap();
+    std::fs::write(
+        advance.join("graph.json"),
+        format!(
+            r#"{{"binding":"{mem}/graph","frozen_slice":{{"added":["{mem}/graph/codebase#src/a.rs"],"modified":[],"deleted":[]}},"dispositions":{{"{mem}/graph/codebase#src/a.rs":"worked"}}}}"#
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn mem_rename_moves_the_mirror_and_the_state_and_rewrites_every_mem_id() {
+    use memstead_base::mem_management::{MemRenameParams, rename_mem};
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    engine
+        .add_projection_json("specs", "graph", BINDING_PATCH, Some("bound"))
+        .expect("add lands");
+    seed_state_files(tmp.path(), "specs");
+
+    rename_mem(
+        &mut engine,
+        MemRenameParams {
+            old: "specs".to_string(),
+            new: "plans".to_string(),
+            operator_mode: true,
+            note: Some("renamed for the pin".to_string()),
+        },
+    )
+    .expect("rename lands");
+
+    // The mirror moved with the mem and its record names the new mem.
+    assert!(
+        !memstead_tree_has(tmp.path(), "pipeline/projections/specs/graph.json"),
+        "old mirror row gone"
+    );
+    let mirrored = memstead_tree_blob(tmp.path(), "pipeline/projections/plans/graph.json")
+        .expect("mirror row under the new leaf");
+    let mirrored: serde_json::Value = serde_json::from_slice(&mirrored).unwrap();
+    assert_eq!(
+        mirrored["destination_mem"], "plans",
+        "mirror record rewritten: {mirrored}"
+    );
+    // The mirror equals the disk record.
+    let on_disk = std::fs::read(tmp.path().join(".memstead/projections/plans/graph.json")).unwrap();
+    let on_disk: serde_json::Value = serde_json::from_slice(&on_disk).unwrap();
+    assert_eq!(mirrored, on_disk, "mirror and disk agree after the rename");
+
+    // Every per-mem state directory moved, and every mem-prefixed id inside
+    // reads the new name.
+    for dir in ["projections", "state/findings", "state/advance"] {
+        assert!(
+            !tmp.path()
+                .join(".memstead")
+                .join(dir)
+                .join("specs")
+                .exists(),
+            "{dir}/specs gone"
+        );
+        let file = tmp
+            .path()
+            .join(".memstead")
+            .join(dir)
+            .join("plans/graph.json");
+        let text = std::fs::read_to_string(&file)
+            .unwrap_or_else(|_| panic!("{dir}/plans/graph.json present"));
+        assert!(
+            !text.contains("specs/") && !text.contains("specs--") && !text.contains("\"specs\""),
+            "{dir}: no id names the old mem: {text}"
+        );
+        if dir != "projections" {
+            assert!(
+                text.contains("plans/graph"),
+                "{dir}: ids name the new mem: {text}"
+            );
+        }
+    }
+    let advance: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join(".memstead/state/advance/plans/graph.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(advance["binding"], "plans/graph");
+    assert_eq!(
+        advance["dispositions"]["plans/graph/codebase#src/a.rs"],
+        "worked"
+    );
+    let findings: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join(".memstead/state/findings/plans/graph.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        findings["batches"][0]["findings"][0]["target"]["entity"],
+        "plans--one"
+    );
+}
+
+#[test]
+fn mem_delete_removes_the_records_their_state_and_the_mirror() {
+    use memstead_base::mem_management::{self, MemDeleteParams};
+    use memstead_base::vcs::Actor;
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    engine
+        .add_projection_json("specs", "graph", BINDING_PATCH, Some("bound"))
+        .expect("add lands");
+    seed_state_files(tmp.path(), "specs");
+
+    mem_management::delete_mem(
+        &mut engine,
+        MemDeleteParams {
+            name: "specs".to_string(),
+            delete_files: true,
+            note: Some("retired".to_string()),
+            actor: Actor::Cli,
+            client: None,
+            operator_mode: true,
+            detach_incoming: false,
+        },
+    )
+    .expect("delete lands");
+
+    assert!(
+        !memstead_tree_has(tmp.path(), "pipeline/projections/specs/graph.json"),
+        "mirror row pruned with the mem"
+    );
+    assert!(
+        !memstead_tree_has(tmp.path(), "mems/specs/config.json"),
+        "config blob pruned"
+    );
+    for dir in ["projections", "state/findings", "state/advance"] {
+        assert!(
+            !tmp.path()
+                .join(".memstead")
+                .join(dir)
+                .join("specs")
+                .exists(),
+            "{dir}/specs removed with the mem"
+        );
+    }
+}
+
+#[test]
+fn mem_unregister_keeps_the_records_and_the_mirror() {
+    use memstead_base::mem_management::{self, MemDeleteParams};
+    use memstead_base::vcs::Actor;
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    engine
+        .add_projection_json("specs", "graph", BINDING_PATCH, Some("bound"))
+        .expect("add lands");
+    seed_state_files(tmp.path(), "specs");
+
+    mem_management::delete_mem(
+        &mut engine,
+        MemDeleteParams {
+            name: "specs".to_string(),
+            delete_files: false,
+            note: Some("unregistered".to_string()),
+            actor: Actor::Cli,
+            client: None,
+            operator_mode: true,
+            detach_incoming: false,
+        },
+    )
+    .expect("unregister lands");
+
+    assert!(
+        memstead_tree_has(tmp.path(), "pipeline/projections/specs/graph.json"),
+        "an unregister keeps the mirror, as it keeps the branch"
+    );
+    for dir in ["projections", "state/findings", "state/advance"] {
+        assert!(
+            tmp.path()
+                .join(".memstead")
+                .join(dir)
+                .join("specs/graph.json")
+                .is_file(),
+            "{dir}/specs kept by an unregister"
+        );
+    }
+}
+
+#[test]
+fn mem_create_seeds_the_mirror_from_the_records_on_disk() {
+    use memstead_base::mem_management::{self, MemCreateParams, StorageKind};
+    use memstead_base::vcs::Actor;
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+
+    // A binding declared before its destination exists (legal: the
+    // destination may arrive later) sits on disk with no mirror row.
+    let later_patch = BINDING_PATCH.replace("\"specs\"", "\"later\"");
+    memstead_base::pipeline_edit::add_binding_json(tmp.path(), "later", "graph", &later_patch)
+        .expect("binding on disk");
+    assert!(!memstead_tree_has(
+        tmp.path(),
+        "pipeline/projections/later/graph.json"
+    ));
+
+    mem_management::create_mem(
+        &mut engine,
+        MemCreateParams {
+            name: "later".to_string(),
+            location: std::path::PathBuf::from("later"),
+            schema_ref: "default@1.0.0".parse().unwrap(),
+            vcs: None,
+            note: Some("created after its binding".to_string()),
+            operator_mode: true,
+            recovery: None,
+            write_guidance: Default::default(),
+            storage: Some(StorageKind::GitBranch),
+            actor: Actor::Cli,
+            client: None,
+        },
+    )
+    .expect("create lands");
+
+    let mirrored = memstead_tree_blob(tmp.path(), "pipeline/projections/later/graph.json")
+        .expect("the create seeds the mirror from the disk record");
+    let on_disk = std::fs::read(tmp.path().join(".memstead/projections/later/graph.json")).unwrap();
+    assert_eq!(mirrored, on_disk, "mirror equals the disk record");
+}

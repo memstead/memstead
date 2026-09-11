@@ -36,6 +36,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A mem's binding records and their state follow the mem through its
+  lifecycle.** A `mem rename` moves every per-mem store directory
+  (`projections/<mem>`, `state/findings/<mem>`, `state/advance/<mem>`)
+  with the mem and rewrites every id inside that names it (the
+  binding's `destination_mem`, every `<mem>/…` binding or artifact id,
+  every `<mem>--…` entity id, keys and values alike), then re-records
+  the binding records under the new leaf on the schema-and-config ref;
+  a destructive `mem delete` removes the directories and prunes every
+  row the mem owns on that ref; a `mem create` seeds the ref's rows from
+  the records already on disk for its name. Until now a rename left the
+  advance state under the old name and the ref's rows under the old
+  leaf, and a delete left the records and their rows behind, a binding
+  pointing at a mem that no longer existed. An unregister keeps
+  everything, as it keeps the branch. `pipeline_store::PER_MEM_STORE_DIRS`
+  is the one list a new per-mem state kind joins.
+
 - **A mem deletion carries its provenance note.** `memstead mem delete
   --note` and `memstead_mem_delete`'s `note` reached the engine and were
   lost there: the `__MEMSTEAD` prune commit, the one commit a deletion

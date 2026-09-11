@@ -701,7 +701,32 @@ pub fn delete_mem(
             // shape, not a partial-state signal.
             None => true,
         };
-        backend_ok && dir_ok
+        // The mem's binding records and their per-binding state go
+        // with it: a record whose destination no longer exists is a
+        // row pointing at nothing. (The mirror rows on the
+        // schema-and-config ref went with the backend prune above.)
+        let store_ok = match engine.workspace_root().map(|r| r.to_path_buf()) {
+            Some(root) => match crate::pipeline_store::remove_mem_store(&root, &params.name) {
+                Ok(()) => true,
+                Err(e) => {
+                    tracing::warn!(
+                        mem = %params.name,
+                        error = %e,
+                        "delete_mem: unregister succeeded but the mem's store \
+                         cleanup failed — leaving its records for explicit cleanup"
+                    );
+                    warnings.push(crate::ops::WarningHint::MemFilesNotDeleted {
+                        mem: params.name.clone(),
+                        reason: "store_cleanup_failed".into(),
+                        path: None,
+                        error: Some(e.to_string()),
+                    });
+                    false
+                }
+            },
+            None => true,
+        };
+        backend_ok && dir_ok && store_ok
     } else {
         false
     };
@@ -1470,6 +1495,7 @@ pub fn create_mem(
                         by_tool: "memstead_mem_create (reattach)",
                     };
                     engine.register_writable_mem(mount, backend, origin)?;
+                    seed_binding_mirror(engine, &params.name, params.note.as_deref());
                     engine.persist_state()?;
                     // Re-derive every writable mem's incoming-edge slice
                     // so other mems' relationships pointing at the
@@ -1659,6 +1685,7 @@ pub fn create_mem(
                         by_tool: "memstead_mem_create (reattach)",
                     };
                     engine.register_writable_mem(mount, backend, origin)?;
+                    seed_binding_mirror(engine, &params.name, params.note.as_deref());
                     engine.persist_state()?;
                     // Same rationale as the git-branch reattach: re-derive
                     // every writable mem's incoming-edge slice so
@@ -1750,6 +1777,7 @@ pub fn create_mem(
     // exactly one identifier (the full path), with no separate
     // `params.path` plumbed into the router.
     engine.register_writable_mem(mount, backend, origin)?;
+    seed_binding_mirror(engine, &params.name, params.note.as_deref());
 
     // Persist the updated mount list to the workspace store. Without
     // this, the per-mem branch + `__MEMSTEAD` config (or folder +
@@ -1856,6 +1884,45 @@ pub struct MemRenameResponse {
     /// findings relocation).
     pub resumed: bool,
     pub warnings: Vec<crate::ops::WarningHint>,
+}
+
+/// Record `records` (binding name, bytes) under `mem` on the
+/// schema-and-config ref, so the mirror there equals the disk store.
+/// A workspace without a commit timeline records nothing.
+fn mirror_binding_records(
+    engine: &mut crate::Engine,
+    mem: &str,
+    records: Vec<(String, Vec<u8>)>,
+    note: Option<&str>,
+    verb: &str,
+) -> Result<(), crate::backend::BackendError> {
+    if records.is_empty() {
+        return Ok(());
+    }
+    let edits: Vec<(String, Option<Vec<u8>>)> =
+        records.into_iter().map(|(n, b)| (n, Some(b))).collect();
+    engine.record_pipeline_edit_provenance(mem, "projections", &edits, note, verb)
+}
+
+/// Seed the mirror of a newly registered mem from the binding records
+/// already on disk for its name: a binding may be declared before its
+/// destination exists, and a force-overwrite create prunes the previous
+/// life's rows. A failure here leaves the mem created and is logged;
+/// the next edit of any record re-records it.
+fn seed_binding_mirror(engine: &mut crate::Engine, mem: &str, note: Option<&str>) {
+    let Some(root) = engine.workspace_root().map(|r| r.to_path_buf()) else {
+        return;
+    };
+    let records = match crate::pipeline_store::mem_binding_records(&root, mem) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(mem, error = %e, "create_mem: could not read the binding records to mirror");
+            return;
+        }
+    };
+    if let Err(e) = mirror_binding_records(engine, mem, records, note, "adopt") {
+        tracing::warn!(mem, error = %e, "create_mem: could not mirror the binding records");
+    }
 }
 
 /// Rename a mem: `old` → `new`, complete across every surface that
@@ -2177,46 +2244,22 @@ pub fn rename_mem(
         crate::workspace_config_edit::rename_mem_in_cross_links(&root, &params.old, &params.new)
             .map_err(|e| crate::EngineError::Mem(format!("grants rewrite: {e}")))?;
 
-        // ---- Step 8: binding + findings stores (idempotent) ----
-        let store_dir = root.join(crate::WORKSPACE_STORE_DIR);
-        let projections_old = store_dir.join("projections").join(&params.old);
-        let projections_new = store_dir.join("projections").join(&params.new);
-        if projections_old.is_dir() && !projections_new.exists() {
-            std::fs::rename(&projections_old, &projections_new)
-                .map_err(|e| crate::EngineError::Mem(format!("move projections dir: {e}")))?;
-        }
-        if projections_new.is_dir() {
-            for entry in std::fs::read_dir(&projections_new)
-                .map_err(|e| crate::EngineError::Mem(format!("read projections: {e}")))?
-            {
-                let path = entry
-                    .map_err(|e| crate::EngineError::Mem(format!("read projections: {e}")))?
-                    .path();
-                if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                    continue;
-                }
-                let Ok(text) = std::fs::read_to_string(&path) else {
-                    continue;
-                };
-                let Ok(mut doc) = serde_json::from_str::<serde_json::Value>(&text) else {
-                    continue;
-                };
-                if doc.get("destination_mem").and_then(|v| v.as_str()) == Some(params.old.as_str())
-                {
-                    doc["destination_mem"] = serde_json::Value::String(params.new.clone());
-                    let mut out = serde_json::to_string_pretty(&doc).unwrap_or(text);
-                    out.push('\n');
-                    std::fs::write(&path, out)
-                        .map_err(|e| crate::EngineError::Mem(format!("rewrite binding: {e}")))?;
-                }
-            }
-        }
-        let findings_old = store_dir.join("state").join("findings").join(&params.old);
-        let findings_new = store_dir.join("state").join("findings").join(&params.new);
-        if findings_old.is_dir() && !findings_new.exists() {
-            std::fs::rename(&findings_old, &findings_new)
-                .map_err(|e| crate::EngineError::Mem(format!("move findings dir: {e}")))?;
-        }
+        // ---- Step 8: the mem's store and its mirror (idempotent) ----
+        // The binding records and the per-binding state move with the
+        // mem and every id inside reads the new name; the records are
+        // then re-recorded under the new leaf on the schema-and-config
+        // ref, whose rows the storage flip above already moved, so the
+        // mirror equals the disk store again.
+        let records = crate::pipeline_store::relocate_mem_store(&root, &params.old, &params.new)
+            .map_err(|e| crate::EngineError::Mem(format!("relocate mem store: {e}")))?;
+        mirror_binding_records(
+            engine,
+            &params.new,
+            records,
+            params.note.as_deref(),
+            "relocate",
+        )
+        .map_err(|e| crate::EngineError::Mem(format!("mirror relocated records: {e}")))?;
     }
 
     let note_warning = engine.note_missing_warning("rename_mem", params.note.as_deref());
