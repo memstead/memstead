@@ -75,6 +75,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Every mutating MCP tool takes the per-call `role` and `identity`.**
+  `memstead_mem_create`, `memstead_mem_configure`, `memstead_mem_delete`,
+  `memstead_mem_set_schema` and `memstead_mem_set_version` accept the two
+  optional parameters the entity mutation tools accept, with the same
+  descriptions (one constant each), the same validation (`INVALID_ROLE`
+  naming the vocabulary, `INVALID_IDENTITY` past 128 characters, both
+  before any mutation) and the same fallback to the session's `--role`
+  and `--identity`; the commit each tool produces carries the per-call
+  values in its `Role:` and `Identity:` trailers. Until now the five
+  recorded the session's defaults only, so a lifecycle act under a
+  checker's identity could not be attributed. Every existing call shape
+  keeps working; the CLI's global flags already cover every verb.
+
 - **Every commit the engine writes carries the mutation's context.**
   A `CommitContext` is built in one place, `CommitContext::new`, and the
   engine reaches it through `Engine::commit_context` (a mutation's tool,

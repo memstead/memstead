@@ -3,6 +3,14 @@
 use indexmap::IndexMap;
 use rmcp::schemars;
 
+/// The one description of the per-call `role` parameter, shared by every
+/// mutating tool (entity and lifecycle alike).
+pub(crate) const ROLE_PARAM_DESCRIPTION: &str = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier`. Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.";
+
+/// The one description of the per-call `identity` parameter, shared by
+/// every mutating tool (entity and lifecycle alike).
+pub(crate) const IDENTITY_PARAM_DESCRIPTION: &str = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle. Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars).";
+
 /// Shared `note` description rendered identically on every mutation-tool
 /// parameter. One sentence, ≤280 chars, agent-authored — it lands in the
 /// commit body between the subject and the provenance trailers, and is
@@ -47,13 +55,9 @@ pub struct CreateParams {
     pub dry_run: Option<bool>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
-    #[schemars(
-        description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier`. Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary."
-    )]
+    #[schemars(description = ROLE_PARAM_DESCRIPTION)]
     pub role: Option<String>,
-    #[schemars(
-        description = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle. Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
-    )]
+    #[schemars(description = IDENTITY_PARAM_DESCRIPTION)]
     pub identity: Option<String>,
 }
 
@@ -233,13 +237,9 @@ pub struct UpdateParams {
     pub anchors_unset: Option<Vec<AnchorUnsetParam>>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
-    #[schemars(
-        description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier`. Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary."
-    )]
+    #[schemars(description = ROLE_PARAM_DESCRIPTION)]
     pub role: Option<String>,
-    #[schemars(
-        description = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle. Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
-    )]
+    #[schemars(description = IDENTITY_PARAM_DESCRIPTION)]
     pub identity: Option<String>,
 }
 
@@ -359,13 +359,9 @@ pub struct RelateParams {
     pub relations: Vec<RelateOpInput>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
-    #[schemars(
-        description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier`. Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary."
-    )]
+    #[schemars(description = ROLE_PARAM_DESCRIPTION)]
     pub role: Option<String>,
-    #[schemars(
-        description = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle. Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
-    )]
+    #[schemars(description = IDENTITY_PARAM_DESCRIPTION)]
     pub identity: Option<String>,
     #[schemars(
         description = "Validate and preview the relation operations without executing — no edge lands, no stub is created, no VCS commit. dry_run runs the SAME validation a real call runs (cross-mem policy, vocabulary, description posture, acyclicity, self-loop refusal); an illegal operation refuses with the IDENTICAL typed envelope a real call would return, and a legal one reports the would-be action with `_hash` set to the PROSPECTIVE post-write source hash, `write_id` empty (the rehearsal marker), and any would-be `AUTO_STUB_CREATED` warning for an absent target — reported, never created. The follow-up real call on an unchanged mem succeeds; like create's dry_run, its `_hash` diverges from the rehearsed one whenever a wall-clock second ticks between the calls (the auto-stamped `last_modified` enters the hash) — a timestamp shift, not drift."
@@ -385,13 +381,9 @@ pub struct DeleteParams {
     pub expected_hash: String,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
-    #[schemars(
-        description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier`. Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary."
-    )]
+    #[schemars(description = ROLE_PARAM_DESCRIPTION)]
     pub role: Option<String>,
-    #[schemars(
-        description = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle. Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
-    )]
+    #[schemars(description = IDENTITY_PARAM_DESCRIPTION)]
     pub identity: Option<String>,
 }
 
@@ -409,13 +401,9 @@ pub struct RenameParams {
     pub expected_hash: String,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
-    #[schemars(
-        description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier`. Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary."
-    )]
+    #[schemars(description = ROLE_PARAM_DESCRIPTION)]
     pub role: Option<String>,
-    #[schemars(
-        description = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle. Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
-    )]
+    #[schemars(description = IDENTITY_PARAM_DESCRIPTION)]
     pub identity: Option<String>,
 }
 
@@ -446,13 +434,9 @@ pub struct RetypeParams {
     pub dry_run: Option<bool>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
-    #[schemars(
-        description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier`. Recorded immutably alongside the mutation (commit trailer / ledger). Omit to record the session default. An unknown value refuses INVALID_ROLE naming the vocabulary."
-    )]
+    #[schemars(description = ROLE_PARAM_DESCRIPTION)]
     pub role: Option<String>,
-    #[schemars(
-        description = "WHO is acting: an opaque identity string of your choosing. Recorded immutably alongside the mutation; the author≠checker independence gate compares identities and nothing else. Omit to record the session default. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
-    )]
+    #[schemars(description = IDENTITY_PARAM_DESCRIPTION)]
     pub identity: Option<String>,
 }
 

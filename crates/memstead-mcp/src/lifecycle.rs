@@ -136,6 +136,12 @@ pub struct MemCreateParams {
     )]
     #[serde(default)]
     pub write_guidance: std::collections::HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    #[schemars(description = crate::tools::mutation::ROLE_PARAM_DESCRIPTION)]
+    pub role: Option<String>,
+    #[serde(default)]
+    #[schemars(description = crate::tools::mutation::IDENTITY_PARAM_DESCRIPTION)]
+    pub identity: Option<String>,
 }
 
 /// Parameters for `memstead_mem_set_schema` — the integrity-driven
@@ -153,6 +159,12 @@ pub struct MemSetSchemaParams {
         description = "Optional provenance note (≤280 chars). Reserved: the pin lives in workspace state today (no mem commit is produced), so the note is accepted for wire-compat and recorded once the pin-relocation cut moves the schema pin into mem config."
     )]
     pub note: Option<String>,
+    #[serde(default)]
+    #[schemars(description = crate::tools::mutation::ROLE_PARAM_DESCRIPTION)]
+    pub role: Option<String>,
+    #[serde(default)]
+    #[schemars(description = crate::tools::mutation::IDENTITY_PARAM_DESCRIPTION)]
+    pub identity: Option<String>,
 }
 
 /// Parameters for `memstead_mem_set_version`. F1.
@@ -169,6 +181,12 @@ pub struct MemSetVersionParams {
         description = "Optional provenance note (≤280 chars) recorded on the version-bump commit body. When the workspace sets `require_notes`, omitting it rides a non-blocking `NOTE_MISSING` warning (the bump still lands)."
     )]
     pub note: Option<String>,
+    #[serde(default)]
+    #[schemars(description = crate::tools::mutation::ROLE_PARAM_DESCRIPTION)]
+    pub role: Option<String>,
+    #[serde(default)]
+    #[schemars(description = crate::tools::mutation::IDENTITY_PARAM_DESCRIPTION)]
+    pub identity: Option<String>,
 }
 
 /// Parameters for `memstead_mem_delete`.
@@ -191,6 +209,12 @@ pub struct MemDeleteParams {
         description = "Agent-authored provenance note (≤280 chars). On a mem-repo workspace it rides the prune commit on the schema-and-config ref, the one commit a deletion produces, beside the role and identity trailers; a folder-mem deletion produces no commit to carry it. Under `require_notes` a missing note warns `NOTE_MISSING`."
     )]
     pub note: Option<String>,
+    #[serde(default)]
+    #[schemars(description = crate::tools::mutation::ROLE_PARAM_DESCRIPTION)]
+    pub role: Option<String>,
+    #[serde(default)]
+    #[schemars(description = crate::tools::mutation::IDENTITY_PARAM_DESCRIPTION)]
+    pub identity: Option<String>,
 }
 
 /// Subject block for mem curation — mirrors
@@ -260,4 +284,10 @@ pub struct MemConfigureParams {
     )]
     #[serde(default)]
     pub note: Option<String>,
+    #[serde(default)]
+    #[schemars(description = crate::tools::mutation::ROLE_PARAM_DESCRIPTION)]
+    pub role: Option<String>,
+    #[serde(default)]
+    #[schemars(description = crate::tools::mutation::IDENTITY_PARAM_DESCRIPTION)]
+    pub identity: Option<String>,
 }

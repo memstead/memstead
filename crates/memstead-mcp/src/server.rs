@@ -254,6 +254,21 @@ impl McpServer {
         }
     }
 
+    /// Resolve a call's `role` and `identity` against the session
+    /// defaults, both before any mutation: the one resolver every
+    /// mutating tool (entity and lifecycle alike) runs, so the
+    /// per-call override, the fallback and the two typed refusals are
+    /// the same on every write path.
+    fn resolve_call_provenance(
+        &self,
+        role: Option<&str>,
+        identity: Option<&str>,
+    ) -> Result<(memstead_base::vcs::Role, Option<String>), Box<CallToolResult>> {
+        let role = self.resolve_role(role)?;
+        let identity = self.resolve_identity(identity)?;
+        Ok((role, identity))
+    }
+
     pub fn with_operator_mode(mut self, operator_mode: bool) -> Self {
         self.operator_mode = operator_mode;
         self
@@ -2753,14 +2768,11 @@ impl McpServer {
         }
         let mem = self.resolve_mem(p.mem.as_deref());
         let dry_run = p.dry_run.unwrap_or(false);
-        let role = match self.resolve_role(p.role.as_deref()) {
-            Ok(r) => r,
-            Err(resp) => return *resp,
-        };
-        let identity = match self.resolve_identity(p.identity.as_deref()) {
-            Ok(i) => i,
-            Err(resp) => return *resp,
-        };
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
 
         // Wire JSON matches the `CreateResult` contract.
         let unified = self.unified_engine();
@@ -2864,14 +2876,11 @@ impl McpServer {
         }
         let id = EntityId::canonical(&p.id);
         let dry_run = p.dry_run.unwrap_or(false);
-        let role = match self.resolve_role(p.role.as_deref()) {
-            Ok(r) => r,
-            Err(resp) => return *resp,
-        };
-        let identity = match self.resolve_identity(p.identity.as_deref()) {
-            Ok(i) => i,
-            Err(resp) => return *resp,
-        };
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
 
         // Wire JSON matches the `UpdateResult` contract.
         let unified = self.unified_engine();
@@ -3075,14 +3084,11 @@ impl McpServer {
         if let Some(err) = validate_note(p.note.as_deref()) {
             return err;
         }
-        let role = match self.resolve_role(p.role.as_deref()) {
-            Ok(r) => r,
-            Err(resp) => return *resp,
-        };
-        let identity = match self.resolve_identity(p.identity.as_deref()) {
-            Ok(i) => i,
-            Err(resp) => return *resp,
-        };
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
         if p.relations.is_empty() {
             let msg = "relations must carry at least one operation";
             return tool_error_with_payload(
@@ -3379,14 +3385,11 @@ impl McpServer {
             Some(p.expected_hash.clone())
         };
 
-        let role = match self.resolve_role(p.role.as_deref()) {
-            Ok(r) => r,
-            Err(resp) => return *resp,
-        };
-        let identity = match self.resolve_identity(p.identity.as_deref()) {
-            Ok(i) => i,
-            Err(resp) => return *resp,
-        };
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
         engine.set_role(role);
@@ -3526,14 +3529,11 @@ impl McpServer {
                 }
             },
         };
-        let role = match self.resolve_role(p.role.as_deref()) {
-            Ok(r) => r,
-            Err(resp) => return *resp,
-        };
-        let identity = match self.resolve_identity(p.identity.as_deref()) {
-            Ok(i) => i,
-            Err(resp) => return *resp,
-        };
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
 
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
@@ -3608,14 +3608,11 @@ impl McpServer {
             return err;
         }
         let id = EntityId::canonical(&p.id);
-        let role = match self.resolve_role(p.role.as_deref()) {
-            Ok(r) => r,
-            Err(resp) => return *resp,
-        };
-        let identity = match self.resolve_identity(p.identity.as_deref()) {
-            Ok(i) => i,
-            Err(resp) => return *resp,
-        };
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
 
         // Unified outcome exposes `old_path` / `new_path` directly
         // (matching full's `RenameResult` shape).
@@ -3699,14 +3696,11 @@ impl McpServer {
             );
         }
         let id = EntityId::canonical(&p.id);
-        let role = match self.resolve_role(p.role.as_deref()) {
-            Ok(r) => r,
-            Err(resp) => return *resp,
-        };
-        let identity = match self.resolve_identity(p.identity.as_deref()) {
-            Ok(i) => i,
-            Err(resp) => return *resp,
-        };
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
         engine.set_role(role);
@@ -4119,8 +4113,15 @@ impl McpServer {
                 );
             }
         };
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
+        engine.set_role(role);
+        engine.set_identity(identity);
         match engine.set_mem_version(&p.name, new_version, p.note.as_deref()) {
             Ok(outcome) => {
                 let mut body = serde_json::json!({
@@ -4176,8 +4177,15 @@ impl McpServer {
                 ),
             );
         }
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
+        engine.set_role(role);
+        engine.set_identity(identity);
         let mut warnings: Vec<memstead_base::ops::WarningHint> = Vec::new();
 
         // "Set what is present": each Some field routes through the
@@ -4277,8 +4285,15 @@ impl McpServer {
                 );
             }
         };
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
+        engine.set_role(role);
+        engine.set_identity(identity);
         match engine.set_mem_schema(&p.mem, &target) {
             Ok(outcome) => {
                 let mut body = serde_json::to_value(&outcome).expect("SetSchemaOutcome serialises");
@@ -4300,12 +4315,16 @@ impl McpServer {
         p: crate::lifecycle::MemCreateParams,
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
         let mut engine = crate::lock_engine!(unified);
-        // The session's declared role and identity ride the seed
-        // commit like every entity mutation's commit (see the delete
-        // wrapper for the same rule).
-        engine.set_role(self.default_role);
-        engine.set_identity(self.default_identity.clone());
+        // The call's role and identity (or the session's) ride the seed
+        // commit like every entity mutation's commit.
+        engine.set_role(role);
+        engine.set_identity(identity);
 
         let schema_ref = match p.schema.parse::<memstead_schema::SchemaRef>() {
             Ok(r) => r,
@@ -4489,12 +4508,17 @@ impl McpServer {
         p: crate::lifecycle::MemDeleteParams,
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
+        let (role, identity) =
+            match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
+                Ok(v) => v,
+                Err(resp) => return *resp,
+            };
         let mut engine = crate::lock_engine!(unified);
-        // The session's declared role and identity ride the prune
-        // commit like every entity mutation's commit; without this the
-        // engine carried whatever the previous tool call left on it.
-        engine.set_role(self.default_role);
-        engine.set_identity(self.default_identity.clone());
+        // The call's role and identity (or the session's) ride the
+        // prune commit like every entity mutation's commit; without
+        // this the engine carried whatever the previous call left on it.
+        engine.set_role(role);
+        engine.set_identity(identity);
 
         // MCP `memstead_mem_delete`
         // always means destructive. The wire shape no longer exposes

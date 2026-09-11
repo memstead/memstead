@@ -1431,6 +1431,8 @@ fn mem_set_schema_wire_lifecycle_and_health_confirmation() {
     let (server, _tmp) = setup_dual_test_engine();
     let call = |schema: &str| {
         server.memstead_mem_set_schema(Parameters(crate::lifecycle::MemSetSchemaParams {
+            role: None,
+            identity: None,
             mem: "specs".to_string(),
             schema: schema.to_string(),
             note: None,
@@ -2322,6 +2324,8 @@ fn health_after_runtime_create_lists_new_mem_with_origin_runtime_created() {
     let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
     let target = tmp.path().join("runtime-born");
     let create_result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -2630,6 +2634,8 @@ fn test_memstead_mem_create_via_unified_engine_path() {
     let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
     let result = server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -2665,6 +2671,8 @@ fn test_memstead_mem_create_via_unified_engine_path() {
     // `schema_verbosity: "lite"` — a first-mem create can prime on the
     // cheap skeleton instead of the ~25 KB full body.
     let lite_create = server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -2697,6 +2705,8 @@ fn test_memstead_mem_create_via_unified_engine_path() {
     // An unknown schema_verbosity refuses up front (before the mem
     // lands) rather than silently inlining full.
     let bad = server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -2750,6 +2760,8 @@ fn test_memstead_mem_delete_via_unified_engine_path() {
     let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
 
     let result = server.memstead_mem_delete(Parameters(crate::lifecycle::MemDeleteParams {
+        role: None,
+        identity: None,
         name: "specs".to_string(),
         note: None,
     }));
@@ -3490,6 +3502,8 @@ write_rules: []
 
     let mem_create = |name: &str| {
         server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
+            role: None,
+            identity: None,
             title: None,
             description: None,
             subject: None,
@@ -9010,6 +9024,8 @@ fn memstead_mem_create_happy_path_returns_seed_sha() {
     let server = setup_lifecycle_server(&tmp);
     let target = tmp.path().join("fresh");
     let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9061,6 +9077,8 @@ fn memstead_mem_create_hierarchical_path_lands_branch_and_config() {
     let server = setup_lifecycle_server(&tmp);
     let target = tmp.path().join("hier");
     let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9119,6 +9137,8 @@ fn memstead_mem_create_tree_walk_collision_rejected_with_paths() {
     // sealed at `refs/heads/demo/engine`.
     let first_target = tmp.path().join("engine");
     let first = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9145,6 +9165,8 @@ fn memstead_mem_create_tree_walk_collision_rejected_with_paths() {
     // `colliding_paths` and `suggestion` regardless.
     let second_target = tmp.path().join("engine-second");
     let second = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9193,6 +9215,8 @@ fn memstead_mem_create_rejects_invalid_name_grammar() {
     let server = setup_lifecycle_server(&tmp);
     let target = tmp.path().join("bad");
     let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9247,6 +9271,8 @@ fn memstead_mem_create_path_not_allowed_emits_structured_envelope() {
 
     let target = tmp.path().join("blocked");
     let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9296,6 +9322,8 @@ fn memstead_mem_create_name_collision_envelope_carries_source() {
     // the basename-invariant, so the location is `tmp/same/`.
     let first = tmp.path().join("same");
     let ok = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9317,6 +9345,8 @@ fn memstead_mem_create_name_collision_envelope_carries_source() {
     std::fs::create_dir_all(tmp.path().join("b")).unwrap();
     let second = tmp.path().join("b").join("same");
     let err = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9380,6 +9410,8 @@ fn memstead_mem_create_persists_mount_for_cold_boot() {
 
     let target = canonical_root.join("persisted");
     let ok = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9421,6 +9453,8 @@ fn memstead_mem_create_persists_mount_for_cold_boot() {
     // Second create with the same name trips MEM_NAME_COLLISION —
     // F3 follows from the persistence fix.
     let dup = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9447,6 +9481,8 @@ fn memstead_mem_create_persists_mount_for_cold_boot() {
     // Delete persists too — the manifest no longer carries the
     // mount after a successful unregister.
     let del = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: None,
+        identity: None,
         name: "persisted".to_string(),
         note: None,
     }));
@@ -9472,6 +9508,8 @@ fn memstead_mem_create_invalid_schema_ref_emits_invalid_input() {
     let tmp = TempDir::new().unwrap();
     let server = setup_lifecycle_server(&tmp);
     let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9534,6 +9572,8 @@ fn memstead_mem_delete_happy_path_returns_destructive_response() {
     // Seed a mem first so delete has something to remove.
     let target = tmp.path().join("wipe");
     let create_result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9556,6 +9596,8 @@ fn memstead_mem_delete_happy_path_returns_destructive_response() {
     // blob in one ref-edit transaction and the response carries
     // `files_deleted: true`.
     let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: None,
+        identity: None,
         name: "wipe".to_string(),
         note: Some("mcp handler happy path".to_string()),
     }));
@@ -9600,6 +9642,8 @@ fn memstead_mem_delete_path_not_allowed_emits_structured_envelope() {
     // Set up a mem we can try to delete.
     let target = tmp.path().join("pinned");
     let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9616,6 +9660,8 @@ fn memstead_mem_delete_path_not_allowed_emits_structured_envelope() {
     }));
 
     let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: None,
+        identity: None,
         name: "pinned".to_string(),
         note: None,
     }));
@@ -9659,6 +9705,8 @@ fn lifecycle_commits_carry_the_sessions_role_and_identity() {
 
     let target = tmp.path().join("noted");
     let created = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9690,6 +9738,8 @@ fn lifecycle_commits_carry_the_sessions_role_and_identity() {
     }
 
     let deleted = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: None,
+        identity: None,
         name: "noted".to_string(),
         note: Some("retired after the pin".to_string()),
     }));
@@ -9710,12 +9760,387 @@ fn lifecycle_commits_carry_the_sessions_role_and_identity() {
     }
 }
 
+/// Every lifecycle tool takes the per-call `role` and `identity` the
+/// entity tools take: the override lands on the commit the tool
+/// produces, an omitted pair falls back to the session's defaults, and
+/// set-schema (no commit today) accepts and validates both with its
+/// response shape unchanged.
+#[test]
+fn lifecycle_tools_take_the_per_call_role_and_identity() {
+    let tmp = TempDir::new().unwrap();
+    let server = setup_lifecycle_server_with_delete(&tmp)
+        .with_default_role(memstead_base::vcs::Role::Author)
+        .with_default_identity(Some("session-default".to_string()));
+    let tip_message = |reference: &str| {
+        let repo = gix::open(tmp.path().join("mem-repo").join(".git")).expect("open mem-repo");
+        let tip = repo
+            .find_reference(reference)
+            .expect("ref exists")
+            .into_fully_peeled_id()
+            .expect("peel");
+        let commit = repo
+            .find_object(tip.detach())
+            .expect("commit")
+            .into_commit();
+        String::from_utf8_lossy(commit.message_raw().expect("message")).to_string()
+    };
+    let ok = |r: &rmcp::model::CallToolResult| r.is_error.is_none() || r.is_error == Some(false);
+    let assert_trailers = |message: &str, role: &str, identity: &str, what: &str| {
+        for needle in [format!("Role: {role}"), format!("Identity: {identity}")] {
+            assert!(
+                message.contains(&needle),
+                "{what} lacks {needle:?}: {message:?}"
+            );
+        }
+    };
+
+    // Create: per-call override on the seed commit.
+    let target = tmp.path().join("percall");
+    let created = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: Some("checker".to_string()),
+        identity: Some("per-call".to_string()),
+        title: None,
+        description: None,
+        subject: None,
+        schema_verbosity: None,
+        write_guidance: Default::default(),
+        name: "percall".to_string(),
+        location: target.to_string_lossy().into_owned(),
+        schema: "default@1.0.0".to_string(),
+        vcs: None,
+        note: Some("seeded per call".to_string()),
+        recovery: None,
+        include_schema: false,
+    }));
+    assert!(ok(&created), "{created:?}");
+    assert_trailers(
+        &tip_message("refs/heads/percall"),
+        "checker",
+        "per-call",
+        "seed commit",
+    );
+
+    // Set-version: override, then fallback.
+    let bumped =
+        server.memstead_mem_set_version(Parameters(crate::lifecycle::MemSetVersionParams {
+            role: Some("checker".to_string()),
+            identity: Some("per-call".to_string()),
+            name: "percall".to_string(),
+            version: "0.2.0".to_string(),
+            note: Some("bumped per call".to_string()),
+        }));
+    assert!(ok(&bumped), "{bumped:?}");
+    let bump = tip_message("refs/heads/__MEMSTEAD");
+    assert!(bump.contains("bumped per call"), "{bump:?}");
+    assert_trailers(&bump, "checker", "per-call", "version-bump commit");
+    let bumped =
+        server.memstead_mem_set_version(Parameters(crate::lifecycle::MemSetVersionParams {
+            role: None,
+            identity: None,
+            name: "percall".to_string(),
+            version: "0.3.0".to_string(),
+            note: Some("bumped by the session".to_string()),
+        }));
+    assert!(ok(&bumped), "{bumped:?}");
+    let bump = tip_message("refs/heads/__MEMSTEAD");
+    assert!(bump.contains("bumped by the session"), "{bump:?}");
+    assert_trailers(
+        &bump,
+        "author",
+        "session-default",
+        "fallback version-bump commit",
+    );
+
+    // Configure: override, then fallback.
+    let titled = server.memstead_mem_configure(Parameters(crate::lifecycle::MemConfigureParams {
+        role: Some("checker".to_string()),
+        identity: Some("per-call".to_string()),
+        name: "percall".to_string(),
+        title: Some("Per call".to_string()),
+        description: None,
+        subject: None,
+        clear_subject: false,
+        note: Some("titled per call".to_string()),
+    }));
+    assert!(ok(&titled), "{titled:?}");
+    let title = tip_message("refs/heads/__MEMSTEAD");
+    assert!(title.contains("titled per call"), "{title:?}");
+    assert_trailers(&title, "checker", "per-call", "title commit");
+    let titled = server.memstead_mem_configure(Parameters(crate::lifecycle::MemConfigureParams {
+        role: None,
+        identity: None,
+        name: "percall".to_string(),
+        title: Some("By the session".to_string()),
+        description: None,
+        subject: None,
+        clear_subject: false,
+        note: Some("titled by the session".to_string()),
+    }));
+    assert!(ok(&titled), "{titled:?}");
+    let title = tip_message("refs/heads/__MEMSTEAD");
+    assert!(title.contains("titled by the session"), "{title:?}");
+    assert_trailers(&title, "author", "session-default", "fallback title commit");
+
+    // Set-schema: accepted and validated, response shape unchanged.
+    let pinned = server.memstead_mem_set_schema(Parameters(crate::lifecycle::MemSetSchemaParams {
+        role: Some("checker".to_string()),
+        identity: Some("per-call".to_string()),
+        mem: "percall".to_string(),
+        schema: "default@1.0.0".to_string(),
+        note: None,
+    }));
+    assert!(ok(&pinned), "{pinned:?}");
+    let plain = server.memstead_mem_set_schema(Parameters(crate::lifecycle::MemSetSchemaParams {
+        role: None,
+        identity: None,
+        mem: "percall".to_string(),
+        schema: "default@1.0.0".to_string(),
+        note: None,
+    }));
+    assert!(ok(&plain), "{plain:?}");
+    let keys = |r: &rmcp::model::CallToolResult| {
+        let body = r.structured_content.clone().expect("structured body");
+        let mut keys: Vec<String> = body.as_object().expect("object").keys().cloned().collect();
+        keys.sort();
+        keys
+    };
+    assert_eq!(keys(&pinned), keys(&plain));
+
+    // Delete: per-call override on the prune commit.
+    let deleted = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: Some("checker".to_string()),
+        identity: Some("per-call".to_string()),
+        name: "percall".to_string(),
+        note: Some("retired per call".to_string()),
+    }));
+    assert!(ok(&deleted), "{deleted:?}");
+    let prune = tip_message("refs/heads/__MEMSTEAD");
+    assert!(prune.starts_with("memstead: prune __MEMSTEAD:mems/percall/config.json"));
+    assert_trailers(&prune, "checker", "per-call", "prune commit");
+
+    // Delete fallback on a fresh fixture: the first delete's policy
+    // scrub rewrites workspace.toml and the engine re-reads it, which
+    // drops the fixture's in-memory allowlist rules, so the second mem
+    // needs its own workspace. Seeded and retired under the session's
+    // defaults.
+    let tmp = TempDir::new().unwrap();
+    let server = setup_lifecycle_server_with_delete(&tmp)
+        .with_default_role(memstead_base::vcs::Role::Author)
+        .with_default_identity(Some("session-default".to_string()));
+    let tip_message = |reference: &str| {
+        let repo = gix::open(tmp.path().join("mem-repo").join(".git")).expect("open mem-repo");
+        let tip = repo
+            .find_reference(reference)
+            .expect("ref exists")
+            .into_fully_peeled_id()
+            .expect("peel");
+        let commit = repo
+            .find_object(tip.detach())
+            .expect("commit")
+            .into_commit();
+        String::from_utf8_lossy(commit.message_raw().expect("message")).to_string()
+    };
+    let target = tmp.path().join("bysession");
+    let created = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
+        title: None,
+        description: None,
+        subject: None,
+        schema_verbosity: None,
+        write_guidance: Default::default(),
+        name: "bysession".to_string(),
+        location: target.to_string_lossy().into_owned(),
+        schema: "default@1.0.0".to_string(),
+        vcs: None,
+        note: Some("seeded by the session".to_string()),
+        recovery: None,
+        include_schema: false,
+    }));
+    assert!(ok(&created), "{created:?}");
+    assert_trailers(
+        &tip_message("refs/heads/bysession"),
+        "author",
+        "session-default",
+        "fallback seed commit",
+    );
+    let deleted = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: None,
+        identity: None,
+        name: "bysession".to_string(),
+        note: Some("retired by the session".to_string()),
+    }));
+    assert!(ok(&deleted), "{deleted:?}");
+    assert_trailers(
+        &tip_message("refs/heads/__MEMSTEAD"),
+        "author",
+        "session-default",
+        "fallback prune commit",
+    );
+}
+
+/// The five lifecycle tools refuse an unknown role (`INVALID_ROLE`,
+/// naming the vocabulary) and an over-long identity (`INVALID_IDENTITY`)
+/// before any mutation: the mem roster and every mem-repo tip are
+/// unchanged after each refusal.
+#[test]
+fn lifecycle_tools_refuse_a_bad_role_or_identity_before_mutating() {
+    let tmp = TempDir::new().unwrap();
+    let server = setup_lifecycle_server_with_delete(&tmp);
+    let target = tmp.path().join("stays");
+    let created = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
+        title: None,
+        description: None,
+        subject: None,
+        schema_verbosity: None,
+        write_guidance: Default::default(),
+        name: "stays".to_string(),
+        location: target.to_string_lossy().into_owned(),
+        schema: "default@1.0.0".to_string(),
+        vcs: None,
+        note: Some("the fixture".to_string()),
+        recovery: None,
+        include_schema: false,
+    }));
+    assert!(created.is_error.is_none() || created.is_error == Some(false));
+
+    let snapshot = || {
+        let repo = gix::open(tmp.path().join("mem-repo").join(".git")).expect("open mem-repo");
+        let mut tips: Vec<(String, String)> = repo
+            .references()
+            .expect("refs")
+            .all()
+            .expect("iter")
+            .map(|r| {
+                let r = r.expect("ref");
+                let name = r.name().as_bstr().to_string();
+                let id = r
+                    .into_fully_peeled_id()
+                    .map(|id| id.to_string())
+                    .unwrap_or_default();
+                (name, id)
+            })
+            .collect();
+        tips.sort();
+        let roster: Vec<String> = {
+            let unified = server.unified_engine();
+            let engine = unified.lock().unwrap();
+            let mut names: Vec<String> =
+                engine.mounts().into_iter().map(|m| m.mem.clone()).collect();
+            names.sort();
+            names
+        };
+        (tips, roster)
+    };
+    let before = snapshot();
+    let long_identity = "x".repeat(129);
+    let mut refusals: Vec<(&str, String)> = Vec::new();
+    for (bad_role, bad_identity) in [
+        (Some("owner".to_string()), None),
+        (None, Some(long_identity.clone())),
+    ] {
+        let expected = if bad_role.is_some() {
+            "INVALID_ROLE"
+        } else {
+            "INVALID_IDENTITY"
+        };
+        let results = vec![
+            (
+                "memstead_mem_create",
+                server.memstead_mem_create(Parameters(TlsMemCreateParams {
+                    role: bad_role.clone(),
+                    identity: bad_identity.clone(),
+                    title: None,
+                    description: None,
+                    subject: None,
+                    schema_verbosity: None,
+                    write_guidance: Default::default(),
+                    name: "never".to_string(),
+                    location: tmp.path().join("never").to_string_lossy().into_owned(),
+                    schema: "default@1.0.0".to_string(),
+                    vcs: None,
+                    note: None,
+                    recovery: None,
+                    include_schema: false,
+                })),
+            ),
+            (
+                "memstead_mem_set_version",
+                server.memstead_mem_set_version(Parameters(
+                    crate::lifecycle::MemSetVersionParams {
+                        role: bad_role.clone(),
+                        identity: bad_identity.clone(),
+                        name: "stays".to_string(),
+                        version: "9.0.0".to_string(),
+                        note: None,
+                    },
+                )),
+            ),
+            (
+                "memstead_mem_configure",
+                server.memstead_mem_configure(Parameters(crate::lifecycle::MemConfigureParams {
+                    role: bad_role.clone(),
+                    identity: bad_identity.clone(),
+                    name: "stays".to_string(),
+                    title: Some("Never".to_string()),
+                    description: None,
+                    subject: None,
+                    clear_subject: false,
+                    note: None,
+                })),
+            ),
+            (
+                "memstead_mem_set_schema",
+                server.memstead_mem_set_schema(Parameters(crate::lifecycle::MemSetSchemaParams {
+                    role: bad_role.clone(),
+                    identity: bad_identity.clone(),
+                    mem: "stays".to_string(),
+                    schema: "default@1.0.0".to_string(),
+                    note: None,
+                })),
+            ),
+            (
+                "memstead_mem_delete",
+                server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+                    role: bad_role.clone(),
+                    identity: bad_identity.clone(),
+                    name: "stays".to_string(),
+                    note: None,
+                })),
+            ),
+        ];
+        for (tool, result) in results {
+            assert_eq!(
+                result.is_error,
+                Some(true),
+                "{tool} must refuse: {result:?}"
+            );
+            let envelope = result.structured_content.expect("typed envelope");
+            assert_eq!(envelope["code"], expected, "{tool}: {envelope}");
+            if expected == "INVALID_ROLE" {
+                let allowed = envelope["details"]["allowed"].to_string();
+                assert!(
+                    allowed.contains("author") && allowed.contains("checker"),
+                    "{tool}: the refusal names the vocabulary: {envelope}"
+                );
+            }
+            refusals.push((tool, expected.to_string()));
+        }
+    }
+    assert_eq!(refusals.len(), 10);
+    assert_eq!(snapshot(), before, "a refusal must mutate nothing");
+}
+
 #[test]
 fn memstead_mem_delete_unknown_mem_emits_unknown_mem_envelope() {
     let tmp = TempDir::new().unwrap();
     let server = setup_lifecycle_server_with_delete(&tmp);
 
     let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: None,
+        identity: None,
         name: "ghost".to_string(),
         note: None,
     }));
@@ -9743,6 +10168,8 @@ fn memstead_mem_delete_policy_grant_envelope_carries_referring_mems() {
     // `.memstead/workspace.toml` directly).
     let server = setup_lifecycle_server_with_delete(&tmp);
     let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9757,6 +10184,8 @@ fn memstead_mem_delete_policy_grant_envelope_carries_referring_mems() {
         include_schema: false,
     }));
     let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9836,6 +10265,8 @@ fn memstead_mem_delete_policy_grant_envelope_carries_referring_mems() {
     // storage-preserved is reachable only via the CLI's
     // `memstead mem unregister` verb.
     let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: None,
+        identity: None,
         name: "primary".to_string(),
         note: None,
     }));
@@ -9869,6 +10300,8 @@ fn memstead_mem_delete_with_delete_files_true_on_mem_db_mount_prunes_branch_and_
     let gitdir = tmp.path().join("mem-repo").join(".git");
 
     let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -9910,6 +10343,8 @@ fn memstead_mem_delete_with_delete_files_true_on_mem_db_mount_prunes_branch_and_
     );
 
     let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: None,
+        identity: None,
         name: "ephemeral".to_string(),
         note: None,
     }));
@@ -9993,6 +10428,8 @@ fn memstead_mem_delete_with_delete_files_true_on_folder_mount_removes_dir() {
 
     let mem_dir = tmp.path().join("scratch");
     let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -10009,6 +10446,8 @@ fn memstead_mem_delete_with_delete_files_true_on_folder_mount_removes_dir() {
     assert!(mem_dir.is_dir(), "create must produce the mem dir on disk");
 
     let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: None,
+        identity: None,
         name: "scratch".to_string(),
         note: None,
     }));
@@ -10076,6 +10515,8 @@ fn memstead_mem_delete_hierarchical_path_prunes_branch_and_config() {
     // `planning/plan-q4` name is the canonical input — no
     // separate `path` field.
     let create_result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+        role: None,
+        identity: None,
         title: None,
         description: None,
         subject: None,
@@ -10129,6 +10570,8 @@ fn memstead_mem_delete_hierarchical_path_prunes_branch_and_config() {
     // Symmetric cleanup — MCP delete is always destructive, and
     // the mem name IS the full hierarchical path.
     let delete_result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: None,
+        identity: None,
         name: "planning/plan-q4".to_string(),
         note: None,
     }));
@@ -11224,6 +11667,8 @@ mod schema_payload {
     fn create_and_get_payload(server: &McpServer, tmp: &TempDir, name: &str) -> serde_json::Value {
         let target = tmp.path().join(name);
         let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+            role: None,
+            identity: None,
             title: None,
             description: None,
             subject: None,
@@ -11257,6 +11702,8 @@ mod schema_payload {
         let (server, tmp) = setup();
         let target = tmp.path().join("curated");
         let result = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+            role: None,
+            identity: None,
             title: Some("Curated Library".to_string()),
             description: Some("One-line card text.".to_string()),
             subject: Some(crate::lifecycle::MemSubjectInput {
@@ -11283,6 +11730,8 @@ mod schema_payload {
         // the post-create state.
         let state =
             server.memstead_mem_configure(Parameters(crate::lifecycle::MemConfigureParams {
+                role: None,
+                identity: None,
                 name: "curated".to_string(),
                 title: None,
                 description: None,
@@ -11306,6 +11755,8 @@ mod schema_payload {
         let (server, tmp) = setup();
         let target = tmp.path().join("plain");
         let create = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+            role: None,
+            identity: None,
             title: None,
             description: None,
             subject: None,
@@ -11326,6 +11777,8 @@ mod schema_payload {
                          subject: Option<crate::lifecycle::MemSubjectInput>,
                          clear_subject: bool| {
             server.memstead_mem_configure(Parameters(crate::lifecycle::MemConfigureParams {
+                role: None,
+                identity: None,
                 name: "plain".to_string(),
                 title: title.map(String::from),
                 description: description.map(String::from),
@@ -11372,6 +11825,8 @@ mod schema_payload {
         // Unknown mem refuses with the typed code.
         let unknown =
             server.memstead_mem_configure(Parameters(crate::lifecycle::MemConfigureParams {
+                role: None,
+                identity: None,
                 name: "no-such-mem".to_string(),
                 title: Some("X".to_string()),
                 description: None,
@@ -11414,6 +11869,8 @@ mod schema_payload {
 
         let target = tmp.path().join("denied-x");
         let refused = server.memstead_mem_create(Parameters(TlsMemCreateParams {
+            role: None,
+            identity: None,
             title: Some("Sneaky Title".to_string()),
             description: Some("Sneaky description.".to_string()),
             subject: None,
@@ -11484,6 +11941,8 @@ mod schema_payload {
                 .unwrap();
         }
         let ro = server.memstead_mem_configure(Parameters(crate::lifecycle::MemConfigureParams {
+            role: None,
+            identity: None,
             name: "frozen".to_string(),
             title: Some("New Title".to_string()),
             description: None,
