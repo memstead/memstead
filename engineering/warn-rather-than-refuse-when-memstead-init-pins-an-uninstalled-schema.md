@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:08Z
-last_modified: 2026-09-08T21:08:53Z
+last_modified: 2026-09-11T13:36:01Z
 status: accepted
 decided_on: 2026-07-03
 deciders: memstead-core
@@ -40,4 +40,4 @@ We chose to let `memstead init` write a filesystem-mem workspace whose `--schema
 
 ## Notes
 
-Enforced in `crates/memstead-cli/src/commands/init.rs` (`unresolved_pin_warning`, the `pin_unresolved` guard, and the additive `warnings` JSON field). The sibling eager-resolve-and-refuse lives in the engine's mount-load path (`crates/memstead-base/src/engine/lifecycle.rs`, `SchemaResolver::resolve` -> `EngineError::SchemaNotFound`). Companion init-doorway choice: [[engineering--refuse-memstead-init-in-a-non-empty-folder-rather-than-adopting-existing-files]]. Tests: `init_succeeds_but_warns_on_unresolvable_schema_pin`, `unresolved_pin_warning_names_pin_recovery_and_builtins`, `init_accepts_every_builtin_schema_pin`.
+Enforced in `crates/memstead-cli/src/commands/init.rs` (`unresolved_pin_warning`, the `pin_unresolved` guard, and the additive `warnings` JSON field). The sibling eager-resolve-and-refuse lives in the engine's mount-load path (`crates/memstead-base/src/engine/lifecycle/mounts.rs`, `SchemaResolver::resolve` -> `EngineError::SchemaNotFound`). Companion init-doorway choice: [[engineering--refuse-memstead-init-in-a-non-empty-folder-rather-than-adopting-existing-files]]. Tests: `init_succeeds_but_warns_on_unresolvable_schema_pin`, `unresolved_pin_warning_names_pin_recovery_and_builtins`, `init_accepts_every_builtin_schema_pin`.

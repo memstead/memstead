@@ -1,10 +1,10 @@
 ---
 type: decision
 created_date: 2026-09-11T10:40:20Z
-last_modified: 2026-09-11T10:40:20Z
+last_modified: 2026-09-11T13:46:03Z
 status: accepted
 decided_on: 2026-09-11
-deciders: operator
+deciders: implementing agent (contributor-ready bundle, 2026-09-11)
 scope: system
 tags: crate-structure, contributor-ready, deferred
 ---

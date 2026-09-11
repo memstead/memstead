@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-04T08:03:25Z
-last_modified: 2026-09-04T08:03:25Z
+last_modified: 2026-09-11T13:36:33Z
 status: accepted
 decided_on: 2026-09-04
 deciders: operator, implementing agent
@@ -41,4 +41,4 @@ We will let an archive-backed read-only mount resolve its schema pin from the sc
 
 ## Notes
 
-Engine sites: `embedded_archive_schemas` in `memstead-base/src/engine/boot.rs`, consulted by `from_mounts_inner`, `register_writable_mem_inner` and `reattach_quarantined_mem`; `stage_sealed_schema` and `sealed_schema_gitdir` in `engine/lifecycle.rs`. Revisit if a backend-trait schema read ever lands (it would let the archive be opened once per boot).
+Engine sites: `embedded_archive_schemas` in `memstead-base/src/engine/boot.rs`, consulted by `from_mounts_inner`, `register_writable_mem_inner` and `reattach_quarantined_mem`; `stage_sealed_schema` and `sealed_schema_gitdir` in `engine/lifecycle/schema.rs`. Revisit if a backend-trait schema read ever lands (it would let the archive be opened once per boot).

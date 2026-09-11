@@ -1,7 +1,7 @@
 ---
 type: memo
 created_date: 2026-07-13T16:43:04Z
-last_modified: 2026-07-13T16:43:04Z
+last_modified: 2026-09-11T13:36:01Z
 status: closed
 tags: observation, lesson, coherence, cas, reload, concurrency, engine
 ---
@@ -28,7 +28,7 @@ Two pieces combine, each individually reasonable.
 1. **Root cause — `commit()` did not clear `pending` on failure** (`crates/memstead-git-branch/src/storage/git_tree.rs`, `GitTreeMemWriter::commit`). The backend stages writes into an in-memory `Pending { parent, ops }` buffer via `write_entity`, then `commit_as` does a compare-and-swap on the branch tip. On a CAS conflict the conflict arm `return`ed early with `HashMismatch` and never reached `pending.clear()`, which sat on the success tail. The rejected write stayed in `ops`.
 2. **Amplifier — `read_entity` prefers `pending` over the committed tip** (same file: "Pending ops win over the branch tip"). That precedence is correct *during* a live transaction, but defect 1 left a *dead* transaction's bytes in the buffer, so the orphaned write was served as truth.
 
-Why it hid, then spread: `memstead_entity` reads the engine's parsed `self.store`, not the backend, and `apply_prepared_to_store` runs only after a *successful* commit — so right after the failed commit the store still held truth and reads looked fine. Then `memstead_reload` ([[engine--explicit-mem-reload-surface]]) → `collect_source_entries` → `read_entity` per path (`engine/boot.rs`, `engine/lifecycle.rs::reload_one_mem_inner`) ingested the phantom into the store. The automatic `reload_if_stale` never fired because the committed tip never moved. Worst case: a *later* successful mutation builds on the phantom store entity and bakes it onto disk.
+Why it hid, then spread: `memstead_entity` reads the engine's parsed `self.store`, not the backend, and `apply_prepared_to_store` runs only after a *successful* commit — so right after the failed commit the store still held truth and reads looked fine. Then `memstead_reload` ([[engine--explicit-mem-reload-surface]]) → `collect_source_entries` → `read_entity` per path (`engine/boot.rs`, `engine/lifecycle/reload.rs::reload_one_mem_inner`) ingested the phantom into the store. The automatic `reload_if_stale` never fired because the committed tip never moved. Worst case: a *later* successful mutation builds on the phantom store entity and bakes it onto disk.
 
 ## Alternatives
 
