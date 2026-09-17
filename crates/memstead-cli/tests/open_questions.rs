@@ -116,7 +116,8 @@ write_rules: []
 /// - `qmem` (qcheck schema): one entity violating the requires_when
 ///   constraint.
 /// - binding `hold/proc` (destination `hold`) with a MOUNTED process
-///   mem `proc` (ingest schema) holding one coverage_gap and one
+///   mem `hold/proc` (ingest schema, a folder mem: git cannot hold
+///   the branch `hold/proc` beside the branch `hold`) holding one coverage_gap and one
 ///   negative_finding; binding `hold/ghostproc` with NO mounted mem.
 fn build_workspace(root: &Path) {
     run_ok(root, &["mem-repo", "init", "."]);
@@ -215,7 +216,9 @@ fn build_workspace(root: &Path) {
         ],
     );
 
-    // Process pairing: binding hold/proc + mounted process mem `proc`.
+    // Process pairing: binding hold/proc + mounted process mem `hold/proc`,
+    // the convention-derived name, held as a folder mem because git cannot
+    // keep the branch `hold/proc` beside the branch `hold`.
     run_ok(
         root,
         &[
@@ -236,9 +239,13 @@ fn build_workspace(root: &Path) {
         &[
             "mem",
             "init",
-            "proc",
+            "hold/proc",
             "--schema",
             "ingest@0.5.0",
+            "--storage",
+            "folder",
+            "--location",
+            "proc",
             "--no-gitignore",
         ],
     );
@@ -247,7 +254,7 @@ fn build_workspace(root: &Path) {
         &[
             "create",
             "--mem",
-            "proc",
+            "hold/proc",
             "--title",
             "Uncovered corner",
             "--type",
@@ -263,7 +270,7 @@ fn build_workspace(root: &Path) {
         &[
             "create",
             "--mem",
-            "proc",
+            "hold/proc",
             "--title",
             "No licensing note anywhere",
             "--type",
@@ -433,7 +440,7 @@ fn axis_composes_all_signals_and_matches_per_signal_axes() {
     assert!(ghost.get("open_entries").is_none());
 
     // --- a hole-free mem reports an empty axis entry, not an error.
-    let proc_entry = &axis["proc"];
+    let proc_entry = &axis["hold/proc"];
     assert_eq!(proc_entry["stubs"]["count"], 0);
     assert_eq!(proc_entry["dangling_links"]["count"], 0);
 

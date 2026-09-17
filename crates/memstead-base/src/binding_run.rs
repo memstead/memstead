@@ -427,6 +427,27 @@ mod tests {
         assert!(matches!(err, ResolveError::MalformedProjectionRef { .. }));
     }
 
+    /// The convention-derived process mem: the binding id itself for a
+    /// single-component destination (unchanged), the last separator
+    /// hyphenated for a nested one, so a git-branch workspace can hold
+    /// the derived name beside the destination's own branch.
+    #[test]
+    fn derived_process_mem_name_keeps_flat_ids_and_hyphenates_nested_ones() {
+        assert_eq!(derived_process_mem_name("engine/graph"), "engine/graph");
+        assert_eq!(
+            derived_process_mem_name("stocks/impfpflicht/anker"),
+            "stocks/impfpflicht-anker"
+        );
+        assert_eq!(
+            derived_process_mem_name("planning/plan-first-stock/anker"),
+            "planning/plan-first-stock-anker"
+        );
+        assert_eq!(derived_process_mem_name("a/b/c/d"), "a/b/c-d");
+        // A malformed id passes through: nothing to derive from.
+        assert_eq!(derived_process_mem_name("noslash"), "noslash");
+        assert_eq!(derived_process_mem_name(""), "");
+    }
+
     /// An absent build block resolves to sane defaults (read-only callers
     /// keep working; the mutating-op refusal is enforced at the brief entry).
     #[test]
@@ -571,10 +592,32 @@ pub struct ProcessMemResolution {
     pub declared: bool,
 }
 
+/// The schema family every process mem pins: a declared process mem
+/// must carry an `ingest@*` pin, whatever its version.
+pub const PROCESS_MEM_SCHEMA_NAME: &str = "ingest";
+
+/// The convention-derived process mem name for a binding, the fallback
+/// where the destination declares none. For a single-component
+/// destination it is the binding id itself (`engine/graph`), unchanged
+/// since the convention was set. For a nested destination
+/// (`stocks/impfpflicht`) the id's last separator becomes a hyphen
+/// (`stocks/impfpflicht-anker`): a sibling of the destination in the
+/// same namespace directory, because git keeps refs as files in
+/// directories and cannot hold `stocks/impfpflicht/anker` beside the
+/// branch `stocks/impfpflicht`. The one derivation every consumer uses
+/// (the brief renderer, the open-questions health axis), so the two
+/// cannot pair differently. A malformed id passes through unchanged.
+pub fn derived_process_mem_name(binding_id: &str) -> String {
+    match crate::pipeline_store::parse_binding_id(binding_id) {
+        Some((mem, stem)) if mem.contains('/') => format!("{mem}-{stem}"),
+        _ => binding_id.to_string(),
+    }
+}
+
 /// Resolve the process mem for `destination_mem`. `derived_name` is
-/// the convention-derived candidate (the binding / ingest name);
-/// pass it even when a declaration might exist — the declaration
-/// wins, the derivation remains the fallback.
+/// the convention-derived candidate ([`derived_process_mem_name`] of
+/// the binding id); pass it even when a declaration might exist — the
+/// declaration wins, the derivation remains the fallback.
 pub fn resolve_process_mem(
     engine: &crate::Engine,
     destination_mem: &str,

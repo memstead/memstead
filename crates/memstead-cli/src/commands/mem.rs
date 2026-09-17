@@ -114,6 +114,16 @@ pub enum MemAction {
     /// process-state mems are flagged this way.
     #[command(name = "set-internal")]
     SetInternal(SetInternalArgs),
+    /// Declare (or clear) a mem's paired process mem: the mem holding its
+    /// process tier (verification targets, findings, inquiry entries),
+    /// which `projection brief` and the open-questions health axis pair
+    /// it with. The declaration wins over the binding-name convention
+    /// (`<mem>/<stem>`, or `<mem>-<stem>` for a nested destination). The
+    /// process mem must be a mounted mem pinned to an `ingest@*` schema
+    /// and not the mem itself (`PROCESS_MEM_NOT_ELIGIBLE` otherwise);
+    /// `--clear` returns the mem to the convention.
+    #[command(name = "set-process-mem")]
+    SetProcessMem(SetProcessMemArgs),
     /// Enumerate every mounted mem in the workspace with its
     /// schema pin, version, entity count, and capability (writable
     /// vs read-only). Markdown by default; pass `--json` (root flag)
@@ -804,6 +814,9 @@ fn run_delete_inner(
             "name": response.name,
             "deleted_from_router": response.deleted_from_router,
             "files_deleted": response.files_deleted,
+            // Set only when an operator-mode delete removed a config a
+            // failed create left on `__MEMSTEAD` (no mount, no branch).
+            "pruned_orphan_config": response.pruned_orphan_config,
             "warnings": response
                 .warnings
                 .iter()
@@ -874,6 +887,12 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
         r.deleted_from_router,
     ));
     out.push_str(&format!("- Files deleted: {}\n", r.files_deleted));
+    if let Some(blob) = &r.pruned_orphan_config {
+        out.push_str(&format!(
+            "- Pruned orphan config: `{blob}` (the name was not registered and had no \
+             content branch; a failed create had left the config behind)\n"
+        ));
+    }
     if !r.detached_referrers.is_empty() {
         out.push_str("\n## Detached referrers (edges now dangle as stubs)\n\n");
         for referrer in &r.detached_referrers {
@@ -921,7 +940,8 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
 /// validation → exit 5, generic → exit 1) is consumed in one place;
 /// lifecycle variants (`MEM_PATH_NOT_ALLOWED`,
 /// `MEM_SCHEMA_NOT_ALLOWED`, `MEM_REFERENCED_BY_POLICY`,
-/// `INVALID_MEM_NAME`, `CONFIG_ERROR`, `MEM_STORAGE_RESIDUE_DETECTED`)
+/// `INVALID_MEM_NAME`, `CONFIG_ERROR`, `MEM_STORAGE_RESIDUE_DETECTED`,
+/// `MEM_NAME_REF_CONFLICT`)
 /// are user-recoverable validation refusals and land at exit 5.
 ///
 /// Sourcing from the engine error directly means any new engine code
@@ -1093,6 +1113,27 @@ pub struct SetInternalArgs {
     pub note: Option<String>,
 }
 
+/// `memstead mem set-process-mem <NAME> <PROCESS_MEM>` / `--clear` arguments.
+#[derive(Args, Debug)]
+pub struct SetProcessMemArgs {
+    /// Mem whose pairing is declared (must be registered in the workspace).
+    pub name: String,
+
+    /// The process mem to pair with: a mounted mem pinned to an `ingest@*`
+    /// schema. Omit it and pass `--clear` to remove the declaration.
+    #[arg(required_unless_present = "clear", conflicts_with = "clear")]
+    pub process_mem: Option<String>,
+
+    /// Clear the declaration: the mem pairs by the binding-name convention
+    /// again.
+    #[arg(long)]
+    pub clear: bool,
+
+    /// Optional provenance note (≤280 chars) recorded on the commit body.
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
 /// Warnings as a markdown block, or empty when there are none.
 ///
 /// Shared because three setters rendered warnings in `--json` only and stayed
@@ -1194,6 +1235,41 @@ pub fn run_set_subject(ctx: &CliContext, args: SetSubjectArgs) -> anyhow::Result
             outcome.mem,
             describe(&outcome.old_subject),
             describe(&outcome.new_subject),
+            warning_block(&outcome.warnings),
+        ));
+    }
+    Ok(())
+}
+
+/// `memstead mem set-process-mem <NAME> <PROCESS_MEM>` / `--clear`: declare
+/// or clear the mem's paired process mem, through the same config-commit
+/// path as the sibling setters.
+pub fn run_set_process_mem(ctx: &CliContext, args: SetProcessMemArgs) -> anyhow::Result<()> {
+    let value = if args.clear {
+        None
+    } else {
+        args.process_mem.clone()
+    };
+    let note = args.note.as_deref();
+    let outcome = match ctx.cli_engine()? {
+        crate::setup::CliEngine::MemRepo(mut engine) => engine
+            .set_mem_process_mem(&args.name, value, note)
+            .map_err(crate::CliError::from_engine_op)?,
+        crate::setup::CliEngine::Filesystem(mut engine) => engine
+            .set_mem_process_mem(&args.name, value, note)
+            .map_err(crate::CliError::from_engine_op)?,
+    };
+
+    if ctx.json {
+        crate::output::print_json(&outcome)?;
+    } else {
+        let old = outcome.previous.as_deref().unwrap_or("<none>");
+        let new = outcome.process_mem.as_deref().unwrap_or("<cleared>");
+        crate::output::print_markdown(&format!(
+            "# Mem `{}` process mem updated\n\n- Old: {}\n- New: {}{}",
+            outcome.mem,
+            old,
+            new,
             warning_block(&outcome.warnings),
         ));
     }

@@ -715,6 +715,11 @@ pub(super) fn engine_err_unified(
                 }),
             ),
         ),
+        E::ProcessMemNotEligible { .. } => tool_error_with_payload(
+            "PROCESS_MEM_NOT_ELIGIBLE",
+            &message,
+            envelope("PROCESS_MEM_NOT_ELIGIBLE", message.clone(), e.details()),
+        ),
         e @ E::SchemaNotFound { .. } => tool_error_with_payload(
             "SCHEMA_NOT_FOUND",
             &message,
@@ -1174,6 +1179,11 @@ pub(super) fn full_engine_err_unified(
                     "recovery": ["reattach", "force_overwrite", "hard_cleanup_first"],
                 }),
             ),
+        ),
+        PE::MemNameRefConflict { .. } => tool_error_with_payload(
+            "MEM_NAME_REF_CONFLICT",
+            &message,
+            envelope("MEM_NAME_REF_CONFLICT", message.clone(), e.details()),
         ),
     }
 }

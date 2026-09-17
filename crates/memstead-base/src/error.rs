@@ -139,6 +139,50 @@ pub enum FullEngineError {
         /// the count is unavailable.
         entity_count: usize,
     },
+
+    /// `create_mem` refused a git-branch name that git's ref namespace
+    /// cannot hold beside an existing mem branch: refs are files in
+    /// directories, so `refs/heads/stocks/impfpflicht` and
+    /// `refs/heads/stocks/impfpflicht/anker` cannot coexist, in either
+    /// order of creation. Refused before any write, so nothing lands on
+    /// `__MEMSTEAD`. `suggestion` names a sibling spelling where one
+    /// follows from the shape (the child case: the parent's leaf and the
+    /// rest joined by a hyphen).
+    #[error("{}", ref_conflict_message(.name, .branch_ref, .conflicting_branches, .suggestion))]
+    MemNameRefConflict {
+        /// The requested mem name.
+        name: String,
+        /// The branch the name would have become (`refs/heads/<name>`).
+        branch_ref: String,
+        /// The existing branches that sit above or below it in the ref
+        /// namespace, as branch names (without `refs/heads/`).
+        conflicting_branches: Vec<String>,
+        /// A sibling name that git can hold, where the shape yields one.
+        suggestion: Option<String>,
+    },
+}
+
+fn ref_conflict_message(
+    name: &str,
+    branch_ref: &str,
+    conflicting_branches: &[String],
+    suggestion: &Option<String>,
+) -> String {
+    let listed = conflicting_branches
+        .iter()
+        .map(|b| format!("`{b}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let hint = match suggestion {
+        Some(s) => format!(" Pick a sibling name instead, for example `{s}`."),
+        None => " Pick a name that is neither a parent nor a child path of an existing mem branch."
+            .to_string(),
+    };
+    format!(
+        "mem name '{name}' cannot become branch `{branch_ref}`: git keeps refs as files in \
+         directories, and the existing mem branch(es) {listed} would be a parent or child path \
+         of it.{hint}"
+    )
 }
 
 /// Recovery shape for `create_mem` against pre-existing storage
@@ -360,6 +404,17 @@ impl FullEngineError {
                 "entity_count": entity_count,
                 "recovery": ["reattach", "force_overwrite", "hard_cleanup_first"],
             }),
+            FullEngineError::MemNameRefConflict {
+                name,
+                branch_ref,
+                conflicting_branches,
+                suggestion,
+            } => serde_json::json!({
+                "name": name,
+                "branch_ref": branch_ref,
+                "conflicting_branches": conflicting_branches,
+                "suggestion": suggestion,
+            }),
         }
     }
 
@@ -379,6 +434,7 @@ impl FullEngineError {
             FullEngineError::MemSchemaNotAllowed { .. } => "MEM_SCHEMA_NOT_ALLOWED",
             FullEngineError::ConfigAlreadyExists { .. } => "CONFIG_ERROR",
             FullEngineError::MemStorageResidueDetected { .. } => "MEM_STORAGE_RESIDUE_DETECTED",
+            FullEngineError::MemNameRefConflict { .. } => "MEM_NAME_REF_CONFLICT",
         }
     }
 }
@@ -423,6 +479,18 @@ mod tests {
             path: PathBuf::from("/x"),
         };
         assert_eq!(e.code(), "CONFIG_ERROR");
+
+        let e = FullEngineError::MemNameRefConflict {
+            name: "stocks/impfpflicht/anker".into(),
+            branch_ref: "refs/heads/stocks/impfpflicht/anker".into(),
+            conflicting_branches: vec!["stocks/impfpflicht".into()],
+            suggestion: Some("stocks/impfpflicht-anker".into()),
+        };
+        assert_eq!(e.code(), "MEM_NAME_REF_CONFLICT");
+        let text = e.to_string();
+        assert!(text.contains("`stocks/impfpflicht`"), "{text}");
+        assert!(text.contains("`stocks/impfpflicht-anker`"), "{text}");
+        assert_eq!(e.details()["suggestion"], "stocks/impfpflicht-anker");
     }
 
     /// Wrapped base-engine errors delegate `code()` to the base mapping.

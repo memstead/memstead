@@ -792,9 +792,14 @@ pub fn health_open_questions_axis(
             }
         } else {
             for binding in &mem_bindings {
+                // `binding` is the stem; the convention derives from the
+                // canonical id `<mem>/<stem>`, the same input the brief
+                // renderer hands the derivation.
+                let derived =
+                    crate::binding_run::derived_process_mem_name(&format!("{mem}/{binding}"));
                 resolutions.push((
                     Some((*binding).clone()),
-                    crate::binding_run::resolve_process_mem(engine, mem, binding),
+                    crate::binding_run::resolve_process_mem(engine, mem, &derived),
                 ));
             }
         }

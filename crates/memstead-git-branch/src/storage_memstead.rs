@@ -1092,6 +1092,33 @@ pub fn delete_mem_artifacts_at_gitdir(
     branch_leaf: &str,
     ctx: &CommitContext<'_>,
 ) -> Result<(), MemRepoWriteError> {
+    prune_mem_storage_at_gitdir(gitdir, branch_leaf, ctx, true)
+}
+
+/// Drop only the mem's blobs on `__MEMSTEAD` (its config and its mirrored
+/// pipeline records) and leave every content branch alone. The rollback
+/// for a create whose seed commit failed after the config had landed,
+/// and the cleanup for a config that was left behind that way: in both
+/// cases the branch the config names is not the mem's to delete (it
+/// never came to exist, or it belongs to whatever refused the seed).
+/// Idempotent: nothing to prune is not an error.
+pub fn prune_mem_config_at_gitdir(
+    gitdir: &Path,
+    branch_leaf: &str,
+    ctx: &CommitContext<'_>,
+) -> Result<(), MemRepoWriteError> {
+    prune_mem_storage_at_gitdir(gitdir, branch_leaf, ctx, false)
+}
+
+/// The shared prune: one `__MEMSTEAD` commit dropping the mem's blobs,
+/// plus (when `delete_branch`) the content branch's deletion, in a
+/// single ref-edit transaction.
+fn prune_mem_storage_at_gitdir(
+    gitdir: &Path,
+    branch_leaf: &str,
+    ctx: &CommitContext<'_>,
+    delete_branch: bool,
+) -> Result<(), MemRepoWriteError> {
     use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
     use gix::refs::{FullName, Target};
 
@@ -1183,20 +1210,22 @@ pub fn delete_mem_artifacts_at_gitdir(
     // ---- Step 2: ref-edit batch (branch delete + __MEMSTEAD advance) ----
     let mut edits: Vec<RefEdit> = Vec::with_capacity(2);
 
-    let branch_ref = format!("refs/heads/{branch_leaf}");
-    let branch_full: FullName = branch_ref.as_str().try_into().map_err(|e| {
-        MemRepoWriteError::RefTransaction(format!("invalid branch ref {branch_ref:?}: {e}"))
-    })?;
-    edits.push(RefEdit {
-        change: Change::Delete {
-            // `Any` keeps the delete idempotent — a missing branch
-            // (sibling pruned it, manual surgery) is not an error.
-            expected: PreviousValue::Any,
-            log: RefLog::AndReference,
-        },
-        name: branch_full,
-        deref: false,
-    });
+    if delete_branch {
+        let branch_ref = format!("refs/heads/{branch_leaf}");
+        let branch_full: FullName = branch_ref.as_str().try_into().map_err(|e| {
+            MemRepoWriteError::RefTransaction(format!("invalid branch ref {branch_ref:?}: {e}"))
+        })?;
+        edits.push(RefEdit {
+            change: Change::Delete {
+                // `Any` keeps the delete idempotent — a missing branch
+                // (sibling pruned it, manual surgery) is not an error.
+                expected: PreviousValue::Any,
+                log: RefLog::AndReference,
+            },
+            name: branch_full,
+            deref: false,
+        });
+    }
 
     if let (Some(prior_tip), Some(new_commit)) = (existing_memstead_tip, new_memstead_commit) {
         let memstead_full: FullName = "refs/heads/__MEMSTEAD".try_into().map_err(|e| {
@@ -1217,6 +1246,10 @@ pub fn delete_mem_artifacts_at_gitdir(
             name: memstead_full,
             deref: false,
         });
+    }
+    if edits.is_empty() {
+        // A config-only prune with nothing on the ref: nothing to do.
+        return Ok(());
     }
 
     repo.edit_references_as(

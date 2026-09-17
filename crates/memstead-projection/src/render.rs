@@ -616,7 +616,7 @@ fn build_process_mem(engine: &Engine, resolved: &ResolvedIngest) -> ProcessMemIn
     let resolution = memstead_base::binding_run::resolve_process_mem(
         engine,
         &resolved.destination_mem,
-        &resolved.name,
+        &memstead_base::binding_run::derived_process_mem_name(&resolved.name),
     );
     let leaf = resolution.mem.clone();
     let present = !skipped && resolution.mounted;

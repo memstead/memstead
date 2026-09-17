@@ -1183,6 +1183,118 @@ fn init_nested_mem_scaffolds_under_the_nested_tier_and_brief_finds_it() {
     assert_eq!(env["code"], "PROJECTION_INVALID_NAME");
 }
 
+/// `memstead mem set-process-mem <mem> <process-mem>` declares the pairing
+/// the brief renders: before the declaration a binding on a git-branch
+/// destination has no paired process mem (the convention-derived name
+/// `dest/code` is a branch git cannot hold beside `dest`); after it, the
+/// brief's `### Paired process mem` block names the declared mem. The
+/// setter refuses a mem that is not mounted, not pinned to `ingest@*`, or
+/// the mem itself, and `--clear` returns the mem to the convention.
+#[test]
+fn set_process_mem_declares_the_pairing_the_brief_renders() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    let mem_init = |args: &[&str]| {
+        memstead()
+            .current_dir(&ws)
+            .env("MEMSTEAD_OPERATOR_MODE", "1")
+            .args(["mem", "init"])
+            .args(args)
+            .arg("--no-gitignore")
+            .assert()
+            .success();
+    };
+    mem_init(&["dest"]);
+    mem_init(&["proc", "--schema", "ingest@0.5.0"]);
+    mem_init(&["other"]);
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "dest",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "code",
+        ])
+        .assert()
+        .success();
+    let brief = |ws: &Path| -> String {
+        let out = memstead()
+            .current_dir(ws)
+            .args(["projection", "brief", "dest/code"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        String::from_utf8(out).unwrap()
+    };
+    assert!(
+        !brief(&ws).contains("### Paired process mem"),
+        "no pairing before the declaration"
+    );
+
+    // Ineligible declarations refuse typed, before any write.
+    for (target, reason) in [
+        ("other", "not_ingest_schema"),
+        ("ghost", "not_mounted"),
+        ("dest", "self_pairing"),
+    ] {
+        let output = memstead()
+            .current_dir(&ws)
+            .args(["--json", "mem", "set-process-mem", "dest", target])
+            .assert()
+            .failure()
+            .get_output()
+            .stdout
+            .clone();
+        let env: Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(env["code"], "PROCESS_MEM_NOT_ELIGIBLE", "{env}");
+        assert_eq!(env["details"]["reason"], reason, "{env}");
+    }
+
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "mem",
+            "set-process-mem",
+            "dest",
+            "proc",
+            "--note",
+            "pair the stock with its process tier",
+        ])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("New: proc"));
+    let paired = brief(&ws);
+    assert!(
+        paired.contains("### Paired process mem") && paired.contains("**proc**"),
+        "the brief names the declared process mem; got:\n{paired}"
+    );
+
+    // Fresh process: the old value comes from the persisted config.
+    memstead()
+        .current_dir(&ws)
+        .args(["mem", "set-process-mem", "dest", "--clear"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Old: proc"))
+        .stdout(predicates::str::contains("New: <cleared>"));
+    assert!(
+        !brief(&ws).contains("### Paired process mem"),
+        "cleared: back to the convention"
+    );
+}
+
 /// Re-expressed against the pointer
 /// channel: the ACTIVE-BINDING pointer derives only from CONSUMING renders.
 /// A peek-only brief (any named render — the `--consume` flag requires

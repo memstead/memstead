@@ -1928,6 +1928,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "MEM_REATTACHED_AFTER_UNREGISTER",
             "__MEMSTEAD",
             "unregistered_at",
+            // The ref-namespace refusal a git-branch name draws when an
+            // existing mem branch is its parent or child path.
+            "MEM_NAME_REF_CONFLICT",
+            "details.suggestion",
             // Error-envelope `details` field references — both
             // envelopes (path + schema) carry these.
             "details.source",
@@ -2071,6 +2075,13 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "mem set-title",
             "set-description",
             "set-subject",
+            "set-process-mem",
+            // The process-mem declaration: its field, the schema family
+            // it must pin, and its refusal code.
+            "process_mem",
+            "ingest@*",
+            "PROCESS_MEM_NOT_ELIGIBLE",
+            "details.reason",
             // Allowlist token (description disclaims the gate).
             "mem_management",
         ],

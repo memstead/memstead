@@ -182,11 +182,25 @@ impl McpServer {
                 }
             }
         }
+        if let Some(pm) = p.process_mem.clone() {
+            let value = if pm.is_empty() { None } else { Some(pm) };
+            match engine.set_mem_process_mem(&p.name, value, p.note.as_deref()) {
+                Ok(o) => warnings.extend(o.warnings),
+                Err(e) => {
+                    let (engine, notices) = engine.finish();
+                    let drift = notices_as_reload_warnings(&notices);
+                    return attach_drift_to_error(engine_err_unified(e, &engine), &drift, notices);
+                }
+            }
+        }
 
         // No-field calls still validate the mem exists (a pure no-op
         // against an unknown name would be a silent lie).
-        let no_field =
-            p.title.is_none() && p.description.is_none() && p.subject.is_none() && !p.clear_subject;
+        let no_field = p.title.is_none()
+            && p.description.is_none()
+            && p.subject.is_none()
+            && !p.clear_subject
+            && p.process_mem.is_none();
         if no_field && engine.mount(&p.name).is_none() {
             let e = engine.unknown_mem_error(&p.name);
             let (engine, notices) = engine.finish();
@@ -209,6 +223,7 @@ impl McpServer {
                 "method": sub.method,
                 "exclusions": sub.exclusions,
             }))),
+            "process_mem": config.as_ref().and_then(|c| c.process_mem.clone()),
             "warnings": warnings,
         });
         let (_engine, finished_notices) = engine.finish();
@@ -504,6 +519,7 @@ impl McpServer {
                     "name": response.name,
                     "deleted_from_router": response.deleted_from_router,
                     "files_deleted": response.files_deleted,
+                    "pruned_orphan_config": response.pruned_orphan_config,
                     // Surface scrubbed
                     // `.memstead/workspace.toml` entries so the agent
                     // doesn't have to re-read `workspace show` to

@@ -95,6 +95,17 @@ pub struct SetMemInternalOutcome {
     pub warnings: Vec<WarningHint>,
 }
 
+/// Result of `Engine::set_mem_process_mem`: the declaration before and
+/// after the write (`None` = the binding-name convention applies).
+#[derive(Debug, Clone, Serialize)]
+pub struct SetMemProcessMemOutcome {
+    pub mem: String,
+    pub previous: Option<String>,
+    pub process_mem: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<WarningHint>,
+}
+
 /// Result of `Engine::set_mem_version`. Carries the (mem,
 /// old_version, new_version) triple so callers (CLI, MCP) can surface
 /// the change without an extra read.

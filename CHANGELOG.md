@@ -34,7 +34,66 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   definition, `memstead_schema::check_kind_wire_is_well_formed`, shared by
   the loader and the check surface. The gates brief names the floor.
 
+### Added
+
+- **`memstead mem set-process-mem <mem> <process-mem>` declares the
+  paired process mem; `--clear` returns to the convention.**
+  `MemConfig.process_mem` has existed as the declaration that wins
+  over the binding-name derivation on the brief and the open-questions
+  health axis, but no surface wrote it. The setter sits beside
+  `set-title` / `set-description` / `set-internal` on the same
+  config-commit path (`--note`, and the session's `--role` /
+  `--identity`, ride the commit), and refuses `PROCESS_MEM_NOT_ELIGIBLE`
+  (`details.reason`: `not_mounted`, `not_ingest_schema` with the pin the
+  mem carries, `self_pairing`) unless the named mem is mounted and
+  pinned to an `ingest@*` schema. The same field joins the existing
+  `memstead_mem_configure` MCP tool as the optional `process_mem`
+  (empty string clears), no new tool; the tool's response carries the
+  post-call `process_mem`. Pinned by a CLI test: after the declaration
+  `projection brief` renders the `### Paired process mem` block naming
+  the declared mem, and `--clear` removes it again.
+
 ### Fixed
+
+- **A git-branch mem name that git's ref namespace cannot hold refuses
+  before anything is written, a failed seed leaves no config behind,
+  and a config left behind is removable.** Git keeps refs as files in
+  directories, so `refs/heads/stocks/impfpflicht/anker` cannot exist
+  beside the mem branch `stocks/impfpflicht`, in either order of
+  creation. `mem init` used to find that out inside its seed commit
+  (`git-tree writer: ref ... vanished during CAS recovery`), after the
+  mem's config had already landed on `__MEMSTEAD`, leaving a config
+  with no mount and no branch that nothing could remove. Three changes,
+  each general: (1) `create_mem` probes the mem-repo's local branches
+  first and refuses `MEM_NAME_REF_CONFLICT` for a name that an existing
+  mem branch sits above or below, naming the branches in
+  `details.conflicting_branches` and, for the child case, a sibling
+  spelling in `details.suggestion` (`stocks/impfpflicht-anker`); (2) a
+  seed commit that fails after the config write rolls the config back
+  through a config-only prune that never touches a branch; (3)
+  `mem delete <name> --operator-mode` recognises the config-only
+  leftover for an unregistered name with no branch, prunes it, and
+  reports the blob as `pruned_orphan_config` (`deleted_from_router:
+  false`, `files_deleted: true`); agent mode keeps refusing
+  `UNKNOWN_MEM`. Pinned by three CLI tests over a real mem-repo.
+
+- **The convention-derived process mem name of a nested destination
+  is a sibling, not a child.** Decision, recorded here: for a binding
+  `<mem>/<stem>` whose destination is a nested mem (`stocks/impfpflicht`),
+  the derived process mem is `<mem>-<stem>` (`stocks/impfpflicht-anker`),
+  the last separator hyphenated, because the former derivation
+  `stocks/impfpflicht/anker` names a branch git cannot hold beside the
+  destination's own. The convention for a single-component destination
+  is unchanged (`engine/graph` pairs with `engine/graph`); note that on
+  a mem-repo workspace that name is equally a child path of the
+  destination's branch, so a git-branch destination pairs either
+  through a folder-backed process mem or through the new
+  `set-process-mem` declaration. One derivation function
+  (`memstead_base::binding_run::derived_process_mem_name`) now feeds
+  both consumers; the open-questions health axis had been deriving
+  from the binding's stem alone (`proc` for `hold/proc`) while the
+  brief derived from the full id, so the two surfaces could pair a
+  destination with different mems. They pair identically now.
 
 - **A nested mem name is a legal binding destination.** `memstead
   projection init --mem stocks/impfpflicht` refused

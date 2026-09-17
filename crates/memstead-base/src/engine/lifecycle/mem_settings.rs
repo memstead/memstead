@@ -289,6 +289,90 @@ impl Engine {
         })
     }
 
+    /// Declare (or clear) the mem's paired process mem: the mem that
+    /// holds its process tier (verification targets, findings, inquiry
+    /// entries). The declaration wins over the binding-name convention
+    /// the brief renderer and the open-questions health axis otherwise
+    /// derive (`crate::binding_run::derived_process_mem_name`); `None`
+    /// returns the mem to that convention. The target must be a mounted
+    /// mem pinned to an `ingest@*` schema and must not be the mem
+    /// itself; anything else refuses [`EngineError::ProcessMemNotEligible`]
+    /// before any write. Backend-symmetric like the sibling setters:
+    /// one config commit, `CONFIG_WRITE_INTERVENED` on the outcome when
+    /// the stored config had moved.
+    pub fn set_mem_process_mem(
+        &mut self,
+        mem_name: &str,
+        process_mem: Option<String>,
+        note: Option<&str>,
+    ) -> Result<crate::ops::SetMemProcessMemOutcome, EngineError> {
+        let mount_idx = self
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == mem_name)
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
+        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
+            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
+        }
+        if let Some(target) = process_mem.as_deref() {
+            let refuse =
+                |reason: &'static str, schema: Option<String>| EngineError::ProcessMemNotEligible {
+                    mem: mem_name.to_string(),
+                    process_mem: target.to_string(),
+                    reason,
+                    schema,
+                };
+            if target == mem_name {
+                return Err(refuse("self_pairing", None));
+            }
+            let Some(target_mount) = self.mount(target) else {
+                return Err(refuse("not_mounted", None));
+            };
+            let pin = target_mount
+                .schema
+                .as_ref()
+                .map(|s| format!("{}@{}", s.name, s.version));
+            let is_ingest = target_mount
+                .schema
+                .as_ref()
+                .is_some_and(|s| s.name == crate::binding_run::PROCESS_MEM_SCHEMA_NAME);
+            if !is_ingest {
+                return Err(refuse("not_ingest_schema", pin));
+            }
+        }
+
+        let mut warnings = self.reload_if_stale(Some(mem_name));
+        if let Some(w) = self.note_missing_warning("set_mem_process_mem", note) {
+            warnings.push(w);
+        }
+
+        let seen: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+        let value = process_mem.clone();
+        let (_, intervened) = self.write_mem_config_merged(
+            mount_idx,
+            mem_name,
+            "set_mem_process_mem",
+            note,
+            &|c: &mut memstead_schema::config::MemConfig| {
+                *seen.borrow_mut() = c.process_mem.clone();
+                c.process_mem = value.clone();
+            },
+        )?;
+        if !intervened.is_empty() {
+            warnings.push(crate::ops::WarningHint::ConfigWriteIntervened {
+                mem: mem_name.to_string(),
+                fields: intervened,
+            });
+        }
+
+        Ok(crate::ops::SetMemProcessMemOutcome {
+            mem: mem_name.to_string(),
+            previous: seen.into_inner(),
+            process_mem,
+            warnings,
+        })
+    }
+
     /// Set (or clear) one opaque sync-state token in a mem's per-mem
     /// config and persist it through the backend. The ingest layer calls
     /// this after a successful pass over a source's changed slice to

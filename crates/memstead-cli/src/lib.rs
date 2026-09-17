@@ -703,6 +703,7 @@ impl CliError {
                     "source": source_origin,
                 })),
             ),
+            e @ ProcessMemNotEligible { .. } => (ExitKind::Validation, Some(e.details())),
             e @ SchemaNotFound { .. } => (ExitKind::Validation, Some(e.details())),
             EmbeddedSchemaInvalid { mem, pin, reason } => (
                 ExitKind::Validation,

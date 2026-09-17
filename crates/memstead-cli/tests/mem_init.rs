@@ -1029,3 +1029,228 @@ fn mem_delete_preserves_allowlist_rules_so_recreate_succeeds() {
         .success();
     assert_mem_in_mounts(&workspace, "other");
 }
+
+// ---------------------------------------------------------------------------
+// Git's ref namespace: a mem branch and a branch below or above it cannot
+// coexist. The create refuses before writing; a seed that fails anyway
+// leaves no config behind; a config that was left behind is removable.
+// ---------------------------------------------------------------------------
+
+/// Run `git` inside the workspace's mem-repo gitdir; the stdout, trimmed.
+fn mem_repo_git(workspace: &Path, args: &[&str]) -> std::process::Output {
+    let gitdir = workspace.join("mem-repo").join(".git");
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(&gitdir)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .expect("git is available to the test")
+}
+
+/// Whether `__MEMSTEAD:mems/<mem_name>/config.json` exists on the ref.
+fn config_blob_present(workspace: &Path, mem_name: &str) -> bool {
+    mem_repo_git(
+        workspace,
+        &[
+            "cat-file",
+            "-e",
+            &format!("__MEMSTEAD:mems/{mem_name}/config.json"),
+        ],
+    )
+    .status
+    .success()
+}
+
+/// A git-branch name below an existing mem branch (`stocks/impfpflicht/anker`
+/// under the mem `stocks/impfpflicht`) refuses `MEM_NAME_REF_CONFLICT`
+/// before anything is written: no config lands on `__MEMSTEAD`, no branch
+/// appears, and the message names the conflicting branch and a sibling
+/// spelling that then succeeds. The parent direction refuses the same way.
+#[test]
+fn memstead_mem_init_refuses_a_name_git_cannot_hold_beside_an_existing_mem_branch() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = seed_workspace(tmp.path());
+
+    memstead()
+        .current_dir(&workspace)
+        .args(["mem", "init", "stocks/impfpflicht", "--no-gitignore"])
+        .assert()
+        .success();
+
+    let output = memstead()
+        .current_dir(&workspace)
+        .args([
+            "--json",
+            "mem",
+            "init",
+            "stocks/impfpflicht/anker",
+            "--no-gitignore",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "MEM_NAME_REF_CONFLICT", "{env}");
+    assert_eq!(
+        env["details"]["conflicting_branches"],
+        serde_json::json!(["stocks/impfpflicht"]),
+        "{env}"
+    );
+    assert_eq!(
+        env["details"]["suggestion"], "stocks/impfpflicht-anker",
+        "{env}"
+    );
+    assert!(
+        !config_blob_present(&workspace, "stocks/impfpflicht/anker"),
+        "a refused create leaves no config on __MEMSTEAD"
+    );
+    assert_branch_absent(&workspace, "stocks/impfpflicht/anker");
+    assert_mem_not_in_mounts(&workspace, "stocks/impfpflicht/anker");
+
+    // The parent direction: `stocks` would sit above the existing branch.
+    let output = memstead()
+        .current_dir(&workspace)
+        .args(["--json", "mem", "init", "stocks", "--no-gitignore"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "MEM_NAME_REF_CONFLICT", "{env}");
+    assert!(!config_blob_present(&workspace, "stocks"));
+
+    // The suggested sibling is a name git can hold.
+    memstead()
+        .current_dir(&workspace)
+        .args(["mem", "init", "stocks/impfpflicht-anker", "--no-gitignore"])
+        .assert()
+        .success();
+    assert_branch_present(&workspace, "stocks/impfpflicht-anker");
+    assert_mem_in_mounts(&workspace, "stocks/impfpflicht-anker");
+}
+
+/// A seed commit that fails after the config was written rolls the config
+/// back. A lock held on the branch ref makes the seed refuse (a branch
+/// that merely exists does not: the seed commits on top of it), and
+/// afterwards `__MEMSTEAD` carries no `mems/ghost/config.json` and no
+/// branch appeared; once the lock is gone the same name creates cleanly.
+#[test]
+fn memstead_mem_init_seed_failure_leaves_no_config_on_the_registry_ref() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = seed_workspace(tmp.path());
+
+    // A held lock on the branch ref makes the seed's ref update refuse
+    // while the config write (a commit on `__MEMSTEAD`, a different
+    // lock) still lands: the shape the rollback exists for.
+    let heads = workspace
+        .join("mem-repo")
+        .join(".git")
+        .join("refs")
+        .join("heads");
+    fs::create_dir_all(&heads).unwrap();
+    let lock = heads.join("ghost.lock");
+    fs::write(&lock, b"held by the test\n").unwrap();
+
+    let assertion = memstead()
+        .current_dir(&workspace)
+        .args(["mem", "init", "ghost", "--no-gitignore"])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8(assertion.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("seed commit"), "got stderr:\n{stderr}");
+    assert!(
+        !config_blob_present(&workspace, "ghost"),
+        "the config written before the seed must be rolled back"
+    );
+    assert_branch_absent(&workspace, "ghost");
+    assert_mem_not_in_mounts(&workspace, "ghost");
+
+    // With the lock gone the same name creates cleanly: nothing was
+    // left behind to refuse it.
+    fs::remove_file(&lock).unwrap();
+    memstead()
+        .current_dir(&workspace)
+        .args(["mem", "init", "ghost", "--no-gitignore"])
+        .assert()
+        .success();
+    assert!(config_blob_present(&workspace, "ghost"));
+    assert_branch_present(&workspace, "ghost");
+    assert_mem_in_mounts(&workspace, "ghost");
+}
+
+/// A config on `__MEMSTEAD` with no branch and no mount (what a failed
+/// create left behind before the rollback existed) is removable with
+/// `mem delete <name> --operator-mode`: the response names the pruned
+/// blob, and the blob is gone. Agent mode keeps refusing `UNKNOWN_MEM`
+/// for the unregistered name.
+#[test]
+fn memstead_mem_delete_prunes_a_config_only_leftover_in_operator_mode() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = seed_workspace(tmp.path());
+
+    memstead()
+        .current_dir(&workspace)
+        .args(["mem", "init", "scratch", "--no-gitignore"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&workspace)
+        .args(["mem", "unregister", "scratch"])
+        .assert()
+        .success();
+    // Drop the branch and keep the config: the orphan shape.
+    let dropped = mem_repo_git(&workspace, &["update-ref", "-d", "refs/heads/scratch"]);
+    assert!(dropped.status.success());
+    assert_branch_absent(&workspace, "scratch");
+    assert!(config_blob_present(&workspace, "scratch"), "precondition");
+
+    // Agent mode: an unregistered name is unknown, the leftover stays.
+    let output = memstead_no_env()
+        .current_dir(&workspace)
+        .args(["--json", "mem", "delete", "scratch"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "UNKNOWN_MEM", "{env}");
+    assert!(config_blob_present(&workspace, "scratch"));
+
+    let output = memstead_no_env()
+        .current_dir(&workspace)
+        .args(["--json", "mem", "delete", "scratch", "--operator-mode"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["deleted_from_router"], false, "{env}");
+    assert_eq!(env["files_deleted"], true, "{env}");
+    assert_eq!(
+        env["pruned_orphan_config"], "__MEMSTEAD:mems/scratch/config.json",
+        "{env}"
+    );
+    assert!(
+        !config_blob_present(&workspace, "scratch"),
+        "the orphan config is pruned"
+    );
+    // Nothing left: the name is unknown again, and the same name creates
+    // fresh.
+    memstead_no_env()
+        .current_dir(&workspace)
+        .args(["--json", "mem", "delete", "scratch", "--operator-mode"])
+        .assert()
+        .failure();
+    memstead()
+        .current_dir(&workspace)
+        .args(["mem", "init", "scratch", "--no-gitignore"])
+        .assert()
+        .success();
+    assert_mem_in_mounts(&workspace, "scratch");
+}

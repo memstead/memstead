@@ -280,6 +280,11 @@ pub struct MemConfigureParams {
     #[serde(default)]
     pub clear_subject: bool,
     #[schemars(
+        description = "Declared process mem: the mounted mem, pinned to an `ingest@*` schema, that holds this mem's process tier (verification targets, findings, inquiry entries). The declaration wins over the binding-name convention on the brief and the open-questions health axis. Absent = untouched; empty string = clear (back to the convention). A name that is not mounted, not pinned to `ingest@*`, or the mem itself refuses `PROCESS_MEM_NOT_ELIGIBLE` with `details.reason`."
+    )]
+    #[serde(default)]
+    pub process_mem: Option<String>,
+    #[schemars(
         description = "Optional provenance note (≤280 chars) recorded on each field's config commit."
     )]
     #[serde(default)]

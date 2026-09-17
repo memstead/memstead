@@ -215,6 +215,9 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             commands::mem::MemAction::SetInternal(args) => {
                 commands::mem::run_set_internal(&ctx, args)
             }
+            commands::mem::MemAction::SetProcessMem(args) => {
+                commands::mem::run_set_process_mem(&ctx, args)
+            }
             commands::mem::MemAction::SetSyncState(args) => {
                 commands::mem::run_set_sync_state(&ctx, args)
             }

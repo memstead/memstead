@@ -9860,6 +9860,7 @@ fn lifecycle_tools_take_the_per_call_role_and_identity() {
         description: None,
         subject: None,
         clear_subject: false,
+        process_mem: None,
         note: Some("titled per call".to_string()),
     }));
     assert!(ok(&titled), "{titled:?}");
@@ -9874,6 +9875,7 @@ fn lifecycle_tools_take_the_per_call_role_and_identity() {
         description: None,
         subject: None,
         clear_subject: false,
+        process_mem: None,
         note: Some("titled by the session".to_string()),
     }));
     assert!(ok(&titled), "{titled:?}");
@@ -10088,6 +10090,7 @@ fn lifecycle_tools_refuse_a_bad_role_or_identity_before_mutating() {
                     description: None,
                     subject: None,
                     clear_subject: false,
+                    process_mem: None,
                     note: None,
                 })),
             ),
@@ -11737,6 +11740,7 @@ mod schema_payload {
                 description: None,
                 subject: None,
                 clear_subject: false,
+                process_mem: None,
                 note: None,
             }));
         assert!(!state.is_error.unwrap_or(false), "{state:?}");
@@ -11784,6 +11788,7 @@ mod schema_payload {
                 description: description.map(String::from),
                 subject,
                 clear_subject,
+                process_mem: None,
                 note: Some("configure test".to_string()),
             }))
         };
@@ -11832,6 +11837,7 @@ mod schema_payload {
                 description: None,
                 subject: None,
                 clear_subject: false,
+                process_mem: None,
                 note: None,
             }));
         assert!(unknown.is_error.unwrap_or(false));
@@ -11948,6 +11954,7 @@ mod schema_payload {
             description: None,
             subject: None,
             clear_subject: false,
+            process_mem: None,
             note: None,
         }));
         assert!(ro.is_error.unwrap_or(false), "{ro:?}");

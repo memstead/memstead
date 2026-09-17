@@ -634,6 +634,23 @@ pub type GitBranchPruneResidueFn = fn(
     ctx: &crate::vcs::CommitContext<'_>,
 ) -> Result<(), BackendError>;
 
+/// Config-only prune: drop the mem's blobs on `__MEMSTEAD` and leave
+/// every content branch alone. `create_mem` rolls a failed seed commit
+/// back through it so no config outlives the mem it was written for;
+/// `delete_mem` removes a config left behind that way. Idempotent.
+pub type GitBranchPruneConfigBlobFn = fn(
+    gitdir: &Path,
+    branch_full_path: &str,
+    ctx: &crate::vcs::CommitContext<'_>,
+) -> Result<(), BackendError>;
+
+/// Ref-namespace probe: the local branches a new
+/// `refs/heads/<branch_full_path>` could not coexist with, because
+/// one is a path prefix of the other (git keeps refs as files in
+/// directories). `create_mem` asks before it writes anything.
+pub type GitBranchNamespaceConflictsFn =
+    fn(gitdir: &Path, branch_full_path: &str) -> Result<Vec<String>, BackendError>;
+
 /// `rename_mem` dispatch for the git-branch backend: move the mem's
 /// content branch `refs/heads/<old>` to `refs/heads/<new>` at the same
 /// tip (history preserved) and relocate the `__MEMSTEAD:mems/<old>/`
@@ -714,6 +731,8 @@ pub struct GitBranchOps {
     pub export: GitBranchExportFn,
     pub export_to_bytes: GitBranchExportToBytesFn,
     pub prune_residue: GitBranchPruneResidueFn,
+    pub prune_config_blob: GitBranchPruneConfigBlobFn,
+    pub branch_namespace_conflicts: GitBranchNamespaceConflictsFn,
     pub rename_mem_storage: GitBranchRenameMemStorageFn,
     pub write_schema: GitBranchWriteSchemaFn,
     pub read_schema_file: GitBranchReadSchemaFileFn,

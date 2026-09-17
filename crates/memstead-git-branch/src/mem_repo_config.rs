@@ -183,6 +183,55 @@ pub fn find_branches_by_leaf_at_gitdir(
     Ok(matches)
 }
 
+/// Every local branch whose name sits above or below `branch_full_path`
+/// in git's ref namespace: a branch that is a path prefix of it
+/// (`stocks/impfpflicht` for `stocks/impfpflicht/anker`) or that it is a
+/// path prefix of (`stocks/impfpflicht` for `stocks`). Git keeps refs as
+/// files in directories, so such a pair can never coexist: creating the
+/// second ref fails with a low-level ref-edit error. The mem-create
+/// orchestrator asks this BEFORE any write, so the refusal is typed and
+/// nothing lands on `__MEMSTEAD`. The exact same name is not a conflict
+/// here (that is the residue probe's case). Sorted for stable messages.
+pub fn branch_namespace_conflicts_at_gitdir(
+    gitdir: &Path,
+    branch_full_path: &str,
+) -> Result<Vec<String>, MemRepoConfigError> {
+    if !gitdir.is_dir() {
+        return Err(MemRepoConfigError::GitdirNotFound(
+            gitdir.display().to_string(),
+        ));
+    }
+    let repo = gix::open(gitdir).map_err(|e| MemRepoConfigError::GixOpen(e.to_string()))?;
+    let refs = repo
+        .references()
+        .map_err(|e| MemRepoConfigError::GitTree(e.to_string()))?;
+    let iter = refs
+        .local_branches()
+        .map_err(|e| MemRepoConfigError::GitTree(e.to_string()))?;
+    let mut conflicts: Vec<String> = Vec::new();
+    for r in iter {
+        let Ok(reference) = r else { continue };
+        let short = reference.name().shorten();
+        let Ok(name) = std::str::from_utf8(short) else {
+            continue;
+        };
+        if name == branch_full_path {
+            continue;
+        }
+        let existing_is_parent = branch_full_path
+            .strip_prefix(name)
+            .is_some_and(|rest| rest.starts_with('/'));
+        let existing_is_child = name
+            .strip_prefix(branch_full_path)
+            .is_some_and(|rest| rest.starts_with('/'));
+        if existing_is_parent || existing_is_child {
+            conflicts.push(name.to_string());
+        }
+    }
+    conflicts.sort();
+    Ok(conflicts)
+}
+
 /// Compute the fully-qualified branch ref name for `mem_name` by
 /// resolving its leaf to the matching hierarchical full path on the
 /// mem-repo (e.g. `refs/heads/demo/engine` for leaf `engine`,
@@ -813,6 +862,45 @@ mod tests {
         assert_eq!(
             matches,
             vec!["demo/engine".to_string(), "planning/engine".to_string()]
+        );
+    }
+
+    /// The ref-namespace probe: a branch above or below the requested
+    /// path conflicts, a sibling or the exact name does not.
+    #[test]
+    fn branch_namespace_conflicts_find_parents_and_children_only() {
+        let tmp = init_mem_repo_with_hierarchical_branch("stocks/impfpflicht");
+        let gitdir = tmp.path().join("mem-repo").join(".git");
+        seal_branches(&gitdir, &["stocks/impfpflicht-anker", "planning/plan-a"]);
+
+        // Below an existing branch: the existing one is the conflict.
+        let below =
+            super::branch_namespace_conflicts_at_gitdir(&gitdir, "stocks/impfpflicht/anker")
+                .unwrap();
+        assert_eq!(below, vec!["stocks/impfpflicht".to_string()]);
+        // Above existing branches: every child is a conflict, sorted.
+        let above = super::branch_namespace_conflicts_at_gitdir(&gitdir, "stocks").unwrap();
+        assert_eq!(
+            above,
+            vec![
+                "stocks/impfpflicht".to_string(),
+                "stocks/impfpflicht-anker".to_string()
+            ]
+        );
+        // A sibling, a prefix that is not a path segment, and the exact
+        // name are no conflict.
+        for free in [
+            "stocks/other",
+            "stocks/impf",
+            "stocks/impfpflicht",
+            "planning/plan-b",
+        ] {
+            let hits = super::branch_namespace_conflicts_at_gitdir(&gitdir, free).unwrap();
+            assert!(hits.is_empty(), "{free} must be free, got {hits:?}");
+        }
+        assert!(
+            super::branch_namespace_conflicts_at_gitdir(tmp.path(), "x").is_err(),
+            "a missing gitdir is an error, never a clean answer"
         );
     }
 

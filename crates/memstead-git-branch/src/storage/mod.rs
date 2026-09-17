@@ -54,6 +54,8 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     export: export_dispatch,
     export_to_bytes: export_to_bytes_dispatch,
     prune_residue: prune_residue_dispatch,
+    prune_config_blob: prune_config_blob_dispatch,
+    branch_namespace_conflicts: branch_namespace_conflicts_dispatch,
     rename_mem_storage: rename_mem_storage_dispatch,
     write_schema: write_schema_dispatch,
     read_schema_file: read_schema_file_dispatch,
@@ -158,6 +160,36 @@ fn prune_residue_dispatch(
             ))
         },
     )
+}
+
+/// Dispatcher for the config-only prune: the mem's blobs on
+/// `__MEMSTEAD` go, every content branch stays. `create_mem` rolls a
+/// failed seed back through it, `delete_mem` removes a config such a
+/// failure left behind through it.
+fn prune_config_blob_dispatch(
+    gitdir: &std::path::Path,
+    branch_full_path: &str,
+    ctx: &memstead_base::vcs::CommitContext<'_>,
+) -> Result<(), memstead_base::backend::BackendError> {
+    crate::storage_memstead::prune_mem_config_at_gitdir(gitdir, branch_full_path, ctx).map_err(
+        |e| {
+            memstead_base::backend::BackendError::Other(format!(
+                "config prune at {}: {e}",
+                branch_full_path,
+            ))
+        },
+    )
+}
+
+/// Dispatcher for the ref-namespace probe `create_mem` runs before it
+/// writes anything: the local branches a new `refs/heads/<path>` could
+/// not coexist with.
+fn branch_namespace_conflicts_dispatch(
+    gitdir: &std::path::Path,
+    branch_full_path: &str,
+) -> Result<Vec<String>, memstead_base::backend::BackendError> {
+    crate::mem_repo_config::branch_namespace_conflicts_at_gitdir(gitdir, branch_full_path)
+        .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
 }
 
 /// Dispatcher for `memstead_base::mem_management::rename_mem` on git-branch

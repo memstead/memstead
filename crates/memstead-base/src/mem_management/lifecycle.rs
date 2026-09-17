@@ -244,6 +244,13 @@ pub struct MemDeleteResponse {
     /// when `detach_incoming` was `false` (the refusal fires
     /// instead).
     pub detached_referrers: Vec<crate::ReferrerInfo>,
+    /// The `__MEMSTEAD:mems/<name>/config.json` blob an operator-mode
+    /// delete pruned for a name that was NOT registered and had no
+    /// content branch: a config a failed create left behind. On that
+    /// path `deleted_from_router` is `false` (there was nothing to
+    /// unregister) and `files_deleted` is `true`. `None` on every
+    /// ordinary delete.
+    pub pruned_orphan_config: Option<String>,
 }
 
 /// One scrubbed `.memstead/workspace.toml` entry surfaced on
@@ -368,6 +375,28 @@ pub fn delete_mem(
 
     // ---- Step 1: resolve name ----
     if !engine.mem_router().is_writable(&params.name) {
+        // A config on `__MEMSTEAD` with no content branch and no mount
+        // is what a create that failed inside its seed commit used to
+        // leave behind (before the rollback existed). Nothing outside
+        // the engine may touch the mem-repo, so the operator's delete
+        // is the way to remove it: destructive, operator-mode only,
+        // and only for that exact shape. A name with a branch is
+        // residue of the reattachable kind and stays `mem init`'s
+        // business (`--reattach` / `--force-overwrite`).
+        if params.operator_mode
+            && params.delete_files
+            && let Some(pruned) = prune_orphan_config(engine, &params.name, &delete_ctx)?
+        {
+            return Ok(MemDeleteResponse {
+                name: params.name,
+                deleted_from_router: false,
+                files_deleted: true,
+                warnings: Vec::new(),
+                allowlist_entries_removed: Vec::new(),
+                detached_referrers: Vec::new(),
+                pruned_orphan_config: Some(pruned),
+            });
+        }
         return Err(crate::EngineError::UnknownMem(params.name.clone()).into());
     }
 
@@ -817,7 +846,62 @@ pub fn delete_mem(
         warnings,
         allowlist_entries_removed,
         detached_referrers,
+        pruned_orphan_config: None,
     })
+}
+
+/// Prune the config blob of `name` on `__MEMSTEAD` when, and only when,
+/// the name has a config there and no content branch: the leftover of
+/// a create whose seed commit failed. Returns the pruned blob's path.
+/// `None` when the workspace has no mem-repo, the name has no config,
+/// or a branch exists (that is residue, not an orphan).
+fn prune_orphan_config(
+    engine: &crate::Engine,
+    name: &str,
+    ctx: &crate::vcs::CommitContext<'_>,
+) -> Result<Option<String>, FullEngineError> {
+    let Some(root) = engine.workspace_root().map(|r| r.to_path_buf()) else {
+        return Ok(None);
+    };
+    let gitdir = root.join("mem-repo").join(".git");
+    if !gitdir.is_dir() {
+        return Ok(None);
+    }
+    let gitdir = gitdir.canonicalize().unwrap_or(gitdir);
+    let Some(ops) = engine.git_branch_ops() else {
+        return Ok(None);
+    };
+    let branch_ref = format!("refs/heads/{name}");
+    let branch_exists = (ops.resolve_ref)(&gitdir, &branch_ref)
+        .map_err(|e| crate::EngineError::Mem(format!("resolve {branch_ref}: {e}")))?
+        .is_some();
+    if branch_exists {
+        return Ok(None);
+    }
+    // The backend reads the config by the branch's path on `__MEMSTEAD`;
+    // the branch itself need not exist, and the schema plays no part.
+    let probe_mount = crate::workspace::Mount {
+        migration_target: None,
+        mem: name.to_string(),
+        schema: None,
+        storage: crate::workspace::MountStorage::GitBranch {
+            gitdir: gitdir.clone(),
+            branch: branch_ref,
+        },
+        capability: crate::workspace::MountCapability::Write,
+        lifecycle: crate::workspace::MountLifecycle::Eager,
+        cross_linkable: true,
+    };
+    let factory = engine.backend_factory();
+    let Ok(backend) = factory(&probe_mount) else {
+        return Ok(None);
+    };
+    if !matches!(backend.read_mem_config(), Ok(Some(_))) {
+        return Ok(None);
+    }
+    (ops.prune_config_blob)(&gitdir, name, ctx)
+        .map_err(|e| crate::EngineError::Mem(format!("orphan config prune: {e}")))?;
+    Ok(Some(format!("__MEMSTEAD:mems/{name}/config.json")))
 }
 
 // ---------------------------------------------------------------------------
@@ -1331,6 +1415,33 @@ pub fn create_mem(
         .into());
     }
 
+    // ---- Step 2a: ref-namespace probe (git-branch only, before any write) ----
+    // Git keeps refs as files in directories, so `refs/heads/stocks/impfpflicht`
+    // and `refs/heads/stocks/impfpflicht/anker` can never coexist. Without
+    // this probe the second create failed inside its seed commit, with a
+    // low-level ref-edit error, after the config had already landed on
+    // `__MEMSTEAD`. Asked here, with nothing written yet, the refusal is
+    // typed and names both sides. The exact name is not a conflict (that
+    // is the residue probe's case, next).
+    if storage_kind == StorageKind::GitBranch
+        && let Some(root) = workspace_root.as_deref()
+        && let Some(ops) = engine.git_branch_ops()
+    {
+        let gitdir = root.join("mem-repo").join(".git");
+        let gitdir = gitdir.canonicalize().unwrap_or(gitdir);
+        let conflicting = (ops.branch_namespace_conflicts)(&gitdir, &params.name)
+            .map_err(|e| crate::EngineError::Mem(format!("ref namespace probe: {e}")))?;
+        if !conflicting.is_empty() {
+            let suggestion = sibling_name_suggestion(&params.name, &conflicting);
+            return Err(FullEngineError::MemNameRefConflict {
+                branch_ref: format!("refs/heads/{}", params.name),
+                name: params.name,
+                conflicting_branches: conflicting,
+                suggestion,
+            });
+        }
+    }
+
     // ---- Step 2b: storage residue probe (mem-repo only) ----
     // A name absent from the in-memory router can still have storage
     // residue — a per-mem content branch +
@@ -1766,9 +1877,30 @@ pub fn create_mem(
             .write_mem_config(&config_bytes, &seed_ctx)
             .map_err(|e| crate::EngineError::Mem(format!("write mem config: {e}")))?;
     }
-    let seed_write_id = backend
-        .commit(&format!("memstead: create mem {}", params.name), &seed_ctx)
-        .map_err(|e| crate::EngineError::Mem(format!("seed commit: {e}")))?;
+    let seed_write_id =
+        match backend.commit(&format!("memstead: create mem {}", params.name), &seed_ctx) {
+            Ok(id) => id,
+            Err(e) => {
+                // A failed seed leaves no config behind: the blob written
+                // above would otherwise sit on `__MEMSTEAD` naming a mem that
+                // never came to exist, invisible to the router and to an
+                // ordinary `mem delete`. The rollback touches the config
+                // only, never a branch (whatever refused the seed may own
+                // one).
+                if let crate::workspace::MountStorage::GitBranch { gitdir, .. } = &mount.storage
+                    && let Some(ops) = engine.git_branch_ops()
+                    && let Err(rollback) = (ops.prune_config_blob)(gitdir, &params.name, &seed_ctx)
+                {
+                    tracing::warn!(
+                        mem = %params.name,
+                        error = %rollback,
+                        "create_mem: seed commit failed and the config rollback failed too; \
+                         `memstead mem delete <name> --operator-mode` removes the leftover"
+                    );
+                }
+                return Err(crate::EngineError::Mem(format!("seed commit: {e}")).into());
+            }
+        };
     let origin = crate::MemOrigin::RuntimeCreated {
         at: std::time::SystemTime::now(),
         by_tool: "memstead_mem_create",
@@ -1812,6 +1944,23 @@ pub fn create_mem(
         seed_write_id,
         warnings,
     })
+}
+
+/// A sibling spelling git can hold for a name that sits below an
+/// existing mem branch: the parent's path and the rest of the name
+/// joined by a hyphen (`stocks/impfpflicht/anker` beside
+/// `stocks/impfpflicht` becomes `stocks/impfpflicht-anker`). `None`
+/// when the name is the parent of existing branches instead: no
+/// single spelling follows from that shape.
+fn sibling_name_suggestion(name: &str, conflicting: &[String]) -> Option<String> {
+    conflicting
+        .iter()
+        .filter_map(|parent| {
+            name.strip_prefix(parent.as_str())
+                .and_then(|rest| rest.strip_prefix('/'))
+                .map(|rest| format!("{parent}-{}", rest.replace('/', "-")))
+        })
+        .max_by_key(|s| s.len())
 }
 
 /// Canonicalize a path that may or may not yet exist. Walks up

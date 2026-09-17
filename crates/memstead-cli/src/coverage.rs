@@ -298,6 +298,7 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         no_verdict("mem set-subject", MUTATION),
         no_verdict("mem set-sync-state", MUTATION),
         no_verdict("mem set-internal", MUTATION),
+        no_verdict("mem set-process-mem", MUTATION),
         no_verdict("mem list", READS_DATA),
         no_verdict("mem-repo init", MUTATION),
         no_verdict("mem-repo remote-add", MUTATION),

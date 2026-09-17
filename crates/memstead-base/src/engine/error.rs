@@ -87,6 +87,30 @@ fn format_blocked_referrers(items: &[BlockedReferrer]) -> String {
 /// entity renders its quoted title; a stub renders as "a stub" (with
 /// its title when it has one — a titleless stub must never render as
 /// an empty title).
+/// The prose for [`EngineError::ProcessMemNotEligible`]: which of the
+/// three eligibility conditions the named mem failed, and what would pass.
+fn process_mem_not_eligible_message(
+    mem: &str,
+    process_mem: &str,
+    reason: &str,
+    schema: &Option<String>,
+) -> String {
+    let why = match reason {
+        "self_pairing" => "a mem cannot be its own process mem".to_string(),
+        "not_mounted" => "no mounted mem carries that name".to_string(),
+        _ => format!(
+            "it is pinned to `{}`, and a process mem must be pinned to an `{}@*` schema",
+            schema.as_deref().unwrap_or("<no schema>"),
+            crate::binding_run::PROCESS_MEM_SCHEMA_NAME
+        ),
+    };
+    format!(
+        "process mem '{process_mem}' is not eligible for mem '{mem}': {why}. Declare a mounted \
+         `{}@*` mem, or clear the declaration to pair by the binding-name convention",
+        crate::binding_run::PROCESS_MEM_SCHEMA_NAME
+    )
+}
+
 fn render_occupant(existing_title: &str, existing_is_stub: bool) -> String {
     match (existing_is_stub, existing_title.is_empty()) {
         (true, true) => "a stub".to_string(),
@@ -986,6 +1010,18 @@ pub enum EngineError {
     /// entries or a stand-in for read-only ones.
     #[error("mem name collision: {name} is already registered ({source_origin})")]
     MemNameCollision { name: String, source_origin: String },
+    /// `set_mem_process_mem` refused the declared pairing: the named
+    /// process mem is not mounted (`not_mounted`), is not pinned to an
+    /// `ingest@*` schema (`not_ingest_schema`, with the pin it carries
+    /// in `schema`), or is the mem itself (`self_pairing`). Typed code
+    /// `PROCESS_MEM_NOT_ELIGIBLE`.
+    #[error("{}", process_mem_not_eligible_message(.mem, .process_mem, .reason, .schema))]
+    ProcessMemNotEligible {
+        mem: String,
+        process_mem: String,
+        reason: &'static str,
+        schema: Option<String>,
+    },
     /// Lifecycle orchestrator rejected the input. Carries a single
     /// free-form message — the orchestrator's typed payload (note
     /// length, malformed path, etc.) is the message text.
@@ -1411,6 +1447,7 @@ impl EngineError {
             EngineError::SchemaResolverInit(_) => "SCHEMA_RESOLVER_INIT_FAILED",
             EngineError::Mem(_) => "MEM_ERROR",
             EngineError::MemNameCollision { .. } => "MEM_NAME_COLLISION",
+            EngineError::ProcessMemNotEligible { .. } => "PROCESS_MEM_NOT_ELIGIBLE",
             EngineError::InvalidInput(_) => "INVALID_INPUT",
             EngineError::MergeConflictUnsupportedBackend { .. } => {
                 "CONFLICT_RESOLVE_UNSUPPORTED_BACKEND"
@@ -1914,6 +1951,18 @@ impl EngineError {
             EngineError::InvalidAnchor(e) => {
                 serde_json::Value::Object(e.detail().into_iter().collect::<serde_json::Map<_, _>>())
             }
+            EngineError::ProcessMemNotEligible {
+                mem,
+                process_mem,
+                reason,
+                schema,
+            } => serde_json::json!({
+                "mem": mem,
+                "process_mem": process_mem,
+                "reason": reason,
+                "schema": schema,
+                "expected_schema": format!("{}@*", crate::binding_run::PROCESS_MEM_SCHEMA_NAME),
+            }),
             _ => serde_json::Value::Object(serde_json::Map::new()),
         }
     }
