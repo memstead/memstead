@@ -315,6 +315,26 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 line.push('\n');
                 line
             };
+            // The newest verification record behind the state: who
+            // recorded what, and whether the engine carried it across a
+            // rename (the JSON form carries the whole record).
+            let render_check = |rec: &serde_json::Value| -> Option<String> {
+                let verdict = rec.get("verdict")?.as_str()?;
+                let who = rec
+                    .get("identity")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| rec.get("actor").and_then(|v| v.as_str()))
+                    .unwrap_or("unknown");
+                let mut line = format!("- last check: {verdict} by {who}");
+                if let Some(m) = rec.get("method").and_then(|v| v.as_str()) {
+                    line.push_str(&format!(" ({m})"));
+                }
+                if let Some(from) = rec.get("renamed_from").and_then(|v| v.as_str()) {
+                    line.push_str(&format!(", carried across rename from {from}"));
+                }
+                line.push('\n');
+                Some(line)
+            };
             match prov.get("unavailable") {
                 Some(reason) => {
                     text.push_str(&format!(
@@ -345,6 +365,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     }
                     if let Some(state) = prov.get("check_state").and_then(|v| v.as_str()) {
                         text.push_str(&format!("- check state: {state}\n"));
+                    }
+                    if let Some(l) = render_check(&prov["last_check"]) {
+                        text.push_str(&l);
                     }
                 }
             }
