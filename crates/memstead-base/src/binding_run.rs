@@ -127,13 +127,12 @@ pub fn resolve_binding_run(
     binding_id: &str,
     binding: &Binding,
 ) -> Result<ResolvedIngest, ResolveError> {
-    let (mem, name) = binding_id
-        .split_once('/')
-        .filter(|(m, n)| !m.is_empty() && !n.is_empty())
-        .ok_or_else(|| ResolveError::MalformedProjectionRef {
+    let (mem, name) = crate::pipeline_store::parse_binding_id(binding_id).ok_or_else(|| {
+        ResolveError::MalformedProjectionRef {
             ingest: binding_id.to_string(),
             projection: binding_id.to_string(),
-        })?;
+        }
+    })?;
     let mem = mem.to_string();
     let name = name.to_string();
 

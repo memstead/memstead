@@ -1105,6 +1105,84 @@ fn brief_renders_for_scaffolded_binding() {
     );
 }
 
+/// A nested mem name is a legal binding destination: `projection init` with
+/// `--mem stocks/impfpflicht` scaffolds the record under the nested tier
+/// (`.memstead/projections/stocks/impfpflicht/anker.json`), the binding id
+/// splits at its last separator, and `projection brief` finds the binding by
+/// that id.
+#[test]
+fn init_nested_mem_scaffolds_under_the_nested_tier_and_brief_finds_it() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    let output = memstead()
+        .current_dir(&ws)
+        .args([
+            "--json",
+            "projection",
+            "init",
+            "--mem",
+            "stocks/impfpflicht",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "anker",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).expect("--json init must emit JSON");
+    assert_eq!(env["binding"], "stocks/impfpflicht/anker");
+    assert_eq!(
+        env["created"],
+        serde_json::json!([".memstead/projections/stocks/impfpflicht/anker.json"])
+    );
+    let record = ws.join(".memstead/projections/stocks/impfpflicht/anker.json");
+    assert!(record.is_file(), "the record lands under the nested tier");
+    let binding: Binding = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    assert_eq!(binding.destination_mem, "stocks/impfpflicht");
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["projection", "brief", "stocks/impfpflicht/anker"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let brief = String::from_utf8(out).unwrap();
+    assert!(
+        brief.contains("stocks/impfpflicht/anker"),
+        "brief must name the canonical binding id; got:\n{brief}"
+    );
+
+    // The id's shape is still guarded: a traversal segment inside the mem
+    // half refuses typed, before any disk access.
+    let output = memstead()
+        .current_dir(&ws)
+        .args([
+            "--json",
+            "projection",
+            "enable",
+            "verify",
+            "stocks/../impfpflicht/anker",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(env["code"], "PROJECTION_INVALID_NAME");
+}
+
 /// Re-expressed against the pointer
 /// channel: the ACTIVE-BINDING pointer derives only from CONSUMING renders.
 /// A peek-only brief (any named render — the `--consume` flag requires
@@ -1203,7 +1281,7 @@ fn active_binding_pointer_derives_only_from_consuming_renders() {
     )
     .unwrap();
     let guarded = cache["binding"].as_str().unwrap();
-    let stem = guarded.split_once('/').map(|(_, s)| s).unwrap_or(guarded);
+    let stem = guarded.rsplit_once('/').map(|(_, s)| s).unwrap_or(guarded);
     assert!(
         brief.contains(stem),
         "enforcement must target the binding whose brief was consumed: pointer names \

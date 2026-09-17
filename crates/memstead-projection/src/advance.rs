@@ -510,28 +510,13 @@ fn derive_corrected_ids(
         .collect()
 }
 
-/// Split a canonical binding id `<mem>/<stem>` into its two single-component
-/// halves, or refuse. Mirrors the store's component guard so a caller-supplied
-/// id can never escape the `.memstead/state/advance/` tier.
+/// Split a canonical binding id `<mem>/<stem>` into its mem path and stem,
+/// or refuse. The store's own parser carries the path guard, so a
+/// caller-supplied id can never escape the `.memstead/state/advance/` tier.
 fn split_binding_id(binding_id: &str) -> Result<(String, String), AdvanceError> {
-    binding_id
-        .split_once('/')
-        .filter(|(m, n)| is_single_component(m) && is_single_component(n))
+    memstead_base::pipeline_store::parse_binding_id(binding_id)
         .map(|(m, n)| (m.to_string(), n.to_string()))
         .ok_or_else(|| AdvanceError::MalformedId(binding_id.to_string()))
-}
-
-/// Is `value` a single, plain path component — safe as a `<mem>` / `<name>`
-/// directory or file segment? (No separators, traversal segments, drive/stream
-/// colon, or NUL.) Shared with the findings store's identical path guard.
-pub(crate) fn is_single_component(value: &str) -> bool {
-    !value.is_empty()
-        && value != "."
-        && value != ".."
-        && !value.contains('/')
-        && !value.contains('\\')
-        && !value.contains(':')
-        && !value.contains('\0')
 }
 
 /// The durable store path for a binding: `.memstead/state/advance/<mem>/<name>.json`.

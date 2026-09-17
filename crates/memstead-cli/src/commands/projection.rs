@@ -36,7 +36,9 @@ use memstead_base::binding::{
     DEFAULT_FULL_RESYNC_EVERY, ScaffoldParams, SyncOperation, VerifyOperation, validate_binding,
 };
 use memstead_base::pipeline::{IngestTrigger, MediumType};
-use memstead_base::pipeline_store::{load_pipeline_configs, read_binding};
+use memstead_base::pipeline_store::{
+    is_mem_path, is_single_component, load_pipeline_configs, parse_binding_id, read_binding,
+};
 use memstead_projection::advance::{
     AdvanceError, DispositionInput, ExcludeError, advance_baseline, record_exclusions,
 };
@@ -364,7 +366,9 @@ impl BriefOperationArg {
 #[derive(ClapArgs, Debug)]
 pub struct InitArgs {
     /// Destination mem the binding writes into — the `<mem>` half of the
-    /// binding id `<mem>/<stem>` and the per-mem tier the three files live under.
+    /// binding id `<mem>/<stem>` and the per-mem tier the record lives under.
+    /// A nested mem name (`team/sub-mem`) is accepted and nests the tier the
+    /// same way; the stem stays the id's last segment.
     #[arg(long)]
     pub mem: String,
     /// The medium pointer — a path (codebase / filesystem / git) or a mem id /
@@ -955,20 +959,6 @@ that is not there. Repair the mem, then re-run",
     Ok(())
 }
 
-/// Is `value` a single, plain path component — safe to use verbatim as a `<mem>`
-/// or `<stem>` dir/file segment and as half of the binding id? Mirrors
-/// `pipeline_store`'s internal component guard so `init` refuses with a clear
-/// typed code up front rather than surfacing a store IO error mid-scaffold.
-fn is_single_component(value: &str) -> bool {
-    !value.is_empty()
-        && value != "."
-        && value != ".."
-        && !value.contains('/')
-        && !value.contains('\\')
-        && !value.contains(':')
-        && !value.contains('\0')
-}
-
 /// Derive a binding stem from a `--source` pointer: its final path component
 /// (trailing slashes trimmed). `../public` → `public`; `home` → `home`;
 /// `https://example.com/manual` → `manual`.
@@ -1048,22 +1038,35 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         .clone()
         .unwrap_or_else(|| derive_stem(&args.source));
 
-    // `mem` and `stem` become three file-path components and the binding id —
-    // refuse anything that is not a single plain component before touching disk.
-    for (kind, value) in [("mem", mem.as_str()), ("name", stem.as_str())] {
-        if !is_single_component(value) {
-            return Err(CliError::new(
-                ExitKind::Validation,
-                "PROJECTION_INVALID_NAME",
-                format!(
-                    "invalid {kind} '{}': must be a single path component (no separators, \
-                     traversal segments, ':' or NUL) — pass an explicit --name",
-                    value.escape_default()
-                ),
-            )
-            .with_details(json!({ "kind": kind, "value": value }))
-            .into());
-        }
+    // `mem` and `stem` become the record's file path and the binding id:
+    // refuse anything the store would refuse before touching disk, with
+    // the store's own guards. The mem is a mem path (a nested name is
+    // legal), the stem a single plain component.
+    if !is_mem_path(&mem) {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_INVALID_NAME",
+            format!(
+                "invalid mem '{}': must be a mem name (plain path components joined by '/'; \
+                 no traversal segments, backslashes, ':' or NUL)",
+                mem.escape_default()
+            ),
+        )
+        .with_details(json!({ "kind": "mem", "value": mem }))
+        .into());
+    }
+    if !is_single_component(&stem) {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_INVALID_NAME",
+            format!(
+                "invalid name '{}': must be a single path component (no separators, \
+                 traversal segments, ':' or NUL); pass an explicit --name",
+                stem.escape_default()
+            ),
+        )
+        .with_details(json!({ "kind": "name", "value": stem }))
+        .into());
     }
 
     let binding_id = format!("{mem}/{stem}");
@@ -1225,16 +1228,18 @@ fn binding_miss_error(configs: &memstead_base::BindingConfigs, binding_id: &str)
     .with_details(json!({ "binding": binding_id }))
 }
 
-/// A malformed binding id (not `<mem>/<stem>`, or a half that is not a single
-/// plain path component) — the same shape guard `init` applies to its
-/// scaffolded id, spelled here so the failure is typed before any disk touch.
+/// A malformed binding id (not `<mem>/<stem>`, a mem that is not a mem path,
+/// or a stem that is not a single plain path component): the same shape guard
+/// `init` applies to its scaffolded id, spelled here so the failure is typed
+/// before any disk touch.
 fn invalid_binding_id(binding_id: &str) -> CliError {
     CliError::new(
         ExitKind::Validation,
         "PROJECTION_INVALID_NAME",
         format!(
-            "invalid binding id '{}': expected `<mem>/<stem>` with each half a single path \
-             component (no extra separators, traversal segments, ':' or NUL)",
+            "invalid binding id '{}': expected `<mem>/<stem>`, the stem a single path \
+             component after the last '/', the mem a mem name (a nested `team/sub-mem` \
+             is fine; no traversal segments, ':' or NUL anywhere)",
             binding_id.escape_default()
         ),
     )
@@ -1264,14 +1269,11 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
     let binding_id = args.binding;
     let op = args.operation;
 
-    // Parse the binding id `<mem>/<stem>`; refuse a malformed shape (or a half
-    // that is not a single plain path component) before touching disk. Own the
-    // halves so `binding_id` is free to move into JSON payloads later.
-    let (mem, stem) = binding_id
-        .split_once('/')
-        .filter(|(m, n)| !m.is_empty() && !n.is_empty())
-        .filter(|(m, n)| is_single_component(m) && is_single_component(n))
-        .ok_or_else(|| invalid_binding_id(&binding_id))?;
+    // Parse the binding id `<mem>/<stem>` with the store's own parser; refuse
+    // a malformed shape before touching disk. Own the halves so `binding_id`
+    // is free to move into JSON payloads later.
+    let (mem, stem) =
+        parse_binding_id(&binding_id).ok_or_else(|| invalid_binding_id(&binding_id))?;
     let mem = mem.to_string();
     let stem = stem.to_string();
 
@@ -1434,11 +1436,8 @@ fn edit(ctx: &CliContext, args: EditArgs) -> anyhow::Result<()> {
     })?;
 
     let binding_id = args.binding;
-    let (mem, stem) = binding_id
-        .split_once('/')
-        .filter(|(m, n)| !m.is_empty() && !n.is_empty())
-        .filter(|(m, n)| is_single_component(m) && is_single_component(n))
-        .ok_or_else(|| invalid_binding_id(&binding_id))?;
+    let (mem, stem) =
+        parse_binding_id(&binding_id).ok_or_else(|| invalid_binding_id(&binding_id))?;
     let mem = mem.to_string();
     let stem = stem.to_string();
 

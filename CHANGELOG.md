@@ -36,6 +36,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A nested mem name is a legal binding destination.** `memstead
+  projection init --mem stocks/impfpflicht` refused
+  `PROJECTION_INVALID_NAME` although nested mem names (`team/sub-mem`)
+  are first-class everywhere else in the engine: the workspace create
+  rules, git-branch mounts, `mem list`. The binding store now keys a mem
+  by its path, so the record lands at
+  `.memstead/projections/stocks/impfpflicht/anker.json`, the loader
+  walks nested tiers, and the per-binding state (`state/findings`,
+  `state/advance`) nests the same way. The canonical binding id
+  `<mem>/<stem>` splits at its LAST separator, through one shared parser
+  (`memstead_base::pipeline_store::parse_binding_id`) that every surface
+  uses: the CLI's `enable` / `edit` / `brief` / `advance` / `exclude` /
+  `report`, the run resolver, the cursor, the findings and advance
+  stores. The traversal guard is unchanged in substance: every component
+  of the mem path and the stem still refuses `.`, `..`, backslashes,
+  `:` and NUL, so `stocks/../x` is refused as before. A mem's store
+  removal and relocation now move the mem's own record files rather
+  than its whole directory, so a nested mem's tier under a parent path
+  is never swept away with the parent.
+
 - **Search finds a word whatever Unicode spelling it arrives in.** The
   search tokenizer now normalises text to NFC before splitting it into
   words. Until now a decomposed umlaut (`a` + U+0308, the spelling macOS

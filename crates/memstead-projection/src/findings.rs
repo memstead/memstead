@@ -76,7 +76,6 @@ use memstead_base::binding::{
 use memstead_base::entity::EntityId;
 use memstead_base::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
-use super::advance::is_single_component;
 use super::cursor::{compute_source_cursor, enumerate_source_artifacts};
 use super::refinement::{
     ROTATION_ANCHOR_ADJUDICATION, bump_verify_runs, next_batch, next_rotation_batch,
@@ -676,13 +675,11 @@ pub fn record_anchor_hash_backfill(
     engine.record_anchor_observed_hashes(destination_mem, &outcome.hash_backfill, note)
 }
 
-/// Split a canonical binding id `<mem>/<stem>` into its two path-safe halves,
-/// or refuse. Uses the same guard as the advance store so a caller-supplied id
-/// can never escape the `.memstead/state/findings/` tier.
+/// Split a canonical binding id `<mem>/<stem>` into its mem path and stem,
+/// or refuse. The store's own parser carries the path guard, so a
+/// caller-supplied id can never escape the `.memstead/state/findings/` tier.
 fn split_binding_id(binding_id: &str) -> Result<(String, String), FindingsError> {
-    binding_id
-        .split_once('/')
-        .filter(|(m, n)| is_single_component(m) && is_single_component(n))
+    memstead_base::pipeline_store::parse_binding_id(binding_id)
         .map(|(m, n)| (m.to_string(), n.to_string()))
         .ok_or_else(|| FindingsError::MalformedId(binding_id.to_string()))
 }

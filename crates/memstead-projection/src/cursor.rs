@@ -859,9 +859,7 @@ pub fn compute_source_cursor(
     let disposed_units: std::cell::OnceCell<BTreeSet<String>> = std::cell::OnceCell::new();
     let disposed_units = || {
         disposed_units.get_or_init(|| {
-            resolved
-                .name
-                .split_once('/')
+            memstead_base::pipeline_store::parse_binding_id(&resolved.name)
                 .and_then(|(mem, name)| {
                     super::advance::read_advance_store(workspace_root, mem, name)
                         .ok()

@@ -41,6 +41,7 @@ use memstead_base::Engine;
 use memstead_base::anchor::{AnchorGrain, AnchorProvenanceClass, AnchorState};
 use memstead_base::binding::{Binding, CoverageSemantics, MediumCapabilities, medium_capabilities};
 use memstead_base::chunking::estimate_tokens;
+use memstead_base::pipeline_store::parse_binding_id;
 
 use super::advance::read_advance_store;
 use super::cursor::{enumerate_source_artifacts_reported, source_moved};
@@ -1714,7 +1715,7 @@ pub fn compute_fidelity_report(
     // however it is annotated. The count rides beside the figures as
     // `excluded`, and the rationales keep their own block below.
     let mut disposed_excluded_rationales: Vec<(String, String)> = Vec::new();
-    if let Some((mem, name)) = binding_id.split_once('/')
+    if let Some((mem, name)) = parse_binding_id(&binding_id)
         && let Ok(Some(state)) = read_advance_store(workspace_root, mem, name)
     {
         let uncovered_set: std::collections::BTreeSet<&str> =
@@ -1744,7 +1745,7 @@ pub fn compute_fidelity_report(
         .collect();
     unanchored_entities.sort();
     let mut excluded_entity_rationales: Vec<(String, String)> = Vec::new();
-    if let Some((mem, name)) = binding_id.split_once('/')
+    if let Some((mem, name)) = parse_binding_id(&binding_id)
         && let Ok(Some(state)) = read_advance_store(workspace_root, mem, name)
     {
         for (entity, rationale) in &state.entity_exclusions {
@@ -1764,7 +1765,7 @@ pub fn compute_fidelity_report(
     // batch: the verify pass records one `unanchored-mention` finding per
     // (entity, artifact), already net of the exclusion ledger.
     let mut unanchored_mentions: Vec<UnanchoredMention> = Vec::new();
-    if let Some((mem, name)) = binding_id.split_once('/')
+    if let Some((mem, name)) = parse_binding_id(&binding_id)
         && let Ok(Some(store)) = read_findings_store(workspace_root, mem, name)
     {
         for f in store.current(key) {
@@ -1897,7 +1898,7 @@ pub fn compute_fidelity_report(
     let mut findings_by_class: BTreeMap<String, usize> = BTreeMap::new();
     let mut backlog = 0usize;
     let mut superseded: Vec<String> = Vec::new();
-    if let Some((mem, name)) = binding_id.split_once('/')
+    if let Some((mem, name)) = parse_binding_id(&binding_id)
         && let Ok(Some(store)) = read_findings_store(workspace_root, mem, name)
     {
         for f in store.current(key) {
