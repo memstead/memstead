@@ -190,10 +190,14 @@ pub(crate) fn rewrite_mem_prefix(text: &str, old_mem: &str, new_mem: &str) -> (S
 
         out.push_str(&text[last_end..whole.start()]);
 
-        let rewritten_inner = match split_cross_mem_target(target) {
-            Some((mem, sep, slug)) if mem == old_mem => Some(format!("{new_mem}{sep}{slug}")),
-            _ => None,
-        };
+        // Exact-prefix match on the qualifier rather than the grammar
+        // splitter: the splitter refuses a `/` in the mem half (that is
+        // the decoder's ambiguity rule), but the caller names the mem
+        // outright, and a hierarchical mem's own links (`[[a/b--slug]]`,
+        // `[[a/b:slug]]`) are exactly what an export to its leaf name
+        // has to retarget.
+        let rewritten_inner = split_qualified_target(target, old_mem)
+            .map(|(sep, slug)| format!("{new_mem}{sep}{slug}"));
 
         if let Some(new_target) = rewritten_inner {
             out.push_str("[[");
@@ -211,6 +215,24 @@ pub(crate) fn rewrite_mem_prefix(text: &str, old_mem: &str, new_mem: &str) -> (S
     }
     out.push_str(&text[last_end..]);
     (out, rewritten)
+}
+
+/// Split a target that names `mem` outright as its qualifier into
+/// `(separator, slug)`: `<mem>:<slug>` or `<mem>--<slug>`, the slug
+/// non-empty and the `::` reserved syntax left alone. `None` for a bare
+/// slug or a target qualified by another mem. Unlike
+/// [`split_cross_mem_target`] the mem may carry `/`: the caller knows
+/// which mem it means, so no grammar decision is taken here.
+fn split_qualified_target<'a>(target: &'a str, mem: &str) -> Option<(&'static str, &'a str)> {
+    let rest = target.strip_prefix(mem)?;
+    if let Some(slug) = rest.strip_prefix(':') {
+        if !slug.is_empty() && !slug.starts_with(':') {
+            return Some((":", slug));
+        }
+        return None;
+    }
+    let slug = rest.strip_prefix("--")?;
+    (!slug.is_empty()).then_some(("--", slug))
 }
 
 /// Decompose a cross-mem wiki-link target half into
@@ -246,6 +268,29 @@ fn split_cross_mem_target(target: &str) -> Option<(&str, &'static str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A hierarchical mem's own qualified links follow the mem to a new
+    /// name in both forms; a target qualified by a longer path that
+    /// merely starts with the mem, a bare slug, and code spans stay.
+    #[test]
+    fn rewrites_hierarchical_mem_prefix_in_both_forms() {
+        let text = "\
+---
+type: note
+---
+# N
+
+See [[planning/plan-x--alpha]] and [[planning/plan-x:beta|the beta]], not
+[[planning/plan-xy--gamma]] nor [[alpha]] nor `[[planning/plan-x--code]]`.
+";
+        let (out, n) = rewrite_mem_prefix(text, "planning/plan-x", "plan-x");
+        assert_eq!(n, 2);
+        assert!(out.contains("[[plan-x--alpha]]"), "{out}");
+        assert!(out.contains("[[plan-x:beta|the beta]]"), "{out}");
+        assert!(out.contains("[[planning/plan-xy--gamma]]"), "{out}");
+        assert!(out.contains("[[alpha]]"), "{out}");
+        assert!(out.contains("`[[planning/plan-x--code]]`"), "{out}");
+    }
 
     #[test]
     fn rewrites_bare_self_reference() {

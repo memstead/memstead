@@ -55,6 +55,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A hierarchical mem's export carries links install accepts, and a
+  refused self-contained export leaves no archive behind.** A mem named
+  `planning/plan-x` publishes under its leaf `plan-x` (the archive name
+  grammar admits no `/`), but its entities kept the links that qualified
+  themselves with the workspace path: `[[planning/plan-x--slug]]`, which
+  the write path accepts as a self-reference, reads under the leaf as
+  the ambiguous dash-slash form, and `[[planning/plan-x:slug]]` as a
+  foreign mem — so `install` refused what `export` had written, and
+  `--self-contained`, whose strict pass caught it first, left the
+  pre-pass archive on disk under a failing command. Every export path
+  (folder, in-memory, git-branch) now derives the archive name by one
+  rule, `ops::export::archive_identity`, and retargets the mem's own
+  qualified links to it (`retarget_mem_links`, both forms, code spans
+  untouched; a no-op for a flat mem), and the CLI removes the archive
+  when the self-contained pass refuses, naming that nothing was
+  written. Found by the trustwork project's first bundle.
+
 - **A rename keeps the entity's check history, and the independence
   reading follows the rename.** `memstead rename` moved the file, the
   anchors and every incoming link but left the check ledger keyed by

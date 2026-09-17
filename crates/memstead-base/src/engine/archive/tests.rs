@@ -1345,3 +1345,68 @@ fn read_entity_path_works_against_byte_backed_archive() {
     let backend = ArchiveBackend::from_bytes(Vec::new());
     let _: Option<&Path> = backend.archive_path();
 }
+
+/// A hierarchical mem exports under its leaf name, and every link that
+/// qualified itself with the workspace path follows: `[[planning/plan-x--
+/// alpha]]` (the self-qualified form the write path accepts) and
+/// `[[planning/plan-x:beta]]` read, under the leaf, as ambiguous and as
+/// foreign respectively — install refused such an archive until the
+/// export retargeted them. The archive must pass the strict validator
+/// install runs, carry the leaf as its name, and hold the retargeted links.
+#[test]
+fn nested_mem_exports_under_its_leaf_with_its_links_retargeted() {
+    let tmp = TempDir::new().unwrap();
+    let mem_dir = tmp.path().join("plan-x");
+    std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+    std::fs::write(
+        mem_dir.join(".memstead").join("config.json"),
+        r#"{"format": 1, "schema": "default@1.0.0", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+    let spec = |title: &str, identity: &str| {
+        format!(
+            "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-01-15\nlevel: M0\n---\n\
+# {title}\n\n## Identity\n\n{identity}\n\n## Purpose\n\nB\n\n## Specifies\n\nC\n\n\
+## Constraints\n\nD\n\n## Rationale\n\nE\n"
+        )
+    };
+    std::fs::write(mem_dir.join("alpha.md"), spec("Alpha", "A")).unwrap();
+    std::fs::write(mem_dir.join("beta.md"), spec("Beta", "B")).unwrap();
+    std::fs::write(
+        mem_dir.join("gamma.md"),
+        spec(
+            "Gamma",
+            "Builds on [[planning/plan-x--alpha]] and [[planning/plan-x:beta|beta]]; \
+compare `[[planning/plan-x--alpha]]` in code.",
+        ),
+    )
+    .unwrap();
+    let writer = FilesystemBackend::new(mem_dir.clone());
+    let engine = Engine::from_mounts(vec![(
+        folder_mount("planning/plan-x", mem_dir.clone()),
+        Box::new(writer) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+
+    let bytes = engine.export_mem_to_bytes("planning/plan-x").unwrap();
+    let validated = crate::validator::validate_and_normalize_archive(&bytes)
+        .expect("the strict pass install runs must accept the export");
+    assert_eq!(validated.config.name, "plan-x");
+
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+    let mut gamma = String::new();
+    std::io::Read::read_to_string(&mut zip.by_name("gamma.md").unwrap(), &mut gamma).unwrap();
+    assert!(gamma.contains("[[plan-x--alpha]]"), "{gamma}");
+    assert!(gamma.contains("[[plan-x:beta|beta]]"), "{gamma}");
+    assert!(gamma.contains("`[[planning/plan-x--alpha]]`"), "{gamma}");
+    assert!(!gamma.contains("[[planning/plan-x:beta"), "{gamma}");
+
+    // The strict pass resolves both links inside the archive: gamma's
+    // outgoing body links land on alpha and beta, no cross-mem edge.
+    let self_contained = crate::validator::make_archive_self_contained(&bytes).unwrap();
+    assert!(
+        self_contained.dropped.is_empty(),
+        "{:?}",
+        self_contained.dropped
+    );
+}

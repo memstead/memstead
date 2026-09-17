@@ -264,7 +264,7 @@ pub(crate) fn schema_files_from_memstead_ref(
 /// routing, not mem identity, and the archive format's slug grammar
 /// admits no `/`. Flat names pass through unchanged.
 fn archive_identity(mem_name: &str) -> &str {
-    mem_name.rsplit('/').next().unwrap_or(mem_name)
+    memstead_base::ops::export::archive_identity(mem_name)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -300,10 +300,19 @@ pub fn export_mem_from_branch_to_bytes(
         Err(BranchReadError::BranchMissing { .. }) => Vec::new(),
         Err(e) => return Err(branch_read_into_mem_export(e)),
     };
+    // A hierarchical mem publishes under its leaf, so every link that
+    // qualifies itself with the workspace path follows the name into the
+    // archive (`[[planning/plan-x--slug]]` → `[[plan-x--slug]]`); the
+    // base funnel applies the same rule for folder and in-memory mems.
     let md_entries: Vec<(String, Vec<u8>)> = blobs
         .into_iter()
         .filter(|b| b.path.ends_with(".md"))
-        .map(|b| (b.path, b.bytes))
+        .map(|b| {
+            (
+                b.path,
+                memstead_base::ops::export::retarget_mem_links(b.bytes, mem_name, &published.name),
+            )
+        })
         .collect();
     let entity_count = md_entries.len();
 

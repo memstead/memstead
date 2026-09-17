@@ -327,17 +327,51 @@ pub fn export_mem_to_bytes(
 /// `md_entries` are `(mem-relative path, bytes)` pairs; paths are
 /// posix-normalised for the archive. Entries need not be pre-sorted — the
 /// archive sort makes the output deterministic regardless of input order.
+/// The archive identity of a mem name: its LEAF segment. A hierarchical
+/// mem (`planning/plan-x`) publishes as `plan-x`: the path is workspace
+/// routing, not mem identity, and the archive format's name grammar
+/// admits no `/`. Flat names pass through unchanged. One definition for
+/// every export path, so an archive's name and the links inside it are
+/// derived by the same rule.
+pub fn archive_identity(mem_name: &str) -> &str {
+    mem_name.rsplit('/').next().unwrap_or(mem_name)
+}
+
+/// Retarget an entity file's mem-qualified wiki-links from the mem's
+/// workspace name to its archive identity: `[[<mem>--slug]]` and
+/// `[[<mem>:slug]]` become `[[<archive>--slug]]` / `[[<archive>:slug]]`.
+/// The archive is validated and installed under the leaf name, so a
+/// link that qualifies itself with the workspace path would read there
+/// as ambiguous (`a/b--slug`) or as a foreign mem (`a/b:slug`) — the
+/// write path accepted it as a self-reference, and the export must not
+/// write what install refuses. A no-op when the two names agree; bytes
+/// that are not UTF-8 pass through untouched (the validator judges them).
+pub fn retarget_mem_links(bytes: Vec<u8>, mem_name: &str, archive_name: &str) -> Vec<u8> {
+    if mem_name == archive_name {
+        return bytes;
+    }
+    match std::str::from_utf8(&bytes) {
+        Ok(text) => {
+            let (out, n) =
+                crate::entity::wikilink_rewrite::rewrite_mem_prefix(text, mem_name, archive_name);
+            if n == 0 { bytes } else { out.into_bytes() }
+        }
+        Err(_) => bytes,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn export_entries_to_bytes(
     config: &MemConfig,
     workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
-    explicit_name: &str,
+    mem_name: &str,
     md_entries: Vec<(PathBuf, Vec<u8>)>,
     provenance: Option<&ArchiveProvenance>,
     anchors_bytes: Option<&[u8]>,
     ref_schema_source: Option<Vec<SchemaSourceFile>>,
 ) -> Result<MemExportBytes, MemExportError> {
+    let explicit_name = archive_identity(mem_name);
     let published = published_config_from(config, explicit_name)?;
     let config_bytes = canonical_json(&published)
         .map_err(|e| MemExportError::Canonical(e.to_string()))?
@@ -377,7 +411,10 @@ pub fn export_entries_to_bytes(
         ));
     }
     for (rel, bytes) in md_entries {
-        all_entries.push((posix_path(&rel), bytes));
+        all_entries.push((
+            posix_path(&rel),
+            retarget_mem_links(bytes, mem_name, &published.name),
+        ));
     }
     all_entries.sort_by(|a, b| a.0.cmp(&b.0));
 

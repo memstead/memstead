@@ -673,10 +673,17 @@ fn make_self_contained_on_disk(
         )
     })?;
     let out = memstead_base::validator::make_archive_self_contained(&bytes).map_err(|e| {
+        // The pre-pass archive was written first; leaving it would hand
+        // the caller a file `install` refuses under a command that
+        // reported failure. Remove it so a failed export writes nothing.
+        let _ = std::fs::remove_file(path);
         CliError::new(
             ExitKind::Generic,
             "ARCHIVE_VALIDATION_FAILED",
-            format!("self-contained re-pack of {}: {e}", path.display()),
+            format!(
+                "self-contained re-pack of {}: {e}; the archive was removed, nothing was written",
+                path.display()
+            ),
         )
     })?;
     std::fs::write(path, &out.bytes).map_err(|e| {
