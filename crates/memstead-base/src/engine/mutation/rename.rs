@@ -487,6 +487,13 @@ impl Engine {
         // resolution finds every anchor under the new id (zero under the
         // old). A no-op when the entity had no anchors (byte-identical).
         super::stage_anchors_rename(backend, id, &new_id)?;
+        // The check ledger follows the id too. It is workspace state, not
+        // mem content, so it cannot ride the commit; it is carried before
+        // the commit so a ledger that refuses stops the rename the way a
+        // refused check stops a record, and a commit that then fails
+        // leaves at worst a carried line under an id that never came to
+        // be — never a renamed entity that lost its checks.
+        self.carry_checks_across_rename(id, &new_id)?;
         let commit_subject = format!("memstead: rename {} → {new_id}", id);
         let mut ctx = self.commit_context(
             Some("rename_entity"),

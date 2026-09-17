@@ -1649,3 +1649,86 @@ fn rename_with_no_cross_mem_referrers_succeeds_regardless_of_policy() {
         .unwrap();
     assert_ne!(outcome.old_id, outcome.new_id);
 }
+
+/// A rename carries the entity's check ledger lines to the new id: the
+/// renamed entity derives `check_stale` (the file changed — title,
+/// self-links — and the verdict is not re-asserted on it), never
+/// `never_checked`, and the carried line names the id it came from.
+/// The lines under the old id stay, as the append-only ledger's record
+/// of what was checked under that id.
+#[test]
+fn rename_carries_check_records_to_the_new_id() {
+    use crate::check::{CheckKind, CheckLedger, CheckState, Verdict, derive_state};
+    let tmp = TempDir::new().unwrap();
+    let mem_dir = tmp.path().join("specs");
+    std::fs::create_dir_all(&mem_dir).unwrap();
+    let writer = FilesystemBackend::new(mem_dir.clone());
+    let mut engine = Engine::from_mounts(vec![(
+        folder_mount("specs", mem_dir.clone()),
+        Box::new(writer) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+    engine.set_workspace_root(tmp.path().to_path_buf());
+    let (actor, client) = cli_actor();
+    let seeded = engine
+        .create_entity(
+            empty_create_args("specs", "Checked Before Rename"),
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    let old_id = seeded.id.clone();
+    engine.set_identity(Some("checker".into()));
+    engine
+        .record_check(
+            "specs",
+            old_id.as_ref(),
+            Verdict::Ok,
+            CheckKind::Verification,
+            Some("read it"),
+            actor,
+            Some(&client),
+        )
+        .unwrap();
+    engine.set_identity(None);
+
+    let outcome = engine
+        .rename_entity(
+            RenameEntityArgs {
+                id: old_id.clone(),
+                expected_hash: Some(seeded.content_hash.clone()),
+                new_title: "Checked After Rename".to_string(),
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+
+    let ledger = CheckLedger::for_workspace(tmp.path());
+    let carried = ledger
+        .latest_for_kind(outcome.new_id.as_ref(), CheckKind::Verification)
+        .expect("the check followed the rename");
+    assert_eq!(carried.renamed_from.as_deref(), Some(old_id.as_ref()));
+    assert_eq!(carried.verdict, "ok");
+    assert_eq!(carried.identity.as_deref(), Some("checker"));
+    assert_eq!(carried.method.as_deref(), Some("read it"));
+    assert_eq!(carried.entity_hash, seeded.content_hash);
+    // The original stays under the old id, unmarked.
+    let original = ledger.latest_for(old_id.as_ref()).unwrap();
+    assert!(original.renamed_from.is_none());
+    // Against the renamed file the carried verdict is stale, not fresh
+    // and not absent.
+    let renamed = engine.get_entity(&outcome.new_id).unwrap();
+    assert_ne!(renamed.content_hash, seeded.content_hash);
+    assert_eq!(
+        derive_state(Some(&carried), &renamed.content_hash),
+        CheckState::CheckStale
+    );
+    // The engine's own derivation agrees.
+    let state = engine
+        .entity_check_state("specs", outcome.new_id.as_ref())
+        .unwrap();
+    assert_eq!(state.0, CheckState::CheckStale);
+}

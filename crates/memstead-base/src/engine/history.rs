@@ -136,7 +136,7 @@ pub struct EntityHistoryReport {
 /// pair. Cross-mem peer rewrites (parenthetical qualifier) and
 /// malformed values return `None` — they modify wiki-link bodies in a
 /// peer mem, never the entity itself.
-fn parse_rename_pair(field: &str) -> Option<(String, String)> {
+pub(crate) fn parse_rename_pair(field: &str) -> Option<(String, String)> {
     if field.contains("(cross-mem rewrite") {
         return None;
     }

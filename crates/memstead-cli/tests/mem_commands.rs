@@ -2795,8 +2795,13 @@ fn verify_anchors_observations_adjudicate_and_age_url_rows() {
         .clone();
     let hv: serde_json::Value = serde_json::from_slice(&health).unwrap();
     let text = hv.to_string();
+    // The fixture's observation date is fixed, so the age grows with the
+    // calendar: the note must carry the same count the row reports.
+    let living_days = row("https://w.test/living")["unobserved_for_days"]
+        .as_u64()
+        .unwrap();
     assert!(
-        text.contains("unobserved for 3"),
+        text.contains(&format!("unobserved for {living_days} days")),
         "aging note missing: {text}"
     );
     assert!(

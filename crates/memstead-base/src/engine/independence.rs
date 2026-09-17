@@ -97,9 +97,57 @@ impl CheckStanding {
 #[derive(Debug, Default, Clone)]
 pub struct MemTouches {
     by_entity: HashMap<String, Vec<(i64, Option<String>)>>,
+    /// Rename notes seen, as `(ts, old, new)`, for [`Self::follow_renames`].
+    renames: Vec<(i64, String, String)>,
 }
 
 impl MemTouches {
+    /// Record one note's touch. A rename note's entity field reads
+    /// `old → new` (the engine's own subject shape, the pair
+    /// [`super::history::parse_rename_pair`] splits); the touch lands
+    /// under both ids and the pair is kept so [`Self::follow_renames`]
+    /// can join the two halves of the story. Anything else is one id.
+    fn absorb(&mut self, entity_field: &str, ts: i64, identity: Option<String>) {
+        match super::history::parse_rename_pair(entity_field) {
+            Some((old, new)) => {
+                self.by_entity
+                    .entry(old.clone())
+                    .or_default()
+                    .push((ts, identity.clone()));
+                self.by_entity
+                    .entry(new.clone())
+                    .or_default()
+                    .push((ts, identity));
+                self.renames.push((ts, old, new));
+            }
+            None => self
+                .by_entity
+                .entry(entity_field.to_string())
+                .or_default()
+                .push((ts, identity)),
+        }
+    }
+
+    /// Join each renamed entity's story: the touches recorded under the
+    /// old id (its creation among them) become touches of the new id,
+    /// oldest rename first so a chain `a → b → c` carries `a`'s story
+    /// through `b` into `c`. Without this the renamed entity's oldest
+    /// touch is the rename itself and the renamer reads as its author.
+    fn follow_renames(&mut self) {
+        let mut renames = std::mem::take(&mut self.renames);
+        renames.sort_by_key(|r| r.0);
+        for (_, old, new) in &renames {
+            let inherited = self.by_entity.get(old).cloned().unwrap_or_default();
+            let target = self.by_entity.entry(new.clone()).or_default();
+            for touch in inherited {
+                if !target.contains(&touch) {
+                    target.push(touch);
+                }
+            }
+        }
+        self.renames = renames;
+    }
+
     /// The oldest touch timestamp of `entity`, if any is recorded.
     fn written_at(&self, entity: &str) -> Option<i64> {
         self.by_entity
@@ -162,15 +210,9 @@ impl Engine {
                         let Some(entity) = n.entity_id.as_deref() else {
                             continue;
                         };
-                        // A rename note names `old -> new`; both ids are the
-                        // same entity's story.
-                        for id in entity.split("->").map(str::trim).filter(|s| !s.is_empty()) {
-                            out.by_entity
-                                .entry(id.to_string())
-                                .or_default()
-                                .push((n.timestamp, n.identity.clone()));
-                        }
+                        out.absorb(entity, n.timestamp, n.identity.clone());
                     }
+                    out.follow_renames();
                 }
             }
             crate::workspace::MountStorage::Folder { .. }
@@ -318,5 +360,50 @@ impl Engine {
                 independence: Some(independence),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MemTouches;
+
+    /// A git-branch rename note carries `old → new` in its entity field.
+    /// Absorbing it lands the touch under both ids, and following the
+    /// renames joins the old id's story to the new one — the creator
+    /// stays the oldest touch, the renamer does not become the author.
+    /// Before this, the field was split on an ASCII `->` the engine never
+    /// writes, so the renamed entity had no story at all and every check
+    /// on it read `unconfirmable`.
+    #[test]
+    fn rename_notes_join_the_story_under_the_new_id() {
+        let mut t = MemTouches::default();
+        t.absorb("m--a", 10, Some("alice".into()));
+        t.absorb("m--a → m--b", 20, Some("renamer".into()));
+        t.absorb("m--b", 30, Some("bob".into()));
+        t.absorb("m--b → m--c", 40, None);
+        t.follow_renames();
+
+        assert_eq!(t.written_at("m--c"), Some(10));
+        let author = t
+            .by_entity
+            .get("m--c")
+            .and_then(|v| v.iter().min_by_key(|(ts, _)| *ts))
+            .and_then(|(_, id)| id.clone());
+        assert_eq!(author.as_deref(), Some("alice"));
+        let mut ids = std::collections::BTreeSet::new();
+        t.identities_since("m--c", 0, &mut ids);
+        assert_eq!(
+            ids.into_iter().collect::<Vec<_>>(),
+            vec!["alice", "bob", "renamer"]
+        );
+        // A cross-mem rewrite qualifier is not a pair and stays one key.
+        let mut u = MemTouches::default();
+        u.absorb("m--x → m--y (cross-mem rewrite in peer)", 1, None);
+        u.follow_renames();
+        assert!(
+            u.by_entity
+                .contains_key("m--x → m--y (cross-mem rewrite in peer)")
+        );
+        assert!(!u.by_entity.contains_key("m--y"));
     }
 }

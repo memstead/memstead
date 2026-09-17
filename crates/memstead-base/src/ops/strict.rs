@@ -467,6 +467,7 @@ mod tests {
                 message: "known open".to_string(),
                 evidence: None,
             }),
+            renamed_from: None,
         }
     }
 

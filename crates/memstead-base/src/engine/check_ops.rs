@@ -178,6 +178,7 @@ impl Engine {
             },
             schema_ref,
             finding,
+            renamed_from: None,
         };
         ledger
             .record(&record)
@@ -185,6 +186,32 @@ impl Engine {
                 reason: format!("ledger append failed: {e}"),
             })?;
         Ok(record)
+    }
+
+    /// Carry the check ledger across a rename: every line recorded under
+    /// `old` is appended again under `new`, marked `renamed_from`, so the
+    /// renamed entity keeps its check history instead of reading
+    /// `never_checked` while its record sits unreachable under an id
+    /// nothing resolves any more. The carried lines keep their hash, so
+    /// they derive `check_stale` against the renamed file — a rename is
+    /// a content change (title, self-links), and the verdict is not
+    /// re-asserted on content the checker never saw. An engine with no
+    /// workspace root has no ledger and carries nothing. A failed
+    /// append refuses, as recording does: the caller runs this before
+    /// the rename commits.
+    pub(crate) fn carry_checks_across_rename(
+        &self,
+        old: &crate::entity::EntityId,
+        new: &crate::entity::EntityId,
+    ) -> Result<usize, EngineError> {
+        let Some(root) = self.workspace_root() else {
+            return Ok(0);
+        };
+        CheckLedger::for_workspace(root)
+            .carry_rename(old.as_ref(), new.as_ref())
+            .map_err(|e| EngineError::CheckNotRecorded {
+                reason: format!("ledger carry across rename {old} → {new} failed: {e}"),
+            })
     }
 
     /// Derive one entity's check state and newest check record.

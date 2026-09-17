@@ -55,6 +55,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A rename keeps the entity's check history, and the independence
+  reading follows the rename.** `memstead rename` moved the file, the
+  anchors and every incoming link but left the check ledger keyed by
+  the old id: the renamed entity read `never_checked` and its records
+  sat unreachable. The ledger now carries every line of the old id to
+  the new id, marked `renamed_from`, before the rename commits (a
+  refusing ledger stops the rename, as a refusing append stops a
+  check). The carried line keeps the hash it was checked against, so
+  the renamed entity reads `check_stale` — the rename rewrote the file
+  (title, self-links) and the verdict is not re-asserted on content
+  the checker never saw; the state and the record are visible where
+  they were lost. On git-branch mems the independence comparator split
+  a rename note on an ASCII `->` the engine never writes (its subject
+  reads `old → new`), so a renamed entity had no story: its oldest
+  touch vanished and every check on it read `unconfirmable`, or the
+  renamer read as its author. The note now joins the old id's story to
+  the new one, oldest rename first across a chain.
+
 - **A git-branch mem name that git's ref namespace cannot hold refuses
   before anything is written, a failed seed leaves no config behind,
   and a config left behind is removable.** Git keeps refs as files in

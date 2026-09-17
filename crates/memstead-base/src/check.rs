@@ -288,6 +288,17 @@ pub struct CheckRecord {
     /// still parses and finding-less lines stay byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finding: Option<CheckFinding>,
+    /// Set on a line the engine carried across a rename: the id the
+    /// check was recorded under before the entity took its current id.
+    /// Every other field is the original act's, hash included, so the
+    /// state derived under the new id stays honest — a rename rewrites
+    /// the file (title, self-links, timestamps), so the carried record
+    /// reads `check_stale` until someone checks the renamed entity; what
+    /// the carry prevents is the ledger losing the entity (`never_checked`
+    /// under the new id, an unreachable row under the old). Absent on
+    /// every line a checker wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renamed_from: Option<String>,
 }
 
 impl CheckRecord {
@@ -408,6 +419,39 @@ impl CheckLedger {
         f.write_all(line.as_bytes())
     }
 
+    /// Carry every record of `old` across a rename to `new`: each line
+    /// keyed by the old id is appended again under the new id with
+    /// `renamed_from` set, in ledger order, as one write of whole lines.
+    /// The originals stay — the ledger is append-only and they remain the
+    /// record of what was checked under that id. Returns the number of
+    /// lines carried; zero (and no write) when the old id has none.
+    pub fn carry_rename(&self, old: &str, new: &str) -> std::io::Result<usize> {
+        let carried: Vec<CheckRecord> = self
+            .all()
+            .into_iter()
+            .filter(|r| r.entity == old)
+            .map(|mut r| {
+                r.entity = new.to_string();
+                r.renamed_from = Some(old.to_string());
+                r
+            })
+            .collect();
+        if carried.is_empty() {
+            return Ok(0);
+        }
+        let mut lines = String::new();
+        for rec in &carried {
+            lines.push_str(&serde_json::to_string(rec).map_err(std::io::Error::other)?);
+            lines.push('\n');
+        }
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        f.write_all(lines.as_bytes())?;
+        Ok(carried.len())
+    }
+
     /// All records, oldest first. A missing ledger is an empty one;
     /// unparseable lines are skipped (a torn tail must not poison the
     /// readable history).
@@ -474,6 +518,7 @@ mod tests {
             kind: None,
             schema_ref: None,
             finding: None,
+            renamed_from: None,
         }
     }
 
@@ -503,6 +548,60 @@ mod tests {
         assert_eq!(latest.entity_hash, "h2");
         // Supersession never erases: all three records remain.
         assert_eq!(ledger.all().len(), 3);
+    }
+
+    /// A rename carries the old id's lines under the new id, marked
+    /// with their origin, and leaves the originals in place. The carried
+    /// line keeps the hash the check was made against, so it derives
+    /// `check_stale` against the renamed file's new hash — never a
+    /// silently fresh `checked_ok`, never `never_checked`.
+    #[test]
+    fn carry_rename_rekeys_without_erasing() {
+        let tmp = TempDir::new().unwrap();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        ledger.record(&rec("m--old", "ok", "h1")).unwrap();
+        ledger.record(&rec("m--other", "ok", "h9")).unwrap();
+        let mut conf = rec("m--old", "failed", "h1");
+        conf.kind = Some("conformance".into());
+        ledger.record(&conf).unwrap();
+
+        assert_eq!(ledger.carry_rename("m--old", "m--new").unwrap(), 2);
+        assert_eq!(ledger.carry_rename("m--absent", "m--new").unwrap(), 0);
+
+        let all = ledger.all();
+        assert_eq!(all.len(), 5);
+        assert!(all.iter().filter(|r| r.entity == "m--old").count() == 2);
+        let carried: Vec<&CheckRecord> = all.iter().filter(|r| r.entity == "m--new").collect();
+        assert_eq!(carried.len(), 2);
+        assert!(
+            carried
+                .iter()
+                .all(|r| r.renamed_from.as_deref() == Some("m--old"))
+        );
+        let latest = ledger
+            .latest_for_kind("m--new", CheckKind::Verification)
+            .unwrap();
+        assert_eq!(latest.verdict, "ok");
+        assert_eq!(derive_state(Some(&latest), "h1"), CheckState::CheckedOk);
+        assert_eq!(
+            derive_state(Some(&latest), "h2-after-rename"),
+            CheckState::CheckStale
+        );
+        assert_eq!(
+            ledger
+                .latest_for_kind("m--new", CheckKind::Conformance)
+                .unwrap()
+                .verdict,
+            "failed"
+        );
+        // A checker's own line never carries the marker.
+        assert!(
+            ledger
+                .latest_for("m--other")
+                .unwrap()
+                .renamed_from
+                .is_none()
+        );
     }
 
     #[test]
