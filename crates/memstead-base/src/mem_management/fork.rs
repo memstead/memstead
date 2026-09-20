@@ -15,13 +15,30 @@
 //! pointer, and the fork's branch is created at the fetched commit.
 //!
 //! The fork is an engine act end to end: the branch through the
-//! engine's git layer ([`crate::GitBranchOps`]), the config through the
-//! backend's config writer on the `__MEMSTEAD` ref, the grants through
-//! the workspace policy writer the grant verb uses, the mount through
+//! engine's git layer ([`crate::GitBranchOps`]), the fork commit through
+//! the fork's own backend, the config through the backend's config
+//! writer on the `__MEMSTEAD` ref, the grants through the workspace
+//! policy writer the grant verb uses, the mount through
 //! [`crate::Engine::register_writable_mem`]. Every refusal is typed and
-//! lands nothing; a failure after the branch exists rolls the branch and
-//! the config back through the residue prune, and the policy line
-//! through the deletion scrub (both idempotent).
+//! lands nothing; a failure after the branch exists rolls the branch
+//! (the fork commit with it) and the config back through the residue
+//! prune, and the policy line through the deletion scrub (both
+//! idempotent).
+//!
+//! **The fork commit.** A copied tree still names the source: the
+//! anchors sidecar keys its rows by `<source>--<slug>`, the derivations
+//! sidecar keys its baselines the same way, and a body link the source
+//! qualified with its own name (`[[<source>--slug]]`, `[[<source>:slug]]`)
+//! would parse in the fork as a cross-mem link into the source. So the
+//! fork's first act on its branch, before the mount exists, is one
+//! commit that moves every such id and link from the source's name to
+//! its own ([`retarget_fork_tree`]): the rows keep their hashes, spans
+//! and observations, a link naming another mem stays, a code span is
+//! never touched, and a tree with nothing to move gets the commit all
+//! the same (an empty retarget is still the base). Its sha is recorded
+//! as `forkedFrom.base`; the ancestor on the source stays `sha`. The
+//! workspace check ledger is not consulted: a fork starts unchecked,
+//! because a fork's entity is not the same entity as its source's.
 
 use std::path::Path;
 
@@ -79,7 +96,8 @@ pub struct MemForkResponse {
     /// The new mem's name.
     pub name: String,
     /// The origin as written into the fork's config: source mem, the
-    /// 40-hex sha the branch starts at, the remote when one was used.
+    /// 40-hex sha the branch starts at, the remote when one was used,
+    /// and the fork commit's sha as `base`.
     pub forked_from: memstead_schema::ForkedFrom,
     /// The schema pin the fork carries: the source's, copied.
     pub schema_ref: memstead_schema::SchemaRef,
@@ -348,26 +366,17 @@ pub fn fork_mem(
         )?;
     }
 
-    // ---- Step 7: the fork's config ----
-    // The source's config, with the origin written in and the source's
-    // own cursors left behind: sync state and the review mark are the
-    // source's maintenance bookkeeping, the tombstone is not the
-    // fork's, and the name is path-derived.
-    let forked_from = memstead_schema::ForkedFrom {
-        mem: params.source.clone(),
-        sha: sha.clone(),
-        remote: params.remote.clone(),
-    };
+    // ---- Step 7: the fork's config, short of its origin ----
+    // The source's config with the source's own cursors left behind:
+    // sync state and the review mark are the source's maintenance
+    // bookkeeping, the tombstone is not the fork's, and the name is
+    // path-derived. The origin is written in once the fork commit
+    // exists, because it records that commit's sha.
     let mut config = source_config;
     config.name = None;
     config.sync_state.clear();
     config.review_mark = None;
     config.unregistered_at = None;
-    config.forked_from = Some(forked_from.clone());
-    let mut config_bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
-        crate::EngineError::InvalidInput(format!("could not serialize the fork's config: {e}"))
-    })?;
-    config_bytes.push(b'\n');
 
     // ---- Step 8: the writes, each rolled back on the next one's failure ----
     let branch_ref = format!("refs/heads/{}", params.name);
@@ -398,6 +407,38 @@ pub fn fork_mem(
                 "backend instantiate",
             );
             return Err(crate::EngineError::Mem(format!("instantiate backend: {e}")).into());
+        }
+    };
+    // The fork commit: sidecar ids and self-links move to the fork's
+    // name in one commit on the fork's branch, right above the
+    // ancestor. The branch rollback covers it (the prune drops the ref,
+    // and the commit with it).
+    let base = match retarget_fork_tree(backend.as_ref(), &params.source, &params.name, &sha, &ctx)
+    {
+        Ok(base) => base,
+        Err(e) => {
+            roll_back(&ops, &gitdir, &root, &params.name, &ctx, "fork commit");
+            return Err(e.into());
+        }
+    };
+    let forked_from = memstead_schema::ForkedFrom {
+        mem: params.source.clone(),
+        sha: sha.clone(),
+        remote: params.remote.clone(),
+        base: Some(base),
+    };
+    config.forked_from = Some(forked_from.clone());
+    let config_bytes = match serde_json::to_vec_pretty(&config) {
+        Ok(mut bytes) => {
+            bytes.push(b'\n');
+            bytes
+        }
+        Err(e) => {
+            roll_back(&ops, &gitdir, &root, &params.name, &ctx, "config serialize");
+            return Err(crate::EngineError::InvalidInput(format!(
+                "could not serialize the fork's config: {e}"
+            ))
+            .into());
         }
     };
     if let Err(e) = backend.write_mem_config(&config_bytes, &ctx) {
@@ -471,6 +512,106 @@ pub fn fork_mem(
         inherited_grants,
         warnings,
     })
+}
+
+/// The fork commit: move every id and link that names `source` to
+/// `fork`, in the anchors sidecar (entity keys), the derivations
+/// sidecar (source keys and same-mem targets) and the entity bodies
+/// (mem-qualified self-links, through the export retargeting rule:
+/// `[[<source>--slug]]` and `[[<source>:slug]]`, labels kept, code
+/// spans and links naming another mem untouched), then commit once on
+/// the fork's branch with the caller's provenance. Rows keep their
+/// hashes, spans and observations; a body with nothing to move keeps
+/// its bytes. The commit is made even when nothing moved, so every
+/// fork has a base of its own above the ancestor. Returns the commit's
+/// sha.
+fn retarget_fork_tree(
+    backend: &dyn crate::backend::MemBackend,
+    source: &str,
+    fork: &str,
+    ancestor: &str,
+    ctx: &CommitContext<'_>,
+) -> Result<String, crate::EngineError> {
+    // The anchors sidecar: entity keys.
+    if let Some(bytes) = backend.read_anchors_sidecar()? {
+        let mut sidecar = crate::anchor::AnchorSidecar::from_bytes(&bytes).map_err(|e| {
+            crate::EngineError::Mem(format!(
+                "fork {fork:?}: the source's anchors sidecar does not parse: {e}"
+            ))
+        })?;
+        let mut moved = false;
+        let keys: Vec<String> = sidecar.entities.keys().cloned().collect();
+        for key in keys {
+            if let Some(to) = retarget_entity_id(&key, source, fork) {
+                sidecar.rename(&key, &to);
+                moved = true;
+            }
+        }
+        if moved {
+            backend.write_anchors_sidecar(&sidecar.to_bytes())?;
+        }
+    }
+
+    // The derivations sidecar: source keys and same-mem targets.
+    let derivations_path = Path::new(crate::derivation::DERIVATION_SIDECAR_PATH);
+    if let Some(bytes) = backend.read_entity(derivations_path)? {
+        let sidecar = crate::derivation::DerivationSidecar::from_bytes(&bytes).map_err(|e| {
+            crate::EngineError::Mem(format!(
+                "fork {fork:?}: the source's derivations sidecar does not parse: {e}"
+            ))
+        })?;
+        let mut moved = false;
+        let mut retargeted = crate::derivation::DerivationSidecar {
+            version: sidecar.version,
+            baselines: Default::default(),
+        };
+        for (key, baselines) in sidecar.baselines {
+            let key = match retarget_entity_id(&key, source, fork) {
+                Some(to) => {
+                    moved = true;
+                    to
+                }
+                None => key,
+            };
+            let baselines = baselines
+                .into_iter()
+                .map(|mut b| {
+                    if let Some(to) = retarget_entity_id(&b.target, source, fork) {
+                        b.target = to;
+                        moved = true;
+                    }
+                    b
+                })
+                .collect();
+            retargeted.baselines.insert(key, baselines);
+        }
+        if moved {
+            backend.write_entity(derivations_path, &retargeted.to_bytes())?;
+        }
+    }
+
+    // The entity bodies: mem-qualified self-links.
+    for rel_path in backend.list_entities()? {
+        let Some(bytes) = backend.read_entity(&rel_path)? else {
+            continue;
+        };
+        let retargeted = crate::ops::export::retarget_mem_links(bytes.clone(), source, fork);
+        if retargeted != bytes {
+            backend.write_entity(&rel_path, &retargeted)?;
+        }
+    }
+
+    let short = &ancestor[..ancestor.len().min(12)];
+    let subject = format!("memstead: fork mem {fork} from {source}@{short}");
+    Ok(backend.commit(&subject, ctx)?)
+}
+
+/// `<source>--<slug>` as `<fork>--<slug>`; `None` for an id qualified
+/// by any other mem (a cross-mem target, a foreign row), which the fork
+/// leaves as it found it.
+fn retarget_entity_id(id: &str, source: &str, fork: &str) -> Option<String> {
+    let slug = id.strip_prefix(source)?.strip_prefix("--")?;
+    (!slug.is_empty()).then(|| format!("{fork}--{slug}"))
 }
 
 /// Local form: the source is a mounted git-branch mem of this
@@ -660,5 +801,40 @@ fn roll_back(
             "fork_mem: {stage} failed and the policy rollback failed too; \
              `memstead workspace revoke-cross-link <name> <target>` removes the leftover"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retarget_entity_id;
+
+    /// The id rule the two sidecars share: exactly the source's own
+    /// ids move, by exact qualifier match; hierarchical names included.
+    #[test]
+    fn retarget_entity_id_moves_the_sources_ids_and_nothing_else() {
+        assert_eq!(
+            retarget_entity_id("specs--alpha", "specs", "specs-fork").as_deref(),
+            Some("specs-fork--alpha")
+        );
+        assert_eq!(
+            retarget_entity_id(
+                "stocks/ai-citations--claim-one",
+                "stocks/ai-citations",
+                "proposals/ai-citations-001"
+            )
+            .as_deref(),
+            Some("proposals/ai-citations-001--claim-one")
+        );
+        // A slug with dashes keeps them.
+        assert_eq!(
+            retarget_entity_id("specs--a--b", "specs", "f").as_deref(),
+            Some("f--a--b")
+        );
+        // Another mem's id, a mem whose name merely starts with the
+        // source's, a bare slug, an empty slug: untouched.
+        assert_eq!(retarget_entity_id("plans--roadmap", "specs", "f"), None);
+        assert_eq!(retarget_entity_id("specs-old--alpha", "specs", "f"), None);
+        assert_eq!(retarget_entity_id("alpha", "specs", "f"), None);
+        assert_eq!(retarget_entity_id("specs--", "specs", "f"), None);
     }
 }

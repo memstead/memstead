@@ -12,14 +12,27 @@
 //! before the mount exists, no grant is inherited, the local
 //! `__MEMSTEAD` is never fetched over, and an unresolvable pin refuses
 //! naming `memstead schema install`.
+//!
+//! The fork commit (plan-proposal 01): the fork's branch carries
+//! exactly one commit above the ancestor, made by the fork itself,
+//! that moves the anchors and derivations sidecar ids and the
+//! mem-qualified self-links from the source's name to the fork's, with
+//! hashes, spans and observations unchanged; its sha is
+//! `forkedFrom.base`, the ancestor stays `forkedFrom.sha`. A tree with
+//! nothing to move still gets the commit; a failure after it rolls
+//! everything back; a fork recorded without a base reads as based on
+//! its ancestor.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use memstead_base::anchor::{AnchorInput, AnchorSidecar, ObservedArtifactHash};
 use memstead_base::backend::MemBackend;
+use memstead_base::check::{CheckKind, Verdict};
+use memstead_base::derivation::{DERIVATION_SIDECAR_PATH, DerivationSidecar};
 use memstead_base::mem_management::{self, MemForkParams, StorageKind};
 use memstead_base::vcs::Actor;
-use memstead_base::{CreateEntityArgs, FullEngineError};
+use memstead_base::{CreateEntityArgs, EntityId, FullEngineError};
 use memstead_git_branch::mem_repo_config::{commit_config_at_gitdir, read_config_at_gitdir};
 use memstead_git_branch::ops::transport::{
     push_in_gitdir, read_md_blobs_at_ref, remote_add_in_gitdir, resolve_ref_in_gitdir,
@@ -59,6 +72,66 @@ fn create_entity_in(engine: &mut memstead_base::Engine, mem: &str, title: &str) 
             None,
         )
         .unwrap_or_else(|e| panic!("create entity {title:?} in mem {mem:?}: {e:?}"));
+}
+
+/// An entity with the given `identity` section text and anchors.
+fn create_entity_with(
+    engine: &mut memstead_base::Engine,
+    mem: &str,
+    title: &str,
+    identity: &str,
+    anchors: Vec<AnchorInput>,
+) {
+    let mut sections = seed_sections();
+    sections.insert("identity".to_string(), identity.to_string());
+    engine
+        .create_entity(
+            CreateEntityArgs {
+                anchors,
+                mem: mem.to_string(),
+                title: title.to_string(),
+                entity_type: "spec".to_string(),
+                sections,
+                metadata: Default::default(),
+                relations: Vec::new(),
+                dry_run: false,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .unwrap_or_else(|e| panic!("create entity {title:?} in mem {mem:?}: {e:?}"));
+}
+
+/// The parents of a commit, the fork commit's contract being exactly
+/// one: the ancestor.
+fn parents_of(gitdir: &Path, sha: &str) -> Vec<String> {
+    let repo = gix::open(gitdir).unwrap();
+    let id = repo.rev_parse_single(sha).unwrap();
+    id.object()
+        .unwrap()
+        .try_into_commit()
+        .unwrap()
+        .parent_ids()
+        .map(|p| p.to_string())
+        .collect()
+}
+
+/// A commit's full message and its committer name.
+fn commit_message_and_committer(gitdir: &Path, sha: &str) -> (String, String) {
+    let repo = gix::open(gitdir).unwrap();
+    let id = repo.rev_parse_single(sha).unwrap();
+    let commit = id.object().unwrap().try_into_commit().unwrap();
+    let message = String::from_utf8_lossy(commit.message_raw().expect("message")).to_string();
+    let committer = commit.committer().expect("committer").name.to_string();
+    (message, committer)
+}
+
+/// A blob of the tree at `ref_name`, by path.
+fn blob_at(gitdir: &Path, ref_name: &str, path: &str) -> Option<Vec<u8>> {
+    GitTreeBackend::new(gitdir.to_path_buf(), ref_name.to_string())
+        .read_entity(Path::new(path))
+        .unwrap()
 }
 
 fn relate(engine: &mut memstead_base::Engine, from: (&str, &str), to: (&str, &str)) {
@@ -255,11 +328,15 @@ fn local_fork_starts_at_the_sources_tip_with_its_config_entities_and_grants() {
         Some(CrossLinkValue::List(vec!["plans".to_string()]))
     );
 
-    // The branch is the source's commit: same sha, so the same tree
-    // (entities and the anchors sidecar alike).
+    // The branch is the fork commit right above the source's commit:
+    // one commit, whose only parent is the ancestor, and the base the
+    // response and the config record.
+    let fork_tip = sha_of(&gitdir, "refs/heads/specs-fork").unwrap();
+    assert_ne!(fork_tip, source_tip, "the fork commit is the fork's own");
+    assert_eq!(parents_of(&gitdir, &fork_tip), vec![source_tip.clone()]);
     assert_eq!(
-        sha_of(&gitdir, "refs/heads/specs-fork").as_deref(),
-        Some(source_tip.as_str())
+        response.forked_from.base.as_deref(),
+        Some(fork_tip.as_str())
     );
     // The config on __MEMSTEAD is the source's plus the origin.
     let cfg = read_config_at_gitdir(&gitdir, "specs-fork").unwrap();
@@ -270,6 +347,8 @@ fn local_fork_starts_at_the_sources_tip_with_its_config_entities_and_grants() {
     assert_eq!(origin.mem, "specs");
     assert_eq!(origin.sha, source_tip);
     assert_eq!(origin.remote, None);
+    assert_eq!(origin.base.as_deref(), Some(fork_tip.as_str()));
+    assert_eq!(origin.base_sha(), fork_tip);
     // The source's own config is untouched by the fork.
     let source_cfg = read_config_at_gitdir(&gitdir, "specs").unwrap();
     assert!(source_cfg.forked_from.is_none());
@@ -300,7 +379,7 @@ fn local_fork_starts_at_the_sources_tip_with_its_config_entities_and_grants() {
     create_entity_in(&mut engine, "specs-fork", "Gamma");
     assert_ne!(
         sha_of(&gitdir, "refs/heads/specs-fork").unwrap(),
-        source_tip,
+        fork_tip,
         "the fork's branch moved"
     );
     assert_eq!(
@@ -316,6 +395,10 @@ fn local_fork_starts_at_the_sources_tip_with_its_config_entities_and_grants() {
     let engine = engine_from_workspace_root(tmp.path()).expect("reboot");
     let cfg = engine.mem_config_for("specs-fork").expect("config loaded");
     assert_eq!(cfg.forked_from.as_ref().unwrap().sha, source_tip);
+    assert_eq!(
+        cfg.forked_from.as_ref().unwrap().base.as_deref(),
+        Some(fork_tip.as_str())
+    );
     assert_eq!(shapes(&engine, "specs-fork").len(), 3);
     assert!(engine.cross_mem_link_allowed("specs-fork", "plans"));
 }
@@ -339,9 +422,12 @@ fn local_fork_at_a_given_sha_starts_there() {
     p.sha = Some(first[..12].to_string());
     let response = mem_management::fork_mem(&mut engine, p).expect("fork at sha lands");
     assert_eq!(response.forked_from.sha, first);
+    // The fork commit sits right above the named commit, not the tip.
+    let fork_tip = sha_of(&gitdir, "refs/heads/specs-early").unwrap();
+    assert_eq!(parents_of(&gitdir, &fork_tip), vec![first.clone()]);
     assert_eq!(
-        sha_of(&gitdir, "refs/heads/specs-early").as_deref(),
-        Some(first.as_str())
+        response.forked_from.base.as_deref(),
+        Some(fork_tip.as_str())
     );
     let names: Vec<String> = shapes(&engine, "specs-early")
         .into_iter()
@@ -549,6 +635,495 @@ fn local_fork_refusals_land_nothing() {
 }
 
 // ---------------------------------------------------------------------
+// The fork commit: sidecars and self-links carry the fork's name
+// ---------------------------------------------------------------------
+
+/// The trustwork case shape: a source whose entity carries a url span
+/// row, a derived entity-grain row and a file row with an observation,
+/// whose derivations sidecar holds baselines keyed by its ids, and whose
+/// bodies qualify self-links with the mem's own name beside links to
+/// another mem and a code span. After the fork: exactly one commit
+/// above the ancestor, by the engine, with the caller's note and
+/// identity; every sidecar id and self-link names the fork; rows keep
+/// their hashes, spans and observations; the other mem's links and the
+/// code span are untouched; a body with nothing to move keeps its blob;
+/// the anchors read through the engine under the fork's ids and count
+/// the same; the check ledger has no line for the fork; the source is
+/// untouched; a reboot reads it all back.
+#[test]
+fn fork_commit_retargets_sidecars_and_self_links_and_records_the_base() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".memstead")).unwrap();
+    std::fs::write(
+        tmp.path().join(".memstead/workspace.toml"),
+        format!(
+            "{WORKSPACE_HEAD}[[mem_management.create]]\npattern = \"*\"\nschemas = [\"*\"]\n\n\
+             [cross_mem_links]\nspecs = [\"plans\"]\n"
+        ),
+    )
+    .unwrap();
+    init_real_mem_repo(
+        tmp.path(),
+        &[("specs", "default@1.0.0"), ("plans", "default@1.0.0")],
+    );
+    let gitdir = gitdir_of(tmp.path());
+    // The file row's artifact: the write path's existence gate reads it.
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    std::fs::write(tmp.path().join("src/lib.rs"), "pub fn lib() {}\n").unwrap();
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "plans", "Roadmap");
+    // Alpha: a url span row, a derived entity-grain row, a file row.
+    create_entity_with(
+        &mut engine,
+        "specs",
+        "Alpha",
+        "Alpha stands alone.",
+        vec![
+            AnchorInput {
+                artifact: Some("https://example.org/doc".to_string()),
+                grain: Some("url".to_string()),
+                class: Some("anchored".to_string()),
+                span: Some("the quoted words".to_string()),
+                ..Default::default()
+            },
+            AnchorInput {
+                artifact: Some("plans--roadmap".to_string()),
+                grain: Some("entity".to_string()),
+                class: Some("derived".to_string()),
+                derived_from: Some(vec!["plans--roadmap".to_string()]),
+                ..Default::default()
+            },
+            AnchorInput {
+                artifact: Some("src/lib.rs".to_string()),
+                grain: Some("file".to_string()),
+                class: Some("anchored".to_string()),
+                ..Default::default()
+            },
+        ],
+    );
+    // An observed baseline on the file row (`hash_source: backfill`):
+    // the fork must carry it.
+    let written = engine
+        .record_anchor_observed_hashes(
+            "specs",
+            &[ObservedArtifactHash {
+                entity: "specs--alpha".to_string(),
+                artifact: "src/lib.rs".to_string(),
+                hash: "0123456789abcdef".to_string(),
+            }],
+            Some("observed"),
+        )
+        .unwrap();
+    assert_eq!(written, 1);
+    // Beta: self-links in both spellings (one labelled), links to the
+    // other mem in both spellings, and a self-link inside a code span.
+    create_entity_with(
+        &mut engine,
+        "specs",
+        "Beta",
+        "Beta builds on [[specs--alpha]] and [[specs:alpha|the alpha]]; see [[plans--roadmap]] \
+         and [[plans:roadmap]]; the literal `[[specs--alpha]]` stays.",
+        Vec::new(),
+    );
+    // A check on the source's entity: the ledger line the fork must not
+    // inherit.
+    engine
+        .record_check(
+            "specs",
+            "specs--alpha",
+            Verdict::Ok,
+            CheckKind::Verification,
+            Some("read by hand"),
+            Actor::Cli,
+            None,
+        )
+        .unwrap();
+    // The derivations sidecar, keyed by the source's ids with a
+    // same-mem target and a cross-mem target.
+    let specs_writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
+    let mut derivations = DerivationSidecar::default();
+    derivations.set("specs--beta", "DERIVED_FROM", "specs--alpha", "aaaa1111");
+    derivations.set("specs--beta", "DERIVED_FROM", "plans--roadmap", "bbbb2222");
+    specs_writer
+        .write_entity(Path::new(DERIVATION_SIDECAR_PATH), &derivations.to_bytes())
+        .unwrap();
+    specs_writer
+        .commit("derivation baselines", &CommitContext::internal())
+        .unwrap();
+    let source_tip = sha_of(&gitdir, "refs/heads/specs").unwrap();
+    let source_rows = engine.entity_anchors(&EntityId::new("specs", "alpha"));
+    assert_eq!(source_rows.len(), 3, "{source_rows:?}");
+    assert!(
+        source_rows
+            .iter()
+            .any(|a| a.hash.as_deref() == Some("0123456789abcdef")
+                && a.hash_source == Some(memstead_base::anchor::AnchorHashSource::Backfill)),
+        "the observed baseline is on the source's row: {source_rows:?}"
+    );
+    let source_sidecar = blob_at(&gitdir, "refs/heads/specs", ".memstead/anchors.json").unwrap();
+    let source_alpha_blob = tree_blobs(&gitdir, "refs/heads/specs")["alpha.md"].clone();
+
+    engine.set_identity(Some("proposer-p1".to_string()));
+    let mut p = params("specs", "proposals/specs-001");
+    p.note = Some("the proposal fork".to_string());
+    let response = mem_management::fork_mem(&mut engine, p).expect("fork lands");
+
+    // Exactly one commit above the ancestor, by the engine, naming the
+    // fork, with the caller's note, tool, actor and identity.
+    let fork_tip = sha_of(&gitdir, "refs/heads/proposals/specs-001").unwrap();
+    assert_eq!(parents_of(&gitdir, &fork_tip), vec![source_tip.clone()]);
+    assert_eq!(response.forked_from.sha, source_tip);
+    assert_eq!(
+        response.forked_from.base.as_deref(),
+        Some(fork_tip.as_str())
+    );
+    let (message, committer) = commit_message_and_committer(&gitdir, &fork_tip);
+    assert_eq!(committer, "engine");
+    let subject = message.lines().next().unwrap_or_default();
+    assert_eq!(
+        subject,
+        format!(
+            "memstead: fork mem proposals/specs-001 from specs@{}",
+            &source_tip[..12]
+        )
+    );
+    for needle in [
+        "the proposal fork",
+        "Tool: memstead_mem_fork",
+        "Actor: cli",
+        "Identity: proposer-p1",
+    ] {
+        assert!(message.contains(needle), "{needle} in:\n{message}");
+    }
+
+    // The anchors sidecar: every key names the fork, the rows are the
+    // source's rows (hashes, spans, observations included), and the
+    // engine reads them under the fork's id.
+    let fork_sidecar_bytes = blob_at(
+        &gitdir,
+        "refs/heads/proposals/specs-001",
+        ".memstead/anchors.json",
+    )
+    .unwrap();
+    let fork_sidecar = AnchorSidecar::from_bytes(&fork_sidecar_bytes).unwrap();
+    let keys: Vec<&String> = fork_sidecar.entities.keys().collect();
+    assert_eq!(keys, vec!["proposals/specs-001--alpha"], "{keys:?}");
+    assert_eq!(
+        fork_sidecar.get("proposals/specs-001--alpha"),
+        &source_rows[..]
+    );
+    assert_eq!(
+        fork_sidecar.version,
+        AnchorSidecar::from_bytes(&source_sidecar).unwrap().version
+    );
+    assert_eq!(
+        engine.entity_anchors(&EntityId::new("proposals/specs-001", "alpha")),
+        source_rows
+    );
+    assert!(
+        engine
+            .entity_anchors(&EntityId::new("proposals/specs-001", "alpha"))
+            .iter()
+            .any(|a| a.span.as_deref() == Some("the quoted words")),
+        "the span row came along"
+    );
+    assert_eq!(
+        engine.mem_anchors_resolved("proposals/specs-001").len(),
+        engine.mem_anchors_resolved("specs").len(),
+        "the fork counts the rows the source counts"
+    );
+
+    // The derivations sidecar: the source key and the same-mem target
+    // name the fork, the cross-mem target and the hashes stay.
+    let fork_derivations = DerivationSidecar::from_bytes(
+        &blob_at(
+            &gitdir,
+            "refs/heads/proposals/specs-001",
+            DERIVATION_SIDECAR_PATH,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let keys: Vec<&String> = fork_derivations.baselines.keys().collect();
+    assert_eq!(keys, vec!["proposals/specs-001--beta"], "{keys:?}");
+    assert_eq!(
+        fork_derivations.get(
+            "proposals/specs-001--beta",
+            "DERIVED_FROM",
+            "proposals/specs-001--alpha"
+        ),
+        Some("aaaa1111")
+    );
+    assert_eq!(
+        fork_derivations.get(
+            "proposals/specs-001--beta",
+            "DERIVED_FROM",
+            "plans--roadmap"
+        ),
+        Some("bbbb2222")
+    );
+    assert_eq!(
+        fork_derivations.baselines["proposals/specs-001--beta"].len(),
+        2
+    );
+
+    // The bodies: both self-link spellings name the fork (label kept),
+    // the other mem's links and the code span are untouched, and the
+    // link-free body is the same blob.
+    let beta =
+        String::from_utf8(blob_at(&gitdir, "refs/heads/proposals/specs-001", "beta.md").unwrap())
+            .unwrap();
+    assert!(beta.contains("[[proposals/specs-001--alpha]]"), "{beta}");
+    assert!(
+        beta.contains("[[proposals/specs-001:alpha|the alpha]]"),
+        "{beta}"
+    );
+    assert!(beta.contains("[[plans--roadmap]]"), "{beta}");
+    assert!(beta.contains("[[plans:roadmap]]"), "{beta}");
+    assert!(beta.contains("`[[specs--alpha]]`"), "the code span: {beta}");
+    assert_eq!(beta.matches("[[specs--alpha]]").count(), 1, "{beta}");
+    assert_eq!(beta.matches("[[specs:").count(), 0, "{beta}");
+    let fork_blobs = tree_blobs(&gitdir, "refs/heads/proposals/specs-001");
+    assert_eq!(
+        fork_blobs["alpha.md"], source_alpha_blob,
+        "nothing to move: same blob"
+    );
+    // The fork loads with its two entities, the retargeted link read
+    // as its own.
+    assert_eq!(shapes(&engine, "proposals/specs-001").len(), 2);
+    let fork_beta = engine
+        .store()
+        .get(&EntityId::new("proposals/specs-001", "beta"))
+        .expect("beta loaded");
+    assert!(
+        fork_beta.sections["identity"].contains("[[proposals/specs-001--alpha]]"),
+        "{}",
+        fork_beta.sections["identity"]
+    );
+
+    // The check ledger: the source's check stands, the fork has none.
+    assert!(
+        engine
+            .latest_check_record("specs", "specs--alpha", "verification")
+            .is_some()
+    );
+    assert!(
+        engine
+            .latest_check_record(
+                "proposals/specs-001",
+                "proposals/specs-001--alpha",
+                "verification"
+            )
+            .is_none(),
+        "a fork starts unchecked"
+    );
+    let ledger = std::fs::read_to_string(memstead_base::check::check_ledger_path(tmp.path()))
+        .unwrap_or_default();
+    assert!(!ledger.contains("proposals/specs-001--"), "{ledger}");
+
+    // The source is untouched: branch, sidecar and rows.
+    assert_eq!(sha_of(&gitdir, "refs/heads/specs").unwrap(), source_tip);
+    assert_eq!(
+        blob_at(&gitdir, "refs/heads/specs", ".memstead/anchors.json").unwrap(),
+        source_sidecar
+    );
+    assert_eq!(
+        engine.entity_anchors(&EntityId::new("specs", "alpha")),
+        source_rows
+    );
+    drop(engine);
+
+    // A reboot reads the base and the retargeted rows back.
+    let engine = engine_from_workspace_root(tmp.path()).expect("reboot");
+    let origin = engine
+        .mem_config_for("proposals/specs-001")
+        .unwrap()
+        .forked_from
+        .clone()
+        .unwrap();
+    assert_eq!(origin.base.as_deref(), Some(fork_tip.as_str()));
+    assert_eq!(origin.sha, source_tip);
+    assert_eq!(
+        engine.entity_anchors(&EntityId::new("proposals/specs-001", "alpha")),
+        source_rows
+    );
+}
+
+/// A source with no sidecar and no self-qualified link, only links
+/// naming another mem: the fork still gets its one commit (an empty
+/// retarget is still the base), the tree is the ancestor's tree
+/// blob for blob, and the other mem's links are untouched.
+#[test]
+fn fork_of_a_tree_with_nothing_to_retarget_still_gets_its_base_commit() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".memstead")).unwrap();
+    std::fs::write(
+        tmp.path().join(".memstead/workspace.toml"),
+        format!("{WORKSPACE_HEAD}[cross_mem_links]\nspecs = [\"plans\"]\n"),
+    )
+    .unwrap();
+    init_real_mem_repo(
+        tmp.path(),
+        &[("specs", "default@1.0.0"), ("plans", "default@1.0.0")],
+    );
+    let gitdir = gitdir_of(tmp.path());
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "plans", "Roadmap");
+    create_entity_with(
+        &mut engine,
+        "specs",
+        "Gamma",
+        "Gamma follows [[plans--roadmap]] and [[plans:roadmap]] and [[delta]].",
+        Vec::new(),
+    );
+    create_entity_in(&mut engine, "specs", "Delta");
+    let source_tip = sha_of(&gitdir, "refs/heads/specs").unwrap();
+    let source_blobs = tree_blobs(&gitdir, "refs/heads/specs");
+    assert!(
+        !source_blobs.contains_key(".memstead/anchors.json"),
+        "the fixture has no sidecar: {source_blobs:?}"
+    );
+
+    let response =
+        mem_management::fork_mem(&mut engine, params("specs", "specs-fork")).expect("fork lands");
+    let fork_tip = sha_of(&gitdir, "refs/heads/specs-fork").unwrap();
+    assert_ne!(fork_tip, source_tip, "the base is the fork's own commit");
+    assert_eq!(parents_of(&gitdir, &fork_tip), vec![source_tip.clone()]);
+    assert_eq!(
+        response.forked_from.base.as_deref(),
+        Some(fork_tip.as_str())
+    );
+    assert_eq!(
+        tree_blobs(&gitdir, "refs/heads/specs-fork"),
+        source_blobs,
+        "an empty retarget leaves the ancestor's tree blob for blob"
+    );
+    let (message, committer) = commit_message_and_committer(&gitdir, &fork_tip);
+    assert_eq!(committer, "engine");
+    assert!(
+        message.starts_with("memstead: fork mem specs-fork from specs@"),
+        "{message}"
+    );
+    assert_eq!(shapes(&engine, "specs-fork").len(), 2);
+}
+
+/// A failure after the fork commit (here: the workspace policy file
+/// cannot be written when the grant is inherited) rolls the branch and
+/// the fork commit with it, the config and the policy line back; the
+/// name is free again afterwards.
+#[cfg(unix)]
+#[test]
+fn fork_rolls_back_the_fork_commit_when_a_later_step_fails() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".memstead")).unwrap();
+    std::fs::write(
+        tmp.path().join(".memstead/workspace.toml"),
+        format!("{WORKSPACE_HEAD}[cross_mem_links]\nspecs = [\"plans\"]\n"),
+    )
+    .unwrap();
+    init_real_mem_repo(
+        tmp.path(),
+        &[("specs", "default@1.0.0"), ("plans", "default@1.0.0")],
+    );
+    let gitdir = gitdir_of(tmp.path());
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "plans", "Roadmap");
+    create_entity_with(
+        &mut engine,
+        "specs",
+        "Alpha",
+        "Alpha names [[specs--alpha]] itself.",
+        Vec::new(),
+    );
+    let source_tip = sha_of(&gitdir, "refs/heads/specs").unwrap();
+    let toml_path = tmp.path().join(".memstead/workspace.toml");
+    let toml_before = std::fs::read_to_string(&toml_path).unwrap();
+
+    // Seal the policy file: the grant inheritance, which runs after the
+    // fork commit and the config write, fails.
+    std::fs::set_permissions(&toml_path, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let result = mem_management::fork_mem(&mut engine, params("specs", "specs-fork"));
+    std::fs::set_permissions(&toml_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let err = result.expect_err("the sealed policy file refuses the grant write");
+    assert!(err.to_string().contains("grant"), "{err}");
+
+    assert_nothing_landed(&engine, tmp.path(), "specs-fork");
+    assert_eq!(std::fs::read_to_string(&toml_path).unwrap(), toml_before);
+    assert_eq!(sha_of(&gitdir, "refs/heads/specs").unwrap(), source_tip);
+
+    // The name is free: the same fork lands once the file is writable.
+    let response =
+        mem_management::fork_mem(&mut engine, params("specs", "specs-fork")).expect("fork lands");
+    let fork_tip = sha_of(&gitdir, "refs/heads/specs-fork").unwrap();
+    assert_eq!(parents_of(&gitdir, &fork_tip), vec![source_tip]);
+    assert_eq!(
+        response.forked_from.base.as_deref(),
+        Some(fork_tip.as_str())
+    );
+}
+
+/// A fork recorded before the fork commit existed carries no `base`:
+/// it reads as based on its ancestor, loads as before, and forks again
+/// (the new fork gets a base of its own).
+#[test]
+fn a_fork_recorded_without_a_base_reads_as_based_on_its_ancestor() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(
+        tmp.path(),
+        &[
+            ("specs", "default@1.0.0"),
+            ("specs-legacy", "default@1.0.0"),
+        ],
+    );
+    let gitdir = gitdir_of(tmp.path());
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "specs", "Alpha");
+    create_entity_in(&mut engine, "specs-legacy", "Alpha");
+    let legacy_tip = sha_of(&gitdir, "refs/heads/specs-legacy").unwrap();
+    drop(engine);
+    // The older engine's origin: mem and sha, no base.
+    commit_config_at_gitdir(
+        &gitdir,
+        "specs-legacy",
+        format!(
+            r#"{{"schema": "default@1.0.0", "forkedFrom": {{"mem": "specs", "sha": "{legacy_tip}"}}}}"#
+        )
+        .as_bytes(),
+        &CommitContext::internal(),
+        "legacy origin",
+    )
+    .unwrap();
+
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    let origin = engine
+        .mem_config_for("specs-legacy")
+        .unwrap()
+        .forked_from
+        .clone()
+        .expect("the origin loads");
+    assert_eq!(origin.base, None);
+    assert_eq!(
+        origin.base_sha(),
+        legacy_tip,
+        "read as based on the ancestor"
+    );
+    assert_eq!(shapes(&engine, "specs-legacy").len(), 1);
+
+    let response = mem_management::fork_mem(&mut engine, params("specs-legacy", "specs-next"))
+        .expect("a legacy fork forks");
+    assert_eq!(response.forked_from.mem, "specs-legacy");
+    assert_eq!(response.forked_from.sha, legacy_tip);
+    let next_tip = sha_of(&gitdir, "refs/heads/specs-next").unwrap();
+    assert_eq!(
+        response.forked_from.base.as_deref(),
+        Some(next_tip.as_str())
+    );
+    assert_eq!(parents_of(&gitdir, &next_tip), vec![legacy_tip]);
+}
+
+// ---------------------------------------------------------------------
 // AC2: the remote form, with a second bare mem-repo as the remote
 // ---------------------------------------------------------------------
 
@@ -569,7 +1144,15 @@ fn remote_fixture() -> (TempDir, TempDir, TempDir, String) {
     .unwrap();
     let mut engine_a = engine_from_workspace_root(a.path()).expect("A boots");
     create_entity_in(&mut engine_a, "specs", "Alpha");
-    create_entity_in(&mut engine_a, "specs", "Beta");
+    // Beta qualifies a self-link with the mem's own name: what the
+    // remote form's fork commit has to retarget.
+    create_entity_with(
+        &mut engine_a,
+        "specs",
+        "Beta",
+        "Beta follows [[specs--alpha]].",
+        Vec::new(),
+    );
     relate(&mut engine_a, ("specs", "beta"), ("specs", "alpha"));
     drop(engine_a);
     let tip = sha_of(&a_gitdir, "refs/heads/specs").unwrap();
@@ -622,10 +1205,19 @@ fn remote_fork_fetches_the_source_branch_and_config() {
     assert_eq!(response.forked_from.sha, tip);
     assert_eq!(response.forked_from.remote.as_deref(), Some("origin"));
     assert_eq!(response.inherited_grants, None);
+    // The fork commit sits right above the fetched commit, and it did
+    // the same retarget the local form does: the self-link names the
+    // fork.
+    let fork_tip = sha_of(&b_gitdir, "refs/heads/specs-copy").unwrap();
+    assert_eq!(parents_of(&b_gitdir, &fork_tip), vec![tip.clone()]);
     assert_eq!(
-        sha_of(&b_gitdir, "refs/heads/specs-copy").as_deref(),
-        Some(tip.as_str())
+        response.forked_from.base.as_deref(),
+        Some(fork_tip.as_str())
     );
+    let beta =
+        String::from_utf8(blob_at(&b_gitdir, "refs/heads/specs-copy", "beta.md").unwrap()).unwrap();
+    assert!(beta.contains("[[specs-copy--alpha]]"), "{beta}");
+    assert!(!beta.contains("[[specs--alpha]]"), "{beta}");
 
     let cfg = read_config_at_gitdir(&b_gitdir, "specs-copy").unwrap();
     assert_eq!(cfg.description.as_deref(), Some("from A"));
@@ -636,6 +1228,7 @@ fn remote_fork_fetches_the_source_branch_and_config() {
         ("specs", Some("origin"))
     );
     assert_eq!(origin.sha, tip);
+    assert_eq!(origin.base.as_deref(), Some(fork_tip.as_str()));
 
     // The entities and their edge came with the branch.
     let fork_shapes = shapes(&engine, "specs-copy");
