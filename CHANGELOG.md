@@ -9,6 +9,38 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **A sealed archive carries its check records.** `memstead export
+  --format mem` (folder, in-memory and git-branch mems alike) writes one
+  optional member, `.memstead/checks.json`: per entity of the archive, the
+  latest workspace-ledger record per kind (`verification`, `conformance`,
+  each foreign `x-<name>` kind) with kind, verdict, method, identity, actor,
+  role, the entity hash at check time, the timestamp and the rename origin
+  where present, under a member version line. Identities travel exactly as
+  declared; the method note passes the same per-class redaction the
+  provenance member applies, counted in the export report's `redactions`. A
+  mem with no record, and a workspace with no ledger, export no member and
+  byte-identical archives. The validator recognises the member as a strict
+  meta member: a malformed shape, an unknown kind or verdict, a version this
+  engine does not read, or a record naming an entity the archive does not
+  carry refuses with `invalid sealed check records (.memstead/checks.json):
+  <first offending record>` (at install, under `ARCHIVE_VALIDATION_FAILED`),
+  and a valid member threads through the canonical re-pack, so `memstead
+  install` and the registry keep it. An archive mount derives `entity --provenance`
+  (`check_state`, `last_check`, `conformance_state`, the new
+  `foreign_checks` list), the MCP entity read with `include_provenance` and
+  `health --include checks` from the member with the workspace derivation
+  (sealed hash against the sealed entity, conformance also against the pin):
+  a record sealed over a later edit reads `check_stale`; an archive without
+  the member reads `never_checked` with `sealed.checks_carried: false` and a
+  stated `checks_reason` (health: a per-mem `sealed` block); a workspace
+  ledger beside an archive mount is never consulted for it, and a writable
+  mem never reads a sealed member. The published archive format stays 4 and
+  the accepted-format list is unchanged. Migration: an archive sealed before
+  this release reads as carrying no check records; an engine from before
+  this release installs an archive that carries the member and ignores it
+  (its validator tolerates unknown meta members, and its canonical re-pack
+  drops them).
+
 - **An anchor carries the span it quotes and resolves on its presence.**
   The anchor element (`memstead_create` / `memstead_update` `anchors[]`,
   the CLI `--anchor <JSON>`) takes `span`, the verbatim words the entity

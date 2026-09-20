@@ -110,6 +110,31 @@ redacted per class (`redactions` in the JSON envelope). Entity bodies are
 not rewritten: a private string in a body is yours to fix, and the leak
 scan keeps flagging it.
 
+## Check records travel with the archive
+
+A `.mem` archive exported from a workspace whose check ledger holds records
+for the mem carries them in `.memstead/checks.json`: per entity, the latest
+record per kind (`verification`, `conformance`, and each foreign `x-<name>`
+kind) with the verdict, the method note, the checker's declared identity
+handle exactly as recorded, the actor and role, the entity's content hash at
+check time, the timestamp and, where a rename carried the record, its
+origin. A mem with no record, and a workspace with no ledger, export no
+member and the same bytes as before the member existed. The method note
+passes the same per-class redaction the provenance member applies; the
+identity handle is copied verbatim, never mapped to a person. The archive
+format number is unchanged: an archive sealed before the member existed
+reads as carrying no check records, and an engine from before the member
+installs an archive that carries one and ignores it.
+
+An archive mount derives its check state from that member and from nothing
+else: `memstead entity <id> --provenance`, the MCP entity read with
+`include_provenance`, and `memstead health --include checks` compare each
+sealed record's hash against the entity as sealed, so a record sealed over a
+later edit reads `check_stale`, never fresh. A workspace ledger beside the
+mount is not consulted for it, and an archive without the member reads
+`never_checked` with the reason stated. The read-only refusal stands: nothing
+records a check on an archive mount.
+
 ## Publishing over a private source: `--redact-anchors`
 
 A mem built from a source carries provenance anchors — durable records tying

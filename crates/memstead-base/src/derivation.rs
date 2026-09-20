@@ -15,9 +15,13 @@
 //! entity-path write so it rides the SAME commit as the mutation that
 //! produced it, filtered from entity listings by the `.memstead/`
 //! rule, invisible in the mem's markdown, and excluded from `_hash`
-//! by construction. Export/import behaviour follows the anchors
-//! sidecar's decisions (the archive path carries `.memstead/` members
-//! as-is).
+//! by construction. The archive path does NOT carry `.memstead/`
+//! members as-is: the export writers enumerate what travels (the
+//! published config, the schema package, the provenance, anchors and
+//! sealed-checks members), and the validator tolerates and drops any
+//! other meta member. This sidecar is not on that list, so baselines
+//! stay workspace-side and an installed archive reads every derivation
+//! edge as `unbaselined`.
 //!
 //! Baseline hashes are the engine's per-entity `content_hash` —
 //! SHA-256 over the raw markdown truncated to 16 hex characters, the

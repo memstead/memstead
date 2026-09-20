@@ -269,6 +269,22 @@ measurement first, expensive judgment last and only under a budget:
    source. Whatever the cap defers is queued as the **adjudication backlog**, and its
    depth is reported — deferred work is visible, never silently dropped.
 
+## Check records travel with a sealed archive
+
+The judgment tier leaves a trace the engine records rather than infers: a check
+record per entity and kind (`verification`, `conformance`, a foreign `x-<name>`
+kind), with the verdict, the method, the checker's declared identity handle and the
+entity's hash at check time. Those records are workspace state, and a sealed
+`.mem` archive carries the latest one per entity and kind in an optional member,
+`.memstead/checks.json`, so an installed or served mem answers "who checked this,
+and is that check still fresh" from the archive alone. Freshness on an archive
+mount is the workspace derivation applied to the sealed entity: a record sealed
+over a later edit reads `check_stale`, never fresh. An archive without the member
+reads `never_checked` and says so; a workspace ledger beside the mount is never
+consulted for it. Identities travel exactly as declared, and the method note
+passes the provenance member's redaction; nothing is anonymised and nothing is
+mapped to a person.
+
 ## The report leads with a verdict
 
 The report is engine-rendered and deterministic — no model call, so two runs over
