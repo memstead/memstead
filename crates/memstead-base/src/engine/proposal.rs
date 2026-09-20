@@ -540,10 +540,12 @@ impl Engine {
     /// The create or update that lands `landing` (the fork's version
     /// under the target's name) in the target as the fork has it: every
     /// section and metadata field set, the target's sections and fields
-    /// the fork lacks unset, the fork's relations declared and the
-    /// target's relations the fork lacks unset. `existing` is the entity
-    /// the target holds at the slug (an update), or `None` (a create).
-    /// The brief's precheck rehearses exactly this; the merge applies it.
+    /// the fork lacks unset, the fork's authored relations declared (the
+    /// rows the schema synthesises from body links are left to the
+    /// gate, which re-emits them from the landed body) and the target's
+    /// relations the fork lacks unset. `existing` is the entity the
+    /// target holds at the slug (an update), or `None` (a create). The
+    /// brief's precheck rehearses exactly this; the merge applies it.
     pub(crate) fn landing_write_args(
         &self,
         target: &str,
@@ -564,9 +566,20 @@ impl Engine {
             .filter(|(k, _)| !STAMPED_METADATA.contains(&k.as_str()))
             .map(|(k, v)| (k.clone(), v.to_frontmatter_string()))
             .collect();
+        // The rows the engine synthesises from body wiki-links (the
+        // schema's `alias_target_rel_type`, which the loader forces to
+        // `manual_authoring: forbidden`) are never authored here: the
+        // write gate re-emits them from the landed body, and an explicit
+        // row would refuse `RELATION_MANUAL_AUTHORING_FORBIDDEN`. Every
+        // other row is the proposer's own declaration and lands as such.
+        let synthesised: Option<String> = self
+            .schemas
+            .get(target)
+            .and_then(|s| s.alias_target_rel_type().map(str::to_string));
         let relations: Vec<crate::ops::RelateArg> = landing
             .relationships
             .iter()
+            .filter(|r| synthesised.as_deref() != Some(r.rel_type.as_str()))
             .map(|r| crate::ops::RelateArg {
                 target: r.target.clone(),
                 rel_type: r.rel_type.clone(),

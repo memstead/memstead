@@ -19,7 +19,7 @@ use memstead_base::backend::MemBackend;
 use memstead_base::check::{CheckKind, CheckState, Verdict};
 use memstead_base::engine::independence::Independence;
 use memstead_base::mem_management::{self, MemForkParams};
-use memstead_base::ops::proposal::{ProposalBrief, ProposalRecord};
+use memstead_base::ops::proposal::{PrecheckOutcome, ProposalBrief, ProposalRecord};
 use memstead_base::vcs::Actor;
 use memstead_base::{
     CreateEntityArgs, DeleteEntityArgs, EntityId, RenameEntityArgs, UpdateEntityArgs,
@@ -1281,5 +1281,333 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
             .unwrap()
             .proposals_bytes
             .is_none()
+    );
+}
+
+// ---------------------------------------------------------------------
+// Body citations land as synthesised rows; authored rows stay
+// ---------------------------------------------------------------------
+
+/// A fork entity whose body cites another entity with a wiki-link
+/// carries the schema's alias-emitted relation (`REFERENCES` under the
+/// default schema, `manual_authoring: forbidden`) in its parsed row set.
+/// The merge never authors that row: the precheck reads clean, the
+/// landing re-synthesises it from the body, and a relation the proposer
+/// declared by hand (`DEPENDS_ON`) lands beside it. Both a new entity
+/// and an existing one gaining a citation.
+#[test]
+fn merge_lands_body_citations_as_synthesised_references_and_keeps_authored_rows() {
+    let (tmp, mut engine) = staged();
+    engine.set_identity(Some(PROPOSER.to_string()));
+    create(
+        &mut engine,
+        "specs-fork",
+        "Mu",
+        sections("mu rests on [[specs-fork--alpha]]", "seed"),
+        Vec::new(),
+    );
+    relate(&mut engine, ("specs-fork", "mu"), ("specs-fork", "beta"));
+    update_sections(
+        &mut engine,
+        ("specs-fork", "beta"),
+        &[(
+            "identity",
+            "beta as the proposer has it, after [[specs-fork--alpha]]",
+        )],
+        &[],
+    );
+    engine.set_identity(Some(MERGER.to_string()));
+
+    let mut file = filled(&mut engine);
+    file.dispositions.get_mut("mu").unwrap().disposition = "adopt".to_string();
+    for slug in ["mu", "beta"] {
+        let entry = file.entries.iter().find(|e| e.slug == slug).unwrap();
+        assert!(
+            matches!(entry.precheck.outcome, PrecheckOutcome::Clean),
+            "{slug}: {:?}",
+            entry.precheck
+        );
+    }
+
+    let outcome = engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+    assert!(outcome.validation.is_clean(), "{:?}", outcome.validation);
+    let by_slug: BTreeMap<&str, &memstead_base::ops::proposal::MergedEntity> = outcome
+        .entities
+        .iter()
+        .map(|e| (e.slug.as_str(), e))
+        .collect();
+    assert_eq!(by_slug["mu"].action, "created");
+    assert_eq!(by_slug["beta"].action, "updated");
+
+    let rows = |engine: &memstead_base::Engine, slug: &str| -> Vec<(String, String)> {
+        engine
+            .store()
+            .get(&EntityId::new("specs", slug))
+            .unwrap()
+            .relationships
+            .iter()
+            .map(|r| (r.rel_type.clone(), r.target.to_string()))
+            .collect()
+    };
+    let mu = rows(&engine, "mu");
+    assert!(
+        mu.contains(&("REFERENCES".to_string(), "specs--alpha".to_string())),
+        "the citation is synthesised under the target's id: {mu:?}"
+    );
+    assert!(
+        mu.contains(&("DEPENDS_ON".to_string(), "specs--beta".to_string())),
+        "the authored row lands: {mu:?}"
+    );
+    assert_eq!(mu.len(), 2, "{mu:?}");
+    let beta = rows(&engine, "beta");
+    assert!(
+        beta.contains(&("REFERENCES".to_string(), "specs--alpha".to_string())),
+        "an existing entity gains its citation: {beta:?}"
+    );
+    assert!(
+        engine
+            .store()
+            .get(&EntityId::new("specs", "beta"))
+            .unwrap()
+            .sections["identity"]
+            .contains("[[specs--alpha]]")
+    );
+    assert!(
+        engine
+            .conformance_findings("specs", None)
+            .unwrap()
+            .is_empty()
+    );
+
+    // A second boot reads the same rows off the branch.
+    let engine2 = engine_from_workspace_root(tmp.path()).unwrap();
+    assert_eq!(rows(&engine2, "mu"), mu);
+    assert_eq!(rows(&engine2, "beta"), beta);
+}
+
+// ---------------------------------------------------------------------
+// A check is recorded only for an entity the merge created or updated
+// ---------------------------------------------------------------------
+
+/// The owner made beta read exactly as the proposer has it, so the
+/// landing is a no-op; `adopt_with_changes` with a body that restates
+/// the landed version amends nothing: the action is `noop` and no
+/// verification check is written. A body that differs is an update by
+/// the amend alone: `updated`, with the check.
+#[test]
+fn a_noop_landing_records_no_check_and_an_amend_alone_counts_as_an_update() {
+    for (purpose, action, checked) in [
+        ("beta's purpose, sharpened", "noop", false),
+        ("beta's purpose, sharpened by the owner", "updated", true),
+    ] {
+        let (_tmp, mut engine) = staged();
+        engine.set_identity(Some(OWNER.to_string()));
+        update_sections(
+            &mut engine,
+            ("specs", "beta"),
+            &[
+                ("identity", "beta as the proposer has it"),
+                ("purpose", "beta's purpose, sharpened"),
+            ],
+            &[("level", "M1")],
+        );
+        engine.set_identity(Some(MERGER.to_string()));
+        let mut file = filled(&mut engine);
+        let slot = file.dispositions.get_mut("beta").unwrap();
+        slot.disposition = "adopt_with_changes".to_string();
+        slot.reason = "the same words on both sides".to_string();
+        slot.body = Some(serde_json::json!({
+            "sections": {"identity": "beta as the proposer has it", "purpose": purpose},
+            "metadata": {"level": "M1"}
+        }));
+
+        let outcome = engine
+            .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+            .expect("the merge lands");
+        let beta = outcome.entities.iter().find(|e| e.slug == "beta").unwrap();
+        assert_eq!(beta.action, action, "{purpose}: {outcome:?}");
+        assert_eq!(beta.check_recorded, checked, "{purpose}");
+        let (state, _) = engine.entity_check_state("specs", "specs--beta").unwrap();
+        assert_eq!(
+            state,
+            if checked {
+                CheckState::CheckedOk
+            } else {
+                CheckState::NeverChecked
+            },
+            "{purpose}"
+        );
+        let amended: Vec<&str> = outcome
+            .amend_commit
+            .iter()
+            .flat_map(|c| c.entities.iter().map(String::as_str))
+            .collect();
+        assert_eq!(amended.contains(&"specs--beta"), checked, "{purpose}");
+        assert!(
+            !outcome.merge_commits[0]
+                .entities
+                .contains(&"specs--beta".to_string()),
+            "a no-op landing is in no merge commit: {outcome:?}"
+        );
+        assert_eq!(
+            engine
+                .store()
+                .get(&EntityId::new("specs", "beta"))
+                .unwrap()
+                .sections["purpose"],
+            purpose
+        );
+    }
+}
+
+// ---------------------------------------------------------------------
+// Several proposers: the merge lands whole or not at all
+// ---------------------------------------------------------------------
+
+/// The record entry the merge writes for `file` at `at`, byte for byte:
+/// what the test occupies in the object store so the commit that
+/// carries it fails.
+fn predicted_record(file: &ProposalBrief, proposer: &str, at: &str) -> Vec<u8> {
+    let entities = file
+        .entries
+        .iter()
+        .map(|e| {
+            let slot = &file.dispositions[&e.slug];
+            let reason = slot.reason.trim();
+            (
+                e.slug.clone(),
+                memstead_base::ops::proposal::RecordedDisposition {
+                    disposition: slot.disposition.clone(),
+                    reason: (!reason.is_empty()).then(|| reason.to_string()),
+                    content_hash: e.content_hash.clone(),
+                },
+            )
+        })
+        .collect();
+    ProposalRecord {
+        proposals: vec![memstead_base::ops::proposal::ProposalRecordEntry {
+            id: file.proposal_id.clone(),
+            proposer: Some(proposer.to_string()),
+            ancestor: file.ancestor.clone(),
+            base: file.base.clone(),
+            target_tip: file.target_tip.clone(),
+            merged_by: Some(MERGER.to_string()),
+            at: at.to_string(),
+            entities,
+        }],
+        ..ProposalRecord::default()
+    }
+    .to_bytes()
+}
+
+/// Two proposers, so two commits in slug order: `proposer-p2`'s alpha
+/// first, then `proposer-p1`'s entities with the record. The record's
+/// blob is made unwritable before the merge (its object path in the
+/// mem-repo is occupied by a directory; the bytes are predictable
+/// under a pinned clock), so the second commit fails at commit time
+/// after the first landed. Nothing stands: the target branch is back
+/// at the tip the file recorded, the store and sidecars are as before,
+/// no record and no check exists, and the same file merges cleanly
+/// once the obstacle is gone.
+#[test]
+fn a_failure_after_the_first_proposer_commit_lands_nothing() {
+    let (tmp, mut engine) = staged();
+    let gitdir = gitdir_of(tmp.path());
+    engine.set_identity(Some("proposer-p2".to_string()));
+    update_sections(
+        &mut engine,
+        ("specs-fork", "alpha"),
+        &[("identity", "alpha as the second proposer has it")],
+        &[],
+    );
+    engine.set_identity(Some(MERGER.to_string()));
+    let before = refs_and_sidecars(&gitdir);
+    let state_before = workspace_state(tmp.path());
+    let mut file = filled(&mut engine);
+    file.dispositions.get_mut("alpha").unwrap().disposition = "adopt".to_string();
+
+    // The clock pinned, the record's bytes are known before the merge.
+    engine.set_mutation_clock(std::sync::Arc::new(|| {
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000)
+    }));
+    let record = predicted_record(&file, "proposer-p2, proposer-p1", "2027-01-15T08:00:00Z");
+    let oid = gix::objs::compute_hash(gix::hash::Kind::Sha1, gix::objs::Kind::Blob, &record)
+        .unwrap()
+        .to_string();
+    let obstacle = gitdir.join("objects").join(&oid[..2]).join(&oid[2..]);
+    assert!(!obstacle.exists(), "the record is not yet an object");
+    std::fs::create_dir_all(&obstacle).unwrap();
+
+    let err = engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .unwrap_err();
+    assert!(err.to_string().contains("proposals.json"), "{err}");
+
+    // The first proposer's commit does not stand: the branch is back at
+    // the pinned tip, byte for byte as before, and the store mirrors it.
+    assert_eq!(
+        sha_of(&gitdir, "refs/heads/specs"),
+        Some(file.target_tip.clone())
+    );
+    assert_eq!(before, refs_and_sidecars(&gitdir), "nothing landed");
+    assert_eq!(state_before, workspace_state(tmp.path()));
+    assert!(record_on(&gitdir, "specs").is_none());
+    let alpha = engine
+        .store()
+        .get(&EntityId::new("specs", "alpha"))
+        .unwrap();
+    assert_eq!(alpha.sections["identity"], "alpha stands", "{alpha:?}");
+    assert!(engine.store().get(&EntityId::new("specs", "eta")).is_none());
+    assert!(
+        engine
+            .store()
+            .get(&EntityId::new("specs", "gamma"))
+            .is_some()
+    );
+    for slug in ["alpha", "beta"] {
+        assert_eq!(
+            engine
+                .entity_check_state("specs", &format!("specs--{slug}"))
+                .unwrap()
+                .0,
+            CheckState::NeverChecked,
+            "{slug}"
+        );
+    }
+    let engine2 = engine_from_workspace_root(tmp.path()).unwrap();
+    assert_eq!(
+        engine2
+            .store()
+            .get(&EntityId::new("specs", "alpha"))
+            .unwrap()
+            .sections["identity"],
+        "alpha stands"
+    );
+
+    // The tips the file recorded are still the branches' tips, so the
+    // same file merges once the obstacle is gone: two commits, whole.
+    std::fs::remove_dir_all(&obstacle).unwrap();
+    let outcome = engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the retry lands");
+    assert_eq!(outcome.merge_commits.len(), 2);
+    assert_eq!(outcome.merge_commits[0].identity, "proposer-p2");
+    assert_eq!(outcome.merge_commits[1].identity, PROPOSER);
+    assert_eq!(
+        Some(outcome.target_tip_after.clone()),
+        sha_of(&gitdir, "refs/heads/specs")
+    );
+    assert!(outcome.validation.is_clean(), "{:?}", outcome.validation);
+    let record = record_on(&gitdir, "specs").unwrap();
+    assert_eq!(record.proposals[0].at, "2027-01-15T08:00:00Z");
+    assert_eq!(
+        engine
+            .store()
+            .get(&EntityId::new("specs", "alpha"))
+            .unwrap()
+            .sections["identity"],
+        "alpha as the second proposer has it"
     );
 }

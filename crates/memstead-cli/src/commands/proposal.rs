@@ -31,16 +31,17 @@ pub enum ProposalAction {
     /// from: every `adopt` entity lands as the fork has it (created,
     /// updated or deleted, anchors and self-links under the target's
     /// ids) in one commit on the target branch per proposer identity,
-    /// parent-pinned to the tip the file recorded; `adopt_with_changes`
-    /// lands the fork's version there and your final body in a second
-    /// commit under your identity; `reject` lands nothing. The merge
-    /// commit carries the proposer's identity (read from the fork's
-    /// own commits, never from you) with `Merged-By:` and `Proposal:`
-    /// beside it, writes the proposal record (`.memstead/proposals.json`)
-    /// on the target branch, records a verification check per adopted
-    /// entity under your identity, and validates the whole target store
-    /// afterwards. `--identity` is required. Every refusal lands
-    /// nothing. A human's act on the owner's branch: CLI-only.
+    /// parent-pinned to the tip the file recorded, all landing or none;
+    /// `adopt_with_changes` lands the fork's version there and your
+    /// final body in a second commit under your identity; `reject`
+    /// lands nothing. The merge commit carries the proposer's identity
+    /// (read from the fork's own commits, never from you) with
+    /// `Merged-By:` and `Proposal:` beside it, writes the proposal
+    /// record (`.memstead/proposals.json`) on the target branch, records
+    /// a verification check per entity it created or updated under your
+    /// identity, and validates the whole target store afterwards.
+    /// `--identity` is required. Every refusal lands nothing. A human's
+    /// act on the owner's branch: CLI-only.
     Merge(MergeArgs),
     /// List the proposals merged into a mem: the record the merge keeps
     /// on the target branch (`.memstead/proposals.json`), one block per

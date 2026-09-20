@@ -13,10 +13,13 @@
 //! before it) carrying every adopted entity as the fork has it, the
 //! record sidecar in the last of them; a second commit under the
 //! merger's identity with the owner's final bodies for
-//! `adopt_with_changes`; a verification check record per adopted entity
-//! under the merger's identity; and a whole-store validation of the
-//! target read back from its backend. A refusal lands nothing: the
-//! store snapshot is restored and every pending buffer discarded.
+//! `adopt_with_changes`; a verification check record per entity the
+//! merge created or updated, under the merger's identity; and a
+//! whole-store validation of the target read back from its backend. A
+//! refusal lands nothing: the store snapshot is restored and every
+//! pending buffer discarded, and when an earlier proposer's commit had
+//! already landed, the target branch is moved back to the tip the merge
+//! was pinned to (every commit above it was this merge's own).
 //!
 //! Nothing is written to the fork.
 
@@ -559,8 +562,13 @@ impl Engine {
             let (ids, created) = match staged {
                 Ok(v) => v,
                 Err(e) => {
-                    self.unwind_merge(&target, &store_snapshot, landed_any);
-                    return Err(e);
+                    return Err(self.unwind_merge(
+                        &target,
+                        &brief.target_tip,
+                        landed_any.then_some(parent.as_str()),
+                        &store_snapshot,
+                        e,
+                    ));
                 }
             };
             let mut ctx = CommitContext::new(
@@ -583,18 +591,25 @@ impl Engine {
                 .commit_with_expected_parent(&subject, &ctx, Some(&parent))
             {
                 Ok(sha) => sha,
-                Err(crate::backend::BackendError::ParentMismatch { expected, actual }) => {
-                    self.unwind_merge(&target, &store_snapshot, landed_any);
-                    return Err(EngineError::ProposalStale {
-                        fork: fork.to_string(),
-                        side: "target".to_string(),
-                        recorded: expected,
-                        current: actual,
-                    });
-                }
                 Err(e) => {
-                    self.unwind_merge(&target, &store_snapshot, landed_any);
-                    return Err(e.into());
+                    let e = match e {
+                        crate::backend::BackendError::ParentMismatch { expected, actual } => {
+                            EngineError::ProposalStale {
+                                fork: fork.to_string(),
+                                side: "target".to_string(),
+                                recorded: expected,
+                                current: actual,
+                            }
+                        }
+                        other => other.into(),
+                    };
+                    return Err(self.unwind_merge(
+                        &target,
+                        &brief.target_tip,
+                        landed_any.then_some(parent.as_str()),
+                        &store_snapshot,
+                        e,
+                    ));
                 }
             };
             landed_any = true;
@@ -670,9 +685,13 @@ impl Engine {
                 Ok(())
             })();
             if let Err(e) = staged {
-                self.discard_all_pending();
-                self.reload_one_mem(&target)?;
-                return Err(e);
+                return Err(self.unwind_merge(
+                    &target,
+                    &brief.target_tip,
+                    Some(&parent),
+                    &store_snapshot,
+                    e,
+                ));
             }
             let ids: Vec<String> = amends.iter().map(|p| p.id.to_string()).collect();
             let mut ctx = self.commit_context(
@@ -694,9 +713,13 @@ impl Engine {
             {
                 Ok(sha) => sha,
                 Err(e) => {
-                    self.discard_all_pending();
-                    self.reload_one_mem(&target)?;
-                    return Err(e.into());
+                    return Err(self.unwind_merge(
+                        &target,
+                        &brief.target_tip,
+                        Some(&parent),
+                        &store_snapshot,
+                        e.into(),
+                    ));
                 }
             };
             self.record_self_write(target_mount, &sha);
@@ -714,19 +737,22 @@ impl Engine {
             });
         }
 
-        // ---- The merger's check per adopted entity, against the landed hash ----
+        // ---- The merger's check per entity the merge created or updated,
+        //      against the landed hash; a no-op or a deletion gets none ----
         let method = format!("proposal {}", brief.proposal_id);
         let mut entities: Vec<MergedEntity> = Vec::with_capacity(slots.len());
         for slot in &slots {
             let slug = slot.entry.slug.as_str();
             let target_id = EntityId::new(&target, slug);
             let plan = adopted.iter().find(|a| a.slug == slug);
+            let amended = amends.iter().any(|p| p.id == target_id);
             let (action, proposer) = match plan {
                 None => ("none", None),
                 Some(a) => {
                     let action = if a.landings.iter().any(|l| l.is_create()) {
                         "created"
-                    } else if a.landings.iter().any(|l| matches!(l, Landing::Update(_))) {
+                    } else if amended || a.landings.iter().any(|l| matches!(l, Landing::Update(_)))
+                    {
                         "updated"
                     } else if a
                         .landings
@@ -747,7 +773,7 @@ impl Engine {
                     .map(|e| e.content_hash.clone())
                     .unwrap_or_default()
             });
-            let check_recorded = if plan.is_some() && exists {
+            let check_recorded = if exists && matches!(action, "created" | "updated") {
                 self.record_check(
                     &target,
                     target_id.as_ref(),
@@ -1019,16 +1045,41 @@ impl Engine {
         }
     }
 
-    /// Roll a failed merge back: the store snapshot and every pending
-    /// buffer when nothing landed; a re-read of the target when an
-    /// earlier proposer's commit already did (the store must mirror the
-    /// branch, and that commit stands).
-    fn unwind_merge(&mut self, target: &str, snapshot: &crate::store::Store, landed_any: bool) {
+    /// Roll a failed merge back so nothing of it stands: every pending
+    /// buffer discarded and the store snapshot restored; when a commit
+    /// of this merge already landed (`landed` is the branch's tip then),
+    /// the target branch moved back to `target_tip`, the tip the merge
+    /// was pinned to (every commit above it is this merge's own, each
+    /// parent-pinned, so no other writer's work sits between), and the
+    /// target re-read from its backend. Returns `error`, the failure
+    /// that triggered the unwind, unless the branch could not be moved
+    /// back: then the landed commits stand and the error names both.
+    fn unwind_merge(
+        &mut self,
+        target: &str,
+        target_tip: &str,
+        landed: Option<&str>,
+        snapshot: &crate::store::Store,
+        error: EngineError,
+    ) -> EngineError {
         self.discard_all_pending();
-        if landed_any {
-            let _ = self.reload_one_mem(target);
-        } else {
-            self.store = snapshot.clone();
+        self.store = snapshot.clone();
+        let Some(landed) = landed else {
+            return error;
+        };
+        match self.branch_reset(target, target_tip, Some(landed)) {
+            Ok(_) => {
+                let _ = self.reload_one_mem(target);
+                error
+            }
+            Err(reset) => {
+                let _ = self.reload_one_mem(target);
+                EngineError::Backend(crate::backend::BackendError::Other(format!(
+                    "{}; the merge commits already on '{target}' (tip {landed}) could not be \
+                     moved back to {target_tip} and stand: {reset}",
+                    error.prose_render()
+                )))
+            }
         }
     }
 }

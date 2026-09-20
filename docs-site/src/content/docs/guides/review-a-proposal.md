@@ -143,10 +143,13 @@ identity with the merger's beside it: `Identity: <proposer>`,
 `Merged-By: <you>`, `Proposal: <id>`, plus `Entities:` and `Created:`
 (the ids the commit brought into the target). When adopted entities
 were last touched by different proposers, there is one commit per
-proposer identity, in slug order, each pinned to the one before. After
-the commits the merge records a verification check under your identity
-for every adopted entity, against the hash that landed (the second
-commit's for `adopt_with_changes`), so `health --include checks` reads
+proposer identity, in slug order, each pinned to the one before, and
+they land together or not at all: a failure after an earlier one moves
+the branch back to the pinned tip. After the commits the merge records
+a verification check under your identity for every entity it created
+or updated (a landing that changed nothing, and a deletion, get none),
+against the hash that landed (the second commit's for
+`adopt_with_changes`), so `health --include checks` reads
 them `confirmed_independent`; and it re-reads the whole target from its
 backend and reports, under `validation`, the integrity and conformance
 findings before and after the merge. `new_findings` is empty when the

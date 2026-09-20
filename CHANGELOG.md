@@ -136,14 +136,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `Identity: <proposer>`, `Merged-By: <merger>`, `Proposal: <id>`,
   `Entities:` and `Created:` (the ids the commit brought into the target,
   so their story reads the merge as their creation); the record
-  `.memstead/proposals.json` rides the last of these. `adopt_with_changes`
+  `.memstead/proposals.json` rides the last of these. The commits land
+  together or not at all: a failure after an earlier proposer's commit
+  moves the target branch back to the pinned tip. `adopt_with_changes`
   lands the fork's version there and the owner's final body in a second
   commit under the merger's identity (`memstead: proposal-amend <id>`,
   the same `Proposal:` and `Merged-By:` trailers); the owner's body sets
   the sections it carries, the metadata it names, and its relations when
   given. After the commits the merge records a verification check per
-  adopted entity under the merger's identity (`method` names the
-  proposal) against the landed hash, so the checks axis reads it
+  entity it created or updated (a no-op landing and a deletion get
+  none) under the merger's identity (`method` names the proposal)
+  against the landed hash, so the checks axis reads it
   `confirmed_independent`, then re-reads the whole target from its
   backend and reports the integrity and conformance findings before and
   after (`validation` on the outcome; `new_findings` is empty when the
