@@ -76,6 +76,10 @@ pub const FULL: &[(&str, &str)] = &[
         include_str!("../descriptions/full/memstead_overview.md"),
     ),
     (
+        "memstead_proposal_brief",
+        include_str!("../descriptions/full/memstead_proposal_brief.md"),
+    ),
+    (
         "memstead_relate",
         include_str!("../descriptions/full/memstead_relate.md"),
     ),

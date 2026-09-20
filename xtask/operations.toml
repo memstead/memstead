@@ -83,6 +83,14 @@ cli = "mem fork"
 rationale = "a fork is a lineage act on the mem-repo (a branch at a recorded ancestor, a config carrying its origin, a fetch from a declared remote): transport and lineage stay on the script and human side beside fetch, pull and push, so the MCP slot stays blank on purpose"
 
 [[operation]]
+name = "proposal-brief"
+mcp = "memstead_proposal_brief"
+cli = "proposal brief"
+# The brief is a read the owner's agent pre-fills over MCP; the merge
+# (plan-proposal 03) stays CLI-only as a human's act on the owner's
+# branch.
+
+[[operation]]
 name = "branch-reset"
 cli = "branch-reset"
 # Deliberately absent from MCP (history rewriting stays off the agent

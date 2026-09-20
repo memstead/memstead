@@ -965,4 +965,34 @@ impl McpServer {
             Err(e) => engine_err_unified(e, &engine),
         }
     }
+
+    #[tool(
+        name = "memstead_proposal_brief",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    pub(super) fn memstead_proposal_brief(
+        &self,
+        Parameters(p): Parameters<ProposalBriefParams>,
+    ) -> CallToolResult {
+        let unified = self.unified_engine();
+        let mut engine = crate::lock_engine!(unified);
+        // The brief reloads both sides itself and writes nothing; the
+        // markdown rides the text channel for a human, the JSON (with
+        // the disposition skeleton) rides `structured_content`.
+        match engine.proposal_brief(&p.fork) {
+            Ok(brief) => {
+                let markdown = memstead_base::ops::render_proposal_brief(&brief);
+                let mut r =
+                    CallToolResult::success(vec![rmcp::model::ContentBlock::text(markdown)]);
+                r.structured_content = serde_json::to_value(&brief).ok();
+                r
+            }
+            Err(e) => engine_err_unified(e, &engine),
+        }
+    }
 }

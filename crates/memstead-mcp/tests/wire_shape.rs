@@ -4010,3 +4010,131 @@ fn full_health_stops_reporting_a_branch_mount_unbacked_once_its_branch_appears()
         "the appeared branch's entity is served"
     );
 }
+
+// ---------------------------------------------------------------------------
+// memstead_proposal_brief: the review brief of a fork over the wire
+// ---------------------------------------------------------------------------
+
+/// The success shape: markdown on the text channel, the JSON with the
+/// four shas, the entries and the disposition skeleton as
+/// `structuredContent`; and the two typed refusals the CLI shares,
+/// `INVALID_INPUT` for a mem with no recorded origin and `UNKNOWN_MEM`
+/// for a mem that is not mounted.
+#[test]
+fn full_memstead_proposal_brief_serves_markdown_and_the_json_skeleton() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("alpha", "default@1.0.0")]);
+    // The fork and its one added entity, through the engine before the
+    // server boots: the fork is a lineage act the CLI owns.
+    {
+        let mut engine =
+            memstead_git_branch::workspace_store::engine_from_workspace_root(tmp.path())
+                .expect("engine boots");
+        engine
+            .create_entity(
+                memstead_base::CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "alpha".to_string(),
+                    title: "Alpha".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: [
+                        ("identity".to_string(), "alpha stands".to_string()),
+                        ("purpose".to_string(), "seed".to_string()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    metadata: Default::default(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                memstead_base::vcs::Actor::Cli,
+                None,
+                None,
+            )
+            .expect("alpha lands");
+        memstead_base::mem_management::fork_mem(
+            &mut engine,
+            memstead_base::mem_management::MemForkParams {
+                source: "alpha".to_string(),
+                sha: None,
+                name: "alpha-fork".to_string(),
+                remote: None,
+                note: None,
+                operator_mode: true,
+                actor: memstead_base::vcs::Actor::Cli,
+                client: None,
+            },
+        )
+        .expect("fork lands");
+        engine
+            .create_entity(
+                memstead_base::CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "alpha-fork".to_string(),
+                    title: "Eta".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: [
+                        ("identity".to_string(), "eta is new".to_string()),
+                        ("purpose".to_string(), "a new card".to_string()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    metadata: Default::default(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                memstead_base::vcs::Actor::Cli,
+                None,
+                None,
+            )
+            .expect("eta lands");
+    }
+
+    let mut harness = WireHarness::start(tmp.path());
+    let result = harness.call_tool("memstead_proposal_brief", json!({ "fork": "alpha-fork" }));
+    let text = assert_success_envelope(&result);
+    assert!(
+        text.starts_with("# Proposal brief: `alpha-fork` against `alpha`"),
+        "{text}"
+    );
+    assert!(text.contains("## `eta`: added (Eta)"), "{text}");
+    let structured = result
+        .get("structuredContent")
+        .expect("structuredContent carries the JSON brief");
+    assert_eq!(structured["fork"], "alpha-fork");
+    assert_eq!(structured["target"], "alpha");
+    for key in ["ancestor", "base", "fork_tip", "target_tip"] {
+        assert_eq!(
+            structured[key].as_str().map(str::len),
+            Some(40),
+            "{key}: {structured}"
+        );
+    }
+    assert_eq!(structured["entries"][0]["slug"], "eta");
+    assert_eq!(structured["entries"][0]["status"], "added");
+    assert_eq!(structured["entries"][0]["precheck"]["outcome"], "clean");
+    assert_eq!(
+        structured["dispositions"]["eta"]["accepts"],
+        json!(["adopt", "adopt_with_changes", "reject"])
+    );
+    assert_eq!(structured["dispositions"]["eta"]["disposition"], "");
+
+    // The refusals: the typed code, and a message naming the cause.
+    let refusal = |result: &Value, code: &str, names: &str| {
+        assert_eq!(
+            result.get("isError").and_then(Value::as_bool),
+            Some(true),
+            "{result}"
+        );
+        let structured = result
+            .get("structuredContent")
+            .expect("structuredContent on the refusal");
+        assert_eq!(structured["code"], code, "{structured}");
+        let message = structured["message"].as_str().unwrap_or_default();
+        assert!(message.contains(names), "{structured}");
+    };
+    let result = harness.call_tool("memstead_proposal_brief", json!({ "fork": "alpha" }));
+    refusal(&result, "INVALID_INPUT", "forkedFrom");
+    let result = harness.call_tool("memstead_proposal_brief", json!({ "fork": "nobody" }));
+    refusal(&result, "UNKNOWN_MEM", "nobody");
+}

@@ -51,6 +51,7 @@ fn shared_rows() -> Vec<SurfaceCoverage> {
         no_verdict("memstead_schema", READS_DATA),
         no_verdict("memstead_diff", READS_DATA),
         no_verdict("memstead_changes_since", READS_DATA),
+        no_verdict("memstead_proposal_brief", READS_DATA),
         no_verdict("memstead_create", MUTATION),
         no_verdict("memstead_update", MUTATION),
         no_verdict("memstead_relate", MUTATION),

@@ -5,7 +5,9 @@
 //! `memstead_schema`, `memstead_search`; mutation: `memstead_create`,
 //! `memstead_delete`, `memstead_relate`, `memstead_rename`,
 //! `memstead_update`; process: `memstead_check`; admin:
-//! `memstead_changes_since`, `memstead_diff`, `memstead_reload`; mem
+//! `memstead_changes_since`, `memstead_diff`, `memstead_reload`; proposal:
+//! `memstead_proposal_brief` (the review brief of a fork, a read; the
+//! merge is CLI-only); mem
 //! lifecycle: `memstead_mem_create`, `memstead_mem_configure`,
 //! `memstead_mem_delete`, `memstead_mem_set_schema`,
 //! `memstead_mem_set_version`. The asserted count is
@@ -64,6 +66,10 @@ const EXPECTED_TOOLS: &[&str] = &[
     "memstead_changes_since",
     "memstead_diff",
     "memstead_reload",
+    // Proposal (1): the review brief of a fork against its source,
+    // the one read of the fork-review flow that lives on this
+    // surface (the owner's agent pre-fills it); the merge is CLI-only.
+    "memstead_proposal_brief",
     // Mem lifecycle (5)
     "memstead_mem_configure",
     "memstead_mem_create",
@@ -487,7 +493,8 @@ fn expected_hints(tool_name: &str) -> HintTriple {
         | "memstead_schema"
         | "memstead_health"
         | "memstead_changes_since"
-        | "memstead_diff" => HintTriple {
+        | "memstead_diff"
+        | "memstead_proposal_brief" => HintTriple {
             read_only: Some(true),
             destructive: Some(false),
             idempotent: Some(true),
@@ -1780,6 +1787,40 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "none",
             // Grounded labelling (include=labelling): the axis key.
             "labelling",
+        ],
+        "memstead_proposal_brief" => &[
+            // Response-shape fields the description names.
+            "ancestor",
+            "base",
+            "fork_tip",
+            "target_tip",
+            "entries",
+            "slug",
+            "status",
+            "added",
+            "modified",
+            "deleted",
+            "renamed",
+            "fork_delta",
+            "referrers",
+            "anchors",
+            "precheck",
+            "clean",
+            "failed",
+            "not_run",
+            "conflict",
+            "re_proposal",
+            "dispositions",
+            "disposition",
+            "reason",
+            "adopt",
+            "adopt_with_changes",
+            "reject",
+            "structured_content",
+            // Refusal codes the description names.
+            "INVALID_INPUT",
+            "UNKNOWN_MEM",
+            "UNKNOWN_REF",
         ],
         "memstead_diff" => &[
             // Response-shape fields the description names.

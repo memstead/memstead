@@ -85,6 +85,18 @@ fn default_true() -> bool {
     true
 }
 
+/// Parameters for memstead_proposal_brief: the review brief of a fork
+/// against its source; the response wire shape is `ProposalBrief` from
+/// `memstead_base::ops::proposal`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProposalBriefParams {
+    #[schemars(
+        description = "The fork mem: a mounted git-branch mem whose config records its origin (`memstead mem fork` writes it). Its changes are read against its base (the fork commit, or the ancestor for an older fork) and the source mem's branch tip at call time. A mem with no recorded origin refuses with `INVALID_INPUT`; a fork whose source mem is not mounted refuses with `UNKNOWN_MEM`."
+    )]
+    pub fork: String,
+}
+
 /// Parameters for memstead_changes_since.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
