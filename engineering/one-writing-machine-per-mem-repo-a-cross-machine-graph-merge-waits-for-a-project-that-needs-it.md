@@ -1,8 +1,8 @@
 ---
 type: decision
 created_date: 2026-09-10T14:08:00Z
-last_modified: 2026-09-10T14:08:00Z
-status: accepted
+last_modified: 2026-09-20T02:54:38Z
+status: superseded
 decided_on: 2026-09-10
 deciders: operator (in-session), implementing agent
 scope: system
@@ -27,9 +27,14 @@ The 2026-09-10 review of prune separated two questions the merge word had fused.
 - **INFORMED_BY**: [[heal-the-two-machine-mem-repo-fork-by-remote-lineage-reset-plus-source-rebuild]]
 - **REFERENCES**: [[merge-conflicts-get-an-engine-door-the-agent-judges-the-engine-writes-the-guards-stay-closed]]
 - **REFERENCES**: [[heal-the-two-machine-mem-repo-fork-by-remote-lineage-reset-plus-source-rebuild]]
+- **REFERENCES**: [[build-proposals-as-forks-with-a-recorded-ancestor-merged-entity-wise-under-two-identities]]
 
 ## Options
 
 - Build the entity-wise pull merge now: rejected, no live payer and the engine is to stop widening.
 - Textual git merge per branch: rejected earlier for the sixty-day fork, it surfaces the same conflict masses without the validator.
 - One writing machine per mem-repo with the healing procedure as fallback (chosen).
+
+## Notes
+
+2026-09-20 amendment: the trigger named in Decision fired (trustwork must merge a second lineage into an owner's mem); superseded by [[engineering--build-proposals-as-forks-with-a-recorded-ancestor-merged-entity-wise-under-two-identities]], which keeps the design order recorded under Consequences.
