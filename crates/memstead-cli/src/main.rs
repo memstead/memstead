@@ -228,5 +228,6 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Workspace { action } => commands::workspace::run(&ctx, action),
         Command::Schema(args) => commands::schema::run(&ctx, args),
         Command::Projection(args) => commands::projection::run(&ctx, args),
+        Command::Proposal { action } => commands::proposal::run(&ctx, action),
     }
 }

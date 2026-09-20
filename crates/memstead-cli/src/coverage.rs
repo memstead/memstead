@@ -217,6 +217,7 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         no_verdict("review-mark list", READS_DATA),
         no_verdict("review-mark diff", READS_DATA),
         no_verdict("projection brief", READS_DATA),
+        no_verdict("proposal brief", READS_DATA),
         no_verdict("projection check-path", READS_DATA),
         // The check ledger: the one surface deliberately outside the
         // rule, because its verdict is the caller's claim about the

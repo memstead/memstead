@@ -223,6 +223,7 @@ pub mod login;
 pub mod logout;
 pub mod overview;
 pub mod projection;
+pub mod proposal;
 pub mod publish;
 pub mod quickstart;
 pub mod relate;

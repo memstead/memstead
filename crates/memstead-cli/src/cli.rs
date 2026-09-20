@@ -427,6 +427,16 @@ pub enum Command {
     /// measures a binding's fidelity and records findings; `check-path`
     /// answers deny verdicts for paths and patterns.
     Projection(commands::projection::Args),
+
+    /// The review side of a fork. `brief <fork>` renders a fork's
+    /// changes against the mem it was forked from, three ways (fork
+    /// against base, target against base, and the conflicts), with a
+    /// mechanics precheck per entity and the disposition file the
+    /// merge consumes; a read that writes nothing.
+    Proposal {
+        #[command(subcommand)]
+        action: commands::proposal::ProposalAction,
+    },
 }
 
 impl Command {
@@ -488,6 +498,7 @@ impl Command {
             Command::Workspace { .. } => "workspace",
             Command::Schema(_) => "schema",
             Command::Projection(_) => "projection",
+            Command::Proposal { .. } => "proposal",
         }
     }
 }
