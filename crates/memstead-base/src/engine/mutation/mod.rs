@@ -515,7 +515,15 @@ impl super::Engine {
                 continue;
             };
             for a in anchors {
-                if a.grain != crate::anchor::AnchorGrain::Url || a.artifact != obs.artifact {
+                // The row identity, span included: an artifact carrying
+                // several span rows takes each observation on the one row
+                // the verify adjudicated, and a row the verify did not
+                // adjudicate (a hash-only observation over a span row) gets
+                // no record.
+                if a.grain != crate::anchor::AnchorGrain::Url
+                    || a.artifact != obs.artifact
+                    || !crate::anchor::same_span(a.span.as_deref(), obs.span.as_deref())
+                {
                     continue;
                 }
                 let mut changed = false;

@@ -4884,3 +4884,163 @@ fn a_derived_entity_anchor_is_pinned_to_its_target_at_write() {
     assert_eq!(r[0].anchor.hash_source, Some(AnchorHashSource::Pinned));
     assert_eq!(r[0].state, Some(crate::anchor::AnchorState::Resolves));
 }
+
+/// AC2 and AC4 at the record seam: one entity, two span rows and one
+/// span-less row on one url artifact. A mixed content observation lands
+/// on each row by its identity (A resolves, B span_absent, the span-less
+/// row by the whole-document rule), and a hash-only observation updates
+/// the span-less row alone, leaving the span rows byte for byte as they
+/// were. The roster and both health axes count exactly what the report
+/// counted.
+#[test]
+fn a_recorded_observation_lands_on_the_one_row_the_verify_adjudicated() {
+    use crate::anchor::{
+        AnchorInput, AnchorState, SuppliedObservationInput, validate_supplied_observations,
+    };
+    let (_tmp, _mem_dir, mut engine) = span_workspace();
+    let clock_now = "2026-09-02T12:00:00Z";
+    let page = "https://w.test/page";
+    let text = "Alpha words here. Beta words there.";
+    let mk = |span: Option<&str>, stability: &str| AnchorInput {
+        artifact: Some(page.to_string()),
+        grain: Some("url".to_string()),
+        class: Some("anchored".to_string()),
+        span: span.map(str::to_string),
+        content: Some(text.to_string()),
+        hash_stability: Some(stability.to_string()),
+        ..Default::default()
+    };
+    let id = spec_with_anchors(
+        &mut engine,
+        "Three rows",
+        vec![
+            mk(Some("Alpha words"), "stable"),
+            mk(Some("Beta words"), "stable"),
+            mk(None, "stable"),
+        ],
+    );
+    let doc_hash = crate::anchor::prepared_content_hash(text.as_bytes());
+    let rows = |engine: &Engine| engine.entity_anchors_resolved(&id);
+    let row = |rows: &[crate::engine::query::ResolvedAnchor], span: Option<&str>| {
+        rows.iter()
+            .find(|r| r.anchor.span.as_deref() == span)
+            .cloned()
+            .unwrap()
+    };
+    let counts = |engine: &Engine| -> (usize, usize, usize, u64, u64) {
+        let report = engine.verify_mem_anchors("specs").unwrap();
+        let roster = engine
+            .mem_anchors_resolved("specs")
+            .iter()
+            .filter(|(_, r)| r.state == Some(AnchorState::SpanAbsent))
+            .count();
+        let axis = crate::ops::health::health_anchors_axis(engine, None);
+        let open = crate::ops::health::health_open_questions_axis(engine, Some("specs"));
+        (
+            report.span_absent,
+            report.figure.count_for_assertions(),
+            roster,
+            axis["specs"]["span_absent"].as_u64().unwrap(),
+            open["specs"]["anchors_span_absent"]["count"]
+                .as_u64()
+                .unwrap(),
+        )
+    };
+
+    // Mixed observation: A present, B gone, the whole document changed.
+    let changed = "Alpha words here. Gamma words there.";
+    let changed_hash = crate::anchor::prepared_content_hash(changed.as_bytes());
+    let supplied = validate_supplied_observations(
+        &[SuppliedObservationInput {
+            artifact: Some(page.into()),
+            content: Some(changed.into()),
+            ..Default::default()
+        }],
+        clock_now,
+    )
+    .unwrap();
+    let report = engine.verify_mem_anchors_with("specs", &supplied).unwrap();
+    assert_eq!(
+        (
+            report.span_absent,
+            report.drifted,
+            report.figure.count_for_assertions()
+        ),
+        (1, 1, 1),
+        "A resolves, B span_absent, the whole-document row drifts: {:?}",
+        report.anchors
+    );
+    assert_eq!(report.recordable_observations.len(), 3);
+    assert_eq!(
+        engine
+            .record_anchor_observations("specs", &report.recordable_observations, None)
+            .unwrap(),
+        3
+    );
+    let after = rows(&engine);
+    let obs = |span: Option<&str>| row(&after, span).anchor.last_observed.clone().unwrap();
+    assert_eq!(obs(Some("Alpha words")).state, AnchorState::Resolves);
+    assert_eq!(obs(Some("Beta words")).state, AnchorState::SpanAbsent);
+    assert_eq!(obs(None).state, AnchorState::Drifted);
+    for span in [Some("Alpha words"), Some("Beta words"), None] {
+        assert_eq!(obs(span).hash.as_deref(), Some(changed_hash.as_str()));
+        assert_eq!(
+            row(&after, span).anchor.hash.as_deref(),
+            Some(doc_hash.as_str()),
+            "the author baseline stays"
+        );
+    }
+    assert_eq!(
+        counts(&engine),
+        (1, 1, 1, 1, 1),
+        "one span_absent everywhere"
+    );
+
+    // Hash-only observation: the span rows stay byte for byte, the
+    // span-less row takes the record.
+    let supplied = validate_supplied_observations(
+        &[SuppliedObservationInput {
+            artifact: Some(page.into()),
+            hash: Some(doc_hash.clone()),
+            observed_at: Some("2026-09-02T13:00:00Z".into()),
+            ..Default::default()
+        }],
+        clock_now,
+    )
+    .unwrap();
+    let report = engine.verify_mem_anchors_with("specs", &supplied).unwrap();
+    assert_eq!(report.recordable_observations.len(), 1);
+    assert_eq!(report.recordable_observations[0].span, None);
+    let state_of = |span: Option<&str>| {
+        report
+            .anchors
+            .iter()
+            .find(|a| a.span.as_deref() == span)
+            .map(|a| (a.state.clone(), a.observation_supplied))
+            .unwrap()
+    };
+    assert_eq!(state_of(Some("Alpha words")), ("resolves".into(), false));
+    assert_eq!(state_of(Some("Beta words")), ("span_absent".into(), false));
+    assert_eq!(state_of(None), ("resolves".into(), true));
+    assert_eq!(
+        engine
+            .record_anchor_observations("specs", &report.recordable_observations, None)
+            .unwrap(),
+        1
+    );
+    let later = rows(&engine);
+    assert_eq!(
+        row(&later, Some("Alpha words")).anchor,
+        row(&after, Some("Alpha words")).anchor,
+        "span row A untouched"
+    );
+    assert_eq!(
+        row(&later, Some("Beta words")).anchor,
+        row(&after, Some("Beta words")).anchor,
+        "span row B untouched"
+    );
+    let plain = row(&later, None).anchor.last_observed.unwrap();
+    assert_eq!(plain.state, AnchorState::Resolves);
+    assert_eq!(plain.at, "2026-09-02T13:00:00Z");
+    assert_eq!(counts(&engine), (1, 2, 1, 1, 1));
+}

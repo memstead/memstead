@@ -289,3 +289,142 @@ fn absent_reads_recheck_and_a_hash_observation_leaves_a_span_row_as_it_was() {
     assert_eq!(row(&v, TARIFF)["state"], "recheck", "{v}");
     assert_eq!(row(&v, BOARD)["state"], "recheck", "{v}");
 }
+
+/// The record seam through the CLI: two span rows and a span-less row on
+/// one url artifact, on one entity. After a mixed observation each row
+/// carries its own recorded state on `anchors <id>`, and `health --include
+/// anchors` counts one span_absent, as the verify did; a hash-only
+/// observation afterwards leaves the span rows exactly as they were.
+#[test]
+fn a_recorded_observation_lands_on_the_one_row_it_adjudicated() {
+    let ws = TempDir::new().unwrap();
+    memstead()
+        .current_dir(ws.path())
+        .args([
+            "init",
+            "--name",
+            "notes",
+            "--schema",
+            "default@1.3.0",
+            "--quiet",
+        ])
+        .assert()
+        .success();
+    let page = "https://example.test/page";
+    let text = "Alpha words here. Beta words there.";
+    let mk = |span: Option<&str>| match span {
+        Some(s) => format!(
+            r#"{{"artifact":"{page}","grain":"url","class":"anchored","span":"{s}","content":"{text}"}}"#
+        ),
+        None => format!(
+            r#"{{"artifact":"{page}","grain":"url","class":"anchored","content":"{text}"}}"#
+        ),
+    };
+    memstead()
+        .current_dir(ws.path())
+        .args([
+            "create",
+            "--type",
+            "assertion",
+            "--title",
+            "Three rows",
+            "--section",
+            "claim=Alpha and beta.",
+            "--section",
+            "evidence=The page.",
+            "--identity",
+            "author-one",
+            "--role",
+            "author",
+            "--quiet",
+            "--anchor",
+            &mk(Some("Alpha words")),
+            "--anchor",
+            &mk(Some("Beta words")),
+            "--anchor",
+            &mk(None),
+        ])
+        .assert()
+        .success();
+    let entity = "notes--three-rows";
+    let rows_of = |ws: &Path| -> serde_json::Value {
+        let out = memstead()
+            .current_dir(ws)
+            .args(["anchors", entity, "--json", "--quiet"])
+            .output()
+            .unwrap();
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    let row = |v: &serde_json::Value, span: Option<&str>| -> serde_json::Value {
+        v["anchors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["span"].as_str() == span)
+            .cloned()
+            .unwrap_or_else(|| panic!("no row for {span:?} in {v}"))
+    };
+
+    let obs = ws.path().join("obs.json");
+    fs::write(
+        &obs,
+        format!(r#"[{{"artifact":"{page}","content":"Alpha words here. Gamma words there."}}]"#),
+    )
+    .unwrap();
+    let v = verify(ws.path(), Some(&obs));
+    // The span-less row reads by the whole-document rule: the url default
+    // is `unstable`, so a changed page is recheck, not drifted.
+    assert_eq!(
+        (
+            v["span_absent"].as_u64(),
+            v["recheck"].as_u64(),
+            v["drifted"].as_u64()
+        ),
+        (Some(1), Some(1), Some(0)),
+        "{v}"
+    );
+    assert_eq!(v["observations"]["recorded"], 3, "{v}");
+    let rows = rows_of(ws.path());
+    assert_eq!(
+        row(&rows, Some("Alpha words"))["last_observed"]["state"],
+        "resolves"
+    );
+    assert_eq!(
+        row(&rows, Some("Beta words"))["last_observed"]["state"],
+        "span_absent"
+    );
+    assert_eq!(row(&rows, None)["last_observed"]["state"], "recheck");
+    let health = |ws: &Path| -> serde_json::Value {
+        let out = memstead()
+            .current_dir(ws)
+            .args([
+                "health",
+                "--include",
+                "anchors,open_questions",
+                "--json",
+                "--quiet",
+            ])
+            .output()
+            .unwrap();
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    let h = health(ws.path());
+    assert_eq!(h["anchors"]["notes"]["span_absent"], 1, "{h}");
+    assert_eq!(
+        h["open_questions"]["notes"]["anchors_span_absent"]["count"], 1,
+        "{h}"
+    );
+
+    // Hash-only afterwards: the span rows keep their records, the
+    // span-less row takes the new one.
+    fs::write(&obs, format!(r#"[{{"artifact":"{page}","hash":"zz"}}]"#)).unwrap();
+    let v = verify(ws.path(), Some(&obs));
+    assert_eq!(v["observations"]["recorded"], 1, "{v}");
+    let later = rows_of(ws.path());
+    for span in [Some("Alpha words"), Some("Beta words")] {
+        assert_eq!(row(&later, span), row(&rows, span), "span row untouched");
+    }
+    assert_eq!(row(&later, None)["last_observed"]["hash"], "zz");
+    let h = health(ws.path());
+    assert_eq!(h["anchors"]["notes"]["span_absent"], 1, "{h}");
+}

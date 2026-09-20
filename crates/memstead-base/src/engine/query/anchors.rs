@@ -762,6 +762,7 @@ impl Engine {
                 report.recordable_observations.push(RecordedObservation {
                     entity: eid.to_string(),
                     artifact: resolved.anchor.artifact.clone(),
+                    span: resolved.anchor.span.clone(),
                     observation: crate::anchor::AnchorObservation {
                         at: at.clone(),
                         hash: resolved.observed_hash.clone(),
@@ -917,11 +918,16 @@ pub struct MemAnchorVerification {
 }
 
 /// One observation to record onto a sidecar row (the `last_observed`
-/// field), addressed by the `(entity, artifact)` pair.
+/// field), addressed by the row's identity: the entity, the artifact and
+/// the span (compared in the canonical span form, as the merge and the
+/// unset selector compare it). Exactly the row the verify adjudicated
+/// takes the record; a sibling row on the same artifact with another span,
+/// or with none, is another row with its own observation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedObservation {
     pub entity: String,
     pub artifact: String,
+    pub span: Option<String>,
     pub observation: crate::anchor::AnchorObservation,
 }
 
