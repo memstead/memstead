@@ -363,6 +363,26 @@ pub struct MutationStamp {
     pub schema: String,
 }
 
+/// Where a forked mem came from, see [`MemConfig::forked_from`]. The
+/// ancestor never moves: `sha` is the source branch's commit the fork's
+/// branch was created at, `mem` the source mem's name, and `remote` the
+/// mem-repo remote the source was fetched from when the fork was not
+/// local (`None` for a fork of a mounted mem). Author-only: the
+/// published archive config never carries it, so an archive can never
+/// claim a lineage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ForkedFrom {
+    /// The source mem's name.
+    pub mem: String,
+    /// The 40-hex commit sha on the source branch the fork started at.
+    pub sha: String,
+    /// The mem-repo remote the source branch and config were fetched
+    /// from; absent for a local fork.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+}
+
 /// Full mem configuration loaded from .memstead/config.json.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -580,6 +600,23 @@ pub struct MemConfig {
     )]
     pub mutation_stamp: Option<MutationStamp>,
 
+    /// The recorded ancestor of a mem created by `memstead mem fork`:
+    /// the source mem, the commit its branch started at, and the remote
+    /// when one was used. Written once at fork time and never moved
+    /// (the review mark is the moving cursor; the ancestor is not).
+    /// Absent on every mem that was not forked. Wire key `forkedFrom`.
+    ///
+    /// Stripped from `PublishedMemConfig` (allowlist projection), whose
+    /// deny-unknown-fields shape refuses the key outright. An engine
+    /// that predates the field reads the config unchanged: the key
+    /// lands in the flattened `extra` map and is written back verbatim.
+    #[serde(
+        default,
+        rename = "forkedFrom",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub forked_from: Option<ForkedFrom>,
+
     /// Extra fields not in the known set (captured for round-tripping).
     ///
     /// Historical tombstones:
@@ -774,6 +811,15 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "community",
     "vcs",
     "syncState",
+    // Engine-owned or lifecycle keys the struct models: the validator
+    // must not call them unknown ("will be ignored") when the engine
+    // reads every one of them.
+    "format",
+    "processMem",
+    "unregisteredAt",
+    "reviewMark",
+    "mutationStamp",
+    "forkedFrom",
 ];
 
 /// Keys that are explicitly rejected with a `LEGACY_FIELD_PRESENT`

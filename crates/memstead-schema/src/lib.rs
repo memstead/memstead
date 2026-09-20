@@ -29,7 +29,7 @@ pub use archive_provenance::{
 pub use config::{
     ARCHIVE_ANCHORS_PATH, ARCHIVE_CHECKS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION,
     ARCHIVE_META_DIR, ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX, CommunityOverride,
-    ConfigCheckResult, ConfigError, MEM_META_DIR, MemConfig, MemSubject, MutationStamp,
+    ConfigCheckResult, ConfigError, ForkedFrom, MEM_META_DIR, MemConfig, MemSubject, MutationStamp,
     PUBLISHED_MEM_FORMAT, PUBLISHED_MEM_FORMATS_ACCEPTED, PublishConfig, PublishConversionError,
     PublishedMemConfig, ReadMemSource, ReadMemSpec, RoleConfig, SchemaRef, VcsConfig, check_config,
     load_and_validate, load_config, parse_mem_config, published_config_from,

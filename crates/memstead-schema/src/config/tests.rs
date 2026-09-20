@@ -108,6 +108,7 @@ fn mem_config_omits_name_when_none_on_serialize() {
         sync_state: Default::default(),
         review_mark: None,
         mutation_stamp: None,
+        forked_from: None,
         extra: Default::default(),
     };
     let json = serde_json::to_string(&cfg).unwrap();
@@ -505,6 +506,7 @@ fn published_config_strips_extra_and_write_guidance() {
         sync_state,
         review_mark: None,
         mutation_stamp: None,
+        forked_from: None,
         extra,
     };
     let published = published_config_from(&cfg, "").expect("publish projection");
@@ -865,6 +867,7 @@ fn published_config_strips_vcs() {
         sync_state: BTreeMap::new(),
         review_mark: None,
         mutation_stamp: None,
+        forked_from: None,
         extra: HashMap::new(),
     };
     cfg.vcs = Some(VcsConfig {
@@ -902,4 +905,182 @@ fn belongs_to_field_is_legacy_tombstone() {
         "tombstone error must name the field and the replacement section: {:?}",
         result.errors
     );
+}
+
+// ----- forkedFrom: the recorded ancestor of a forked mem -----
+
+/// `forkedFrom` round-trips as a typed optional field under its
+/// camelCase wire key, with `remote` absent for a local fork and
+/// present for a remote one; a config without the key parses to
+/// `None` and writes no key.
+#[test]
+fn forked_from_round_trips_camel_case_and_is_absent_by_default() {
+    let local = json!({
+        "schema": "default@1.0.0",
+        "forkedFrom": { "mem": "specs", "sha": "a".repeat(40) }
+    });
+    let cfg = parse_mem_config(&local).unwrap();
+    let origin = cfg.forked_from.as_ref().expect("field parsed");
+    assert_eq!(origin.mem, "specs");
+    assert_eq!(origin.sha, "a".repeat(40));
+    assert_eq!(origin.remote, None);
+    assert!(
+        cfg.extra.is_empty(),
+        "the key is modelled, never captured as extra: {:?}",
+        cfg.extra
+    );
+    let wire: Value = serde_json::to_value(&cfg).unwrap();
+    assert_eq!(wire["forkedFrom"]["mem"], "specs");
+    assert!(wire["forkedFrom"].get("remote").is_none(), "{wire}");
+    assert!(wire.get("forked_from").is_none(), "camelCase only: {wire}");
+
+    let remote = json!({
+        "schema": "default@1.0.0",
+        "forkedFrom": { "mem": "specs", "sha": "b".repeat(40), "remote": "origin" }
+    });
+    let cfg = parse_mem_config(&remote).unwrap();
+    assert_eq!(cfg.forked_from.unwrap().remote.as_deref(), Some("origin"));
+
+    let plain = parse_mem_config(&json!({ "schema": "default@1.0.0" })).unwrap();
+    assert!(plain.forked_from.is_none());
+    let wire: Value = serde_json::to_value(&plain).unwrap();
+    assert!(wire.get("forkedFrom").is_none(), "{wire}");
+}
+
+/// The validator knows the key: a forked mem's config raises no
+/// "unknown key" warning, and neither do the other engine-owned keys
+/// the struct models (`reviewMark`, `mutationStamp`, `processMem`,
+/// `unregisteredAt`, `format`), which the validator used to call
+/// unknown while the engine read every one of them.
+#[test]
+fn check_config_knows_every_modelled_key() {
+    let cfg = json!({
+        "schema": "default@1.0.0",
+        "format": 1,
+        "processMem": "specs-process",
+        "unregisteredAt": "2026-01-01T00:00:00Z",
+        "reviewMark": "c".repeat(40),
+        "mutationStamp": { "engineVersion": "0.20.0", "schema": "default@1.0.0" },
+        "forkedFrom": { "mem": "specs", "sha": "a".repeat(40) }
+    });
+    let result = check_config(&cfg);
+    assert!(result.valid, "{:?}", result.errors);
+    assert!(
+        result.warnings.is_empty(),
+        "no modelled key may be reported unknown: {:?}",
+        result.warnings
+    );
+}
+
+/// The shape of `forkedFrom` is strict: an unknown member refuses at
+/// parse, so a config cannot smuggle an unmodelled lineage claim.
+#[test]
+fn forked_from_refuses_unknown_members() {
+    let cfg = json!({
+        "schema": "default@1.0.0",
+        "forkedFrom": { "mem": "specs", "sha": "a".repeat(40), "branch": "x" }
+    });
+    let err = parse_mem_config(&cfg).unwrap_err();
+    assert!(err.to_string().contains("branch"), "{err}");
+}
+
+/// Older-engine tolerance (AC3): the previous engine's `MemConfig`
+/// had no `forked_from` field but the same flattened `extra` map. A
+/// config written by this engine, read through that prior shape, keeps
+/// the key in `extra` and writes it back byte-for-byte, so this engine
+/// reads the ancestor intact after the older one rewrote the config.
+#[test]
+fn forked_from_survives_the_prior_struct_shape_through_extra() {
+    /// The previous engine's struct, reduced to the members that
+    /// matter for the round trip: the modelled `schema` key and the
+    /// flattened catch-all every unknown key lands in.
+    #[derive(Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PriorMemConfig {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        schema: Option<SchemaRef>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(flatten)]
+        extra: HashMap<String, Value>,
+    }
+
+    let written_by_this_engine = MemConfig {
+        format: None,
+        name: None,
+        version: Some(semver::Version::new(0, 3, 0)),
+        description: None,
+        title: None,
+        subject: None,
+        authors: None,
+        process_mem: None,
+        schema: Some("default@1.0.0".parse().unwrap()),
+        write_guidance: HashMap::new(),
+        rules: None,
+        publish: None,
+        language: None,
+        read_mems: BTreeMap::new(),
+        community: None,
+        vcs: None,
+        unregistered_at: None,
+        sync_state: BTreeMap::new(),
+        review_mark: None,
+        mutation_stamp: None,
+        forked_from: Some(ForkedFrom {
+            mem: "specs".to_string(),
+            sha: "a".repeat(40),
+            remote: Some("origin".to_string()),
+        }),
+        extra: HashMap::new(),
+    };
+    let bytes = serde_json::to_vec(&written_by_this_engine).unwrap();
+
+    // The older engine loads it: the key is unknown to it and lands in
+    // `extra`, nothing refuses.
+    let mut prior: PriorMemConfig = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        prior.extra.get("forkedFrom"),
+        Some(&json!({ "mem": "specs", "sha": "a".repeat(40), "remote": "origin" })),
+        "the prior shape keeps the field as an unknown key: {:?}",
+        prior.extra
+    );
+    // The older engine rewrites the config (a description edit, say).
+    prior.description = Some("edited by the previous engine".to_string());
+    let rewritten = serde_json::to_vec(&prior).unwrap();
+
+    // This engine reads the ancestor back unchanged.
+    let value: Value = serde_json::from_slice(&rewritten).unwrap();
+    let reread = parse_mem_config(&value).unwrap();
+    assert_eq!(reread.forked_from, written_by_this_engine.forked_from);
+    assert_eq!(
+        reread.description.as_deref(),
+        Some("edited by the previous engine")
+    );
+}
+
+/// The published archive config never carries the ancestor: the
+/// projection strips it, and the strict archive shape refuses a
+/// `forkedFrom` key outright (deny-unknown-fields), so an archive can
+/// never claim a lineage.
+#[test]
+fn published_config_strips_and_refuses_forked_from() {
+    let cfg = json!({
+        "schema": "default@1.0.0",
+        "version": "1.0.0",
+        "forkedFrom": { "mem": "specs", "sha": "a".repeat(40) }
+    });
+    let parsed = parse_mem_config(&cfg).unwrap();
+    let published = published_config_from(&parsed, "fork").unwrap();
+    let wire: Value = serde_json::to_value(&published).unwrap();
+    assert!(wire.get("forkedFrom").is_none(), "{wire}");
+
+    let smuggled = json!({
+        "format": PUBLISHED_MEM_FORMAT,
+        "name": "fork",
+        "version": "1.0.0",
+        "schema": "default@1.0.0",
+        "forkedFrom": { "mem": "specs", "sha": "a".repeat(40) }
+    });
+    let err = serde_json::from_value::<PublishedMemConfig>(smuggled).unwrap_err();
+    assert!(err.to_string().contains("forkedFrom"), "{err}");
 }

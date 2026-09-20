@@ -244,6 +244,7 @@ mod tests {
                 sync_state: Default::default(),
                 review_mark: None,
                 mutation_stamp: None,
+                forked_from: None,
                 extra: Default::default(),
             };
             let meta = dir.join(memstead_schema::MEM_META_DIR);
@@ -424,6 +425,7 @@ mod tests {
             sync_state: Default::default(),
             review_mark: None,
             mutation_stamp: None,
+            forked_from: None,
             extra: Default::default(),
         };
         config.review_mark = Some("deadbeef".to_string());

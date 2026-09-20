@@ -1652,6 +1652,7 @@ pub fn create_mem(
         format: None,
         review_mark: None,
         mutation_stamp: None,
+        forked_from: None,
         name: None,
         title: None,
         subject: None,
