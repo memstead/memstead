@@ -115,3 +115,32 @@ graph reflects the pulled state immediately.
 Divergence (both sides committed) never merges silently: `pull` refuses
 with `LOCAL_DIVERGENCE`, and you choose — `branch-reset` to adopt the
 remote, or push from the other machine first.
+
+## 5. Fork a mem at a recorded ancestor
+
+A proposal against a mem is a second lineage, not an unrelated mem: fork
+it, and the diff between the two later has a common ancestor to stand on.
+
+```sh
+memstead mem fork knowledge knowledge-proposal            # at the source's tip
+memstead mem fork knowledge@<sha> knowledge-proposal      # at a commit the source reaches
+memstead mem fork knowledge knowledge-proposal --remote origin   # source fetched from the remote
+```
+
+The fork's branch starts at the source's commit, its config is the
+source's (same schema pin, same version and description) with
+`forkedFrom` (source mem, sha, remote when one was used) written in, and
+its entities read identical to the source's at that commit. A local fork
+carries the source's outgoing cross-link grants under its own name, so
+copied cross-mem edges read conformant from the first read; `mem list`
+shows the origin (`forked from ...`). The name obeys the same create rules
+as `mem init`, and every refusal (a sha not on the source branch, a name
+a branch sits above or below, an existing name, a folder or archive
+source) lands nothing.
+
+With `--remote`, the source branch and the remote's `__MEMSTEAD` config
+are fetched into remote-tracking refs (the local `__MEMSTEAD` never
+moves), the fetched tree is validated as `pull` validates before the
+mount exists, no grant is inherited (the remote's policy is not this
+workspace's), and a schema pin this workspace cannot resolve refuses
+naming the remedy, `memstead schema install`.

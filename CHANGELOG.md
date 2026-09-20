@@ -9,6 +9,39 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **A mem forks from another mem's branch at a recorded ancestor.**
+  `memstead mem fork <source>[@<sha>] <new-name> [--remote <name>]` creates
+  a writable git-branch mem whose branch starts at the source's commit (the
+  tip, or a sha the source branch reaches), whose config is the source's
+  with the schema pin copied and `forkedFrom` (`{mem, sha, remote?}`)
+  written in, and whose entities read identical to the source's at that
+  commit. The local form forks a mounted mem and carries the source's
+  outgoing `[cross_mem_links]` grants under the new name through the same
+  policy writer `workspace grant-cross-link` uses (a source without grants
+  adds none); the `--remote` form fetches the source branch and the remote's
+  `__MEMSTEAD` into remote-tracking refs (the local `__MEMSTEAD` never
+  moves), reads the config there, validates the fetched tree as `pull`
+  does before the mount exists, inherits no grant, and refuses a schema pin
+  this workspace cannot resolve with `SCHEMA_NOT_FOUND` naming `memstead
+  schema install`. The source's `syncState` and `reviewMark` are its own
+  cursors and are not copied. Refusals, all landing nothing: a sha not on
+  the source branch or a branch the remote lacks (`UNKNOWN_REF`), a name
+  outside the create rules (`MEM_PATH_NOT_ALLOWED`, `MEM_SCHEMA_NOT_ALLOWED`),
+  a name a branch sits above or below (`MEM_NAME_REF_CONFLICT`), an existing
+  name (`MEM_NAME_COLLISION`), residue at the name
+  (`MEM_STORAGE_RESIDUE_DETECTED`), a folder, archive or in-memory source or
+  a folder-only workspace (`INVALID_INPUT`), an unknown remote
+  (`UNKNOWN_REMOTE`), a fetched tree failing the schema
+  (`SCHEMA_VIOLATION_IN_FETCH`); a failure after the branch exists rolls the
+  branch, the config and the policy line back. `mem list` shows a fork's
+  origin (`forked_from` in JSON, `forked from` in markdown). CLI-only, like
+  `fetch`, `pull` and `push`, recorded in the parity registry with its
+  rationale; no MCP tool. `forkedFrom` is a typed optional field of the
+  workspace mem config, author-only: the published archive config never
+  carries it and its strict shape refuses the key. Migration: an engine
+  from before this release reads a forked mem's config with the field
+  preserved and unread (it lands in the config's unknown-field map and is
+  written back verbatim), so the two engines can share one mem-repo.
 - **A sealed archive carries its check records.** `memstead export
   --format mem` (folder, in-memory and git-branch mems alike) writes one
   optional member, `.memstead/checks.json`: per entity of the archive, the
