@@ -716,14 +716,25 @@ fn fork_commit_retargets_sidecars_and_self_links_and_records_the_base() {
         .unwrap();
     assert_eq!(written, 1);
     // Beta: self-links in both spellings (one labelled), links to the
-    // other mem in both spellings, and a self-link inside a code span.
+    // other mem in both spellings, a self-link inside a code span, and
+    // a derived entity-grain row whose artifact and one of whose inputs
+    // name a same-mem entity beside a foreign one.
     create_entity_with(
         &mut engine,
         "specs",
         "Beta",
         "Beta builds on [[specs--alpha]] and [[specs:alpha|the alpha]]; see [[plans--roadmap]] \
          and [[plans:roadmap]]; the literal `[[specs--alpha]]` stays.",
-        Vec::new(),
+        vec![AnchorInput {
+            artifact: Some("specs--alpha".to_string()),
+            grain: Some("entity".to_string()),
+            class: Some("derived".to_string()),
+            derived_from: Some(vec![
+                "specs--alpha".to_string(),
+                "plans--roadmap".to_string(),
+            ]),
+            ..Default::default()
+        }],
     );
     // A check on the source's entity: the ledger line the fork must not
     // inherit.
@@ -759,6 +770,12 @@ fn fork_commit_retargets_sidecars_and_self_links_and_records_the_base() {
             .any(|a| a.hash.as_deref() == Some("0123456789abcdef")
                 && a.hash_source == Some(memstead_base::anchor::AnchorHashSource::Backfill)),
         "the observed baseline is on the source's row: {source_rows:?}"
+    );
+    let source_beta_rows = engine.entity_anchors(&EntityId::new("specs", "beta"));
+    assert_eq!(source_beta_rows.len(), 1, "{source_beta_rows:?}");
+    assert!(
+        source_beta_rows[0].hash.is_some(),
+        "the same-mem derived row carries the target's hash: {source_beta_rows:?}"
     );
     let source_sidecar = blob_at(&gitdir, "refs/heads/specs", ".memstead/anchors.json").unwrap();
     let source_alpha_blob = tree_blobs(&gitdir, "refs/heads/specs")["alpha.md"].clone();
@@ -807,10 +824,39 @@ fn fork_commit_retargets_sidecars_and_self_links_and_records_the_base() {
     .unwrap();
     let fork_sidecar = AnchorSidecar::from_bytes(&fork_sidecar_bytes).unwrap();
     let keys: Vec<&String> = fork_sidecar.entities.keys().collect();
-    assert_eq!(keys, vec!["proposals/specs-001--alpha"], "{keys:?}");
+    assert_eq!(
+        keys,
+        vec!["proposals/specs-001--alpha", "proposals/specs-001--beta"],
+        "{keys:?}"
+    );
     assert_eq!(
         fork_sidecar.get("proposals/specs-001--alpha"),
         &source_rows[..]
+    );
+    // The same-mem derived row: its artifact and its same-mem input
+    // name the fork, the foreign input, the hash and everything else
+    // stay as the source's row had them.
+    let expected_beta_row = {
+        let mut row = source_beta_rows[0].clone();
+        row.artifact = "proposals/specs-001--alpha".to_string();
+        row.derived_from = vec![
+            "proposals/specs-001--alpha".to_string(),
+            "plans--roadmap".to_string(),
+        ];
+        row
+    };
+    assert_eq!(
+        fork_sidecar.get("proposals/specs-001--beta"),
+        std::slice::from_ref(&expected_beta_row)
+    );
+    // And it resolves against the fork's own entity.
+    let resolved = engine.entity_anchors_resolved(&EntityId::new("proposals/specs-001", "beta"));
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].anchor, expected_beta_row);
+    assert_eq!(
+        resolved[0].state,
+        Some(memstead_base::anchor::AnchorState::Resolves),
+        "{resolved:?}"
     );
     assert_eq!(
         fork_sidecar.version,
@@ -930,6 +976,10 @@ fn fork_commit_retargets_sidecars_and_self_links_and_records_the_base() {
     assert_eq!(
         engine.entity_anchors(&EntityId::new("specs", "alpha")),
         source_rows
+    );
+    assert_eq!(
+        engine.entity_anchors(&EntityId::new("specs", "beta")),
+        source_beta_rows
     );
     drop(engine);
 

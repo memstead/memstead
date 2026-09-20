@@ -515,8 +515,9 @@ pub fn fork_mem(
 }
 
 /// The fork commit: move every id and link that names `source` to
-/// `fork`, in the anchors sidecar (entity keys), the derivations
-/// sidecar (source keys and same-mem targets) and the entity bodies
+/// `fork`, in the anchors sidecar (entity keys, an entity-grain row's
+/// `artifact`, every `derived_from` entry naming the source mem), the
+/// derivations sidecar (source keys and same-mem targets) and the entity bodies
 /// (mem-qualified self-links, through the export retargeting rule:
 /// `[[<source>--slug]]` and `[[<source>:slug]]`, labels kept, code
 /// spans and links naming another mem untouched), then commit once on
@@ -540,6 +541,24 @@ fn retarget_fork_tree(
             ))
         })?;
         let mut moved = false;
+        // A row that names a same-mem entity as its artifact (entity
+        // grain) or among its inputs would otherwise resolve against
+        // the source's entity from the fork, and read unobserved where
+        // the source is not mounted.
+        for row in sidecar.entities.values_mut().flatten() {
+            if row.grain == crate::anchor::AnchorGrain::Entity
+                && let Some(to) = retarget_entity_id(&row.artifact, source, fork)
+            {
+                row.artifact = to;
+                moved = true;
+            }
+            for input in &mut row.derived_from {
+                if let Some(to) = retarget_entity_id(input, source, fork) {
+                    *input = to;
+                    moved = true;
+                }
+            }
+        }
         let keys: Vec<String> = sidecar.entities.keys().cloned().collect();
         for key in keys {
             if let Some(to) = retarget_entity_id(&key, source, fork) {

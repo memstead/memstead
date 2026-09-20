@@ -69,7 +69,8 @@ fn seed() -> TempDir {
             .assert()
             .success();
     }
-    // Delta in `alpha`: a url span row and a derived entity-grain row,
+    // Delta in `alpha`: a url span row and a derived entity-grain row
+    // whose artifact names a same-mem entity beside a foreign input,
     // the trustwork case shape.
     memstead()
         .current_dir(ws.path())
@@ -88,7 +89,7 @@ fn seed() -> TempDir {
             "--anchor",
             r#"{"artifact": "https://example.org/page", "grain": "url", "class": "anchored", "span": "the quoted words"}"#,
             "--anchor",
-            r#"{"artifact": "beta--alpha", "grain": "entity", "class": "derived", "derived_from": ["beta--alpha"]}"#,
+            r#"{"artifact": "alpha--alpha", "grain": "entity", "class": "derived", "derived_from": ["alpha--alpha", "beta--alpha"]}"#,
             "--quiet",
         ])
         .assert()
@@ -195,14 +196,39 @@ fn mem_fork_creates_the_fork_and_mem_list_shows_its_origin() {
     assert_eq!(envelope["warnings"], serde_json::json!([]));
 
     // The fork's entity lists the rows the source's entity has, under
-    // the fork's id; the source keeps its own.
+    // the fork's id, with the same-mem artifact and input naming the
+    // fork and resolving against the fork's entity; the source keeps
+    // its own.
     let source_rows = anchor_rows(ws.path(), "alpha--delta");
     assert_eq!(
         source_rows.as_array().map(Vec::len),
         Some(2),
         "{source_rows}"
     );
-    assert_eq!(anchor_rows(ws.path(), "alpha-fork--delta"), source_rows);
+    let expected_fork_rows: Value = serde_json::from_str(
+        &serde_json::to_string(&source_rows)
+            .unwrap()
+            .replace("\"alpha--alpha\"", "\"alpha-fork--alpha\""),
+    )
+    .unwrap();
+    assert_ne!(
+        expected_fork_rows, source_rows,
+        "the fixture has a same-mem target"
+    );
+    let fork_rows = anchor_rows(ws.path(), "alpha-fork--delta");
+    assert_eq!(fork_rows, expected_fork_rows);
+    let derived = fork_rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["grain"] == "entity")
+        .unwrap();
+    assert_eq!(derived["artifact"], "alpha-fork--alpha");
+    assert_eq!(
+        derived["derived_from"],
+        serde_json::json!(["alpha-fork--alpha", "beta--alpha"])
+    );
+    assert_eq!(derived["state"], "resolves", "{derived}");
     assert!(
         source_rows
             .as_array()

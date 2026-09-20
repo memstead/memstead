@@ -48,8 +48,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   commit (subject `memstead: fork mem <fork> from <source>@<sha>`,
   committed by the engine with the caller's actor, note, role and
   identity in the trailers), that moves every id and link naming the
-  source to the fork's name: the anchors sidecar's entity keys, the
-  derivations sidecar's source keys and same-mem targets, and every
+  source to the fork's name: the anchors sidecar's entity keys, an
+  entity-grain row's artifact and every `derived_from` input naming a
+  same-mem entity, the derivations sidecar's source keys and same-mem
+  targets, and every
   mem-qualified self-link in an entity body (`[[<source>--slug]]`,
   `[[<source>:slug]]`, labels kept), through the same rule `export` uses
   for its leaf rename. Rows keep their hashes, spans and observations; a
