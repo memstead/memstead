@@ -358,6 +358,122 @@ fn canonical_text_owned(text: &str) -> String {
         .replace("\r\n", "\n")
 }
 
+// ---------------------------------------------------------------------------
+// Quoted spans: the canonical form a span is checked and hashed in
+// ---------------------------------------------------------------------------
+
+/// The **canonical span form**: the one text form a quoted span
+/// ([`crate::anchor::Anchor::span`]) is compared in, at write (is the span in
+/// the supplied `content`?), at observation (is it still in the observed
+/// text?) and when hashed ([`span_hash`]). One function serves all three
+/// sites, so a span that passed the write check is the span the observation
+/// looks for.
+///
+/// It removes exactly the noise two extractions of one document disagree on,
+/// and nothing else:
+///
+/// - Unicode NFC composition (a decomposed umlaut matches a composed one);
+/// - a soft hyphen (U+00AD) is removed;
+/// - typographic quotes (`‘ ’ ‚ ‛ “ ” „ ‟ ‹ › « »`) become their ASCII forms
+///   (`'` and `"`), and typographic dashes (U+2010 to U+2015, U+2212) become
+///   `-`;
+/// - the ligatures ﬀ ﬁ ﬂ ﬃ ﬄ ﬅ ﬆ resolve to their letter pairs;
+/// - a hyphen directly followed by a line break is removed, together with
+///   the break and the indentation after it, so a word split at a line end
+///   matches its unsplit form;
+/// - every run of whitespace (spaces, tabs, line breaks, non-breaking
+///   spaces) becomes one space, and the ends are trimmed.
+///
+/// Digits, decimal marks, units, case and word order are untouched: beyond
+/// this form the match is exact, and no similarity threshold exists on any
+/// path. Case folding is deliberately absent (capitalisation carries meaning
+/// in the sources' languages) and so is NFKC (it would equate `m²` with
+/// `m2`, a changed unit).
+pub fn canonical_span_form(text: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    let composed: String = text.nfc().collect();
+    let mut mapped = String::with_capacity(composed.len());
+    for c in composed.chars() {
+        match c {
+            '\u{00AD}' => {}
+            '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' | '\u{2039}' | '\u{203A}' => {
+                mapped.push('\'');
+            }
+            '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{201F}' | '\u{00AB}' | '\u{00BB}' => {
+                mapped.push('"');
+            }
+            '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}'
+            | '\u{2212}' => mapped.push('-'),
+            '\u{FB00}' => mapped.push_str("ff"),
+            '\u{FB01}' => mapped.push_str("fi"),
+            '\u{FB02}' => mapped.push_str("fl"),
+            '\u{FB03}' => mapped.push_str("ffi"),
+            '\u{FB04}' => mapped.push_str("ffl"),
+            '\u{FB05}' | '\u{FB06}' => mapped.push_str("st"),
+            other => mapped.push(other),
+        }
+    }
+    // A hyphen at a line end joins the word it split: the hyphen, the break
+    // and any indentation that follows go.
+    let mut joined = String::with_capacity(mapped.len());
+    let mut chars = mapped.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '-' {
+            let mut ahead = chars.clone();
+            let mut consumed = 0usize;
+            if ahead.peek() == Some(&'\r') {
+                ahead.next();
+                consumed += 1;
+            }
+            if ahead.peek() == Some(&'\n') {
+                ahead.next();
+                consumed += 1;
+                while matches!(ahead.peek(), Some(' ') | Some('\t')) {
+                    ahead.next();
+                    consumed += 1;
+                }
+                for _ in 0..consumed {
+                    chars.next();
+                }
+                continue;
+            }
+        }
+        joined.push(c);
+    }
+    let mut out = String::with_capacity(joined.len());
+    let mut pending_space = false;
+    for c in joined.chars() {
+        if c.is_whitespace() {
+            pending_space = !out.is_empty();
+        } else {
+            if pending_space {
+                out.push(' ');
+                pending_space = false;
+            }
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Whether `span` occurs in `text`, both taken in the canonical span form.
+/// An empty span (empty after canonicalisation) occurs nowhere: it names no
+/// words, and the write path refuses it before it can be stored.
+pub fn span_occurs(span: &str, text: &str) -> bool {
+    let span = canonical_span_form(span);
+    if span.is_empty() {
+        return false;
+    }
+    canonical_span_form(text).contains(span.as_str())
+}
+
+/// The hash a span row records for its span: the house prepared-content
+/// hash over the canonical span form, so two writers quoting the same words
+/// with different quote marks or line breaks record the same value.
+pub fn span_hash(span: &str) -> String {
+    prepared_content_hash(canonical_span_form(span).as_bytes())
+}
+
 /// The code map of a tree: one line per scoped file under it, `<file digest
 /// hash>  <path>`, in path order — hashed by the caller through
 /// [`prepared_content_hash`]. A file joining, leaving, or changing its

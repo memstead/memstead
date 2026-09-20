@@ -1064,3 +1064,106 @@ fn quoted_phrase_on_an_entity_reads_the_canonical_markdown() {
     assert!(entity_prepared_hash(&e, None, None).is_some());
     assert!(entity_prepared_hash(&e, None, Some("pdf-to-markdown")).is_none());
 }
+
+// --- the canonical span form (quoted-span anchors, AC3) ---
+
+/// Every pair the canonical form is fixed on: each left-hand text carries
+/// the right-hand span after canonicalisation, and the two hash alike.
+#[test]
+fn canonical_span_form_folds_exactly_the_listed_noise() {
+    let pairs: &[(&str, &str, &str)] = &[
+        // NFC: a decomposed umlaut matches a composed one.
+        ("Ma\u{0308}rz 2026", "M\u{00E4}rz 2026", "nfc"),
+        // Any run of spaces, tabs and line breaks is one space.
+        (
+            "one \t two\n\n  three\r\nfour",
+            "one two three four",
+            "whitespace",
+        ),
+        // A non-breaking space is whitespace too.
+        ("12\u{00A0}kg", "12 kg", "nbsp"),
+        // A soft hyphen is removed.
+        ("Sauer\u{00AD}stoff", "Sauerstoff", "soft hyphen"),
+        // A hyphen directly followed by a line break joins the split word.
+        ("Sauer-\nstoff", "Sauerstoff", "hyphen at line end"),
+        (
+            "Sauer-\r\n    stoff",
+            "Sauerstoff",
+            "hyphen at line end, indented",
+        ),
+        // Typographic quotes and guillemets to ASCII.
+        (
+            "\u{201C}quoted\u{201D} and \u{2018}single\u{2019}",
+            "\"quoted\" and 'single'",
+            "quotes",
+        ),
+        (
+            "\u{00AB}zitat\u{00BB} \u{2039}x\u{203A} \u{201E}low\u{201C}",
+            "\"zitat\" 'x' \"low\"",
+            "guillemets",
+        ),
+        // Typographic dashes to the ASCII hyphen.
+        (
+            "2019\u{2013}2020 \u{2014} minus \u{2212}5",
+            "2019-2020 - minus -5",
+            "dashes",
+        ),
+        // Ligatures resolve to their letter pairs.
+        (
+            "\u{FB01}nal \u{FB02}ow o\u{FB00} e\u{FB03}cient \u{FB04}",
+            "final flow off efficient ffl",
+            "ligatures",
+        ),
+        // The ends are trimmed.
+        ("  padded  ", "padded", "trim"),
+    ];
+    for (raw, expected, what) in pairs {
+        assert_eq!(&canonical_span_form(raw), expected, "{what}");
+        assert!(
+            span_occurs(expected, raw),
+            "{what}: the plain form is found in the raw text"
+        );
+        assert!(
+            span_occurs(raw, expected),
+            "{what}: the raw form is found in the plain text"
+        );
+        assert_eq!(
+            span_hash(raw),
+            span_hash(expected),
+            "{what}: one hash for both forms"
+        );
+    }
+}
+
+/// Beyond the canonical form the match is exact: each alteration reads
+/// absent, and no tolerance exists on the path.
+#[test]
+fn a_span_matches_exactly_beyond_the_canonical_form() {
+    let text = "The tariff rose to 12,5 % in March 2026; the board did not approve it.";
+    assert!(span_occurs("rose to 12,5 % in March 2026", text));
+    for (altered, what) in [
+        ("rose to 12,6 % in March 2026", "a single changed digit"),
+        ("rose to 12.5 % in March 2026", "a changed decimal mark"),
+        ("rose to 12,5 ‰ in March 2026", "a changed unit"),
+        ("rose to 12,5 % in march 2026", "a changed case"),
+        ("rose in March 2026 to 12,5 %", "a reordered word"),
+        ("the board did approve it", "a dropped negation"),
+    ] {
+        assert!(!span_occurs(altered, text), "{what} must read absent");
+    }
+    // Empty and whitespace-only spans occur nowhere.
+    assert!(!span_occurs("", text));
+    assert!(!span_occurs(" \n\t", text));
+}
+
+/// A span hash is a prepared-content hash over the canonical form, so it
+/// changes with the words and with nothing else.
+#[test]
+fn span_hash_is_over_the_canonical_form() {
+    assert_eq!(
+        span_hash("a  b"),
+        prepared_content_hash(b"a b"),
+        "the hash is the house hash over the canonical form"
+    );
+    assert_ne!(span_hash("a b"), span_hash("a c"));
+}
