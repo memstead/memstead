@@ -1933,10 +1933,16 @@ impl EngineError {
                     "sources": sources,
                 });
                 if let Some(path) = install_hint {
-                    details["install_hint"] = serde_json::json!({
-                        "authoring_package": path,
-                        "command": format!("memstead schema install {path}"),
-                    });
+                    details["install_hint"] = if path == SCHEMA_INSTALL_PACKAGE_UNKNOWN {
+                        serde_json::json!({
+                            "command": format!("memstead schema install {path}"),
+                        })
+                    } else {
+                        serde_json::json!({
+                            "authoring_package": path,
+                            "command": format!("memstead schema install {path}"),
+                        })
+                    };
                 }
                 details
             }
@@ -2290,7 +2296,28 @@ fn schema_not_found_message(
         })
         .collect();
     msg.push_str(&format!(" — searched {}", trail.join(", ")));
-    if sources.iter().any(|s| !s.versions_found.is_empty()) {
+    if let Some(hint) = install_hint
+        && hint == SCHEMA_INSTALL_PACKAGE_UNKNOWN
+    {
+        // The caller knows install is the only remedy (a fork copies
+        // the source's pin and never moves it) but not where the
+        // package sits: the versions a source holds are stated, the
+        // repin command is not.
+        msg.push_str(&format!(
+            "; the pinned version {pin} is not installed in this workspace and the pin is not \
+             to be moved (a fork copies the source's pin, never re-pins): obtain the schema \
+             package for {pin}, then run: memstead schema install {hint}"
+        ));
+    } else if let Some(path) = install_hint {
+        // An authoring package of the name sits in the tree: the
+        // remedy is installing it, whatever versions other sources
+        // hold (the probe sets this only when none does; a fork sets
+        // it whenever the package is there).
+        msg.push_str(&format!(
+            "; an authoring package named {name:?} exists at {path:?} but is not installed — \
+             run: memstead schema install {path}"
+        ));
+    } else if sources.iter().any(|s| !s.versions_found.is_empty()) {
         // Right name, wrong version. The honest hint is version
         // repair, not silence: the final clause is the concrete repin
         // command against the newest version a source actually holds.
@@ -2308,11 +2335,6 @@ fn schema_not_found_message(
                 "; repin to an installed version: run: memstead mem set-schema {mem} {name}@{best}"
             ));
         }
-    } else if let Some(path) = install_hint {
-        msg.push_str(&format!(
-            "; an authoring package named {name:?} exists at {path:?} but is not installed — \
-             run: memstead schema install {path}"
-        ));
     } else {
         // Name unknown everywhere and no authoring package in sight —
         // the repair path is still the install path, stated without a
@@ -2364,6 +2386,14 @@ impl EngineError {
     }
 }
 
+/// The `install_hint` a caller passes when it knows the remedy is
+/// `memstead schema install` but not where the package sits: the
+/// message then names the install command with this placeholder and
+/// never the repin advice. A fork copies the source's pin and never
+/// moves it, so this is the fork's hint when no authoring package of
+/// the name sits in the workspace tree.
+pub const SCHEMA_INSTALL_PACKAGE_UNKNOWN: &str = "<package-dir>";
+
 /// Scan `root`'s immediate subdirectories for a loadable schema
 /// package whose manifest name is `name`. Hidden directories and the
 /// workspace's own storage (`mem-repo`, `.memstead`) are skipped. The
@@ -2371,7 +2401,7 @@ impl EngineError {
 /// directory that merely LOOKS like a package but fails validation
 /// produces no hint, because `memstead schema install` would refuse it
 /// anyway.
-fn probe_authoring_package(root: &std::path::Path, name: &str) -> Option<String> {
+pub(crate) fn probe_authoring_package(root: &std::path::Path, name: &str) -> Option<String> {
     let entries = std::fs::read_dir(root).ok()?;
     for entry in entries.flatten() {
         let path = entry.path();

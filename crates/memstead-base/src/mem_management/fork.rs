@@ -209,15 +209,22 @@ pub fn fork_mem(
     let sha = match params.sha.as_deref() {
         None => tip.clone(),
         Some(raw) => {
-            let full = (ops.resolve_ref)(&gitdir, raw)
+            // `^{commit}`: the object must exist and peel to a commit.
+            // A bare `rev-parse --verify` accepts any 40-hex string
+            // whether or not the store holds it, and the ancestry
+            // check would then fail raw.
+            let full = (ops.resolve_ref)(&gitdir, &format!("{raw}^{{commit}}"))
                 .map_err(crate::EngineError::Backend)?
                 .ok_or_else(|| {
                     crate::EngineError::UnknownRef(format!(
-                        "{raw} does not resolve in the mem-repo"
+                        "{raw} is not a commit in the mem-repo (source branch {tip_ref})"
                     ))
                 })?;
-            let on_branch =
-                (ops.is_ancestor)(&gitdir, &full, &tip).map_err(crate::EngineError::Backend)?;
+            let on_branch = (ops.is_ancestor)(&gitdir, &full, &tip).map_err(|e| {
+                crate::EngineError::UnknownRef(format!(
+                    "{raw} could not be placed against {tip_ref}: {e}"
+                ))
+            })?;
             if !on_branch {
                 return Err(crate::EngineError::UnknownRef(format!(
                     "{raw} is not on {tip_ref} (tip {tip}): a fork starts at a commit the \
@@ -242,13 +249,21 @@ pub fn fork_mem(
     let resolved_schema = crate::engine::SchemaResolver::new(&catalogue)
         .resolve(&pin)
         .map_err(|sources| {
+            // The pin is copied and never re-pinned, so the remedy is
+            // always the install, never `mem set-schema` (which would
+            // name a mem that does not exist yet): a package of the
+            // name in the tree when there is one, the placeholder
+            // otherwise.
+            let hint = crate::engine::error::probe_authoring_package(&root, &pin.name)
+                .unwrap_or_else(|| {
+                    crate::engine::error::SCHEMA_INSTALL_PACKAGE_UNKNOWN.to_string()
+                });
             crate::EngineError::SchemaNotFound {
                 mem: params.name.clone(),
                 pin: pin.to_string(),
                 sources,
-                install_hint: None,
+                install_hint: Some(hint),
             }
-            .with_schema_install_probe(Some(&root))
         })?;
     let canonical_schema_ref = memstead_schema::SchemaRef::new(
         resolved_schema.manifest.name.clone(),

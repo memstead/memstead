@@ -450,6 +450,21 @@ fn local_fork_refusals_land_nothing() {
     assert_eq!(code_of(&err), "UNKNOWN_REF", "{err}");
     assert_nothing_landed(&engine, tmp.path(), "proposals/no-sha");
 
+    // A full 40-hex sha that names no object: git's rev-parse accepts
+    // the spelling, the object store does not hold it. Typed, naming
+    // the sha and the source branch.
+    let mut p = params("specs", "proposals/no-object");
+    p.sha = Some("0000000000000000000000000000000000000001".to_string());
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "UNKNOWN_REF", "{err}");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("0000000000000000000000000000000000000001")
+            && msg.contains("refs/heads/specs"),
+        "{msg}"
+    );
+    assert_nothing_landed(&engine, tmp.path(), "proposals/no-object");
+
     // A malformed name.
     let err = mem_management::fork_mem(&mut engine, params("specs", "Specs Fork")).unwrap_err();
     assert_eq!(code_of(&err), "INVALID_MEM_NAME", "{err}");
@@ -741,6 +756,19 @@ fn remote_fork_refusals_land_nothing() {
     assert_eq!(code_of(&err), "UNKNOWN_REF", "{err}");
     assert_nothing_landed(&engine, b.path(), "specs-off");
 
+    // A full 40-hex sha naming no object, after the fetch: typed.
+    let mut p = params("specs", "specs-no-object");
+    p.remote = Some("origin".to_string());
+    p.sha = Some("0000000000000000000000000000000000000001".to_string());
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "UNKNOWN_REF", "{err}");
+    assert!(
+        err.to_string()
+            .contains("0000000000000000000000000000000000000001"),
+        "{err}"
+    );
+    assert_nothing_landed(&engine, b.path(), "specs-no-object");
+
     // A source pin this workspace cannot resolve: typed, naming the
     // pin and the remedy, landing no branch and no config.
     let mut p = params("weird", "weird-copy");
@@ -767,6 +795,57 @@ fn remote_fork_refusals_land_nothing() {
     );
     assert!(sha_of(&b_gitdir, "refs/remotes/origin/__MEMSTEAD").is_some());
     assert!(read_md_blobs_at_ref(&b_gitdir, "refs/heads/local").is_ok());
+}
+
+/// The trustwork case: the source pins a workspace-local newer
+/// generation of a builtin-named schema (`planning@0.7.0`, where the
+/// forking workspace holds only the builtin generations). A fork
+/// copies the pin and never re-pins, so the refusal names the pin and
+/// `memstead schema install`, never `mem set-schema` against a mem that
+/// does not exist, and lands nothing.
+#[test]
+fn remote_fork_refuses_a_pin_newer_than_the_installed_generations_naming_install() {
+    let (a, b, _remote, _tip) = remote_fixture();
+    let b_gitdir = gitdir_of(b.path());
+    let valid = b"---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\n---\n# Valid\n\n## Identity\n\nv\n\n## Purpose\n\nv\n";
+    push_branch_from_a(
+        a.path(),
+        "trust",
+        br#"{"schema": "planning@0.7.0"}"#,
+        &[("valid.md", valid)],
+    );
+    let mut engine = engine_from_workspace_root(b.path()).expect("B boots");
+    // The forking workspace resolves the builtin planning generations
+    // and not the source's newer one.
+    assert!(
+        engine
+            .builtin_schemas()
+            .iter()
+            .any(|s| s.manifest.name == "planning"),
+        "the fixture needs a builtin named planning"
+    );
+    assert!(
+        !engine
+            .builtin_schemas()
+            .iter()
+            .any(|s| s.manifest.name == "planning" && s.version.to_string() == "0.7.0"),
+        "the fixture needs planning@0.7.0 to be absent here"
+    );
+    let registry_before = sha_of(&b_gitdir, "refs/heads/__MEMSTEAD").unwrap();
+
+    let mut p = params("trust", "trust-copy");
+    p.remote = Some("origin".to_string());
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "SCHEMA_NOT_FOUND", "{err}");
+    let msg = err.to_string();
+    assert!(msg.contains("planning@0.7.0"), "{msg}");
+    assert!(msg.contains("memstead schema install"), "{msg}");
+    assert!(!msg.contains("set-schema"), "a fork never re-pins: {msg}");
+    assert_nothing_landed(&engine, b.path(), "trust-copy");
+    assert_eq!(
+        sha_of(&b_gitdir, "refs/heads/__MEMSTEAD").unwrap(),
+        registry_before
+    );
 }
 
 /// A workspace without a mem-repo cannot fork: typed `INVALID_INPUT`
