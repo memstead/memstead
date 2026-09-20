@@ -1318,7 +1318,7 @@ fn url_anchors_adjudicate_from_supplied_observations_and_age() {
 /// version this engine does not read refuses at the write seam with the
 /// existing typed parse error.
 #[test]
-fn sidecar_v1_fixture_loads_and_next_anchor_write_rewrites_v2_while_v3_refuses() {
+fn sidecar_v1_fixture_loads_and_next_anchor_write_rewrites_v2_while_v4_refuses() {
     use crate::anchor::AnchorInput;
     use crate::vcs::Actor;
     use crate::workspace_store::WorkspaceStoreAdapter;
@@ -1405,7 +1405,7 @@ fn sidecar_v1_fixture_loads_and_next_anchor_write_rewrites_v2_while_v3_refuses()
     // A version this engine does not read refuses at the write seam.
     std::fs::write(
         mem_dir.join(".memstead").join("anchors.json"),
-        r#"{"version":3,"entities":{}}"#,
+        r#"{"version":4,"entities":{}}"#,
     )
     .unwrap();
     let mut sections = IndexMap::new();
@@ -1432,10 +1432,10 @@ fn sidecar_v1_fixture_loads_and_next_anchor_write_rewrites_v2_while_v3_refuses()
             None,
             None,
         )
-        .expect_err("a version-3 sidecar refuses");
+        .expect_err("a version-4 sidecar refuses");
     assert!(
         err.to_string()
-            .contains("unsupported anchors sidecar version 3"),
+            .contains("unsupported anchors sidecar version 4"),
         "{err}"
     );
 }
@@ -4290,4 +4290,597 @@ fn failed_unmount_leaves_the_roster_unapplied_and_the_mem_served() {
     let (_, removed) = roster_change(&warnings).expect("retried");
     assert_eq!(removed, vec!["beta".to_string()]);
     assert_eq!(engine.mem_names(), vec!["alpha"]);
+}
+
+// --- quoted-span anchors (AC2, AC5) ---
+
+/// A folder workspace with one `specs` mem and one path-shaped binding
+/// source (`src`), the shape the url tests use; the engine's clock pinned.
+fn span_workspace() -> (TempDir, std::path::PathBuf, Engine) {
+    use crate::workspace_store::WorkspaceStoreAdapter;
+    let tmp = TempDir::new().unwrap();
+    let mem_dir = tmp.path().join("mem");
+    std::fs::create_dir_all(&mem_dir).unwrap();
+    std::fs::write(
+        mem_dir.join("hello.md"),
+        "---\ntype: spec\n---\n# Hello\n\n## Identity\n\nA.\n",
+    )
+    .unwrap();
+    let memstead = tmp.path().join(".memstead");
+    std::fs::create_dir_all(&memstead).unwrap();
+    std::fs::write(
+        memstead.join("workspace.toml"),
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    )
+    .unwrap();
+    crate::FileWorkspaceStore::new()
+        .save_state(
+            tmp.path(),
+            &crate::workspace::Workspace {
+                mounts: vec![folder_mount("specs", mem_dir.clone())],
+                settings: crate::workspace::WorkspaceSettings::default(),
+            },
+        )
+        .unwrap();
+    crate::pipeline_store::write_binding(
+        tmp.path(),
+        "specs",
+        "graph",
+        &v2_binding_with_pointer("specs", "src"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let mut engine = Engine::from_workspace_root(tmp.path()).unwrap();
+    let pinned = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_788_350_400);
+    engine.set_mutation_clock(std::sync::Arc::new(move || pinned));
+    (tmp, mem_dir, engine)
+}
+
+fn spec_with_anchors(
+    engine: &mut Engine,
+    title: &str,
+    anchors: Vec<crate::anchor::AnchorInput>,
+) -> crate::EntityId {
+    use crate::vcs::Actor;
+    use indexmap::IndexMap;
+    let mut sections = IndexMap::new();
+    sections.insert("identity".to_string(), format!("{title}."));
+    sections.insert("purpose".to_string(), "Quotes a source.".to_string());
+    engine
+        .create_entity(
+            crate::CreateEntityArgs {
+                mem: "specs".to_string(),
+                title: title.to_string(),
+                entity_type: "spec".to_string(),
+                sections,
+                metadata: IndexMap::new(),
+                relations: Vec::new(),
+                anchors,
+                dry_run: false,
+            },
+            Actor::Agent,
+            None,
+            None,
+        )
+        .unwrap_or_else(|e| panic!("{title}: {e}"))
+        .id
+}
+
+/// AC2: `verify-anchors --observations` resolves a url span row while its
+/// span occurs in the supplied text, whatever else on the page changed
+/// (the document hash differs from the one recorded at write, and the new
+/// one is recorded as the row's last observation); a row whose span is gone
+/// reads `span_absent`, never `drifted`; two entities pinning one document
+/// with different extracted texts resolve from one observation; an
+/// `absent` observation reads `recheck`; a hash-only observation cannot
+/// adjudicate a span row and leaves it as it was. The health anchors axis,
+/// the open-questions axis and the per-entity read show the state.
+#[test]
+fn url_span_rows_adjudicate_on_the_spans_presence_through_every_read_surface() {
+    use crate::anchor::{
+        AnchorInput, AnchorState, SuppliedObservationInput, validate_supplied_observations,
+    };
+    let (_tmp, mem_dir, mut engine) = span_workspace();
+    let clock_now = "2026-09-02T12:00:00Z";
+    let report_url = "https://w.test/report.pdf";
+    let span = |artifact: &str, span: &str, content: Option<&str>| AnchorInput {
+        artifact: Some(artifact.to_string()),
+        grain: Some("url".to_string()),
+        class: Some("anchored".to_string()),
+        span: Some(span.to_string()),
+        content: content.map(str::to_string),
+        ..Default::default()
+    };
+    // Two agents extracted the same PDF differently.
+    let extraction_a = "REPORT 2026\nThe tariff rose to 12,5 % in\nMarch 2026. Footer a.";
+    let extraction_b = "Report 2026 - The tariff rose to 12,5 % in March 2026.\nThe board did not approve it.\nFooter b.";
+    let first = spec_with_anchors(
+        &mut engine,
+        "Tariff claim",
+        vec![span(
+            report_url,
+            "rose to 12,5 % in March 2026",
+            Some(extraction_a),
+        )],
+    );
+    let second = spec_with_anchors(
+        &mut engine,
+        "Board claim",
+        vec![
+            span(report_url, "board did not approve it", Some(extraction_b)),
+            span(
+                "https://w.test/gone",
+                "some words",
+                Some("page with some words"),
+            ),
+            span("https://w.test/later", "checked later", None),
+        ],
+    );
+    let doc_hash_a = crate::anchor::prepared_content_hash(extraction_a.as_bytes());
+    let doc_hash_b = crate::anchor::prepared_content_hash(extraction_b.as_bytes());
+    let row_of = |rows: &[crate::engine::query::ResolvedAnchor], artifact: &str| {
+        rows.iter()
+            .find(|r| r.anchor.artifact == artifact)
+            .cloned()
+            .unwrap()
+    };
+    let before_first = engine.entity_anchors_resolved(&first);
+    assert_eq!(
+        row_of(&before_first, report_url).anchor.hash.as_deref(),
+        Some(doc_hash_a.as_str()),
+        "the document hash at write is extraction A's prepared hash"
+    );
+    assert_eq!(
+        row_of(&before_first, report_url)
+            .anchor
+            .span_hash
+            .as_deref(),
+        Some(crate::preparation::span_hash("rose to 12,5 % in March 2026").as_str())
+    );
+    assert!(before_first.iter().all(|r| r.state.is_none()), "unobserved");
+    let before_second = engine.entity_anchors_resolved(&second);
+    assert_eq!(
+        row_of(&before_second, report_url).anchor.hash.as_deref(),
+        Some(doc_hash_b.as_str())
+    );
+    let later = row_of(&before_second, "https://w.test/later");
+    assert!(later.anchor.span_unvalidated && later.anchor.hash.is_none());
+    let sidecar: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(mem_dir.join(".memstead/anchors.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        sidecar["version"], 3,
+        "span rows move the sidecar to version 3"
+    );
+
+    // One observation, a third extraction with both spans and a document
+    // hash neither row recorded; the gone page absent; the later page as a
+    // hash only.
+    let extraction_c = "Report 2026\n\nThe tariff rose to\n12,5 % in March 2026. The board\ndid not approve it.\n\nFooter c.";
+    let doc_hash_c = crate::anchor::prepared_content_hash(extraction_c.as_bytes());
+    let rows = vec![
+        SuppliedObservationInput {
+            artifact: Some(report_url.into()),
+            content: Some(extraction_c.into()),
+            ..Default::default()
+        },
+        SuppliedObservationInput {
+            artifact: Some("https://w.test/gone".into()),
+            absent: Some(true),
+            ..Default::default()
+        },
+        SuppliedObservationInput {
+            artifact: Some("https://w.test/later".into()),
+            hash: Some("some-hash".into()),
+            ..Default::default()
+        },
+    ];
+    let supplied = validate_supplied_observations(&rows, clock_now).unwrap();
+    let report = engine.verify_mem_anchors_with("specs", &supplied).unwrap();
+    let verified = |report: &crate::engine::query::MemAnchorVerification,
+                    entity: &crate::EntityId,
+                    artifact: &str| {
+        report
+            .anchors
+            .iter()
+            .find(|a| a.entity_id == entity.to_string() && a.artifact == artifact)
+            .cloned()
+            .unwrap()
+    };
+    let a = verified(&report, &first, report_url);
+    assert_eq!(a.state, "resolves", "{a:?}");
+    assert_eq!(a.observed_hash.as_deref(), Some(doc_hash_c.as_str()));
+    assert_eq!(a.span.as_deref(), Some("rose to 12,5 % in March 2026"));
+    assert!(a.observation_supplied);
+    let b = verified(&report, &second, report_url);
+    assert_eq!(b.state, "resolves", "{b:?}");
+    assert_eq!(
+        verified(&report, &second, "https://w.test/gone").state,
+        "recheck"
+    );
+    let l = verified(&report, &second, "https://w.test/later");
+    assert_eq!(l.state, "unobserved", "a hash carries no text to look in");
+    assert!(!l.observation_supplied);
+    assert_eq!(
+        report.unmatched_observations,
+        vec!["https://w.test/later"],
+        "the hash-only observation was applied to nothing"
+    );
+    assert_eq!(
+        report.drifted, 0,
+        "a changed document never drifts a span row"
+    );
+    assert_eq!(report.recordable_observations.len(), 3);
+    let written = engine
+        .record_anchor_observations("specs", &report.recordable_observations, None)
+        .unwrap();
+    assert_eq!(written, 3);
+    let after = engine.entity_anchors_resolved(&first);
+    let recorded = row_of(&after, report_url);
+    assert_eq!(recorded.state, Some(AnchorState::Resolves));
+    assert_eq!(
+        recorded
+            .anchor
+            .last_observed
+            .as_ref()
+            .and_then(|o| o.hash.clone()),
+        Some(doc_hash_c.clone()),
+        "the new document hash is the row's last observation"
+    );
+    assert_eq!(
+        recorded.anchor.hash.as_deref(),
+        Some(doc_hash_a.as_str()),
+        "the write-time document hash is kept as the author's baseline"
+    );
+
+    // The later page observed with text: adjudicated, and no longer
+    // unverified once recorded.
+    let rows = vec![SuppliedObservationInput {
+        artifact: Some("https://w.test/later".into()),
+        content: Some("now checked later, in text".into()),
+        ..Default::default()
+    }];
+    let supplied = validate_supplied_observations(&rows, clock_now).unwrap();
+    let report = engine.verify_mem_anchors_with("specs", &supplied).unwrap();
+    assert_eq!(state_of_report(&report, "https://w.test/later"), "resolves");
+    engine
+        .record_anchor_observations("specs", &report.recordable_observations, None)
+        .unwrap();
+    let later = row_of(
+        &engine.entity_anchors_resolved(&second),
+        "https://w.test/later",
+    );
+    assert!(!later.anchor.span_unvalidated, "checked in observed text");
+    assert_eq!(
+        later.anchor.hash_source,
+        Some(crate::anchor::AnchorHashSource::Backfill),
+        "the document hash of a span row written without content is backfilled"
+    );
+
+    // The words of the first claim leave the page; the second's stay.
+    let rows = vec![SuppliedObservationInput {
+        artifact: Some(report_url.into()),
+        content: Some("Report 2026, corrected: the tariff rose to 12,6 % in March 2026. The board did not approve it.".into()),
+        ..Default::default()
+    }];
+    let supplied = validate_supplied_observations(&rows, clock_now).unwrap();
+    let report = engine.verify_mem_anchors_with("specs", &supplied).unwrap();
+    assert_eq!(verified(&report, &first, report_url).state, "span_absent");
+    assert_eq!(verified(&report, &second, report_url).state, "resolves");
+    assert_eq!((report.span_absent, report.drifted), (1, 0));
+    assert!(report.figure.population().contains("adjudicated"));
+    engine
+        .record_anchor_observations("specs", &report.recordable_observations, None)
+        .unwrap();
+    assert_eq!(
+        row_of(&engine.entity_anchors_resolved(&first), report_url).state,
+        Some(AnchorState::SpanAbsent),
+        "the per-entity read shows the recorded state"
+    );
+    let axis = crate::ops::health::health_anchors_axis(&engine, None);
+    assert_eq!(axis["specs"]["span_absent"], 1, "{axis}");
+    assert_eq!(axis["specs"]["drifted"], 0);
+    let open = crate::ops::health::health_open_questions_axis(&engine, Some("specs"));
+    assert_eq!(open["specs"]["anchors_span_absent"]["count"], 1, "{open}");
+    assert_eq!(
+        open["specs"]["anchors_span_absent"]["items"][0]["kind"],
+        "anchor_span_absent"
+    );
+    // The mem roster carries the state too.
+    let roster = engine.mem_anchors_resolved("specs");
+    assert!(
+        roster
+            .iter()
+            .any(|(eid, r)| *eid == first && r.state == Some(AnchorState::SpanAbsent))
+    );
+}
+
+/// AC2 on the path grains: a span row on a file is observed live; the file
+/// rewritten around the words keeps resolving, the words removed reads
+/// `span_absent`, the file gone reads `orphaned` (counted unresolvable).
+/// The whole-file row beside it drifts on the rewrite, as before.
+#[test]
+fn file_span_rows_resolve_live_while_the_words_stand() {
+    use crate::anchor::AnchorInput;
+    let (tmp, _mem_dir, mut engine) = span_workspace();
+    let doc = tmp.path().join("src").join("doc.txt");
+    let text = "# Doc\n\nA nonconforming write is refused\nwith a typed hint.\n";
+    std::fs::write(&doc, text).unwrap();
+    let mk = |grain: &str, span: Option<&str>| AnchorInput {
+        artifact: Some("src/doc.txt".to_string()),
+        grain: Some(grain.to_string()),
+        class: Some("anchored".to_string()),
+        span: span.map(str::to_string),
+        content: Some(text.to_string()),
+        ..Default::default()
+    };
+    let id = spec_with_anchors(
+        &mut engine,
+        "Refusal claim",
+        vec![
+            mk("file", Some("refused with a typed hint")),
+            mk("span", Some("nonconforming write")),
+            mk("file", None),
+        ],
+    );
+    let states = |engine: &Engine| -> Vec<(String, Option<String>, String)> {
+        let report = engine.verify_mem_anchors("specs").unwrap();
+        report
+            .anchors
+            .iter()
+            .map(|a| (a.grain.clone(), a.span.clone(), a.state.clone()))
+            .collect()
+    };
+    let state = |rows: &[(String, Option<String>, String)], grain: &str, span: Option<&str>| {
+        rows.iter()
+            .find(|(g, s, _)| g == grain && s.as_deref() == span)
+            .map(|(_, _, st)| st.clone())
+            .unwrap()
+    };
+    let rows = states(&engine);
+    assert_eq!(
+        state(&rows, "file", Some("refused with a typed hint")),
+        "resolves"
+    );
+    assert_eq!(
+        state(&rows, "span", Some("nonconforming write")),
+        "resolves"
+    );
+    assert_eq!(state(&rows, "file", None), "resolves");
+
+    // Rewritten around the words: the span rows keep resolving, the
+    // whole-file row drifts.
+    std::fs::write(
+        &doc,
+        "Preface.\n\nEvery nonconforming write is refused with a typed hint, we promise.\n",
+    )
+    .unwrap();
+    let rows = states(&engine);
+    assert_eq!(
+        state(&rows, "file", Some("refused with a typed hint")),
+        "resolves"
+    );
+    assert_eq!(
+        state(&rows, "span", Some("nonconforming write")),
+        "resolves"
+    );
+    assert_eq!(state(&rows, "file", None), "drifted");
+
+    // The words gone: span absent, never drifted.
+    std::fs::write(
+        &doc,
+        "Preface.\n\nA nonconforming write is coerced silently.\n",
+    )
+    .unwrap();
+    let rows = states(&engine);
+    assert_eq!(
+        state(&rows, "file", Some("refused with a typed hint")),
+        "span_absent"
+    );
+    assert_eq!(
+        state(&rows, "span", Some("nonconforming write")),
+        "resolves"
+    );
+    let report = engine.verify_mem_anchors("specs").unwrap();
+    assert_eq!((report.span_absent, report.drifted), (1, 1));
+    let resolved = engine.entity_anchors_resolved(&id);
+    assert!(resolved.iter().any(|r| {
+        r.anchor.span.as_deref() == Some("refused with a typed hint")
+            && r.state == Some(crate::anchor::AnchorState::SpanAbsent)
+            && r.observed_hash.is_some()
+    }));
+
+    // The file gone: orphaned for every row.
+    std::fs::remove_file(&doc).unwrap();
+    let rows = states(&engine);
+    assert!(rows.iter().all(|(_, _, st)| st == "orphaned"), "{rows:?}");
+    assert_eq!(engine.verify_mem_anchors("specs").unwrap().unresolvable, 3);
+}
+
+/// AC5: a `derived` (or `anchored`) entity-grain anchor written without a
+/// hash while its target is loaded is pinned to the target's prepared hash
+/// at write (`hash_source: pinned`), so the next verify reads it against
+/// the target as it was: resolves until the target changes, then drifted,
+/// never backfilled from the later state. A target the engine cannot
+/// resolve at write (unknown id, unmounted mem) leaves the row hash-less,
+/// reported unresolvable or unobserved; a supplied hash is kept.
+#[test]
+fn a_derived_entity_anchor_is_pinned_to_its_target_at_write() {
+    use crate::anchor::{AnchorHashSource, AnchorInput};
+    use crate::vcs::Actor;
+    use crate::workspace_store::WorkspaceStoreAdapter;
+    use indexmap::IndexMap;
+    let tmp = TempDir::new().unwrap();
+    let specs_dir = tmp.path().join("specs");
+    let src_dir = tmp.path().join("src");
+    for dir in [&specs_dir, &src_dir] {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(
+            dir.join("hello.md"),
+            "---\ntype: spec\n---\n# Hello\n\n## Identity\n\nA.\n",
+        )
+        .unwrap();
+    }
+    let memstead = tmp.path().join(".memstead");
+    std::fs::create_dir_all(&memstead).unwrap();
+    std::fs::write(
+        memstead.join("workspace.toml"),
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    )
+    .unwrap();
+    crate::FileWorkspaceStore::new()
+        .save_state(
+            tmp.path(),
+            &crate::workspace::Workspace {
+                mounts: vec![
+                    folder_mount("specs", specs_dir.clone()),
+                    folder_mount("src", src_dir.clone()),
+                ],
+                settings: crate::workspace::WorkspaceSettings::default(),
+            },
+        )
+        .unwrap();
+    let mut engine = Engine::from_workspace_root(tmp.path()).unwrap();
+    let mut sections = IndexMap::new();
+    sections.insert("identity".to_string(), "The source entity.".to_string());
+    sections.insert("purpose".to_string(), "Gets derived from.".to_string());
+    let target = engine
+        .create_entity(
+            crate::CreateEntityArgs {
+                mem: "src".to_string(),
+                title: "Thing".to_string(),
+                entity_type: "spec".to_string(),
+                sections,
+                metadata: IndexMap::new(),
+                relations: Vec::new(),
+                anchors: Vec::new(),
+                dry_run: false,
+            },
+            Actor::Agent,
+            None,
+            None,
+        )
+        .unwrap();
+    let target_hash_at_write = {
+        let e = engine.get_entity(&target.id).unwrap();
+        crate::anchor::prepared_content_hash(
+            crate::render::render_entity_markdown(e, None).as_bytes(),
+        )
+    };
+    let entity = |artifact: &str, class: &str, hash: Option<&str>| AnchorInput {
+        artifact: Some(artifact.to_string()),
+        grain: Some("entity".to_string()),
+        class: Some(class.to_string()),
+        hash: hash.map(str::to_string),
+        derived_from: (class == "derived").then(|| vec![artifact.to_string()]),
+        ..Default::default()
+    };
+    let id = spec_with_anchors(
+        &mut engine,
+        "Derived claim",
+        vec![
+            entity(&target.id.to_string(), "derived", None),
+            entity(&target.id.to_string(), "anchored", Some("author-h")),
+            entity("src--nope", "derived", None),
+            entity("nowhere--x", "derived", None),
+        ],
+    );
+    let rows = engine.entity_anchors_resolved(&id);
+    let row = |artifact: &str, class: &str| {
+        rows.iter()
+            .find(|r| r.anchor.artifact == artifact && r.anchor.class.as_wire() == class)
+            .cloned()
+            .unwrap()
+    };
+    let pinned = row(&target.id.to_string(), "derived");
+    assert_eq!(
+        pinned.anchor.hash.as_deref(),
+        Some(target_hash_at_write.as_str())
+    );
+    assert_eq!(pinned.anchor.hash_source, Some(AnchorHashSource::Pinned));
+    assert_eq!(pinned.state, Some(crate::anchor::AnchorState::Resolves));
+    let kept = row(&target.id.to_string(), "anchored");
+    assert_eq!(
+        kept.anchor.hash.as_deref(),
+        Some("author-h"),
+        "a supplied hash is kept"
+    );
+    assert_eq!(kept.anchor.hash_source, Some(AnchorHashSource::Author));
+    assert_eq!(kept.state, Some(crate::anchor::AnchorState::Drifted));
+    let unknown = row("src--nope", "derived");
+    assert_eq!(
+        unknown.anchor.hash, None,
+        "an unknown target gets no guessed hash"
+    );
+    assert_eq!(unknown.anchor.hash_source, None);
+    assert_eq!(unknown.state, Some(crate::anchor::AnchorState::Orphaned));
+    let unmounted = row("nowhere--x", "derived");
+    assert_eq!(unmounted.anchor.hash, None);
+    assert_eq!(
+        unmounted.state, None,
+        "an unmounted mem: unobserved, never orphaned"
+    );
+    let report = engine.verify_mem_anchors("specs").unwrap();
+    assert_eq!(state_of_report(&report, "src--nope"), "orphaned");
+    assert_eq!(report.unresolvable, 1);
+    let sidecar: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(specs_dir.join(".memstead/anchors.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        sidecar["version"], 3,
+        "a pinned row moves the sidecar to version 3"
+    );
+
+    // The target moves: the pinned row reads drifted against the target as
+    // it was, and the pin never follows the later state.
+    let current = engine.get_entity(&target.id).unwrap().content_hash.clone();
+    let mut new_sections = IndexMap::new();
+    new_sections.insert(
+        "identity".to_string(),
+        "The source entity, rewritten.".to_string(),
+    );
+    engine
+        .update_entity(
+            crate::UpdateEntityArgs {
+                id: target.id.clone(),
+                expected_hash: Some(current),
+                sections: new_sections,
+                append_sections: IndexMap::new(),
+                patch_sections: IndexMap::new(),
+                sections_unset: Vec::new(),
+                metadata: IndexMap::new(),
+                metadata_unset: Vec::new(),
+                dry_run: false,
+                declare_relations: Vec::new(),
+                relations_unset: Vec::new(),
+                anchors: Vec::new(),
+                anchors_unset: Vec::new(),
+            },
+            Actor::Agent,
+            None,
+            None,
+        )
+        .unwrap();
+    let rows = engine.entity_anchors_resolved(&id);
+    let moved = rows
+        .iter()
+        .find(|r| {
+            r.anchor.artifact == target.id.to_string() && r.anchor.class.as_wire() == "derived"
+        })
+        .unwrap();
+    assert_eq!(moved.state, Some(crate::anchor::AnchorState::Drifted));
+    assert_eq!(
+        moved.anchor.hash.as_deref(),
+        Some(target_hash_at_write.as_str())
+    );
+    assert_eq!(moved.anchor.hash_source, Some(AnchorHashSource::Pinned));
+    // The same pin for the anchored class written without a hash.
+    let id2 = spec_with_anchors(
+        &mut engine,
+        "Anchored claim",
+        vec![entity(&target.id.to_string(), "anchored", None)],
+    );
+    let r = engine.entity_anchors_resolved(&id2);
+    assert_eq!(r[0].anchor.hash_source, Some(AnchorHashSource::Pinned));
+    assert_eq!(r[0].state, Some(crate::anchor::AnchorState::Resolves));
 }

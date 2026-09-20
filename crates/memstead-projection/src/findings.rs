@@ -862,6 +862,17 @@ pub fn adjudicate_anchor(
                 anchor.artifact
             ),
         ),
+        // The words the row quotes are gone while the document stands: the
+        // claim's basis moved, which is drift of the claim, not a vanished
+        // artifact. Only a span row (hash-bearing by construction) reads it.
+        AnchorState::SpanAbsent => (
+            FindingClass::Drifted,
+            format!(
+                "the span {:?} the anchor quotes no longer occurs in '{}'",
+                anchor.span.as_deref().unwrap_or_default(),
+                anchor.artifact
+            ),
+        ),
         AnchorState::Drifted | AnchorState::Recheck => {
             // Hash-drift adjudication — excluded for non-hash-bearing classes (A2).
             if !anchor.class.is_hash_bearing() {
@@ -1577,6 +1588,11 @@ fn run_verify(
         match state {
             AnchorState::Resolves => {}
             AnchorState::Orphaned => existence.push((eid.as_ref().to_string(), anchor, state)),
+            // A span row carries its span hash from birth and is never
+            // backfilled from a document hash: straight to adjudication.
+            AnchorState::SpanAbsent => {
+                candidates.push((eid.as_ref().to_string(), anchor, state));
+            }
             AnchorState::Drifted | AnchorState::Recheck => {
                 // Only hash-bearing anchors are hash-drift candidates (A2); a
                 // non-hash-bearing class yields no adjudication.

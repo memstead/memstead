@@ -19,7 +19,7 @@ fn anchor_state_round_trips_and_is_documented() {
     }
     assert_eq!(
         seen.into_iter().collect::<Vec<_>>(),
-        vec!["drifted", "orphaned", "recheck", "resolves"]
+        vec!["drifted", "orphaned", "recheck", "resolves", "span_absent"]
     );
     let help = AnchorState::vocabulary_help();
     for state in AnchorState::ALL {

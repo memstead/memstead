@@ -169,7 +169,7 @@ fn valid_sidecar_carries_no_condition() {
     assert!(!text.contains("\"resolved\""), "{text}");
 }
 
-/// A2 AC1, assertion: with the sidecar declaring version 3 every surface
+/// A2 AC1, assertion: with the sidecar declaring version 4 every surface
 /// carries `ANCHORS_SIDECAR_UNREADABLE` with the mem and the reason, the
 /// integrity axis lists it as a finding, `verify-anchors` reports
 /// `fully_adjudicated: false` and exits non-zero, and no surface reports
@@ -179,7 +179,7 @@ fn unreadable_sidecar_is_a_typed_condition_on_every_surface() {
     let ws = seed();
     let p = sidecar_path(ws.path());
     let mut sidecar: serde_json::Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
-    sidecar["version"] = serde_json::json!(3);
+    sidecar["version"] = serde_json::json!(4);
     fs::write(&p, serde_json::to_vec(&sidecar).unwrap()).unwrap();
 
     // verify-anchors: typed refusal, non-zero, fully_adjudicated false.
@@ -196,7 +196,7 @@ fn unreadable_sidecar_is_a_typed_condition_on_every_surface() {
         v["details"]["reason"]
             .as_str()
             .unwrap()
-            .contains("version 3"),
+            .contains("version 4"),
         "{v}"
     );
     assert_eq!(v["details"]["fully_adjudicated"], false);
@@ -267,7 +267,7 @@ fn unreadable_sidecar_is_a_typed_condition_on_every_surface() {
         finding["detail"]["reason"]
             .as_str()
             .unwrap()
-            .contains("version 3")
+            .contains("version 4")
     );
     for include in ["integrity", "anchors"] {
         memstead()

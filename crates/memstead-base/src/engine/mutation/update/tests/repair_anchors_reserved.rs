@@ -205,6 +205,7 @@ fn anchor_unset(artifact: &str) -> crate::anchor::AnchorUnsetInput {
         artifact: Some(artifact.to_string()),
         grain: None,
         class: None,
+        span: None,
     }
 }
 

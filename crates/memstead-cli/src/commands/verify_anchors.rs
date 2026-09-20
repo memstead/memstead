@@ -71,7 +71,11 @@ pub struct Args {
     /// supplied observation adjudicates like a file anchor (equal hash
     /// `resolves`, differing hash `drifted` under `stable` and `recheck`
     /// under `unstable`, `absent` → `recheck`); a url row without one stays
-    /// `unobserved`. Matched observations are recorded on the sidecar rows
+    /// `unobserved`. A row quoting a `span` is adjudicated on the span's
+    /// presence in a `content` observation (`resolves` while the words
+    /// stand, `span_absent` once they are gone, never `drifted`); a `hash`
+    /// observation carries no text and leaves such a row as it was.
+    /// Matched observations are recorded on the sidecar rows
     /// as `last_observed`, so later runs and every anchor surface show how
     /// long each row has gone unobserved. Rows naming no url anchor of the
     /// mem are reported as unmatched and change nothing. A malformed row
@@ -256,6 +260,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "drifted": report.drifted,
             "recheck": report.recheck,
             "unresolvable": report.unresolvable,
+            "span_absent": report.span_absent,
             "unobserved": report.unobserved,
             "dangling": report.dangling,
             "entity_end_unreconciled": report.unreconciled,
@@ -283,13 +288,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         // without what it could not adjudicate cannot be written here.
         let mut out = format!(
             "# Anchor verification — `{}`\n\n- Resolves: {}\n- Drifted: {}\n- Recheck: {}\n\
-             - Unresolvable (artifact gone): {}\n- Unobserved (not measured this pass): {}\n\
-             - Dangling (entity gone): {}\n",
+             - Unresolvable (artifact gone): {}\n- Span absent (quoted words gone): {}\n\
+             - Unobserved (not measured this pass): {}\n- Dangling (entity gone): {}\n",
             report.mem,
             report.figure,
             report.drifted,
             report.recheck,
             report.unresolvable,
+            report.span_absent,
             report.unobserved,
             report.dangling,
         );
@@ -322,8 +328,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             if !flagged.is_empty() {
                 out.push_str("\n## Flagged anchors\n\n");
                 for a in flagged {
+                    let span = a
+                        .span
+                        .as_deref()
+                        .map(|s| format!(", span {s:?}"))
+                        .unwrap_or_default();
                     out.push_str(&format!(
-                        "- **{}**: `{}` → `{}` ({} {})\n",
+                        "- **{}**: `{}` → `{}` ({} {}{span})\n",
                         a.state, a.entity_id, a.artifact, a.class, a.grain,
                     ));
                 }
@@ -363,7 +374,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 observations_recorded,
             ));
             if !report.unmatched_observations.is_empty() {
-                out.push_str("Unmatched (no url anchor of this mem names the artifact):\n");
+                out.push_str(
+                    "Unmatched (no url anchor of this mem could take it: none names the \
+                     artifact, or the rows naming it quote a span and the observation \
+                     carried no text):\n",
+                );
                 for u in &report.unmatched_observations {
                     out.push_str(&format!("- `{u}`\n"));
                 }

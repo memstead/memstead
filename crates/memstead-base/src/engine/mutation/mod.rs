@@ -177,24 +177,33 @@ impl super::Engine {
             .map(|i| i.validate(medium_ref).map_err(EngineError::from))
             .collect::<Result<_, _>>()?;
 
-        // One payload, one row per triple.
-        // `(artifact, grain, class)` is the sidecar's merge
+        // One payload, one row per identity.
+        // `(artifact, grain, class, span)` is the sidecar's merge
         // identity, so a payload naming it twice used to collapse to the last
         // occurrence and the caller was never told an anchor it wrote had
-        // vanished. The unit is THIS payload: the same triple arriving in a
+        // vanished. The unit is THIS payload: the same identity arriving in a
         // later call still replaces the stored row, which is what the
-        // carry-forward depends on.
+        // carry-forward depends on. The span compares in its canonical form,
+        // the form the row is matched in everywhere else.
         {
-            let mut seen: std::collections::HashSet<(&str, &str, &str)> =
+            let mut seen: std::collections::HashSet<(&str, &str, &str, Option<String>)> =
                 std::collections::HashSet::new();
             for a in &anchors {
-                let key = (a.artifact.as_str(), a.grain.as_wire(), a.class.as_wire());
+                let key = (
+                    a.artifact.as_str(),
+                    a.grain.as_wire(),
+                    a.class.as_wire(),
+                    a.span
+                        .as_deref()
+                        .map(crate::preparation::canonical_span_form),
+                );
                 if !seen.insert(key) {
                     return Err(EngineError::from(
                         crate::anchor::AnchorValidationError::DuplicateAnchorTriple {
                             artifact: a.artifact.clone(),
                             grain: a.grain.as_wire(),
                             class: a.class.as_wire(),
+                            span: a.span.clone(),
                         },
                     ));
                 }
@@ -328,6 +337,41 @@ impl super::Engine {
                             candidates,
                         },
                     ));
+                }
+            }
+        }
+
+        // The entity-grain pin: a hash-bearing `entity` row written without
+        // a hash takes its target's prepared hash as the engine computes it
+        // NOW (the same form observation compares, under the preparation the
+        // row's source declares), marked `pinned`, so the next verify reads
+        // the row against the target as it was when the claim was made. A
+        // row backfilled at a later verify instead was pinned to whatever
+        // the target had become by then (Test A, M3, 2026-09-02). A target
+        // the engine cannot resolve at write (unknown id, unmounted mem, a
+        // stub, a preparation without an entity form) leaves the row
+        // hash-less and unverified: never a guessed hash. A supplied hash is
+        // the author's baseline and is kept.
+        if anchors
+            .iter()
+            .any(|a| a.grain == crate::anchor::AnchorGrain::Entity)
+        {
+            let joins = self.anchor_source_roots(mem);
+            for a in anchors.iter_mut() {
+                if a.grain != crate::anchor::AnchorGrain::Entity
+                    || !a.class.is_hash_bearing()
+                    || a.hash.is_some()
+                {
+                    continue;
+                }
+                let preparation = a
+                    .source
+                    .as_deref()
+                    .and_then(|name| joins.get(name))
+                    .and_then(|j| j.preparation.as_deref());
+                if let Some(hash) = self.entity_anchor_target_hash(&a.artifact, preparation) {
+                    a.hash = Some(hash);
+                    a.hash_source = Some(crate::anchor::AnchorHashSource::Pinned);
                 }
             }
         }
@@ -477,6 +521,21 @@ impl super::Engine {
                 let mut changed = false;
                 if a.last_observed.as_ref() != Some(&obs.observation) {
                     a.last_observed = Some(obs.observation.clone());
+                    changed = true;
+                }
+                // A span the write could not check has now been looked for
+                // in observed text (resolves or span_absent): it is no
+                // longer unverified. A `recheck` (failed retrieval) says
+                // nothing about the span and leaves the flag.
+                if a.span.is_some()
+                    && a.span_unvalidated
+                    && matches!(
+                        obs.observation.state,
+                        crate::anchor::AnchorState::Resolves
+                            | crate::anchor::AnchorState::SpanAbsent
+                    )
+                {
+                    a.span_unvalidated = false;
                     changed = true;
                 }
                 if a.class.is_hash_bearing()

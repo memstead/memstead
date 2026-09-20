@@ -22,6 +22,8 @@ fn redaction_blanks_references_and_keeps_trust_metadata() {
                 derived_from: vec![],
                 binding: Some("bhash".into()),
                 source: Some("source-tree".into()),
+                span: None,
+                span_hash: None,
                 span_unvalidated: false,
                 hash_source: None,
                 last_observed: None,
@@ -36,6 +38,8 @@ fn redaction_blanks_references_and_keeps_trust_metadata() {
                 derived_from: vec!["notes/a.md".into(), "notes/b.md".into()],
                 binding: None,
                 source: None,
+                span: None,
+                span_hash: None,
                 span_unvalidated: false,
                 hash_source: None,
                 last_observed: None,
@@ -85,6 +89,8 @@ fn empty_artifact_references_are_refused() {
             derived_from: vec![],
             binding: None,
             source: None,
+            span: None,
+            span_hash: None,
             span_unvalidated: false,
             hash_source: None,
             last_observed: None,
@@ -105,6 +111,8 @@ fn empty_artifact_references_are_refused() {
             derived_from: vec!["  ".into()],
             binding: None,
             source: None,
+            span: None,
+            span_hash: None,
             span_unvalidated: false,
             hash_source: None,
             last_observed: None,
@@ -347,6 +355,7 @@ fn a_re_pin_keeps_the_baseline_it_did_not_mention() {
         artifact: "src/a.rs".into(),
         grain: None,
         class: None,
+        span: None,
     };
     let mut fresh = file_anchor("src/a.rs", "");
     fresh.hash = None;
@@ -629,6 +638,8 @@ fn anchor(class: AnchorProvenanceClass, hash: Option<&str>, stab: AnchorHashStab
         derived_from: Vec::new(),
         binding: None,
         source: None,
+        span: None,
+        span_hash: None,
         span_unvalidated: false,
         hash_source: None,
         last_observed: None,
@@ -727,6 +738,8 @@ fn composition_counts_classes_grains_and_tree_fanout() {
             derived_from: Vec::new(),
             binding: None,
             source: None,
+            span: None,
+            span_hash: None,
             span_unvalidated: false,
             hash_source: None,
             last_observed: None,
@@ -741,6 +754,8 @@ fn composition_counts_classes_grains_and_tree_fanout() {
             derived_from: vec!["a.rs".into(), "b.rs".into()],
             binding: None,
             source: None,
+            span: None,
+            span_hash: None,
             span_unvalidated: false,
             hash_source: None,
             last_observed: None,
@@ -796,6 +811,8 @@ fn file_anchor(artifact: &str, hash: &str) -> Anchor {
         derived_from: Vec::new(),
         binding: None,
         source: None,
+        span: None,
+        span_hash: None,
         span_unvalidated: false,
         hash_source: None,
         last_observed: None,
@@ -895,6 +912,7 @@ fn unset_selects_by_artifact_with_optional_narrowing() {
         artifact: "a.rs".into(),
         grain: Some(AnchorGrain::Span),
         class: None,
+        span: None,
     };
     sc.merge("m--e", &[narrowed], Vec::new(), false);
     assert_eq!(
@@ -907,6 +925,7 @@ fn unset_selects_by_artifact_with_optional_narrowing() {
         artifact: "never-there.rs".into(),
         grain: None,
         class: None,
+        span: None,
     };
     sc.merge("m--e", &[missing], Vec::new(), false);
     assert_eq!(sc.get("m--e").len(), 2);
@@ -916,6 +935,7 @@ fn unset_selects_by_artifact_with_optional_narrowing() {
         artifact: "a.rs".into(),
         grain: None,
         class: None,
+        span: None,
     };
     sc.merge("m--e", &[bare], Vec::new(), false);
     assert_eq!(sc.get("m--e"), &[file_anchor("b.rs", "h-b")]);
@@ -934,6 +954,7 @@ fn unset_applies_before_merge() {
         artifact: "a.rs".into(),
         grain: None,
         class: None,
+        span: None,
     };
     sc.merge("m--e", &[bare], vec![file_anchor("a.rs", "h-new")], false);
     assert_eq!(sc.get("m--e"), &[file_anchor("a.rs", "h-new")]);
@@ -949,6 +970,7 @@ fn merge_prunes_row_emptied_by_unset() {
         artifact: "a.rs".into(),
         grain: None,
         class: None,
+        span: None,
     };
     sc.merge("m--e", &[bare], Vec::new(), false);
     assert!(sc.is_empty());
@@ -963,6 +985,7 @@ fn unset_input_validates_typed() {
         artifact: Some("  a.rs  ".into()),
         grain: Some("span".into()),
         class: None,
+        span: None,
     }
     .validate()
     .unwrap();
@@ -978,6 +1001,7 @@ fn unset_input_validates_typed() {
         artifact: Some("a.rs".into()),
         grain: Some("paragraph".into()),
         class: None,
+        span: None,
     }
     .validate()
     .unwrap_err();
@@ -990,6 +1014,7 @@ fn unset_input_validates_typed() {
         artifact: Some("a.rs".into()),
         grain: None,
         class: Some("guessed".into()),
+        span: None,
     }
     .validate()
     .unwrap_err();
@@ -1132,7 +1157,7 @@ fn source_is_additive_on_the_persisted_shape() {
 // --- sidecar version 2, supplied observations, the url namespace rule ---
 
 #[test]
-fn sidecar_v1_loads_and_upgrades_in_memory_v3_refuses() {
+fn sidecar_v1_loads_and_upgrades_in_memory_v4_refuses() {
     let v1 = br#"{"version":1,"entities":{"m--e":[{"artifact":"https://x.test/a","grain":"url","class":"informed-by","hash_stability":"unstable"}]}}"#;
     let sc = AnchorSidecar::from_bytes(v1).expect("version 1 loads");
     assert_eq!(sc.version, ANCHOR_SIDECAR_VERSION, "upgraded in memory");
@@ -1141,11 +1166,11 @@ fn sidecar_v1_loads_and_upgrades_in_memory_v3_refuses() {
     let rewritten = String::from_utf8(sc.to_bytes()).unwrap();
     assert!(rewritten.contains("\"version\": 2"), "{rewritten}");
 
-    let v3 = br#"{"version":3,"entities":{}}"#;
-    let err = AnchorSidecar::from_bytes(v3).expect_err("unknown higher version refuses");
+    let v4 = br#"{"version":4,"entities":{}}"#;
+    let err = AnchorSidecar::from_bytes(v4).expect_err("unknown higher version refuses");
     assert!(
         err.to_string()
-            .contains("unsupported anchors sidecar version 3"),
+            .contains("unsupported anchors sidecar version 4"),
         "{err}"
     );
 }
@@ -1300,4 +1325,322 @@ fn days_between_ages_by_civil_date() {
     assert_eq!(days_between("garbage", "2026-09-02"), None);
     assert_eq!(iso_days_since_epoch("1970-01-01"), Some(0));
     assert_eq!(iso_days_since_epoch("2000-03-01"), Some(11017));
+}
+
+// --- quoted spans on the anchor element (quoted-span anchors, AC1 and AC4) ---
+
+fn url_span_input(span: &str, content: Option<&str>) -> AnchorInput {
+    AnchorInput {
+        artifact: Some("https://x.test/report.pdf".into()),
+        grain: Some("url".into()),
+        class: Some("anchored".into()),
+        span: Some(span.into()),
+        content: content.map(str::to_string),
+        ..Default::default()
+    }
+}
+
+/// AC1 assertion: a span that occurs in the supplied content (canonical
+/// form) is accepted on the url, span and file grains; the row carries the
+/// span, the hash over its canonical form and the document's prepared hash,
+/// with the author as the hash source.
+#[test]
+fn a_span_inside_the_supplied_content_writes_with_both_hashes() {
+    let content = "Preface.\n\nThe tariff rose to 12,5 %\nin March 2026.\n";
+    for grain in ["url", "span", "file"] {
+        let mut input = url_span_input("rose to 12,5 % in March 2026", Some(content));
+        input.grain = Some(grain.into());
+        input.artifact = Some(if grain == "url" {
+            "https://x.test/report.pdf".into()
+        } else {
+            "docs/report.txt".into()
+        });
+        let a = input
+            .validate(None)
+            .unwrap_or_else(|e| panic!("{grain}: {e}"));
+        assert_eq!(a.span.as_deref(), Some("rose to 12,5 % in March 2026"));
+        assert_eq!(
+            a.span_hash.as_deref(),
+            Some(crate::preparation::span_hash("rose to 12,5 % in March 2026").as_str())
+        );
+        assert_eq!(
+            a.hash.as_deref(),
+            Some(prepared_content_hash(content.as_bytes()).as_str()),
+            "{grain}: the document hash is the prepared hash of the content"
+        );
+        assert_eq!(a.hash_source, Some(AnchorHashSource::Author));
+        assert!(!a.span_unvalidated, "{grain}: checked against content");
+    }
+}
+
+/// AC1 assertion: the same element refuses, typed and naming the span, when
+/// the canonical span does not occur in the canonical content; and a span
+/// beside a supplied hash refuses.
+#[test]
+fn a_span_absent_from_the_content_and_a_span_beside_a_hash_refuse() {
+    let err = url_span_input("rose to 12,6 %", Some("The tariff rose to 12,5 %."))
+        .validate(None)
+        .unwrap_err();
+    assert!(
+        matches!(&err, AnchorValidationError::SpanAbsentFromContent { span, .. } if span == "rose to 12,6 %"),
+        "{err:?}"
+    );
+    assert_eq!(err.code(), INVALID_ANCHOR_CODE);
+    assert_eq!(err.detail()["field"], "span");
+    assert_eq!(err.detail()["got"], "rose to 12,6 %");
+    assert!(err.to_string().contains("rose to 12,6 %"), "{err}");
+
+    let mut with_hash = url_span_input("rose", None);
+    with_hash.hash = Some("abc".into());
+    let err = with_hash.validate(None).unwrap_err();
+    assert!(matches!(err, AnchorValidationError::SpanAndHash), "{err:?}");
+    assert_eq!(err.detail()["field"], "span");
+}
+
+/// AC1 refusal complement: a span without content is accepted and recorded
+/// as unverified (never verified), on the entity or tree grains it refuses,
+/// a whitespace-only span refuses, and a span on a class without hash
+/// semantics refuses like a hash would.
+#[test]
+fn a_span_without_content_is_unverified_and_the_unfit_shapes_refuse() {
+    let a = url_span_input("rose to 12,5 %", None)
+        .validate(None)
+        .unwrap();
+    assert!(
+        a.span_unvalidated,
+        "no content: the span could not be checked"
+    );
+    assert_eq!(a.hash, None, "no content: no document hash");
+    assert_eq!(a.hash_source, None);
+    assert!(a.span_hash.is_some(), "the span hash needs only the span");
+
+    for grain in ["entity", "tree"] {
+        let mut input = url_span_input("rose", None);
+        input.grain = Some(grain.into());
+        input.artifact = Some("m--e".into());
+        let err = input.validate(None).unwrap_err();
+        assert!(
+            matches!(err, AnchorValidationError::SpanNotAcceptedForGrain { grain: g } if g == grain),
+            "{grain}: {err:?}"
+        );
+        assert!(
+            err.to_string()
+                .contains("never computed from supplied text"),
+            "{err}"
+        );
+    }
+
+    let err = url_span_input(" \n\t ", None).validate(None).unwrap_err();
+    assert!(matches!(err, AnchorValidationError::SpanEmpty), "{err:?}");
+
+    let mut authored = url_span_input("rose", None);
+    authored.class = Some("authored".into());
+    let err = authored.validate(None).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            AnchorValidationError::HashOnNonHashClass { class: "authored" }
+        ),
+        "{err:?}"
+    );
+}
+
+/// AC1 assertion: a span rides the CLI `--anchor <JSON>` wire shape (the
+/// same `AnchorInput` the MCP element lowers into) with no new field
+/// grammar: `"span"` beside `"content"` deserialises and validates.
+#[test]
+fn the_span_rides_the_json_wire_shape() {
+    let input: AnchorInput = serde_json::from_str(
+        r#"{"artifact":"https://x.test/a","grain":"url","class":"anchored","span":"the words","content":"all the words"}"#,
+    )
+    .unwrap();
+    let a = input.validate(None).unwrap();
+    assert_eq!(a.span.as_deref(), Some("the words"));
+    let unset: AnchorUnsetInput =
+        serde_json::from_str(r#"{"artifact":"https://x.test/a","span":"the  words"}"#).unwrap();
+    assert_eq!(
+        unset.validate().unwrap().span.as_deref(),
+        Some("the words"),
+        "the unset selector carries the span in canonical form"
+    );
+}
+
+fn span_row(span: &str) -> Anchor {
+    url_span_input(span, Some(&format!("page with {span} on it")))
+        .validate(None)
+        .unwrap()
+}
+
+/// AC4 assertion: two spans on one artifact, grain and class are two rows;
+/// unsetting by artifact and span removes that one row and leaves the
+/// other; a re-pin that omits the span never touches a span row; a bare
+/// unset removes every row, spans included.
+#[test]
+fn the_span_is_part_of_the_row_identity() {
+    let mut sc = AnchorSidecar::default();
+    sc.merge(
+        "m--e",
+        &[],
+        vec![span_row("first words"), span_row("second words")],
+        false,
+    );
+    assert_eq!(sc.get("m--e").len(), 2, "two spans, two rows");
+
+    // A span-less row on the same artifact is a third identity.
+    let mut plain = url_span_input("x", None);
+    plain.span = None;
+    plain.content = Some("whole page".into());
+    let plain = plain.validate(None).unwrap();
+    sc.merge("m--e", &[], vec![plain.clone()], false);
+    assert_eq!(sc.get("m--e").len(), 3);
+
+    // A re-pin without a span replaces only the span-less row.
+    let mut repin = plain.clone();
+    repin.hash = Some("moved".into());
+    sc.merge("m--e", &[], vec![repin], false);
+    let rows = sc.get("m--e");
+    assert_eq!(rows.len(), 3);
+    assert!(
+        rows.iter()
+            .filter(|r| r.span.is_some())
+            .all(|r| r.hash != Some("moved".into())),
+        "span rows untouched by a span-less re-pin"
+    );
+
+    // A restated span row is a no-op; the same span in another spelling is
+    // the same row.
+    assert!(!sc.merge("m--e", &[], vec![span_row("first words")], false));
+    let mut restyled = span_row("first words");
+    restyled.span = Some("first\n  words".into());
+    restyled.hash = Some("new-doc-hash".into());
+    sc.merge("m--e", &[], vec![restyled], false);
+    assert_eq!(sc.get("m--e").len(), 3, "one row per canonical span");
+
+    // Unset by artifact and span: one row goes.
+    let one = AnchorUnsetInput {
+        artifact: Some("https://x.test/report.pdf".into()),
+        span: Some("first words".into()),
+        ..Default::default()
+    }
+    .validate()
+    .unwrap();
+    sc.merge("m--e", &[one], Vec::new(), false);
+    let rows = sc.get("m--e");
+    assert_eq!(rows.len(), 2);
+    assert!(
+        rows.iter()
+            .all(|r| r.span.as_deref() != Some("first words"))
+    );
+
+    // Bare unset: everything on the artifact goes, spans included.
+    let bare = AnchorUnsetInput {
+        artifact: Some("https://x.test/report.pdf".into()),
+        ..Default::default()
+    }
+    .validate()
+    .unwrap();
+    sc.merge("m--e", &[bare], Vec::new(), false);
+    assert!(sc.is_empty());
+}
+
+/// AC4 assertion: the sidecar carries version 3 only once a span row (or a
+/// pinned hash source) exists; a version-2 document loads, resolves and
+/// re-saves with every row unchanged in meaning and the version it had; a
+/// version-3 document loads on this engine.
+#[test]
+fn the_sidecar_version_moves_only_with_a_span_row() {
+    let mut sc = AnchorSidecar::default();
+    sc.set("m--e", vec![file_anchor("a.rs", "h")]);
+    assert_eq!(sc.required_version(), ANCHOR_SIDECAR_VERSION);
+    let bytes = sc.to_bytes();
+    assert!(String::from_utf8_lossy(&bytes).contains("\"version\": 2"));
+    let v2_doc = br#"{"version":2,"entities":{"m--e":[{"artifact":"https://x.test/a","grain":"url","class":"anchored","hash":"abc","hash_stability":"unstable","hash_source":"author","last_observed":{"at":"2026-09-01T00:00:00Z","hash":"abc","state":"resolves"}}]}}"#;
+    let loaded = AnchorSidecar::from_bytes(v2_doc).unwrap();
+    assert_eq!(
+        loaded.version, 2,
+        "a version-2 document without span rows stays 2"
+    );
+    let row = &loaded.get("m--e")[0];
+    assert_eq!(row.span, None);
+    assert_eq!(row.span_hash, None);
+    assert_eq!(row.hash.as_deref(), Some("abc"));
+    assert_eq!(
+        row.last_observed.as_ref().map(|o| o.state),
+        Some(AnchorState::Resolves)
+    );
+    let resaved = AnchorSidecar::from_bytes(&loaded.to_bytes()).unwrap();
+    assert_eq!(resaved, loaded, "re-saving changes no row");
+    assert!(String::from_utf8_lossy(&loaded.to_bytes()).contains("\"version\": 2"));
+
+    sc.merge("m--e", &[], vec![span_row("the words")], false);
+    assert_eq!(sc.required_version(), ANCHOR_SIDECAR_SPAN_VERSION);
+    let bytes = sc.to_bytes();
+    assert!(
+        String::from_utf8_lossy(&bytes).contains("\"version\": 3"),
+        "{}",
+        String::from_utf8_lossy(&bytes)
+    );
+    let back = AnchorSidecar::from_bytes(&bytes).expect("version 3 loads on this engine");
+    assert_eq!(back.version, 3);
+    assert_eq!(back.get("m--e").len(), 2);
+    assert_eq!(
+        back.get("m--e")
+            .iter()
+            .find(|r| r.span.is_some())
+            .and_then(|r| r.span.as_deref()),
+        Some("the words")
+    );
+
+    // A pinned hash source needs version 3 too: an older engine cannot
+    // read the value.
+    let mut pinned = AnchorSidecar::default();
+    let mut row = file_anchor("a.rs", "h");
+    row.hash_source = Some(AnchorHashSource::Pinned);
+    pinned.set("m--e", vec![row]);
+    assert_eq!(pinned.required_version(), ANCHOR_SIDECAR_SPAN_VERSION);
+}
+
+/// AC2's model half: a span row resolves on the span's presence in the
+/// observed text whatever the hash did, reads `span_absent` once the
+/// words are gone, and never `drifted`; a present observation without
+/// text cannot adjudicate it (recheck); an absent artifact is orphaned as
+/// for every row.
+#[test]
+fn a_span_row_resolves_on_presence_and_reads_span_absent_never_drifted() {
+    let row = span_row("rose to 12,5 % in March 2026");
+    assert_eq!(
+        resolve_span_anchor(
+            &row,
+            "Entirely new page, where it rose to 12,5 %\nin March 2026."
+        ),
+        AnchorState::Resolves
+    );
+    assert_eq!(
+        resolve_span_anchor(
+            &row,
+            "Entirely new page, where it rose to 12,6 % in March 2026."
+        ),
+        AnchorState::SpanAbsent
+    );
+    assert_eq!(
+        resolve_anchor(
+            &row,
+            &ArtifactObservation::Present {
+                current_hash: Some("some-other-document-hash".into())
+            }
+        ),
+        AnchorState::Recheck,
+        "a hash alone cannot adjudicate a span row, and it is never drifted"
+    );
+    assert_eq!(
+        resolve_anchor(&row, &ArtifactObservation::Absent),
+        AnchorState::Orphaned
+    );
+    let plain = file_anchor("a.rs", "h");
+    assert_eq!(
+        resolve_span_anchor(&plain, "anything"),
+        AnchorState::Recheck,
+        "a row without a span is not the span resolver's to judge"
+    );
+    assert_eq!(AnchorState::SpanAbsent.as_wire(), "span_absent");
 }

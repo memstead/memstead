@@ -160,6 +160,8 @@ pub fn anchor(artifact: &str, class: AnchorProvenanceClass, hash: Option<&str>) 
         derived_from: Vec::new(),
         binding: None,
         source: None,
+        span: None,
+        span_hash: None,
         span_unvalidated: false,
         hash_source: None,
         last_observed: None,

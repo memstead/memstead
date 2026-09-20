@@ -696,6 +696,10 @@ pub fn health_open_questions_axis(
         // bucket means "none found" only when the check could run at all.
         let (mut recheck, mut unresolvable, mut unobserved, mut dangling_rows) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        // Span rows whose quoted words are gone: the claim's basis moved,
+        // so someone has to re-read the source. Its own bucket, like the
+        // others: it is neither a gone artifact nor an unmeasured row.
+        let mut span_absent = Vec::new();
         // Rows resting on a recorded observation older than today: open
         // work too (someone has to look again), stated as its age.
         let mut aging = Vec::new();
@@ -726,6 +730,7 @@ pub fn health_open_questions_axis(
                     // The enum's wire name for a gone artifact; the bucket
                     // keeps the axis's count name (`anchors_unresolvable`).
                     "orphaned" => unresolvable.push(item),
+                    "span_absent" => span_absent.push(item),
                     "unobserved" => unobserved.push(item),
                     "dangling" => dangling_rows.push(item),
                     _ => {}
@@ -933,6 +938,7 @@ pub fn health_open_questions_axis(
             + resolution_unchecked["count"].as_u64().unwrap_or(0)
             + recheck.len() as u64
             + unresolvable.len() as u64
+            + span_absent.len() as u64
             + unobserved.len() as u64
             + dangling_rows.len() as u64
             + aging.len() as u64
@@ -947,6 +953,7 @@ pub fn health_open_questions_axis(
         entry.insert("stubs".into(), stubs);
         entry.insert("anchors_recheck".into(), capped(recheck));
         entry.insert("anchors_unresolvable".into(), capped(unresolvable));
+        entry.insert("anchors_span_absent".into(), capped(span_absent));
         // Its own bucket here too. The comment above argues that folding two
         // anchor conditions together reproduces the collapse the axis refuses,
         // and a first version then did exactly that eight lines further down.
@@ -1010,6 +1017,9 @@ pub fn health_anchors_axis(
                 // absence of one, and this is the surface a reader arrives at
                 // without a binding in hand.
                 "unresolvable": report.unresolvable,
+                // Span rows whose quoted words are gone from a document
+                // that is still there.
+                "span_absent": report.span_absent,
                 "unobserved": report.unobserved,
                 // The entity end (03/02). Carried here too, both ways: four
                 // counts over a mem whose sidecar has outlived its entities

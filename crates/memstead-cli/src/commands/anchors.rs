@@ -208,8 +208,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     format!(", observed {at}, unobserved for {days} day(s)")
                 })
                 .unwrap_or_default();
+            let span_str = a
+                .span
+                .as_deref()
+                .map(|s| format!(", span {s:?}"))
+                .unwrap_or_default();
             body.push_str(&format!(
-                "\n- `{id}` — {} {} `{}` (hash: {hash}{state_str}{age_str})",
+                "\n- `{id}` — {} {} `{}` (hash: {hash}{span_str}{state_str}{age_str})",
                 a.class.as_wire(),
                 a.grain.as_wire(),
                 a.artifact,

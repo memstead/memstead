@@ -103,6 +103,11 @@ pub struct AnchorInputParam {
     #[serde(default)]
     pub content: Option<String>,
     #[schemars(
+        description = "The verbatim words the entity quotes from the artifact (`url`/`span`/`file` grains, hash-bearing classes). With `content`, the write refuses INVALID_ANCHOR unless the span occurs in it; the row then records the span, a hash over its canonical form and the document's prepared hash. Without `content` the row is accepted with the span unverified. From then on the row is adjudicated on the span's PRESENCE in observed text (`verify-anchors --observations` with `content` rows): `resolves` while the words stand whatever else on the page changed, `span_absent` once they are gone, never `drifted`. Compared in the canonical span form: NFC, whitespace runs to one space, soft hyphens and line-end hyphens removed, typographic quotes, dashes and ligatures to ASCII; digits, decimal marks, units, case and word order exact. The span is part of the row's identity beside `artifact`, `grain` and `class`: several spans on one document are several rows. Refused beside `hash` (the engine computes the hashes), on `entity`/`tree`, and when empty."
+    )]
+    #[serde(default)]
+    pub span: Option<String>,
+    #[schemars(
         description = "Medium's declared hash stability: `stable` | `unstable` (defaults per grain: `url` to `unstable`, every other grain to `stable`). An unstable-source hash break resolves `recheck`, not `drifted`."
     )]
     #[serde(default)]
@@ -157,6 +162,7 @@ impl AnchorInputParam {
             at_version,
             hash: self.hash,
             content: self.content,
+            span: self.span,
             hash_stability: self.hash_stability,
             derived_from: self.derived_from,
             binding: self.binding,
@@ -265,6 +271,11 @@ pub struct AnchorUnsetParam {
     )]
     #[serde(default)]
     pub class: Option<String>,
+    #[schemars(
+        description = "Optional narrowing: only remove the row quoting this span (compared in the canonical span form). Without it, a selector removes span rows and span-less rows alike."
+    )]
+    #[serde(default)]
+    pub span: Option<String>,
 }
 
 impl AnchorUnsetParam {
@@ -276,6 +287,7 @@ impl AnchorUnsetParam {
             artifact: self.artifact,
             grain: self.grain,
             class: self.class,
+            span: self.span,
         }
     }
 }

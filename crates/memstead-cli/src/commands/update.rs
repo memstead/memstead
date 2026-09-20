@@ -139,8 +139,9 @@ pub struct Args {
 
     /// Explicit anchor removal: repeatable `--anchor-unset '<json>'`, each
     /// a JSON object `{ "artifact": "…" }` optionally narrowed by
-    /// `"grain"` and/or `"class"` — a bare artifact removes every anchor
-    /// on it. Applied BEFORE the `--anchor` merge in the same commit
+    /// `"grain"`, `"class"` and/or `"span"` (the one row quoting that
+    /// span) — a bare artifact removes every anchor on it, span rows
+    /// included. Applied BEFORE the `--anchor` merge in the same commit
     /// (anchors merge; writing never removes an anchor not named here).
     /// Unsetting a nonexistent target is a no-op. A malformed selector
     /// refuses `INVALID_ANCHOR`. Conflicts with `--from` (the file's

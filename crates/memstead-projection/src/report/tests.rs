@@ -621,6 +621,8 @@ fn end_to_end_report(
         derived_from: Vec::new(),
         binding: None,
         source: None,
+        span: None,
+        span_hash: None,
         span_unvalidated: false,
         hash_source: None,
         last_observed: None,

@@ -58,14 +58,25 @@ use serde::{Deserialize, Serialize};
 /// entity deltas.
 pub const ANCHOR_SIDECAR_PATH: &str = ".memstead/anchors.json";
 
-/// Current sidecar document schema version. Version 2 added the per-row
-/// `last_observed` record; version 1 files load unchanged (the field is
-/// absent) and are rewritten as version 2 on the next sidecar write.
+/// The sidecar document schema version every sidecar is written at unless
+/// a row needs a newer one. Version 2 added the per-row `last_observed`
+/// record; version 1 files load unchanged (the field is absent) and are
+/// rewritten as version 2 on the next sidecar write.
 pub const ANCHOR_SIDECAR_VERSION: u32 = 2;
+
+/// The version a sidecar carries once any row holds a quoted `span` (with
+/// its `span_hash`) or a `pinned` hash source: the two things an engine
+/// that reads only versions 1 and 2 cannot understand. The version moves
+/// up only when such a row is written ([`AnchorSidecar::required_version`])
+/// and a sidecar without one keeps [`ANCHOR_SIDECAR_VERSION`], so nothing
+/// written before spans existed changes its bytes. An older engine reading
+/// a version-3 sidecar refuses it typed (`unsupported anchors sidecar
+/// version 3`); it never loads the rows with the span dropped.
+pub const ANCHOR_SIDECAR_SPAN_VERSION: u32 = 3;
 
 /// Every sidecar version this engine reads. Anything else refuses typed:
 /// a document written by a later engine is not parsed optimistically.
-pub const ANCHOR_SIDECAR_VERSIONS_READ: &[u32] = &[1, 2];
+pub const ANCHOR_SIDECAR_VERSIONS_READ: &[u32] = &[1, 2, 3];
 
 /// Stable typed error code returned when an `anchors[]` element is
 /// malformed. Mirrors the engine's other typed-envelope codes; the whole
@@ -339,13 +350,33 @@ pub struct Anchor {
     /// still resolves in the workspace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    /// A `span`-grain row whose locator could NOT be checked against the
+    /// The verbatim words this row quotes from the artifact (sidecar
+    /// version 3), on the `url`, `span` and `file` grains. A row carrying a
+    /// span is adjudicated on the span's PRESENCE in the observed text (in
+    /// the canonical span form, [`crate::preparation::canonical_span_form`]),
+    /// not on the document hash: it resolves while the words stand, whatever
+    /// else on the page changed, and reads [`AnchorState::SpanAbsent`] once
+    /// they are gone. Part of the row's identity beside artifact, grain and
+    /// class, so several spans on one document are several rows. `None` on
+    /// every row written before spans existed, which adjudicates exactly as
+    /// before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<String>,
+    /// The hash over the canonical form of [`Self::span`], computed by the
+    /// engine at write (a caller never supplies it). Present exactly when
+    /// `span` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span_hash: Option<String>,
+    /// A row whose locator or quoted span could NOT be checked against the
     /// artifact at write time (consistency-sweep 03/03). The write path
     /// deliberately reads no source content, so the check is possible only
     /// where the caller supplied `content`; elsewhere the anchor is accepted
     /// and this records that its span is unverified, rather than letting a
-    /// later surface report it as adjudicated. Never set on a non-`span`
-    /// grain. Serialized only when true, so an existing sidecar is unchanged.
+    /// later surface report it as adjudicated. Set on a `span`-grain row
+    /// with an unchecked line-range locator, and on any row whose `span`
+    /// was written without `content`; cleared once a recorded observation
+    /// adjudicates the span. Serialized only when true, so an existing
+    /// sidecar is unchanged.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub span_unvalidated: bool,
     /// Who established this row's [`Self::hash`] baseline. `None` on every
@@ -391,6 +422,12 @@ pub enum AnchorHashSource {
     Author,
     /// A completed verify filled a hash-less row from what it observed.
     Backfill,
+    /// The engine hashed the target as it stood at write time: an
+    /// `entity`-grain row of a hash-bearing class written without a hash
+    /// while its target was loaded takes the target's prepared hash then,
+    /// so the next verify reads it against the target as it was when the
+    /// claim was made, never against a later state. Sidecar version 3.
+    Pinned,
 }
 
 impl Anchor {
@@ -410,6 +447,7 @@ impl Anchor {
             && self.derived_from == other.derived_from
             && self.binding == other.binding
             && self.source == other.source
+            && same_span(self.span.as_deref(), other.span.as_deref())
             && self.span_unvalidated == other.span_unvalidated
             && other
                 .hash
@@ -418,11 +456,27 @@ impl Anchor {
     }
 }
 
+/// Whether two optional spans name the same words: both absent, or both
+/// present and equal in the canonical span form. The one span identity
+/// rule, shared by the merge, the no-op check, the duplicate refusal and
+/// the unset selector, so a span re-sent with different line breaks or
+/// quote marks is the same row everywhere.
+pub fn same_span(a: Option<&str>, b: Option<&str>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            crate::preparation::canonical_span_form(a) == crate::preparation::canonical_span_form(b)
+        }
+        _ => false,
+    }
+}
+
 impl AnchorHashSource {
     pub fn as_wire(self) -> &'static str {
         match self {
             AnchorHashSource::Author => "author",
             AnchorHashSource::Backfill => "backfill",
+            AnchorHashSource::Pinned => "pinned",
         }
     }
 }
@@ -534,6 +588,15 @@ pub struct AnchorInput {
     /// form is never computed from supplied bytes.
     #[serde(default)]
     pub content: Option<String>,
+    /// The verbatim words the entity quotes from the artifact. Accepted on
+    /// the `url` / `span` / `file` grains of a hash-bearing class; refused
+    /// beside `hash` (the engine computes the span hash itself), on the
+    /// `entity` / `tree` grains (never prepared from supplied text), and
+    /// when empty. With `content`, the write refuses unless the span occurs
+    /// in it (canonical form); without `content`, the row is recorded with
+    /// the span unverified.
+    #[serde(default)]
+    pub span: Option<String>,
     #[serde(default)]
     pub hash_stability: Option<String>,
     #[serde(default)]
@@ -559,6 +622,10 @@ pub struct AnchorUnsetInput {
     pub grain: Option<String>,
     #[serde(default)]
     pub class: Option<String>,
+    /// Narrow to the one row quoting this span (compared in the canonical
+    /// span form). Absent selects rows with or without a span.
+    #[serde(default)]
+    pub span: Option<String>,
 }
 
 impl AnchorUnsetInput {
@@ -591,10 +658,16 @@ impl AnchorUnsetInput {
                 }
             })?),
         };
+        let span = self
+            .span
+            .as_deref()
+            .map(crate::preparation::canonical_span_form)
+            .filter(|s| !s.is_empty());
         Ok(AnchorUnset {
             artifact,
             grain,
             class,
+            span,
         })
     }
 }
@@ -612,6 +685,9 @@ pub struct AnchorUnset {
     pub grain: Option<AnchorGrain>,
     /// When present, only anchors of this class are removed.
     pub class: Option<AnchorProvenanceClass>,
+    /// When present (canonical span form), only the row quoting this span
+    /// is removed; absent, span rows and span-less rows alike are selected.
+    pub span: Option<String>,
 }
 
 impl AnchorUnset {
@@ -620,6 +696,12 @@ impl AnchorUnset {
         anchor.artifact == self.artifact
             && self.grain.is_none_or(|g| anchor.grain == g)
             && self.class.is_none_or(|c| anchor.class == c)
+            && self.span.as_deref().is_none_or(|s| {
+                anchor
+                    .span
+                    .as_deref()
+                    .is_some_and(|have| crate::preparation::canonical_span_form(have) == s)
+            })
     }
 }
 
@@ -693,21 +775,55 @@ pub enum AnchorValidationError {
          (it has {lines} line(s)); address a range the artifact contains"
     )]
     SpanOutsideContent { artifact: String, lines: usize },
-    /// One payload named the same `(artifact, grain, class)` triple twice.
-    /// That triple is the sidecar's merge identity, so the later occurrence
-    /// silently replaced the earlier one and the caller was never told an
-    /// anchor it wrote had gone missing. A LATER call replacing the stored
-    /// row is unaffected: the unit of this refusal is one payload.
+    /// One payload named the same `(artifact, grain, class, span)` identity
+    /// twice. That identity is the sidecar's merge key, so the later
+    /// occurrence silently replaced the earlier one and the caller was never
+    /// told an anchor it wrote had gone missing. A LATER call replacing the
+    /// stored row is unaffected: the unit of this refusal is one payload.
     #[error(
-        "the anchors payload names {artifact:?} at grain `{grain}` and class `{class}` more \
-         than once; that triple is one row, so the repeats would silently collapse to the \
-         last one: send it once, or vary the grain or class"
+        "the anchors payload names {artifact:?} at grain `{grain}` and class `{class}`{} more \
+         than once; that identity is one row, so the repeats would silently collapse to the \
+         last one: send it once, or vary the grain, class or span",
+        span.as_deref().map(|s| format!(" with span {s:?}")).unwrap_or_default()
     )]
     DuplicateAnchorTriple {
         artifact: String,
         grain: &'static str,
         class: &'static str,
+        span: Option<String>,
     },
+    /// Both `span` and `hash` were supplied. The engine computes a span
+    /// row's hashes itself (the span hash from the span, the document hash
+    /// from `content`), so a supplied hash beside a span is ambiguous.
+    #[error(
+        "anchor supplies both `span` and `hash`; the engine computes a span row's hashes \
+         itself: supply the span with `content`, or a hash without a span"
+    )]
+    SpanAndHash,
+    /// A `span` that is empty after canonicalisation names no words and can
+    /// never be found.
+    #[error(
+        "anchor `span` is empty: a quoted span must carry at least one non-whitespace character"
+    )]
+    SpanEmpty,
+    /// A `span` was supplied on a grain whose prepared form is never computed
+    /// from supplied text (`entity`, `tree`), so the words could never be
+    /// looked for.
+    #[error(
+        "anchor grain '{grain}' does not accept `span`: its prepared form is never computed \
+         from supplied text (accepted for url / span / file)"
+    )]
+    SpanNotAcceptedForGrain { grain: &'static str },
+    /// The canonical form of the supplied `span` does not occur in the
+    /// canonical form of the supplied `content`: the observation the writer
+    /// handed over does not carry the words the entity quotes.
+    #[error(
+        "anchor artifact {artifact:?}: the span {span:?} does not occur in the supplied \
+         `content` (compared in the canonical span form: NFC, whitespace runs to one space, \
+         soft hyphens and line-end hyphens removed, typographic quotes, dashes and ligatures \
+         to ASCII; everything else exact); quote the words as the artifact carries them"
+    )]
+    SpanAbsentFromContent { artifact: String, span: String },
     /// A `source` was supplied but is empty after trimming — a source
     /// name, when present, must be one of the producing binding's
     /// declared names, and an empty string can never be one.
@@ -855,16 +971,49 @@ impl AnchorValidationError {
                 artifact,
                 grain,
                 class,
+                span,
             } => {
                 d.insert("field".into(), "anchors".into());
                 d.insert(
                     "got".into(),
-                    serde_json::json!({ "artifact": artifact, "grain": grain, "class": class }),
+                    serde_json::json!({
+                        "artifact": artifact, "grain": grain, "class": class, "span": span
+                    }),
                 );
                 d.insert(
                     "expected".into(),
                     serde_json::json!(
-                        "each (artifact, grain, class) triple at most once per payload"
+                        "each (artifact, grain, class, span) identity at most once per payload"
+                    ),
+                );
+            }
+            AnchorValidationError::SpanAndHash => {
+                d.insert("field".into(), "span".into());
+                d.insert(
+                    "expected".into(),
+                    serde_json::json!("either `span` (with `content`) or `hash`, never both"),
+                );
+            }
+            AnchorValidationError::SpanEmpty => {
+                d.insert("field".into(), "span".into());
+            }
+            AnchorValidationError::SpanNotAcceptedForGrain { grain } => {
+                d.insert("field".into(), "span".into());
+                d.insert("grain".into(), serde_json::json!(grain));
+                d.insert(
+                    "accepted_grains".into(),
+                    serde_json::json!(["url", "span", "file"]),
+                );
+            }
+            AnchorValidationError::SpanAbsentFromContent { artifact, span } => {
+                d.insert("field".into(), "span".into());
+                d.insert("artifact".into(), serde_json::json!(artifact));
+                d.insert("got".into(), serde_json::json!(span));
+                d.insert(
+                    "expected".into(),
+                    serde_json::json!(
+                        "the span, in the canonical span form, occurring in the canonical form \
+                         of `content`"
                     ),
                 );
             }
@@ -979,18 +1128,53 @@ impl AnchorInput {
             })?,
         };
 
-        // A hash is only meaningful on a hash-bearing class.
+        // A hash is only meaningful on a hash-bearing class. A quoted span
+        // is a fidelity claim ("the artifact says these words"), so it is
+        // one too.
         let hash = self
             .hash
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
-        if (hash.is_some() || self.content.is_some()) && !class.is_hash_bearing() {
+        if (hash.is_some() || self.content.is_some() || self.span.is_some())
+            && !class.is_hash_bearing()
+        {
             return Err(AnchorValidationError::HashOnNonHashClass {
                 class: class.as_wire(),
             });
         }
+        // The quoted span: the engine computes its hashes, so a supplied
+        // hash beside it is refused; an empty span names nothing; the
+        // `entity` and `tree` grains are never prepared from supplied text.
+        // Checked against `content` where the caller supplied it (the words
+        // must occur, in the canonical span form); recorded as unverified
+        // where they did not.
+        let span = match self.span.as_deref() {
+            None => None,
+            Some(_) if hash.is_some() => return Err(AnchorValidationError::SpanAndHash),
+            Some(raw) => {
+                if crate::preparation::canonical_span_form(raw).is_empty() {
+                    return Err(AnchorValidationError::SpanEmpty);
+                }
+                if matches!(grain, AnchorGrain::Entity | AnchorGrain::Tree) {
+                    return Err(AnchorValidationError::SpanNotAcceptedForGrain {
+                        grain: grain.as_wire(),
+                    });
+                }
+                if let Some(content) = self.content.as_deref()
+                    && !crate::preparation::span_occurs(raw, content)
+                {
+                    return Err(AnchorValidationError::SpanAbsentFromContent {
+                        artifact: artifact.clone(),
+                        span: raw.trim().to_string(),
+                    });
+                }
+                Some(raw.trim().to_string())
+            }
+        };
+        let span_hash = span.as_deref().map(crate::preparation::span_hash);
+        let mut span_unvalidated = span.is_some() && self.content.is_none();
         // Supplied content: the engine computes the prepared hash through the
         // preparation registry (touchpoint A at write time) — the one way a
         // `url` anchor's recorded hash is ever the engine's prepared form.
@@ -1009,12 +1193,12 @@ impl AnchorInput {
             }
         };
 
-        // The span itself (consistency-sweep 03/03). A locator that can never
-        // address anything is refused here, context-free, because no medium
-        // context can rescue it. Where the caller supplied content, a line
-        // range is checked against it; where they did not, the row carries
-        // `span_unvalidated` so no later surface reports it as adjudicated.
-        let mut span_unvalidated = false;
+        // The span-grain locator (consistency-sweep 03/03). A locator that
+        // can never address anything is refused here, context-free, because
+        // no medium context can rescue it. Where the caller supplied content,
+        // a line range is checked against it; where they did not, the row
+        // carries `span_unvalidated` so no later surface reports it as
+        // adjudicated.
         if grain == AnchorGrain::Span {
             let locator = parse_span_locator(&artifact).map_err(|reason| {
                 AnchorValidationError::SpanLocatorUnusable {
@@ -1108,6 +1292,8 @@ impl AnchorInput {
                 .filter(|s| !s.is_empty())
                 .map(str::to_string),
             source,
+            span,
+            span_hash,
             span_unvalidated,
             last_observed: None,
         })
@@ -1451,6 +1637,13 @@ pub enum AnchorState {
     /// The artifact the anchor references is no longer present in the
     /// medium.
     Orphaned,
+    /// The artifact is present but the words the row quotes (its `span`)
+    /// no longer occur in it. The claim's basis is gone while the document
+    /// stands: not `drifted` (the row's claim is the span, not the page)
+    /// and not `orphaned` (the artifact is there). Only a row carrying a
+    /// span can read this.
+    #[serde(rename = "span_absent")]
+    SpanAbsent,
 }
 
 impl AnchorState {
@@ -1458,11 +1651,12 @@ impl AnchorState {
     /// list; a new variant must join it (the match in [`Self::describe`]
     /// refuses to compile without it, and [`Self::vocabulary_help`] and the
     /// round-trip test read it).
-    pub const ALL: [AnchorState; 4] = [
+    pub const ALL: [AnchorState; 5] = [
         AnchorState::Resolves,
         AnchorState::Drifted,
         AnchorState::Recheck,
         AnchorState::Orphaned,
+        AnchorState::SpanAbsent,
     ];
 
     /// Stable wire form.
@@ -1472,6 +1666,7 @@ impl AnchorState {
             AnchorState::Drifted => "drifted",
             AnchorState::Recheck => "recheck",
             AnchorState::Orphaned => "orphaned",
+            AnchorState::SpanAbsent => "span_absent",
         }
     }
 
@@ -1488,6 +1683,9 @@ impl AnchorState {
                 "present, but drift cannot be asserted (unstable medium, or a hash missing on one side)"
             }
             AnchorState::Orphaned => "the artifact the anchor references is gone from the medium",
+            AnchorState::SpanAbsent => {
+                "present, but the words the row quotes (its span) no longer occur in it"
+            }
         }
     }
 
@@ -1497,7 +1695,7 @@ impl AnchorState {
     pub fn vocabulary_help() -> String {
         let mut s = String::from("Anchor states (the artifact end of an anchor):\n");
         for state in Self::ALL {
-            s.push_str(&format!("  {:<9} {}\n", state.as_wire(), state.describe()));
+            s.push_str(&format!("  {:<11} {}\n", state.as_wire(), state.describe()));
         }
         s.push_str(
             "Not states: `dangling` (a sidecar row whose entity the mem no longer holds) and \
@@ -1664,6 +1862,12 @@ pub fn resolve_anchor(anchor: &Anchor, observation: &ArtifactObservation) -> Anc
         ArtifactObservation::Absent => return AnchorState::Orphaned,
         ArtifactObservation::Present { current_hash } => current_hash,
     };
+    // A row quoting a span is adjudicated on the span's presence
+    // ([`resolve_span_anchor`]); a present observation that reaches here
+    // for such a row carried no text to look in, so nothing can be asserted.
+    if anchor.span.is_some() {
+        return AnchorState::Recheck;
+    }
     if !anchor.class.is_hash_bearing() {
         return AnchorState::Resolves;
     }
@@ -1675,6 +1879,22 @@ pub fn resolve_anchor(anchor: &Anchor, observation: &ArtifactObservation) -> Anc
         },
         // Missing hash on either side — cannot adjudicate drift.
         _ => AnchorState::Recheck,
+    }
+}
+
+/// Resolve a row that quotes a `span` against the observed TEXT of its
+/// artifact: [`Resolves`](AnchorState::Resolves) while the span occurs in
+/// the text (canonical span form), whatever the document's hash did, and
+/// [`SpanAbsent`](AnchorState::SpanAbsent) once it does not. The document
+/// hash is the observation's business (it is kept and shown as the row's
+/// observed hash); the state answers the row's claim, which is the span.
+/// A row without a span is not this function's to judge and resolves by
+/// its hash ([`resolve_anchor`]).
+pub fn resolve_span_anchor(anchor: &Anchor, text: &str) -> AnchorState {
+    match anchor.span.as_deref() {
+        Some(span) if crate::preparation::span_occurs(span, text) => AnchorState::Resolves,
+        Some(_) => AnchorState::SpanAbsent,
+        None => AnchorState::Recheck,
     }
 }
 
@@ -1783,16 +2003,46 @@ impl AnchorSidecar {
         }
         // An older readable version is upgraded in memory: the rows are
         // unchanged (a version-2 field is simply absent on them) and the
-        // next write persists the current version.
+        // next write persists the version the rows require: version 2
+        // unless a row carries a span or a pinned hash source.
         let mut sidecar = sidecar;
-        sidecar.version = ANCHOR_SIDECAR_VERSION;
+        sidecar.version = sidecar.required_version();
         Ok(sidecar)
     }
 
+    /// The version this document's rows require: [`ANCHOR_SIDECAR_SPAN_VERSION`]
+    /// once any row carries a quoted `span` or a `pinned` hash source (the
+    /// two things an engine reading only versions 1 and 2 cannot
+    /// understand), [`ANCHOR_SIDECAR_VERSION`] otherwise. The version moves
+    /// only when such a row is written, so a sidecar written before spans
+    /// existed re-saves with the version it had.
+    pub fn required_version(&self) -> u32 {
+        let needs_v3 = self
+            .entities
+            .values()
+            .flatten()
+            .any(|a| a.span.is_some() || a.hash_source == Some(AnchorHashSource::Pinned));
+        if needs_v3 {
+            ANCHOR_SIDECAR_SPAN_VERSION
+        } else {
+            ANCHOR_SIDECAR_VERSION
+        }
+    }
+
     /// Serialise to canonical pretty JSON with a trailing newline —
-    /// diff-friendly on the mem branch.
+    /// diff-friendly on the mem branch. The written `version` is
+    /// [`Self::required_version`], whatever the in-memory field says.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut s = serde_json::to_string_pretty(self).expect("anchor sidecar serialises");
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            version: u32,
+            entities: &'a BTreeMap<String, Vec<Anchor>>,
+        }
+        let wire = Wire {
+            version: self.required_version(),
+            entities: &self.entities,
+        };
+        let mut s = serde_json::to_string_pretty(&wire).expect("anchor sidecar serialises");
         s.push('\n');
         s.into_bytes()
     }
@@ -1821,8 +2071,10 @@ impl AnchorSidecar {
     /// Unset applies **first**: each selector removes its matching anchors
     /// (a selector matching nothing is a no-op). Then each incoming anchor
     /// **replaces** the surviving anchor with the same
-    /// `(artifact, grain, class)` triple in place, and **appends**
+    /// `(artifact, grain, class, span)` identity in place, and **appends**
     /// otherwise — untouched anchors keep their bytes and their position.
+    /// The span is part of the identity: two spans on one document are two
+    /// rows, and a re-pin that omits the span never touches a span row.
     /// Writing anchors never removes an anchor the call did not name in
     /// `unsets`; an empty `incoming` merges nothing. A row emptied by
     /// unsets prunes its key so the sidecar never accumulates empty rows.
@@ -1839,7 +2091,10 @@ impl AnchorSidecar {
         let mut changed = row.len() != before;
         for anchor in incoming {
             match row.iter_mut().find(|e| {
-                e.artifact == anchor.artifact && e.grain == anchor.grain && e.class == anchor.class
+                e.artifact == anchor.artifact
+                    && e.grain == anchor.grain
+                    && e.class == anchor.class
+                    && same_span(e.span.as_deref(), anchor.span.as_deref())
             }) {
                 Some(existing) => {
                     // The same triple replaces the row. A row identical to the stored one on every

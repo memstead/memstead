@@ -208,11 +208,27 @@ impl Engine {
         supplied: &SuppliedObservations,
     ) -> Option<Observed> {
         if anchor.grain == crate::anchor::AnchorGrain::Url {
-            if let Some(obs) = supplied.get(&anchor.artifact) {
+            if let Some(obs) = supplied
+                .get(&anchor.artifact)
+                .filter(|obs| observation_adjudicates(obs, anchor))
+            {
                 return Some(match &obs.outcome {
                     crate::anchor::SuppliedOutcome::Absent => Observed {
                         state: crate::anchor::AnchorState::Recheck,
                         hash: None,
+                        at: Some(obs.at.clone()),
+                    },
+                    // A row quoting a span is adjudicated on the span's
+                    // presence in the retrieved text; the document's hash
+                    // rides along as what was observed (the row's last
+                    // observation), never as the verdict. `observation_adjudicates`
+                    // has already excluded a hash-only observation here.
+                    crate::anchor::SuppliedOutcome::Present {
+                        hash,
+                        content: Some(text),
+                    } if anchor.span.is_some() => Observed {
+                        state: crate::anchor::resolve_span_anchor(anchor, text),
+                        hash: Some(hash.clone()),
                         at: Some(obs.at.clone()),
                     },
                     crate::anchor::SuppliedOutcome::Present { hash, content } => {
@@ -295,6 +311,36 @@ impl Engine {
         }
         let root = self.workspace_root.as_deref()?;
         observe_path_anchor(root, anchor, join).map(Observed::live)
+    }
+
+    /// The prepared hash of an `entity`-grain artifact's target as it stands
+    /// NOW, under `preparation`: what the write-time pin records on a
+    /// hash-bearing `entity` row written without a hash, and the same form
+    /// [`Self::observe_entity_anchor`] later compares against. `None` when
+    /// the target cannot be resolved (its mem not mounted, the entity absent
+    /// or a stub, an addressed unit the entity does not carry, or a
+    /// preparation with no entity form): the row then stays hash-less rather
+    /// than carrying a guess.
+    pub(crate) fn entity_anchor_target_hash(
+        &self,
+        artifact: &str,
+        preparation: Option<&str>,
+    ) -> Option<String> {
+        let (id_part, locator) = crate::preparation::split_unit_id(artifact);
+        let id = EntityId::canonical(id_part);
+        if !self.mounts.iter().any(|m| m.mount.mem == id.mem()) {
+            return None;
+        }
+        let entity = self.store.get(&id).filter(|e| !e.stub)?;
+        let type_def = self
+            .schema_for(id.mem())
+            .and_then(|schema| schema.get_type(&entity.entity_type));
+        match crate::preparation::entity_prepared(entity, type_def.as_deref(), preparation, locator)
+        {
+            crate::preparation::PathPrepared::Hash(h) => Some(h),
+            crate::preparation::PathPrepared::UnitAbsent
+            | crate::preparation::PathPrepared::NoHash => None,
+        }
     }
 
     /// Observe an `entity`-grain anchor against the live graph — the entity-
@@ -583,7 +629,7 @@ impl Engine {
         // Dominant adjudicated state per entity: drifted > recheck > resolves.
         fn rank(state: &str) -> Option<u8> {
             match state {
-                "drifted" => Some(3),
+                "drifted" | "span_absent" => Some(3),
                 "recheck" => Some(2),
                 "resolves" => Some(1),
                 _ => None,
@@ -701,7 +747,10 @@ impl Engine {
         let mut matched: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for (eid, resolved) in self.mem_anchors_resolved_with(mem, supplied) {
             let is_url = resolved.anchor.grain == crate::anchor::AnchorGrain::Url;
-            let supplied_here = is_url && supplied.contains_key(&resolved.anchor.artifact);
+            let supplied_here = is_url
+                && supplied
+                    .get(&resolved.anchor.artifact)
+                    .is_some_and(|obs| observation_adjudicates(obs, &resolved.anchor));
             if supplied_here {
                 matched.insert(resolved.anchor.artifact.clone());
             }
@@ -730,6 +779,7 @@ impl Engine {
                     artifact: resolved.anchor.artifact.clone(),
                     grain: resolved.anchor.grain.as_wire().to_string(),
                     class: resolved.anchor.class.as_wire().to_string(),
+                    span: resolved.anchor.span.clone(),
                     state: "dangling".to_string(),
                     observed_hash: resolved.observed_hash,
                     observed_at,
@@ -758,6 +808,13 @@ impl Engine {
                     report.unresolvable += 1;
                     crate::anchor::AnchorState::Orphaned.as_wire()
                 }
+                // The words a row quotes are gone while the document stands:
+                // adjudicated (the claim's basis was looked for and not
+                // found), its own count beside drifted and unresolvable.
+                Some(crate::anchor::AnchorState::SpanAbsent) => {
+                    report.span_absent += 1;
+                    crate::anchor::AnchorState::SpanAbsent.as_wire()
+                }
                 // Split from `unresolvable`: the artifact
                 // being GONE is a measurement; the pass not reaching the
                 // artifact at all is the absence of one, and the repairs
@@ -772,6 +829,7 @@ impl Engine {
                 artifact: resolved.anchor.artifact.clone(),
                 grain: resolved.anchor.grain.as_wire().to_string(),
                 class: resolved.anchor.class.as_wire().to_string(),
+                span: resolved.anchor.span.clone(),
                 state: state.to_string(),
                 observed_hash: resolved.observed_hash,
                 observed_at,
@@ -826,6 +884,11 @@ pub struct MemAnchorVerification {
     /// Source absent: a MEASURED failure. The artifact the anchor names is
     /// not there.
     pub unresolvable: usize,
+    /// The artifact is present but the words the row quotes (its `span`)
+    /// no longer occur in it: a measured failure of the row's claim, apart
+    /// from `drifted` (the claim is the span, not the page) and from
+    /// `unresolvable` (the document is there).
+    pub span_absent: usize,
     /// The anchor could not be observed at all this pass, so nothing about it
     /// was measured. Its own count,
     /// because `unresolvable` used to swallow it: a reader on the surface you
@@ -866,6 +929,22 @@ pub struct RecordedObservation {
 /// [`Engine::verify_mem_anchors_with`].
 pub type SuppliedObservations =
     std::collections::BTreeMap<String, crate::anchor::SuppliedObservation>;
+
+/// Whether a supplied observation can adjudicate `anchor`. A row quoting a
+/// span needs TEXT to look in: a hash-only observation (`{"hash": …}`)
+/// cannot say whether the words are there, so it leaves such a row as it
+/// was (its recorded observation, else unobserved this pass) rather than
+/// pretending to have adjudicated it. Every other pairing adjudicates.
+fn observation_adjudicates(
+    obs: &crate::anchor::SuppliedObservation,
+    anchor: &crate::anchor::Anchor,
+) -> bool {
+    anchor.span.is_none()
+        || !matches!(
+            obs.outcome,
+            crate::anchor::SuppliedOutcome::Present { content: None, .. }
+        )
+}
 
 /// What one observation of an anchor yielded: the resolved state, the
 /// hash it saw (when any), and — for an observation that was not made
@@ -911,7 +990,7 @@ impl MemAnchorVerification {
                  counted, and zero counts here are not a clean mem"
             ));
         }
-        let adjudicated = resolves + self.drifted + self.unresolvable;
+        let adjudicated = resolves + self.drifted + self.unresolvable + self.span_absent;
         let unadjudicated = self.recheck + self.unobserved;
         let mut s = format!(
             "over {} counted row(s): {adjudicated} adjudicated, {unadjudicated} not (recheck {}, unobserved {})",
@@ -946,10 +1025,16 @@ pub struct VerifiedAnchor {
     pub artifact: String,
     pub grain: String,
     pub class: String,
-    /// `resolves` | `drifted` | `recheck` | `unresolvable` (artifact gone) |
+    /// The words the row quotes, when it quotes any: the row is then
+    /// adjudicated on their presence, and `state` reads `span_absent` once
+    /// they are gone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span: Option<String>,
+    /// `resolves` | `drifted` | `recheck` | `orphaned` (artifact gone,
+    /// counted as `unresolvable`) | `span_absent` (the quoted words gone) |
     /// `unobserved` (not measured this pass) | `dangling` (the entity is
     /// gone). The wire vocabulary of this field, which is NOT the engine's
-    /// `AnchorState` enum: that has four variants describing the artifact
+    /// `AnchorState` enum: that has five variants describing the artifact
     /// end, and the last two here are conditions beside them.
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1083,6 +1168,29 @@ fn observe_path_anchor(
             crate::anchor::resolve_anchor(anchor, &crate::anchor::ArtifactObservation::Absent),
             None,
         ));
+    }
+    // A row quoting a span is adjudicated on the span's presence in the
+    // file's text; the file's prepared hash rides along as the observed
+    // hash. An unreadable file observes no hash and no text: recheck.
+    if anchor.span.is_some() && matches!(anchor.grain, AnchorGrain::File | AnchorGrain::Span) {
+        let Some(bytes) = (path.is_file())
+            .then(|| std::fs::read(&path).ok())
+            .flatten()
+        else {
+            return Some((crate::anchor::AnchorState::Recheck, None));
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        let state = crate::anchor::resolve_span_anchor(anchor, &text);
+        let hash = match crate::preparation::path_prepared_hash(
+            preparation,
+            &anchor.artifact,
+            anchor.grain,
+            &bytes,
+        ) {
+            crate::preparation::PathPrepared::Hash(h) => Some(h),
+            _ => None,
+        };
+        return Some((state, hash));
     }
     let current_hash = if !anchor.class.is_hash_bearing() {
         None

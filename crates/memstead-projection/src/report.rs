@@ -215,6 +215,9 @@ pub struct AnchorComposition {
     pub recheck: usize,
     /// Non-`authored` anchors whose artifact is gone.
     pub orphaned: usize,
+    /// Non-`authored` span rows whose quoted words no longer occur in the
+    /// artifact (the document stands; the claim's basis is gone).
+    pub span_absent: usize,
     /// Non-`authored` anchors that could **not** be observed this pass (state
     /// `None`) — reported honestly, never counted as resolved.
     pub unobserved: usize,
@@ -1116,11 +1119,12 @@ fn render_hard_required(report: &FidelityReport) -> String {
     // shows a resolution count without saying what it covered.
     md.push_str(&format!(
         "- resolution (non-`authored`, observed): **anchor-resolution %:** {}; drifted {}, \
-         recheck {}, orphaned {}\n",
+         recheck {}, orphaned {}, span absent {}\n",
         report.anchors.figure.ratio(report.anchors.observed),
         report.anchors.drifted,
         report.anchors.recheck,
         report.anchors.orphaned,
+        report.anchors.span_absent,
     ));
     // What the denominator counted, stated rather than left to be assumed.
     // Rows and artifacts differ
@@ -1888,6 +1892,10 @@ pub fn compute_fidelity_report(
             }
             Some(AnchorState::Orphaned) => {
                 anchors.orphaned += 1;
+                anchors.observed += 1;
+            }
+            Some(AnchorState::SpanAbsent) => {
+                anchors.span_absent += 1;
                 anchors.observed += 1;
             }
             None => anchors.unobserved += 1,
