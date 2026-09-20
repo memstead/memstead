@@ -27,6 +27,7 @@ use crate::entity::{Entity, id::id_to_file_path};
 /// archive-extract time). Every entry is emitted in sorted path order
 /// with fixed mtime so two semantically equal archives produce
 /// identical bytes.
+#[allow(clippy::too_many_arguments)] // the archive's members, one slot each
 pub fn canonical_bytes(
     config: &PublishedMemConfig,
     entities: &[Entity],
@@ -35,6 +36,7 @@ pub fn canonical_bytes(
     provenance_bytes: Option<&[u8]>,
     anchors_bytes: Option<&[u8]>,
     checks_bytes: Option<&[u8]>,
+    proposals_bytes: Option<&[u8]>,
 ) -> Result<Vec<u8>, ValidationError> {
     let mut files: Vec<(String, Vec<u8>)> =
         Vec::with_capacity(entities.len() + schema_files.len() + 4);
@@ -72,6 +74,16 @@ pub fn canonical_bytes(
         files.push((
             memstead_schema::ARCHIVE_CHECKS_PATH.to_string(),
             checks.to_vec(),
+        ));
+    }
+
+    // Preserve the proposal record verbatim, for the same reason: a
+    // normalized archive that lost it would let a rejected proposal
+    // return unseen. Validated at extract time.
+    if let Some(proposals) = proposals_bytes {
+        files.push((
+            crate::ops::proposal::PROPOSAL_RECORD_PATH.to_string(),
+            proposals.to_vec(),
         ));
     }
 
@@ -280,8 +292,8 @@ mod tests {
         // Same config + empty entities + empty schema files twice → identical
         // bytes.
         let c = config();
-        let a = canonical_bytes(&c, &[], &[], None, None, None, None).unwrap();
-        let b = canonical_bytes(&c, &[], &[], None, None, None, None).unwrap();
+        let a = canonical_bytes(&c, &[], &[], None, None, None, None, None).unwrap();
+        let b = canonical_bytes(&c, &[], &[], None, None, None, None, None).unwrap();
         assert_eq!(a, b);
     }
 

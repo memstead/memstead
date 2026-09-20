@@ -620,6 +620,13 @@ fn retarget_fork_tree(
         }
     }
 
+    // The source's proposal record is the target branch's: a fork
+    // carries none (the brief reads the target's; a merge writes the
+    // target's). Dropping an absent member is a no-op.
+    backend.delete_entity(std::path::Path::new(
+        crate::ops::proposal::PROPOSAL_RECORD_PATH,
+    ))?;
+
     let short = &ancestor[..ancestor.len().min(12)];
     let subject = format!("memstead: fork mem {fork} from {source}@{short}");
     Ok(backend.commit(&subject, ctx)?)

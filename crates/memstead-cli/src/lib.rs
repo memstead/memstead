@@ -619,6 +619,12 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({ "ref": raw })),
             ),
+            // The proposal merge's typed refusals: every one lands
+            // nothing, and every one carries the recovery in `details`.
+            ProposalDispositionsIncomplete { .. }
+            | ProposalConflict { .. }
+            | ProposalStale { .. }
+            | ProposalUnattributed { .. } => (ExitKind::Validation, Some(e.details())),
             BranchResetHeadMoved {
                 mem,
                 expected,

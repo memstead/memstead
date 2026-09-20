@@ -303,6 +303,13 @@ pub fn export_mem_from_branch_to_bytes(
         Err(BranchReadError::BranchMissing { .. }) => Vec::new(),
         Err(e) => return Err(branch_read_into_mem_export(e)),
     };
+    // The proposal record rides the branch tree beside the entities
+    // (the merge commits it there), so a sealed archive of a target mem
+    // carries every disposition: read straight off the blobs.
+    let proposals_bytes: Option<Vec<u8>> = blobs
+        .iter()
+        .find(|b| b.path == memstead_base::ops::proposal::PROPOSAL_RECORD_PATH)
+        .map(|b| b.bytes.clone());
     // A hierarchical mem publishes under its leaf, so every link that
     // qualifies itself with the workspace path follows the name into the
     // archive (`[[planning/plan-x--slug]]` → `[[plan-x--slug]]`); the
@@ -344,6 +351,14 @@ pub fn export_mem_from_branch_to_bytes(
         all_entries.push((
             memstead_schema::ARCHIVE_CHECKS_PATH.to_string(),
             checks.to_vec(),
+        ));
+    }
+    // Embed the proposal record the target branch carries, verbatim: a
+    // recognised member the validator parses and the re-pack threads.
+    if let Some(proposals) = proposals_bytes {
+        all_entries.push((
+            memstead_base::ops::proposal::PROPOSAL_RECORD_PATH.to_string(),
+            proposals,
         ));
     }
     for sf in &schema_files {

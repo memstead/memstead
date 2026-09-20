@@ -17,7 +17,7 @@ impl Engine {
     /// (`anchors_changed == Some(true)`), the verdict the wire's
     /// `anchors_changed` reports: a row that restates what is stored
     /// writes nothing, on the single path and in a batch alike.
-    pub(super) fn stage_prepared_update(
+    pub(in crate::engine::mutation) fn stage_prepared_update(
         &self,
         prepared: &PreparedUpdate,
     ) -> Result<(), EngineError> {

@@ -13,7 +13,7 @@ use super::{Engine, EngineError, PreparedCreate};
 impl Engine {
     /// Stage one prepared create's write and sidecars into its
     /// mount's pending buffer.
-    pub(super) fn stage_prepared_create(
+    pub(in crate::engine::mutation) fn stage_prepared_create(
         &self,
         prepared: &PreparedCreate,
     ) -> Result<(), EngineError> {

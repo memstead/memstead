@@ -1139,6 +1139,61 @@ pub enum EngineError {
     /// input. Typed code `UNKNOWN_REF`.
     #[error("unknown ref: {0}")]
     UnknownRef(String),
+    /// A proposal merge's disposition file does not cover the brief:
+    /// it lacks slots for entities the brief lists, or names entities
+    /// the brief does not. Typed code `PROPOSAL_DISPOSITIONS_INCOMPLETE`;
+    /// `details.missing` and `details.unexpected` list them.
+    #[error(
+        "the disposition file does not cover the brief of fork '{fork}'{}: re-render the brief \
+         (`memstead proposal brief {fork} --out <file>`) and fill every slot",
+        proposal_incomplete_summary(.missing, .unexpected)
+    )]
+    ProposalDispositionsIncomplete {
+        fork: String,
+        missing: Vec<String>,
+        unexpected: Vec<String>,
+    },
+    /// `adopt` on an entity the target moved since the ancestor. Typed
+    /// code `PROPOSAL_CONFLICT`; `details.slug` and `details.kind` name
+    /// the entity and the conflict kind.
+    #[error(
+        "entity '{slug}' of fork '{fork}' is in conflict with the target ({kind}): `adopt` is \
+         withheld; supply the merged body under `adopt_with_changes`, or reject it"
+    )]
+    ProposalConflict {
+        fork: String,
+        slug: String,
+        kind: String,
+    },
+    /// The disposition file was rendered against a branch tip that has
+    /// moved since. Typed code `PROPOSAL_STALE`; `details.side` says
+    /// which branch (`target` or `fork`), `details.recorded` and
+    /// `details.current` carry both shas.
+    #[error(
+        "the disposition file of fork '{fork}' was rendered against the {side} tip {recorded}, \
+         and that branch now stands at {current}: re-render the brief (`memstead proposal \
+         brief {fork} --out <file>`) and fill it again"
+    )]
+    ProposalStale {
+        fork: String,
+        side: String,
+        recorded: String,
+        current: String,
+    },
+    /// An adopted entity's last fork commit carries no `Identity:`
+    /// trailer, so the merge has no proposer to record. Typed code
+    /// `PROPOSAL_UNATTRIBUTED`; `details.slug` and `details.sha` name
+    /// the entity and the commit.
+    #[error(
+        "entity '{slug}' of fork '{fork}' was last touched by commit {sha}, which carries no \
+         Identity trailer: a merge never invents an author, so re-commit it on the fork under \
+         an identity (`--identity`) or reject it"
+    )]
+    ProposalUnattributed {
+        fork: String,
+        slug: String,
+        sha: String,
+    },
     /// `memstead_changes_since` received a `rename_similarity` value
     /// outside the allowed range. Maps to wire code `INVALID_INPUT`
     /// with `details.allowed_range: [min, max]` and
@@ -1357,6 +1412,23 @@ impl fmt::Display for MissingWikiLink {
     }
 }
 
+/// The clause a `PROPOSAL_DISPOSITIONS_INCOMPLETE` message carries:
+/// which slots are missing, which are unexpected.
+fn proposal_incomplete_summary(missing: &[String], unexpected: &[String]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !missing.is_empty() {
+        parts.push(format!("missing {}", missing.join(", ")));
+    }
+    if !unexpected.is_empty() {
+        parts.push(format!("not in the brief {}", unexpected.join(", ")));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", parts.join("; "))
+    }
+}
+
 impl EngineError {
     /// Stable, surface-independent error code token.
     ///
@@ -1372,6 +1444,12 @@ impl EngineError {
             EngineError::MemUnmounted { .. } => "MEM_UNMOUNTED",
             EngineError::MemQuarantined { .. } => "MEM_QUARANTINED",
             EngineError::UnknownRef(_) => "UNKNOWN_REF",
+            EngineError::ProposalDispositionsIncomplete { .. } => {
+                "PROPOSAL_DISPOSITIONS_INCOMPLETE"
+            }
+            EngineError::ProposalConflict { .. } => "PROPOSAL_CONFLICT",
+            EngineError::ProposalStale { .. } => "PROPOSAL_STALE",
+            EngineError::ProposalUnattributed { .. } => "PROPOSAL_UNATTRIBUTED",
             EngineError::UnknownRemote(_) => "UNKNOWN_REMOTE",
             EngineError::LocalDivergence { .. } => "LOCAL_DIVERGENCE",
             EngineError::NonFastForward { .. } => "NON_FAST_FORWARD",
@@ -1917,6 +1995,36 @@ impl EngineError {
                 "supported_backends": supported_backends,
             }),
             EngineError::ReviewMarkNotSet { mem } => serde_json::json!({ "mem": mem }),
+            EngineError::ProposalDispositionsIncomplete {
+                fork,
+                missing,
+                unexpected,
+            } => serde_json::json!({
+                "fork": fork,
+                "missing": missing,
+                "unexpected": unexpected,
+            }),
+            EngineError::ProposalConflict { fork, slug, kind } => serde_json::json!({
+                "fork": fork,
+                "slug": slug,
+                "kind": kind,
+            }),
+            EngineError::ProposalStale {
+                fork,
+                side,
+                recorded,
+                current,
+            } => serde_json::json!({
+                "fork": fork,
+                "side": side,
+                "recorded": recorded,
+                "current": current,
+            }),
+            EngineError::ProposalUnattributed { fork, slug, sha } => serde_json::json!({
+                "fork": fork,
+                "slug": slug,
+                "sha": sha,
+            }),
             EngineError::InvalidChangesCursor { mem, since } => serde_json::json!({
                 "mem": mem,
                 "since": since,

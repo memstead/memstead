@@ -35,7 +35,7 @@ use super::super::{Engine, EngineError, UpdateEntityArgs, UpdateEntityOutcome};
 /// Result of [`Engine::prepare_update`] — the validation + markdown
 /// step split out of the commit so the batch path can prepare every
 /// item before committing the whole set atomically.
-enum PrepareOutcome {
+pub(in crate::engine::mutation) enum PrepareOutcome {
     /// No commit is needed: the no-op short-circuit (content unchanged)
     /// and the dry-run preview both return a finished outcome here.
     Done(UpdateEntityOutcome),
@@ -47,29 +47,29 @@ enum PrepareOutcome {
 /// Everything the commit step needs to stage one prepared update's
 /// disk write and build its outcome. Carries no commit SHA — that's
 /// produced when the (single or batched) commit lands.
-struct PreparedUpdate {
-    mount_idx: usize,
-    id: EntityId,
-    mem: String,
-    type_def: Arc<memstead_schema::TypeDefinition>,
-    file_path: String,
-    markdown: String,
+pub(in crate::engine::mutation) struct PreparedUpdate {
+    pub(in crate::engine::mutation) mount_idx: usize,
+    pub(in crate::engine::mutation) id: EntityId,
+    pub(in crate::engine::mutation) mem: String,
+    pub(in crate::engine::mutation) type_def: Arc<memstead_schema::TypeDefinition>,
+    pub(in crate::engine::mutation) file_path: String,
+    pub(in crate::engine::mutation) markdown: String,
     /// Body wiki-link targets the entity had *before* this mutation —
     /// the GC sweep scopes orphan-stub detection to these.
-    prev_body_targets: std::collections::HashSet<EntityId>,
-    modified_date: String,
-    modified_sections: ModifiedSections,
-    modified_metadata: ModifiedMetadata,
-    warnings: Vec<WarningHint>,
-    relations_declared: Vec<RelationDeclared>,
+    pub(in crate::engine::mutation) prev_body_targets: std::collections::HashSet<EntityId>,
+    pub(in crate::engine::mutation) modified_date: String,
+    pub(in crate::engine::mutation) modified_sections: ModifiedSections,
+    pub(in crate::engine::mutation) modified_metadata: ModifiedMetadata,
+    pub(in crate::engine::mutation) warnings: Vec<WarningHint>,
+    pub(in crate::engine::mutation) relations_declared: Vec<RelationDeclared>,
     /// Validated anchors to merge into this entity's sidecar row — staged
     /// into the same commit as the disk write on the commit step. Empty
     /// when the update carried no `anchors[]`.
-    anchors: Vec<crate::anchor::Anchor>,
+    pub(in crate::engine::mutation) anchors: Vec<crate::anchor::Anchor>,
     /// Validated explicit anchor removals, applied before the `anchors`
     /// merge in the same staged write. Empty when the update carried no
     /// `anchors_unset[]`.
-    anchor_unsets: Vec<crate::anchor::AnchorUnset>,
+    pub(in crate::engine::mutation) anchor_unsets: Vec<crate::anchor::AnchorUnset>,
     /// True when this update's *sole* delta is the anchors sidecar —
     /// sections, metadata, and relationships are byte-identical to the
     /// on-disk entity. Such a commit earns the distinct
@@ -80,15 +80,15 @@ struct PreparedUpdate {
     /// also carries anchors) keeps the `memstead: update <id>` subject:
     /// its content change already bumps `_hash` and surfaces as a delta,
     /// so the anchor activity riding it is already visible.
-    anchor_only: bool,
+    pub(in crate::engine::mutation) anchor_only: bool,
     /// Whether the anchors merge changes the sidecar: `None` when the
     /// update carried no anchors or unsets, `Some(true)` when a row is
     /// added, replaced or removed, `Some(false)` when every supplied row
     /// restates what is stored (then nothing is staged).
-    anchors_changed: Option<bool>,
+    pub(in crate::engine::mutation) anchors_changed: Option<bool>,
     /// Whether the entity's content changed in this update: the anchors
     /// merge then re-baselines a restated row (a sync repair's re-pin).
-    content_changed: bool,
+    pub(in crate::engine::mutation) content_changed: bool,
 }
 
 impl Engine {
@@ -175,7 +175,10 @@ impl Engine {
     /// caller stages + commits. May mutate the store in place via the
     /// alias-synthesis auto-stub upsert; the batch path snapshots the
     /// store before preparing so a refused batch can roll that back.
-    fn prepare_update(&mut self, args: UpdateEntityArgs) -> Result<PrepareOutcome, EngineError> {
+    pub(in crate::engine::mutation) fn prepare_update(
+        &mut self,
+        args: UpdateEntityArgs,
+    ) -> Result<PrepareOutcome, EngineError> {
         let resolved = self.resolve_update(args)?;
         let validated = self.validate_update(resolved)?;
         self.compose_update(validated)

@@ -148,6 +148,12 @@ pub struct ValidatedMem {
     /// roster) and threaded verbatim through the canonical re-pack so
     /// publish/normalize does not strip the records.
     pub checks_bytes: Option<Vec<u8>>,
+    /// Raw bytes of the archive's proposal record
+    /// (`.memstead/proposals.json`), or `None` when the archive carries
+    /// none. Validated at extract time (it parses as a record) and
+    /// threaded verbatim through the canonical re-pack so
+    /// publish/normalize does not strip the dispositions.
+    pub proposals_bytes: Option<Vec<u8>>,
 }
 
 /// Every reason the validator can reject an archive. Each variant
@@ -192,6 +198,8 @@ pub enum ValidationError {
     InvalidAnchorsMember { reason: String },
     #[error("invalid sealed check records (.memstead/checks.json): {reason}")]
     InvalidChecksMember { reason: String },
+    #[error("invalid proposal record (.memstead/proposals.json): {reason}")]
+    InvalidProposalsMember { reason: String },
     #[error("invalid config: {reason}")]
     InvalidConfig { reason: String },
     #[error("invalid name: {reason}")]
@@ -364,6 +372,7 @@ pub fn make_archive_self_contained(bytes: &[u8]) -> Result<SelfContainedArchive,
         lenient.provenance_bytes.as_deref(),
         lenient.anchors_bytes.as_deref(),
         lenient.checks_bytes.as_deref(),
+        lenient.proposals_bytes.as_deref(),
     )?;
     // The strict pass is the proof: what comes out is exactly what
     // `install` accepts, or this returns the typed refusal.
@@ -524,6 +533,7 @@ fn validate_impl(
         entries.provenance_bytes.as_deref(),
         entries.anchors_bytes.as_deref(),
         entries.checks_bytes.as_deref(),
+        entries.proposals_bytes.as_deref(),
     )?;
 
     Ok(ValidatedMem {
@@ -538,6 +548,7 @@ fn validate_impl(
         provenance_bytes: entries.provenance_bytes,
         anchors_bytes: entries.anchors_bytes,
         checks_bytes: entries.checks_bytes,
+        proposals_bytes: entries.proposals_bytes,
     })
 }
 

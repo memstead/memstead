@@ -23,6 +23,7 @@ pub mod create;
 pub mod delete;
 pub mod mem_sweep;
 pub mod parse_recovery;
+pub mod proposal_merge;
 pub mod relate;
 pub mod rename;
 pub mod retype;
@@ -792,6 +793,26 @@ pub(crate) fn stage_anchors_removal(
         return Ok(false);
     }
     sidecar.remove(entity_id.as_ref());
+    backend.write_anchors_sidecar(&sidecar.to_bytes())?;
+    Ok(true)
+}
+
+/// Stage a replacement of `entity_id`'s whole anchor row with `rows` (a
+/// proposal merge landing an entity's anchors as the fork has them): the
+/// target's rows for that entity go, the fork's rows come, under the
+/// target's id. A no-op when the stored row already equals `rows` (an
+/// entity with no rows on either side stages nothing). Returns whether a
+/// write was staged.
+pub(crate) fn stage_anchors_replace(
+    backend: &dyn crate::backend::MemBackend,
+    entity_id: &EntityId,
+    rows: Vec<crate::anchor::Anchor>,
+) -> Result<bool, EngineError> {
+    let mut sidecar = read_sidecar(backend)?;
+    if sidecar.get(entity_id.as_ref()) == rows.as_slice() {
+        return Ok(false);
+    }
+    sidecar.set(entity_id.as_ref(), rows);
     backend.write_anchors_sidecar(&sidecar.to_bytes())?;
     Ok(true)
 }

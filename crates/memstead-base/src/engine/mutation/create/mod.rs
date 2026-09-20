@@ -32,26 +32,27 @@ use super::super::{CreateEntityArgs, CreateEntityOutcome, Engine, EngineError};
 /// twin of `PreparedUpdate`. Produced by `Engine::prepare_create`,
 /// consumed by `Engine::commit_prepared_create` (single item) and by
 /// `Engine::batch_create` (staged all-first, one commit per mem).
-struct PreparedCreate {
-    mount_idx: usize,
-    id: EntityId,
-    title: String,
-    mem: String,
-    file_path: String,
-    markdown: String,
-    anchors: Vec<crate::anchor::Anchor>,
-    warnings: Vec<WarningHint>,
-    type_guidance: std::collections::BTreeMap<String, Vec<String>>,
-    relations_declared: Vec<crate::engine::outcomes::RelationDeclared>,
+pub(in crate::engine::mutation) struct PreparedCreate {
+    pub(in crate::engine::mutation) mount_idx: usize,
+    pub(in crate::engine::mutation) id: EntityId,
+    pub(in crate::engine::mutation) title: String,
+    pub(in crate::engine::mutation) mem: String,
+    pub(in crate::engine::mutation) file_path: String,
+    pub(in crate::engine::mutation) markdown: String,
+    pub(in crate::engine::mutation) anchors: Vec<crate::anchor::Anchor>,
+    pub(in crate::engine::mutation) warnings: Vec<WarningHint>,
+    pub(in crate::engine::mutation) type_guidance: std::collections::BTreeMap<String, Vec<String>>,
+    pub(in crate::engine::mutation) relations_declared:
+        Vec<crate::engine::outcomes::RelationDeclared>,
     /// Inline-relation targets — the commit tail materialises
     /// forward-reference stubs for the ones the store still lacks.
-    relation_targets: Vec<EntityId>,
-    type_def: std::sync::Arc<memstead_schema::TypeDefinition>,
+    pub(in crate::engine::mutation) relation_targets: Vec<EntityId>,
+    pub(in crate::engine::mutation) type_def: std::sync::Arc<memstead_schema::TypeDefinition>,
 }
 
 /// Outcome of `Engine::prepare_create`: a dry-run completes at prepare
 /// time; a real write returns the staged material.
-enum CreatePrepareOutcome {
+pub(in crate::engine::mutation) enum CreatePrepareOutcome {
     Done(CreateEntityOutcome),
     Prepared(PreparedCreate),
 }
@@ -140,7 +141,7 @@ impl Engine {
     /// `batch_create` probes every touched mem once, up front). A probe
     /// inside prepare would reload mid-batch and wipe the staged
     /// skeletons.
-    fn prepare_create(
+    pub(in crate::engine::mutation) fn prepare_create(
         &mut self,
         args: CreateEntityArgs,
         batch_skeleton_ids: Option<&std::collections::HashSet<EntityId>>,

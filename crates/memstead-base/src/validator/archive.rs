@@ -88,6 +88,15 @@ pub struct ArchiveEntries {
     /// is a typed validation failure; threaded verbatim through the
     /// canonical re-pack on success.
     pub checks_bytes: Option<Vec<u8>>,
+    /// Raw bytes of the optional proposal record
+    /// (`.memstead/proposals.json`), or `None` when the archive carries
+    /// none (a mem no proposal was merged into, or an archive sealed by
+    /// an engine before the member existed). Strict like the checks
+    /// member: a recognised member that does not parse as a record is
+    /// a typed validation failure naming the member; threaded verbatim
+    /// through the canonical re-pack on success. An engine older than
+    /// the member tolerates it as an unrecognised meta member.
+    pub proposals_bytes: Option<Vec<u8>>,
 }
 
 /// Walk the archive, enforce archive-level rules, return entries in
@@ -123,6 +132,7 @@ pub fn extract_entries(
     let mut provenance_bytes: Option<Vec<u8>> = None;
     let mut anchors_bytes: Option<Vec<u8>> = None;
     let mut checks_bytes: Option<Vec<u8>> = None;
+    let mut proposals_bytes: Option<Vec<u8>> = None;
     let mut seen_paths: Vec<String> = Vec::new();
     let mut uncompressed_total: u64 = 0;
 
@@ -192,6 +202,7 @@ pub fn extract_entries(
         let is_provenance = path_string == ARCHIVE_PROVENANCE_PATH;
         let is_anchors = path_string == ARCHIVE_ANCHORS_PATH;
         let is_checks = path_string == ARCHIVE_CHECKS_PATH;
+        let is_proposals = path_string == crate::ops::proposal::PROPOSAL_RECORD_PATH;
         // `.md` files inside the meta dir are NOT entities — without
         // this guard a `.memstead/notes.md` would slip past the
         // whitelist as markdown.
@@ -219,6 +230,7 @@ pub fn extract_entries(
             && !is_provenance
             && !is_anchors
             && !is_checks
+            && !is_proposals
             && !path_string.ends_with(".md")
             && !path_string.starts_with(ARCHIVE_SCHEMA_PREFIX);
         if !is_config
@@ -227,6 +239,7 @@ pub fn extract_entries(
             && !is_provenance
             && !is_anchors
             && !is_checks
+            && !is_proposals
             && !is_ignored_meta
         {
             return Err(ValidationError::UnknownFile(path_string));
@@ -317,6 +330,16 @@ pub fn extract_entries(
                 }
             })?;
             checks_bytes = Some(buf);
+        } else if is_proposals {
+            // Strict like the checks member: a record that does not parse
+            // would otherwise read as "no proposal was ever rejected", the
+            // one false answer the record exists to make impossible.
+            crate::ops::proposal::ProposalRecord::from_bytes(&buf).map_err(|e| {
+                ValidationError::InvalidProposalsMember {
+                    reason: e.to_string(),
+                }
+            })?;
+            proposals_bytes = Some(buf);
         } else {
             let content = match std::str::from_utf8(&buf) {
                 Ok(s) => s.to_string(),
@@ -373,6 +396,7 @@ pub fn extract_entries(
         provenance_bytes,
         anchors_bytes,
         checks_bytes,
+        proposals_bytes,
     })
 }
 
@@ -510,6 +534,66 @@ mod tests {
         let entries = extract_entries(&zip, &ValidatorLimits::DEFAULT)
             .expect("the pinned sentinel form is a valid member");
         assert!(entries.anchors_bytes.is_some());
+    }
+
+    /// Plan-proposal 03 (AC3): the proposal record (`.memstead/proposals.json`)
+    /// is a recognised strict meta member: surfaced verbatim, never an
+    /// entity, refused naming the member when it does not parse, and
+    /// carried through the canonical re-pack. An engine older than the
+    /// member sees an unrecognised `.memstead/` file, which it tolerates
+    /// and ignores (the rule `unknown_meta_member_is_tolerated` pins).
+    #[test]
+    fn recognises_and_repacks_the_proposals_member_and_refuses_a_malformed_one() {
+        let record = br#"{"version":1,"proposals":[{"id":"f@b","proposer":"p","ancestor":"a","base":"b","target_tip":"t","merged_by":"m","at":"2026-09-20T00:00:00Z","entities":{"foo":{"disposition":"reject","reason":"weak","content_hash":"h1"}}}]}"#;
+        let archive = build_archive(&[
+            (".memstead/config.json", ok_config()),
+            (".memstead/proposals.json", record),
+            ("foo.md", b"# Foo\n"),
+        ]);
+        let entries = extract_entries(&archive, &ValidatorLimits::DEFAULT).unwrap();
+        assert_eq!(entries.proposals_bytes.as_deref(), Some(&record[..]));
+        assert_eq!(
+            entries.markdown_files.len(),
+            1,
+            "the member is not an entity"
+        );
+
+        let broken = build_archive(&[
+            (".memstead/config.json", ok_config()),
+            (".memstead/proposals.json", b"not a record"),
+            ("foo.md", b"# Foo\n"),
+        ]);
+        let err = extract_entries(&broken, &ValidatorLimits::DEFAULT).unwrap_err();
+        match &err {
+            ValidationError::InvalidProposalsMember { .. } => {}
+            other => panic!("expected InvalidProposalsMember, got {other:?}"),
+        }
+        assert!(
+            err.to_string().contains(".memstead/proposals.json"),
+            "{err}"
+        );
+
+        // The canonical re-pack carries the member verbatim.
+        let config: memstead_schema::PublishedMemConfig =
+            serde_json::from_slice(ok_config()).unwrap();
+        let repacked = crate::validator::canonical::canonical_bytes(
+            &config,
+            &[],
+            &[],
+            None,
+            None,
+            None,
+            None,
+            Some(record),
+        )
+        .unwrap();
+        let mut zip = zip::ZipArchive::new(Cursor::new(repacked)).unwrap();
+        let mut member = zip
+            .by_name(".memstead/proposals.json")
+            .expect("member carried");
+        let mut bytes = Vec::new();
+        member.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, record);
     }
 
     fn checks_member(entity: &str, kind: &str, verdict: &str) -> Vec<u8> {

@@ -16,10 +16,10 @@ use super::{Actor, ClientId, Engine, EngineError, PreparedUpdate, UpdateEntityOu
 
 /// The store-side results of applying a prepared write — filled in
 /// after the commit lands by [`Engine::apply_prepared_to_store`].
-pub(super) struct AppliedWrite {
-    pub(super) content_hash: String,
-    pub(super) title: String,
-    pub(super) orphan_stubs_removed: Vec<EntityId>,
+pub(in crate::engine::mutation) struct AppliedWrite {
+    pub(in crate::engine::mutation) content_hash: String,
+    pub(in crate::engine::mutation) title: String,
+    pub(in crate::engine::mutation) orphan_stubs_removed: Vec<EntityId>,
 }
 
 impl Engine {
@@ -147,7 +147,7 @@ impl Engine {
     /// single-update and batch paths — does NOT touch the backend or
     /// commit (the caller has already staged + committed the disk
     /// write).
-    pub(super) fn apply_prepared_to_store(
+    pub(in crate::engine::mutation) fn apply_prepared_to_store(
         &mut self,
         prepared: &PreparedUpdate,
     ) -> Result<AppliedWrite, EngineError> {

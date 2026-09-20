@@ -150,6 +150,17 @@ pub(super) fn engine_err_unified(
                 serde_json::json!({ "ref": raw }),
             ),
         ),
+        // The proposal merge is CLI-only; its refusals are mapped here
+        // so the match stays exhaustive and a future caller gets the
+        // typed envelope rather than a catch-all.
+        E::ProposalDispositionsIncomplete { .. }
+        | E::ProposalConflict { .. }
+        | E::ProposalStale { .. }
+        | E::ProposalUnattributed { .. } => tool_error_with_payload(
+            e.code(),
+            &message,
+            envelope(e.code(), message.clone(), e.details()),
+        ),
         E::BranchResetHeadMoved {
             mem,
             expected,
