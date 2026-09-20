@@ -19,7 +19,18 @@
 //! refusal lands nothing: the store snapshot is restored and every
 //! pending buffer discarded, and when an earlier proposer's commit had
 //! already landed, the target branch is moved back to the tip the merge
-//! was pinned to (every commit above it was this merge's own).
+//! was pinned to (every commit above it was this merge's own). A gate
+//! refusal is the gate's own error wrapped per entity
+//! ([`EngineError::InEntity`]): the code stays the gate's, and
+//! `details.entity` and `details.stage` (`landing` for the fork's
+//! version, `amend` for the owner's body) say where it failed.
+//!
+//! Once the last commit is on the branch, nothing refuses any more: a
+//! failure of the bookkeeping after it (a check record the ledger
+//! refused, the re-read of the target, the validation reading, the tip
+//! read back) is a warning on the outcome, and the merge is reported as
+//! landed, because it is. An error from this function therefore always
+//! means a refusal that landed nothing.
 //!
 //! Nothing is written to the fork.
 
@@ -52,6 +63,13 @@ use super::{
 
 /// The tool name on the merge commits' `Tool:` trailer.
 const MERGE_TOOL: &str = "proposal_merge";
+
+/// `details.stage` of a gate refusal met while landing the fork's
+/// version of an entity.
+const STAGE_LANDING: &str = "landing";
+/// `details.stage` of a gate refusal met while amending a landed entity
+/// with the owner's final body.
+const STAGE_AMEND: &str = "amend";
 
 /// One write the merge lands for an adopted entity.
 enum Landing {
@@ -100,9 +118,12 @@ impl Engine {
     /// deletion), `PROPOSAL_DISPOSITIONS_INCOMPLETE`, `PROPOSAL_CONFLICT`,
     /// `PROPOSAL_STALE` (a pinned tip moved), `PROPOSAL_UNATTRIBUTED`
     /// (an adopted entity's last fork commit carries no identity), the
-    /// write gate's own code for a body it refuses, `HAS_INCOMING_REFS`
-    /// for a deletion the target's referrers block, `UNKNOWN_MEM`,
-    /// `READ_ONLY_MOUNT`, and the brief's refusals.
+    /// write gate's own code for a body it refuses (with
+    /// `details.entity` naming the slug and `details.stage` saying
+    /// `landing` or `amend`), `HAS_INCOMING_REFS` for a deletion the
+    /// target's referrers block, `UNKNOWN_MEM`, `READ_ONLY_MOUNT`, and
+    /// the brief's refusals. Once the last commit is on the branch a
+    /// failure is a warning on the outcome, never an error.
     pub fn proposal_merge(
         &mut self,
         fork: &str,
@@ -676,6 +697,9 @@ impl Engine {
         self.invalidate_search_indexes();
 
         // ---- The owner's final bodies, one commit under the merger ----
+        // From the last commit on, a failure is bookkeeping: it goes here
+        // and the merge is reported as landed (see the module doc).
+        let mut warnings: Vec<String> = Vec::new();
         let mut amend_commit: Option<MergeCommit> = None;
         if !amends.is_empty() {
             let staged: Result<(), EngineError> = (|| {
@@ -724,7 +748,14 @@ impl Engine {
             };
             self.record_self_write(target_mount, &sha);
             for p in &amends {
-                self.apply_prepared_to_store(p)?;
+                if let Err(e) = self.apply_prepared_to_store(p) {
+                    warnings.push(format!(
+                        "{}: the store's copy of the amended entity was not refreshed ({}); \
+                         the re-read after the merge serves the landed body",
+                        p.id,
+                        e.prose_render()
+                    ));
+                }
             }
             let _ = self.stamp_mutation_versions(target_mount);
             self.invalidate_communities();
@@ -773,8 +804,9 @@ impl Engine {
                     .map(|e| e.content_hash.clone())
                     .unwrap_or_default()
             });
-            let check_recorded = if exists && matches!(action, "created" | "updated") {
-                self.record_check(
+            let check_recorded = exists
+                && matches!(action, "created" | "updated")
+                && match self.record_check(
                     &target,
                     target_id.as_ref(),
                     Verdict::Ok,
@@ -782,11 +814,17 @@ impl Engine {
                     Some(&method),
                     actor,
                     client,
-                )?;
-                true
-            } else {
-                false
-            };
+                ) {
+                    Ok(_) => true,
+                    Err(e) => {
+                        warnings.push(format!(
+                            "{target_id}: the verification check was not recorded ({}); the \
+                             entity reads as never checked until `memstead check` records one",
+                            e.prose_render()
+                        ));
+                        false
+                    }
+                };
             entities.push(MergedEntity {
                 slug: slug.to_string(),
                 target_id: target_id.to_string(),
@@ -801,12 +839,37 @@ impl Engine {
         let _ = created_ids;
 
         // ---- The whole store, read back ----
-        self.reload_one_mem(&target)?;
-        let findings_after = self.merge_findings(&target)?;
+        let reread = match self.reload_one_mem(&target) {
+            Ok(_) => true,
+            Err(e) => {
+                warnings.push(format!(
+                    "the target was not re-read from its backend after the merge ({}); run \
+                     `memstead reload --mem {target}`",
+                    e.prose_render()
+                ));
+                false
+            }
+        };
+        let findings_after = match self.merge_findings(&target) {
+            Ok(after) => Some(after),
+            Err(e) => {
+                warnings.push(format!(
+                    "the validation reading after the merge failed ({}); `findings_after` \
+                     restates the count before the merge and `new_findings` is unknown",
+                    e.prose_render()
+                ));
+                None
+            }
+        };
         let new_findings: Vec<String> = findings_after
-            .difference(&findings_before)
-            .map(|(id, code)| format!("{id}: {code}"))
-            .collect();
+            .as_ref()
+            .map(|after| {
+                after
+                    .difference(&findings_before)
+                    .map(|(id, code)| format!("{id}: {code}"))
+                    .collect()
+            })
+            .unwrap_or_default();
         let validation = MergeValidation {
             entities: self
                 .store
@@ -814,9 +877,11 @@ impl Engine {
                 .filter(|e| e.mem == target && !e.stub)
                 .count(),
             findings_before: findings_before.len(),
-            findings_after: findings_after.len(),
+            findings_after: findings_after
+                .as_ref()
+                .map_or(findings_before.len(), BTreeSet::len),
             new_findings,
-            all_entities_parse: self.load_errors().len() <= load_errors_before,
+            all_entities_parse: reread && self.load_errors().len() <= load_errors_before,
         };
 
         let target_tip_after = {
@@ -827,7 +892,17 @@ impl Engine {
                 MountStorage::GitBranch { branch, .. } => branch.clone(),
                 _ => unreachable!("the brief refused a target that is not git-backed"),
             };
-            resolve_sha(&ops, &gitdir, &crate::branch_full_ref(&target_branch))?
+            match resolve_sha(&ops, &gitdir, &crate::branch_full_ref(&target_branch)) {
+                Ok(sha) => sha,
+                Err(e) => {
+                    warnings.push(format!(
+                        "the target tip was not read back after the last commit ({}); \
+                         `target_tip_after` is the sha of the last commit landed",
+                        e.prose_render()
+                    ));
+                    parent.clone()
+                }
+            }
         };
         debug_assert_eq!(target_tip_after, parent);
 
@@ -843,6 +918,7 @@ impl Engine {
             entities,
             record_path: PROPOSAL_RECORD_PATH.to_string(),
             validation,
+            warnings,
         })
     }
 
@@ -894,7 +970,10 @@ impl Engine {
             existing.as_ref(),
         ) {
             LandingWrite::Create(args) => {
-                match self.prepare_create(*args, Some(creates), Vec::new())? {
+                match self
+                    .prepare_create(*args, Some(creates), Vec::new())
+                    .map_err(|e| e.in_entity(target_id.path(), STAGE_LANDING))?
+                {
                     CreatePrepareOutcome::Prepared(p) => Ok(Some(Landing::Create(p))),
                     CreatePrepareOutcome::Done(_) => Ok(None),
                 }
@@ -918,7 +997,10 @@ impl Engine {
                 for (rel_type, to) in &dropped {
                     self.store.remove_edge(target_id, to, rel_type);
                 }
-                match self.prepare_update(args)? {
+                match self
+                    .prepare_update(args)
+                    .map_err(|e| e.in_entity(target_id.path(), STAGE_LANDING))?
+                {
                     PrepareOutcome::Prepared(p) => Ok(Some(Landing::Update(p))),
                     PrepareOutcome::Done(_) => Ok(None),
                 }
@@ -1039,7 +1121,10 @@ impl Engine {
             anchors_unset: Vec::new(),
             relations_unset: Vec::new(),
         };
-        match self.prepare_update(args)? {
+        match self
+            .prepare_update(args)
+            .map_err(|e| e.in_entity(id.path(), STAGE_AMEND))?
+        {
             PrepareOutcome::Prepared(p) => Ok(Some(p)),
             PrepareOutcome::Done(_) => Ok(None),
         }

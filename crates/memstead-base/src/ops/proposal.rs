@@ -563,6 +563,15 @@ pub struct ProposalMergeOutcome {
     pub record_path: String,
     /// The post-merge validation of the whole target store.
     pub validation: MergeValidation,
+    /// What the bookkeeping after the last commit could not do, one
+    /// line each with the cause and the recovery: a verification check
+    /// the ledger refused (the entity's `check_recorded` is false), the
+    /// re-read of the target from its backend, the validation reading,
+    /// the tip read back. Every commit stands whenever an outcome is
+    /// returned; a merge that refuses returns an error and lands
+    /// nothing. Empty when everything after the commits went through.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// One commit a merge landed.
@@ -617,7 +626,9 @@ pub struct MergeValidation {
     /// `<id>: <code>`; empty when the store validates.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub new_findings: Vec<String>,
-    /// Whether every entity of the target parsed on the re-read.
+    /// Whether every entity of the target parsed on the re-read; false
+    /// also when the re-read itself did not complete (the outcome's
+    /// `warnings` say why).
     pub all_entities_parse: bool,
 }
 
@@ -699,6 +710,13 @@ pub fn render_proposal_merge(o: &ProposalMergeOutcome) -> String {
         out.push_str("- New findings:\n");
         for f in &v.new_findings {
             out.push_str(&format!("  - {f}\n"));
+        }
+    }
+    if !o.warnings.is_empty() {
+        out.push_str("\n## Warnings\n\n");
+        out.push_str("The merge landed; the bookkeeping after the last commit did not complete:\n");
+        for w in &o.warnings {
+            out.push_str(&format!("- {w}\n"));
         }
     }
     out

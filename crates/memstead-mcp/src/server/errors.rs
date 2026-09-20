@@ -34,6 +34,32 @@ pub(super) fn engine_err_unified(
     // to a structured channel the MCP client doesn't surface. The
     // structured payload below is unchanged.
     let message = e.prose_render();
+    // The per-entity wrapper of a batch act: the source's own arm decides
+    // the code and the payload; the wrapper adds the entity and the stage
+    // to `details` and prefixes the message (already composed by
+    // `prose_render` above).
+    let e = match e {
+        E::InEntity {
+            entity,
+            stage,
+            source,
+        } => {
+            let code = source.code();
+            let inner = engine_err_unified(*source, engine);
+            let mut payload = inner
+                .structured_content
+                .unwrap_or_else(|| envelope(code, message.clone(), serde_json::json!({})));
+            let details = payload
+                .get("details")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            payload["details"] =
+                memstead_base::engine::error::scope_details_to_entity(details, &entity, &stage);
+            payload["message"] = serde_json::Value::String(message.clone());
+            return tool_error_with_payload(code, &message, payload);
+        }
+        other => other,
+    };
     match &e {
         E::NotFound { id } => {
             // #55: attach `suggestions` so this generic mapper carries the
@@ -1080,6 +1106,8 @@ pub(super) fn engine_err_unified(
                 serde_json::Value::Object(anchor_err.detail().into_iter().collect()),
             ),
         ),
+        // Unwrapped above: the source's own arm decides.
+        E::InEntity { .. } => unreachable!("the per-entity wrapper is unwrapped above"),
     }
 }
 

@@ -126,7 +126,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   from the caller; an adopted entity whose last fork commit carries no
   `Identity:` trailer refuses `PROPOSAL_UNATTRIBUTED` naming it. Every
   adopted body is rehearsed through the target's write gate (the gate's
-  own code on refusal), and a deletion is judged against the target's
+  own code on refusal, with `details.entity` naming the entity and
+  `details.stage` saying whether it failed landing the fork's version or
+  amending with the owner's body), and a deletion is judged against the target's
   referrers as the adopted bodies leave them (`HAS_INCOMING_REFS`). Only
   then does anything land: one commit on the target branch per proposer
   identity, in slug order, each parent-pinned to the tip before it, with
@@ -150,7 +152,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `confirmed_independent`, then re-reads the whole target from its
   backend and reports the integrity and conformance findings before and
   after (`validation` on the outcome; `new_findings` is empty when the
-  store validates). The record keys proposals by id (the fork's name and
+  store validates). Once the last commit is on the branch the merge has
+  landed: a failure of the bookkeeping after it (a check the ledger
+  refused, the re-read, the validation reading) is reported under
+  `warnings` on the outcome, never as an error. The record keys proposals by id (the fork's name and
   base sha) and holds the proposer, ancestor, base, target tip at merge,
   merger, time, and per entity the disposition, the reason and the hash
   of the proposed version (the landing body with the engine's date stamps

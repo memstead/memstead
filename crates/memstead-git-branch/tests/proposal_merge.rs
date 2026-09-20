@@ -827,8 +827,10 @@ fn merge_commits_once_per_proposer_identity_in_slug_order() {
 /// AC1's refusal complement: no merger identity (`INVALID_INPUT`), an
 /// adopted entity whose last fork commit carries no identity
 /// (`PROPOSAL_UNATTRIBUTED`, named), an adopted body the gate refuses
-/// (the gate's own code), each landing nothing and never writing the
-/// fork.
+/// (the gate's own code, with `details.entity` naming the slug and
+/// `details.stage` saying whether the fork's version failed to land or
+/// the owner's body failed to amend), each landing nothing and never
+/// writing the fork.
 #[test]
 fn merge_refuses_without_identity_unattributed_and_gate_failures_landing_nothing() {
     let (tmp, mut engine) = staged();
@@ -863,6 +865,37 @@ fn merge_refuses_without_identity_unattributed_and_gate_failures_landing_nothing
         .proposal_merge("specs-fork", &gate, Actor::Cli, None, None)
         .unwrap_err();
     assert_eq!(err.code(), "INVALID_ENUM_VALUE", "{err}");
+    assert_eq!(err.details()["entity"], "lambda", "{}", err.details());
+    assert_eq!(err.details()["stage"], "landing", "{}", err.details());
+    assert!(
+        err.details()["field"].is_string(),
+        "the gate's own payload rides along: {}",
+        err.details()
+    );
+    assert!(
+        err.to_string().starts_with("lambda (landing): "),
+        "the message names the entity and the stage: {err}"
+    );
+    assert!(
+        err.prose_render().starts_with("lambda (landing): "),
+        "{}",
+        err.prose_render()
+    );
+
+    // The owner's body of an `adopt_with_changes` entity that the gate
+    // refuses fails while amending, and says so.
+    let mut amend = file.clone();
+    amend.dispositions.get_mut("epsilon").unwrap().body = Some(serde_json::json!({
+        "sections": {"identity": "merged", "purpose": "seed"},
+        "metadata": {"level": "M9"}
+    }));
+    let err = engine
+        .proposal_merge("specs-fork", &amend, Actor::Cli, None, None)
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_ENUM_VALUE", "{err}");
+    assert_eq!(err.details()["entity"], "epsilon", "{}", err.details());
+    assert_eq!(err.details()["stage"], "amend", "{}", err.details());
+    assert!(err.to_string().starts_with("epsilon (amend): "), "{err}");
 
     assert_eq!(
         before,
@@ -953,7 +986,9 @@ fn merge_refuses_incomplete_stale_and_conflicting_files_and_lands_nothing() {
         "sections": {"identity": "merged", "purpose": "seed"},
         "metadata": {"level": "M9"}
     }));
-    refuse(&bad_body, "INVALID_ENUM_VALUE");
+    let err = refuse(&bad_body, "INVALID_ENUM_VALUE");
+    assert_eq!(err.details()["entity"], "epsilon", "{}", err.details());
+    assert_eq!(err.details()["stage"], "amend", "{}", err.details());
     // `adopt_with_changes` on a deletion.
     let mut on_delete = file.clone();
     let slot = on_delete.dispositions.get_mut("gamma").unwrap();
@@ -1460,6 +1495,73 @@ fn a_noop_landing_records_no_check_and_an_amend_alone_counts_as_an_update() {
             purpose
         );
     }
+}
+
+// ---------------------------------------------------------------------
+// After the last commit: bookkeeping failures are warnings, not refusals
+// ---------------------------------------------------------------------
+
+/// Once the last commit is on the branch the merge has landed, and a
+/// failure of the bookkeeping after it must not read as a refusal: with
+/// the check ledger unwritable (a directory sits where the ledger file
+/// goes), the merge returns an outcome, the commits and the record
+/// stand, every created or updated entity carries `check_recorded:
+/// false`, and the warnings name each check that was not recorded.
+#[test]
+fn a_failure_after_the_last_commit_is_a_warning_on_a_landed_merge() {
+    let (tmp, mut engine) = staged();
+    let gitdir = gitdir_of(tmp.path());
+    let target_tip_before = sha_of(&gitdir, "refs/heads/specs").unwrap();
+    let file = filled(&mut engine);
+    std::fs::create_dir_all(tmp.path().join(".memstead/state/checks/checks.jsonl")).unwrap();
+
+    let outcome = engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge landed before the ledger was touched");
+
+    assert_ne!(outcome.target_tip_after, target_tip_before);
+    assert_eq!(
+        sha_of(&gitdir, "refs/heads/specs").as_deref(),
+        Some(outcome.target_tip_after.as_str()),
+        "the commits stand"
+    );
+    assert!(record_on(&gitdir, "specs").is_some(), "the record stands");
+    let unchecked: Vec<&str> = outcome
+        .entities
+        .iter()
+        .filter(|e| matches!(e.action.as_str(), "created" | "updated"))
+        .map(|e| e.target_id.as_str())
+        .collect();
+    assert!(!unchecked.is_empty());
+    assert!(
+        outcome.entities.iter().all(|e| !e.check_recorded),
+        "{:?}",
+        outcome.entities
+    );
+    assert_eq!(
+        outcome.warnings.len(),
+        unchecked.len(),
+        "{:?}",
+        outcome.warnings
+    );
+    for (id, w) in unchecked.iter().zip(&outcome.warnings) {
+        assert!(
+            w.starts_with(&format!("{id}: the verification check was not recorded")),
+            "{w}"
+        );
+        assert!(w.contains("memstead check"), "{w}");
+    }
+    assert!(outcome.validation.is_clean(), "{:?}", outcome.validation);
+    let rendered = memstead_base::ops::render_proposal_merge(&outcome);
+    assert!(rendered.contains("## Warnings"), "{rendered}");
+    assert!(
+        rendered.contains(&outcome.warnings[0]),
+        "the renderer lists each warning: {rendered}"
+    );
+    assert!(
+        serde_json::to_value(&outcome).unwrap()["warnings"].is_array(),
+        "warnings serialise when present"
+    );
 }
 
 // ---------------------------------------------------------------------

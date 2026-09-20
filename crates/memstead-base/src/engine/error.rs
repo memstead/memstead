@@ -1347,6 +1347,52 @@ pub enum EngineError {
     /// `INVALID_ANCHOR`.
     #[error("invalid anchor: {0}")]
     InvalidAnchor(#[from] crate::anchor::AnchorValidationError),
+    /// An error raised while a batch act processed one entity: the
+    /// proposal merge rehearsing an adopted body through the write
+    /// gate, or any act that walks several entities and refuses on one
+    /// of them. Generic by design: `entity` is the entity the act was
+    /// on, in the caller's own naming (a slug, an id), `stage` is the
+    /// step it was in (the proposal merge says `landing` for the fork's
+    /// version and `amend` for the owner's body), and `source` is the
+    /// refusal itself. The wire code stays the source's own
+    /// ([`Self::code`] delegates), `details` is the source's payload
+    /// with `entity` and `stage` added (a key the source already set is
+    /// never overwritten), and the message is the source's under a
+    /// `<entity> (<stage>): ` prefix. Built with [`Self::in_entity`].
+    #[error("{entity} ({stage}): {source}")]
+    InEntity {
+        entity: String,
+        stage: String,
+        source: Box<EngineError>,
+    },
+}
+
+/// `details` with `entity` and `stage` added, the payload shape of
+/// [`EngineError::InEntity`]: a key the source payload already carries
+/// keeps its value. A payload that is not an object (no variant renders
+/// one today) is kept whole under `source_details`. Shared by the
+/// engine's [`EngineError::details`] and the surfaces that build their
+/// own per-variant payloads, so the wrapper adds the same two keys
+/// everywhere.
+pub fn scope_details_to_entity(
+    details: serde_json::Value,
+    entity: &str,
+    stage: &str,
+) -> serde_json::Value {
+    let mut map = match details {
+        serde_json::Value::Object(map) => map,
+        serde_json::Value::Null => serde_json::Map::new(),
+        other => {
+            let mut map = serde_json::Map::new();
+            map.insert("source_details".to_string(), other);
+            map
+        }
+    };
+    map.entry("entity")
+        .or_insert_with(|| serde_json::Value::String(entity.to_string()));
+    map.entry("stage")
+        .or_insert_with(|| serde_json::Value::String(stage.to_string()));
+    serde_json::Value::Object(map)
 }
 
 /// Typed payload for a single Write-Mem referrer in
@@ -1546,6 +1592,18 @@ impl EngineError {
                 "MARKDOWN_EXPORT_UNSUPPORTED_BACKEND"
             }
             EngineError::InvalidAnchor(_) => crate::anchor::INVALID_ANCHOR_CODE,
+            EngineError::InEntity { source, .. } => source.code(),
+        }
+    }
+
+    /// Wrap `self` as the refusal a batch act met on `entity` during
+    /// `stage`: the code and payload stay this error's, with the entity
+    /// and the stage added (see [`EngineError::InEntity`]).
+    pub fn in_entity(self, entity: impl Into<String>, stage: impl Into<String>) -> Self {
+        EngineError::InEntity {
+            entity: entity.into(),
+            stage: stage.into(),
+            source: Box::new(self),
         }
     }
 
@@ -2077,6 +2135,11 @@ impl EngineError {
                 "schema": schema,
                 "expected_schema": format!("{}@*", crate::binding_run::PROCESS_MEM_SCHEMA_NAME),
             }),
+            EngineError::InEntity {
+                entity,
+                stage,
+                source,
+            } => scope_details_to_entity(source.details(), entity, stage),
             _ => serde_json::Value::Object(serde_json::Map::new()),
         }
     }
@@ -2300,6 +2363,11 @@ impl EngineError {
                 )
             }
             EngineError::Validation(v) => v.prose_render(),
+            EngineError::InEntity {
+                entity,
+                stage,
+                source,
+            } => format!("{entity} ({stage}): {}", source.prose_render()),
             // Variants whose `Display` already inlines every recovery
             // field — title invariants, hash mismatch (already explains
             // the stub case), unknown mem / type (already prints
@@ -2468,14 +2536,27 @@ impl EngineError {
     /// candidate package exists — passes through unchanged. Read-only:
     /// the probe never writes, installs, or seals anything.
     pub fn with_schema_install_probe(self, workspace_root: Option<&std::path::Path>) -> Self {
-        let EngineError::SchemaNotFound {
-            mem,
-            pin,
-            sources,
-            install_hint,
-        } = self
-        else {
-            return self;
+        let (mem, pin, sources, install_hint) = match self {
+            EngineError::SchemaNotFound {
+                mem,
+                pin,
+                sources,
+                install_hint,
+            } => (mem, pin, sources, install_hint),
+            // The per-entity wrapper of a batch act carries the probe
+            // into its source.
+            EngineError::InEntity {
+                entity,
+                stage,
+                source,
+            } => {
+                return EngineError::InEntity {
+                    entity,
+                    stage,
+                    source: Box::new(source.with_schema_install_probe(workspace_root)),
+                };
+            }
+            other => return other,
         };
         let hint = if install_hint.is_some() {
             install_hint

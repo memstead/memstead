@@ -135,6 +135,30 @@ impl CliError {
     /// surfaces is the agent contract this method delivers.
     pub fn from_engine_op(e: memstead_base::EngineError) -> Self {
         use memstead_base::EngineError::*;
+        // The per-entity wrapper of a batch act: the source decides the
+        // exit kind, the code and the payload; the wrapper adds the
+        // entity and the stage to the payload and prefixes the message
+        // (the same composition `EngineError::prose_render` renders).
+        let e = match e {
+            InEntity {
+                entity,
+                stage,
+                source,
+            } => {
+                let inner = Self::from_engine_op(*source);
+                return Self {
+                    kind: inner.kind,
+                    code: inner.code,
+                    message: format!("{entity} ({stage}): {}", inner.message),
+                    details: Some(memstead_base::engine::error::scope_details_to_entity(
+                        inner.details.unwrap_or(serde_json::Value::Null),
+                        &entity,
+                        &stage,
+                    )),
+                };
+            }
+            other => other,
+        };
         let code = e.code();
         let (kind, details) = match &e {
             NotFound { id } => (ExitKind::NotFound, Some(serde_json::json!({ "id": id }))),
@@ -843,6 +867,8 @@ impl CliError {
                     "swallowed_sections": swallowed,
                 })),
             ),
+            // Unwrapped above: the source's own arm decides.
+            InEntity { .. } => unreachable!("the per-entity wrapper is unwrapped above"),
         };
         // Route the CLI message through the rich-prose renderer so markdown-
         // default mode and `--json --message` consumers see the same
