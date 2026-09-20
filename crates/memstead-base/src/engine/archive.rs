@@ -236,6 +236,13 @@ impl Engine {
                 // Source the anchors sidecar from the branch tip so the
                 // git-branch `.mem` carries anchors like the other backends.
                 let anchors_bytes = mount.backend.read_anchors_sidecar().ok().flatten();
+                // The sealed check records come from the workspace ledger
+                // the engine holds; the hook only places the member.
+                let (checks_bytes, check_redactions) = crate::ops::export::sealed_checks_bytes_for(
+                    workspace_root,
+                    mem_name,
+                    &entity_paths,
+                );
                 (hook.export_to_bytes)(
                     gitdir,
                     branch,
@@ -245,9 +252,11 @@ impl Engine {
                     workspace_schemas_dir,
                     provenance_bytes.as_deref(),
                     anchors_bytes.as_deref(),
+                    checks_bytes.as_deref(),
                 )
                 .map(|mut out| {
-                    out.redactions = redactions;
+                    out.redactions =
+                        crate::ops::export::merge_redactions(redactions, check_redactions);
                     out
                 })
                 .map_err(EngineError::Backend)
@@ -280,6 +289,12 @@ impl Engine {
                 let anchors_bytes = backend
                     .read_anchors_sidecar()
                     .map_err(EngineError::Backend)?;
+                // The sealed check records, from the workspace ledger.
+                let (checks_bytes, check_redactions) = crate::ops::export::sealed_checks_bytes_for(
+                    workspace_root,
+                    mem_name,
+                    &entity_paths,
+                );
                 crate::ops::export::export_entries_to_bytes(
                     config,
                     workspace_root,
@@ -288,10 +303,12 @@ impl Engine {
                     md_entries,
                     Some(&provenance),
                     anchors_bytes.as_deref(),
+                    checks_bytes.as_deref(),
                     self.ref_schema_source_for(config),
                 )
                 .map(|mut out| {
-                    out.redactions = redactions;
+                    out.redactions =
+                        crate::ops::export::merge_redactions(redactions, check_redactions);
                     out
                 })
                 .map_err(|e| {

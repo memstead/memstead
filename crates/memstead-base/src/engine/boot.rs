@@ -125,12 +125,21 @@ impl Engine {
                     .and_then(|bytes| {
                         memstead_schema::ArchiveProvenance::from_archive_bytes(&bytes).ok()
                     });
+            // The sealed check records, an archive mount's only source of
+            // check state. A malformed member downgrades to `None` the way
+            // provenance does; install validated the member already.
+            let archive_checks = backend
+                .read_archive_checks()
+                .ok()
+                .flatten()
+                .and_then(|bytes| crate::check::SealedChecks::from_archive_bytes(&bytes).ok());
             mounted.push(MountedBackend {
                 mount,
                 backend,
                 last_known_head,
                 mem_config,
                 archive_provenance,
+                archive_checks,
                 // Set below, after the schema pin resolves: a lazy mount
                 // whose METADATA half fails still quarantines at boot;
                 // only the entity load defers.

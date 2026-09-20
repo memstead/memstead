@@ -327,6 +327,55 @@ pub fn health_vital_signs_axis(
 /// per-anchor mechanism `verify-anchors` and the binding verify use.
 /// Shared by the health composer, the CLI health command, and the
 /// MCP server so the axis cannot drift between surfaces.
+/// The check records of one source (the workspace ledger, or one
+/// archive's sealed member), folded the way the checks axis reads them.
+#[derive(Default)]
+struct CheckMaps {
+    /// Newest `verification` record per entity.
+    latest: std::collections::BTreeMap<String, crate::check::CheckRecord>,
+    /// Newest `conformance` record per entity.
+    latest_conformance: std::collections::BTreeMap<String, crate::check::CheckRecord>,
+    /// Foreign `x-<name>` kinds per entity: recorded verbatim, never
+    /// aggregated into a state, listed by count per mem.
+    foreign_by_entity: std::collections::BTreeMap<String, Vec<String>>,
+    /// Newest record of any kind per entity, for the finding it may carry.
+    newest_any: std::collections::BTreeMap<String, crate::check::CheckRecord>,
+    /// Every verification record per entity, oldest first: the per-record
+    /// readings show each check's standing, not only the newest one's.
+    all_verification: std::collections::BTreeMap<String, Vec<crate::check::CheckRecord>>,
+}
+
+impl CheckMaps {
+    fn from_records<'a>(records: impl Iterator<Item = &'a crate::check::CheckRecord>) -> Self {
+        let mut maps = Self::default();
+        for rec in records {
+            maps.newest_any.insert(rec.entity.clone(), rec.clone());
+            match rec.resolved_kind() {
+                Some(crate::check::CheckKind::Verification) => {
+                    maps.all_verification
+                        .entry(rec.entity.clone())
+                        .or_default()
+                        .push(rec.clone());
+                    maps.latest.insert(rec.entity.clone(), rec.clone());
+                }
+                Some(crate::check::CheckKind::Conformance) => {
+                    maps.latest_conformance
+                        .insert(rec.entity.clone(), rec.clone());
+                }
+                None => {
+                    if let Some(k) = rec.foreign_kind() {
+                        maps.foreign_by_entity
+                            .entry(rec.entity.clone())
+                            .or_default()
+                            .push(k.to_string());
+                    }
+                }
+            }
+        }
+        maps
+    }
+}
+
 /// The `include=["checks"]` axis: per mem,
 /// counts of the four derived check states plus the author≠checker
 /// independence gate over ok-checked entities. The gate compares
@@ -366,55 +415,16 @@ pub fn health_checks_axis(
         serde_json::Value::Object(o)
     };
 
-    let ledger = engine
+    // The workspace ledger, folded once for every non-archive mem: the
+    // newest record per (entity, kind), every verification record, the
+    // newest record of any kind (for its finding), the foreign kinds.
+    // State is kind-scoped: a conformance record never supersedes a
+    // verification record, or the reverse.
+    let ledger_records: Vec<crate::check::CheckRecord> = engine
         .workspace_root()
-        .map(crate::check::CheckLedger::for_workspace);
-    // Newest record per (entity, kind), one ledger read for the whole
-    // axis. State is kind-scoped: a conformance record never
-    // supersedes a verification record, or the reverse.
-    let mut latest: std::collections::BTreeMap<String, crate::check::CheckRecord> =
-        std::collections::BTreeMap::new();
-    let mut latest_conformance: std::collections::BTreeMap<String, crate::check::CheckRecord> =
-        std::collections::BTreeMap::new();
-    // Foreign `x-<name>` kinds: recorded verbatim, never aggregated into
-    // a state — listed by count per mem so a reader sees that another
-    // checker has been here. Keyed by entity for the per-mem tally.
-    let mut foreign_by_entity: std::collections::BTreeMap<String, Vec<String>> =
-        std::collections::BTreeMap::new();
-    // The newest record of ANY kind per entity, for the finding it may
-    // carry: a finding is served under the entity's latest verdict.
-    let mut newest_any: std::collections::BTreeMap<String, crate::check::CheckRecord> =
-        std::collections::BTreeMap::new();
-    // Every verification record per entity, oldest first: the per-record
-    // readings (engine::independence) show each check's standing, not
-    // only the newest one's — a superseded self-check stays visible.
-    let mut all_verification: std::collections::BTreeMap<String, Vec<crate::check::CheckRecord>> =
-        std::collections::BTreeMap::new();
-    if let Some(l) = &ledger {
-        for rec in l.all() {
-            newest_any.insert(rec.entity.clone(), rec.clone());
-            match rec.resolved_kind() {
-                Some(crate::check::CheckKind::Verification) => {
-                    all_verification
-                        .entry(rec.entity.clone())
-                        .or_default()
-                        .push(rec.clone());
-                    latest.insert(rec.entity.clone(), rec);
-                }
-                Some(crate::check::CheckKind::Conformance) => {
-                    latest_conformance.insert(rec.entity.clone(), rec);
-                }
-                None => {
-                    if let Some(k) = rec.foreign_kind() {
-                        foreign_by_entity
-                            .entry(rec.entity.clone())
-                            .or_default()
-                            .push(k.to_string());
-                    }
-                }
-            }
-        }
-    }
+        .map(|root| crate::check::CheckLedger::for_workspace(root).all())
+        .unwrap_or_default();
+    let from_ledger = CheckMaps::from_records(ledger_records.iter());
 
     let mut mems: Vec<String> = engine.mem_names().iter().map(|s| s.to_string()).collect();
     mems.sort();
@@ -425,6 +435,51 @@ pub fn health_checks_axis(
         {
             continue;
         }
+        // One source per mount: an archive mount derives from its sealed
+        // check records (`.memstead/checks.json`) and never from the
+        // workspace ledger beside it; every other mount from the ledger.
+        let sealed_maps;
+        let (maps, sealed_note) = if engine.is_archive_mount(&mem) {
+            match engine.archive_checks_for(&mem) {
+                Some(sealed) => {
+                    let records: Vec<crate::check::CheckRecord> = sealed
+                        .entities
+                        .iter()
+                        .flat_map(|(path, kinds)| {
+                            let id = crate::EntityId::new(&mem, path).0;
+                            kinds.iter().map(move |(kind, sc)| sc.to_record(&id, kind))
+                        })
+                        .collect();
+                    sealed_maps = CheckMaps::from_records(records.iter());
+                    (
+                        &sealed_maps,
+                        Some(serde_json::json!({
+                            "carried": true,
+                            "records": records.len(),
+                        })),
+                    )
+                }
+                None => {
+                    sealed_maps = CheckMaps::default();
+                    (
+                        &sealed_maps,
+                        Some(serde_json::json!({
+                            "carried": false,
+                            "reason": "the archive carries no check records; every state reads never_checked",
+                        })),
+                    )
+                }
+            }
+        } else {
+            (&from_ledger, None)
+        };
+        let CheckMaps {
+            latest,
+            latest_conformance,
+            foreign_by_entity,
+            newest_any,
+            all_verification,
+        } = maps;
         let mut counts = std::collections::BTreeMap::from([
             ("never_checked", 0usize),
             ("checked_ok", 0usize),
@@ -548,6 +603,11 @@ pub fn health_checks_axis(
             serde_json::to_value(&foreign_kinds).unwrap_or(serde_json::json!({})),
         );
         m.insert("findings".into(), serde_json::Value::Object(findings));
+        // On an archive mount: whether the archive seals check records at
+        // all, so an all-`never_checked` reading is explained, never bare.
+        if let Some(note) = sealed_note {
+            m.insert("sealed".into(), note);
+        }
         m.insert(
             "independence".into(),
             serde_json::json!({
@@ -868,9 +928,6 @@ pub fn health_open_questions_axis(
         // an `x-` kind counts by name, an engine kind by derived state.
         let (mut missing, mut unchecked) = (Vec::new(), Vec::new());
         if let Some(schema) = engine.schema_for(mem) {
-            let ledger = engine
-                .workspace_root()
-                .map(crate::check::CheckLedger::for_workspace);
             for entity in engine
                 .store()
                 .all_entities()
@@ -904,22 +961,13 @@ pub fn health_open_questions_axis(
                     continue;
                 }
                 let kind = res.check_kind.as_deref().unwrap_or("verification");
-                let checked = ledger.as_ref().is_some_and(|l| {
-                    l.all().into_iter().rev().any(|r| {
-                        r.entity == entity.id.to_string()
-                            && r.verdict == "ok"
-                            && r.entity_hash == entity.content_hash
-                            && match crate::check::RecordKind::from_wire(kind) {
-                                Some(crate::check::RecordKind::Engine(k)) => {
-                                    r.resolved_kind() == Some(k)
-                                }
-                                Some(crate::check::RecordKind::Foreign(name)) => {
-                                    r.kind.as_deref() == Some(name.as_str())
-                                }
-                                None => false,
-                            }
-                    })
-                });
+                // The newest record of the declared kind, from the mount's
+                // one source (sealed member or workspace ledger), read the
+                // way the entity read derives its state.
+                let checked = crate::check::RecordKind::from_wire(kind).is_some()
+                    && engine
+                        .latest_check_record(mem, &entity.id.0, kind)
+                        .is_some_and(|r| r.verdict == "ok" && r.entity_hash == entity.content_hash);
                 if !checked {
                     unchecked.push(serde_json::json!({
                         "kind": "resolution_unchecked",

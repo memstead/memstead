@@ -263,6 +263,7 @@ fn export_dispatch(
     workspace_schemas_dir: Option<&std::path::Path>,
     provenance_bytes: Option<&[u8]>,
     anchors_bytes: Option<&[u8]>,
+    checks_bytes: Option<&[u8]>,
 ) -> Result<memstead_base::ops::MemExportResult, memstead_base::backend::BackendError> {
     let _ = branch;
     crate::ops::export::export_mem_from_branch(
@@ -274,6 +275,7 @@ fn export_dispatch(
         workspace_schemas_dir,
         provenance_bytes,
         anchors_bytes,
+        checks_bytes,
     )
     .map_err(|e| {
         memstead_base::backend::BackendError::Other(format!("export_mem_from_branch: {e}"))
@@ -374,6 +376,7 @@ fn export_to_bytes_dispatch(
     workspace_schemas_dir: Option<&std::path::Path>,
     provenance_bytes: Option<&[u8]>,
     anchors_bytes: Option<&[u8]>,
+    checks_bytes: Option<&[u8]>,
 ) -> Result<memstead_base::ops::MemExportBytes, memstead_base::backend::BackendError> {
     let _ = branch;
     crate::ops::export::export_mem_from_branch_to_bytes(
@@ -384,6 +387,7 @@ fn export_to_bytes_dispatch(
         workspace_schemas_dir,
         provenance_bytes,
         anchors_bytes,
+        checks_bytes,
     )
     .map_err(|e| {
         memstead_base::backend::BackendError::Other(format!("export_mem_from_branch_to_bytes: {e}"))

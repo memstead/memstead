@@ -1410,3 +1410,617 @@ compare `[[planning/plan-x--alpha]]` in code.",
         self_contained.dropped
     );
 }
+
+// ---------------------------------------------------------------------------
+// Sealed check records (`.memstead/checks.json`)
+// ---------------------------------------------------------------------------
+
+/// A folder mem under a workspace root (so the engine has a check
+/// ledger), with `titles` created and no check recorded yet.
+fn ledgered_folder_mem(tmp: &TempDir, titles: &[&str]) -> Engine {
+    let (mut engine, _dir) = folder_mem_with_entities(tmp, titles);
+    engine.set_workspace_root(tmp.path().to_path_buf());
+    engine
+}
+
+fn check_as(
+    engine: &mut Engine,
+    identity: &str,
+    id: &str,
+    verdict: crate::check::Verdict,
+    kind: crate::check::RecordKind,
+    method: Option<&str>,
+) {
+    let (actor, client) = cli_actor();
+    engine.set_identity(Some(identity.to_string()));
+    engine
+        .record_check_with(
+            "specs",
+            id,
+            verdict,
+            &kind,
+            method,
+            None,
+            actor,
+            Some(&client),
+        )
+        .unwrap();
+}
+
+fn sealed_checks_of(bytes: &[u8]) -> Option<crate::check::SealedChecks> {
+    let entries = extract_entries(bytes, &ValidatorLimits::DEFAULT).unwrap();
+    entries
+        .checks_bytes
+        .map(|b| crate::check::SealedChecks::from_archive_bytes(&b).unwrap())
+}
+
+/// AC1, folder path: the archive carries, per entity, the latest ledger
+/// record per kind (verification, conformance, a foreign `x-` kind) with
+/// the identity handles verbatim, the method note redacted by the same
+/// classes the provenance member applies, the bytes deterministic.
+/// Complement: a record for an entity the archive does not carry
+/// (deleted since) and a record of another mem are not sealed, and no
+/// person name reaches the archive.
+#[test]
+fn export_seals_latest_check_per_entity_and_kind() {
+    use crate::check::{CheckKind, RecordKind, Verdict};
+    let tmp = TempDir::new().unwrap();
+    let mut engine = ledgered_folder_mem(&tmp, &["Alpha", "Beta", "Gamma"]);
+
+    // Alpha: two verification checks under two handles (the later one
+    // wins), a conformance check under a third, a foreign kind under a
+    // fourth. The winning method names a private path.
+    check_as(
+        &mut engine,
+        "checker-s1",
+        "specs--alpha",
+        Verdict::Ok,
+        RecordKind::Engine(CheckKind::Verification),
+        Some("first pass"),
+    );
+    check_as(
+        &mut engine,
+        "checker-s2",
+        "specs--alpha",
+        Verdict::Failed,
+        RecordKind::Engine(CheckKind::Verification),
+        Some("diffed against /Users/dasboe/notes.md"),
+    );
+    check_as(
+        &mut engine,
+        "grader-s3",
+        "specs--alpha",
+        Verdict::Ok,
+        RecordKind::Engine(CheckKind::Conformance),
+        None,
+    );
+    check_as(
+        &mut engine,
+        "attacker-m",
+        "specs--alpha",
+        Verdict::Ok,
+        RecordKind::Foreign("x-audit".to_string()),
+        Some("adversarial read"),
+    );
+    // Beta: one check. Gamma: checked, then deleted.
+    check_as(
+        &mut engine,
+        "checker-s1",
+        "specs--beta",
+        Verdict::Ok,
+        RecordKind::Engine(CheckKind::Verification),
+        None,
+    );
+    check_as(
+        &mut engine,
+        "checker-s1",
+        "specs--gamma",
+        Verdict::Ok,
+        RecordKind::Engine(CheckKind::Verification),
+        None,
+    );
+    let (actor, client) = cli_actor();
+    engine
+        .delete_entity(
+            crate::DeleteEntityArgs {
+                id: crate::EntityId::new("specs", "gamma"),
+                expected_hash: None,
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    // A record of another mem sits in the same workspace ledger.
+    crate::check::CheckLedger::for_workspace(tmp.path())
+        .record(&crate::check::CheckRecord {
+            ts: 1,
+            entity: "other--thing".to_string(),
+            verdict: "ok".to_string(),
+            method: None,
+            entity_hash: "h".to_string(),
+            actor: "cli".to_string(),
+            client: None,
+            role: "checker".to_string(),
+            identity: Some("checker-elsewhere".to_string()),
+            kind: None,
+            schema_ref: None,
+            finding: None,
+            renamed_from: None,
+        })
+        .unwrap();
+
+    let report = engine.export_mem_bytes_report("specs").unwrap();
+    let sealed = sealed_checks_of(&report.bytes).expect("the archive carries the checks member");
+    assert_eq!(sealed.version, crate::check::SEALED_CHECKS_VERSION);
+    assert_eq!(
+        sealed.entities.keys().cloned().collect::<Vec<_>>(),
+        vec!["alpha".to_string(), "beta".to_string()],
+        "a deleted entity and another mem's entity are not sealed"
+    );
+
+    let alpha = &sealed.entities["alpha"];
+    assert_eq!(
+        alpha.keys().cloned().collect::<Vec<_>>(),
+        vec!["conformance", "verification", "x-audit"]
+    );
+    let v = &alpha["verification"];
+    assert_eq!(v.verdict, "failed", "the later record per kind wins");
+    assert_eq!(v.identity.as_deref(), Some("checker-s2"));
+    assert_eq!(v.role, "unspecified");
+    assert_eq!(
+        v.method.as_deref(),
+        Some("diffed against [redacted:absolute-user-paths]/notes.md"),
+        "the method note passes the provenance member's redaction"
+    );
+    let c = &alpha["conformance"];
+    assert_eq!(c.identity.as_deref(), Some("grader-s3"));
+    assert_eq!(c.schema_ref.as_deref(), Some("default@1.0.0"));
+    let x = &alpha["x-audit"];
+    assert_eq!(x.identity.as_deref(), Some("attacker-m"));
+    assert_eq!(x.method.as_deref(), Some("adversarial read"));
+    assert_eq!(sealed.entities["beta"].len(), 1);
+
+    // The sealed hash is the entity's content hash at check time.
+    let alpha_hash = engine
+        .get_entity(&crate::EntityId::new("specs", "alpha"))
+        .unwrap()
+        .content_hash
+        .clone();
+    assert_eq!(v.entity_hash, alpha_hash);
+
+    // Nothing that is not on the ledger line, and no person name.
+    let raw = String::from_utf8(
+        extract_entries(&report.bytes, &ValidatorLimits::DEFAULT)
+            .unwrap()
+            .checks_bytes
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(!raw.contains("dasboe"), "{raw}");
+    assert!(!raw.contains("\"client\""), "{raw}");
+    assert!(!raw.contains("\"finding\""), "{raw}");
+    assert!(!raw.contains("checker-elsewhere"), "{raw}");
+
+    // The export report counts the redaction, by class.
+    assert_eq!(report.redactions.len(), 1, "{:?}", report.redactions);
+    assert_eq!(report.redactions[0].class, "absolute-user-paths");
+    assert_eq!(report.redactions[0].count, 1);
+
+    // Deterministic for a given ledger.
+    let again = engine.export_mem_to_bytes("specs").unwrap();
+    assert_eq!(report.bytes, again);
+}
+
+/// AC1 complement: an engine with no workspace root, a workspace with no
+/// ledger, and a mem with no record in the ledger all export the same
+/// bytes with no member.
+#[test]
+fn export_without_a_qualifying_record_embeds_no_checks_member() {
+    let tmp = TempDir::new().unwrap();
+    let (engine, _dir) = folder_mem_with_entities(&tmp, &["Alpha"]);
+    let rootless = engine.export_mem_to_bytes("specs").unwrap();
+    assert!(sealed_checks_of(&rootless).is_none());
+
+    let mut engine = engine;
+    engine.set_workspace_root(tmp.path().to_path_buf());
+    let no_ledger = engine.export_mem_to_bytes("specs").unwrap();
+    assert_eq!(rootless, no_ledger, "no ledger: byte-identical, no member");
+
+    // A ledger that holds only another mem's record.
+    crate::check::CheckLedger::for_workspace(tmp.path())
+        .record(&crate::check::CheckRecord {
+            ts: 1,
+            entity: "other--thing".to_string(),
+            verdict: "ok".to_string(),
+            method: None,
+            entity_hash: "h".to_string(),
+            actor: "cli".to_string(),
+            client: None,
+            role: "checker".to_string(),
+            identity: None,
+            kind: None,
+            schema_ref: None,
+            finding: None,
+            renamed_from: None,
+        })
+        .unwrap();
+    let no_record = engine.export_mem_to_bytes("specs").unwrap();
+    assert_eq!(rootless, no_record, "no record for this mem: no member");
+}
+
+/// AC1, in-memory path: a session mem under a workspace root seals its
+/// check records through the same builder.
+#[test]
+fn in_memory_export_seals_check_records() {
+    use crate::check::{CheckKind, RecordKind, Verdict};
+    use crate::storage::InMemoryBackend;
+    let tmp = TempDir::new().unwrap();
+    let backend = InMemoryBackend::new();
+    backend
+        .write_mem_config(
+            br#"{"version":"0.1.0","schema":"default@1.0.0"}"#,
+            &crate::vcs::CommitContext::new(
+                Some("test"),
+                crate::vcs::Actor::Cli,
+                None,
+                None,
+                crate::vcs::Role::Unspecified,
+                None,
+            ),
+        )
+        .unwrap();
+    let mount = Mount {
+        mem: "specs".to_string(),
+        schema: Some("default@1.0.0".parse().unwrap()),
+        storage: MountStorage::InMemory,
+        capability: MountCapability::Write,
+        lifecycle: MountLifecycle::Eager,
+        cross_linkable: false,
+        migration_target: None,
+    };
+    let mut engine =
+        Engine::from_mounts(vec![(mount, Box::new(backend) as Box<dyn MemBackend>)]).unwrap();
+    engine.set_workspace_root(tmp.path().to_path_buf());
+    let (actor, client) = cli_actor();
+    engine
+        .create_entity(
+            empty_create_args("specs", "Idea"),
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    check_as(
+        &mut engine,
+        "checker-s9",
+        "specs--idea",
+        Verdict::Ok,
+        RecordKind::Engine(CheckKind::Verification),
+        None,
+    );
+    let bytes = engine.export_mem_to_bytes("specs").unwrap();
+    let sealed = sealed_checks_of(&bytes).expect("in-memory export seals the checks member");
+    assert_eq!(
+        sealed
+            .latest("idea", "verification")
+            .and_then(|r| r.identity.as_deref()),
+        Some("checker-s9")
+    );
+}
+
+/// AC2: the member threads verbatim through the canonical re-pack (what
+/// install stores) and the installed mem exposes it; an archive without
+/// the member installs as today and exposes none.
+#[test]
+fn checks_member_survives_canonical_repack_and_install() {
+    use crate::check::{CheckKind, RecordKind, Verdict};
+    let tmp = TempDir::new().unwrap();
+    let mut engine = ledgered_folder_mem(&tmp, &["Alpha"]);
+    check_as(
+        &mut engine,
+        "checker-s1",
+        "specs--alpha",
+        Verdict::Ok,
+        RecordKind::Engine(CheckKind::Verification),
+        None,
+    );
+    let bytes = engine.export_mem_to_bytes("specs").unwrap();
+    let raw = extract_entries(&bytes, &ValidatorLimits::DEFAULT)
+        .unwrap()
+        .checks_bytes
+        .expect("member present");
+
+    let validated =
+        crate::validator::validate_and_normalize_archive(&bytes).expect("archive re-validates");
+    assert_eq!(validated.checks_bytes.as_deref(), Some(&raw[..]));
+    let canonical = extract_entries(&validated.canonical_bytes, &ValidatorLimits::DEFAULT).unwrap();
+    assert_eq!(
+        canonical.checks_bytes.as_deref(),
+        Some(&raw[..]),
+        "normalize must preserve the checks member through the canonical re-pack"
+    );
+
+    let installed = Engine::from_archive_bytes(validated.canonical_bytes).unwrap();
+    let sealed = installed
+        .archive_checks_for("specs")
+        .expect("installed mem exposes its sealed checks");
+    assert!(sealed.latest("alpha", "verification").is_some());
+
+    // Without the member: as today.
+    let plain_tmp = TempDir::new().unwrap();
+    let (plain, _dir) = folder_mem_with_entities(&plain_tmp, &["Alpha"]);
+    let plain_bytes = plain.export_mem_to_bytes("specs").unwrap();
+    let validated = crate::validator::validate_and_normalize_archive(&plain_bytes).unwrap();
+    assert!(validated.checks_bytes.is_none());
+    let installed = Engine::from_archive_bytes(validated.canonical_bytes).unwrap();
+    assert!(installed.archive_checks_for("specs").is_none());
+}
+
+/// AC3: an archive mount derives `entity --provenance`'s check states
+/// and the health checks axis from the sealed member with the workspace
+/// derivation (sealed hash against the sealed entity, conformance also
+/// against the pin); foreign kinds are listed; the independence reading
+/// stays unconfirmable on an archive.
+#[test]
+fn archive_mount_derives_check_state_from_sealed_member() {
+    use crate::check::{CheckKind, RecordKind, Verdict};
+    let tmp = TempDir::new().unwrap();
+    let mut engine = ledgered_folder_mem(&tmp, &["Alpha", "Beta"]);
+    check_as(
+        &mut engine,
+        "checker-s1",
+        "specs--alpha",
+        Verdict::Ok,
+        RecordKind::Engine(CheckKind::Verification),
+        None,
+    );
+    check_as(
+        &mut engine,
+        "checker-s2",
+        "specs--alpha",
+        Verdict::Failed,
+        RecordKind::Engine(CheckKind::Verification),
+        Some("found a gap"),
+    );
+    check_as(
+        &mut engine,
+        "grader-s3",
+        "specs--alpha",
+        Verdict::Ok,
+        RecordKind::Engine(CheckKind::Conformance),
+        None,
+    );
+    check_as(
+        &mut engine,
+        "attacker-m",
+        "specs--alpha",
+        Verdict::Ok,
+        RecordKind::Foreign("x-audit".to_string()),
+        None,
+    );
+    check_as(
+        &mut engine,
+        "checker-s1",
+        "specs--beta",
+        Verdict::Ok,
+        RecordKind::Engine(CheckKind::Verification),
+        None,
+    );
+    let bytes = engine.export_mem_to_bytes("specs").unwrap();
+    let mounted = Engine::from_archive_bytes(bytes).unwrap();
+
+    let prov = mounted.entity_provenance("specs", "specs--alpha").unwrap();
+    assert_eq!(prov.check_state, "check_failed");
+    let last = prov
+        .last_check
+        .as_ref()
+        .expect("the sealed record is served");
+    assert_eq!(last.identity.as_deref(), Some("checker-s2"));
+    assert_eq!(last.method.as_deref(), Some("found a gap"));
+    assert_eq!(last.entity, "specs--alpha");
+    assert_eq!(prov.conformance_state, "checked_ok");
+    assert_eq!(
+        prov.last_conformance_check
+            .as_ref()
+            .and_then(|r| r.identity.as_deref()),
+        Some("grader-s3")
+    );
+    assert_eq!(prov.foreign_checks.len(), 1);
+    assert_eq!(prov.foreign_checks[0].kind.as_deref(), Some("x-audit"));
+    assert_eq!(
+        prov.foreign_checks[0].identity.as_deref(),
+        Some("attacker-m")
+    );
+    let sealed = prov.sealed.as_ref().unwrap();
+    assert!(sealed.checks_carried);
+    assert!(sealed.checks_reason.is_none());
+
+    let prov = mounted.entity_provenance("specs", "specs--beta").unwrap();
+    assert_eq!(prov.check_state, "checked_ok");
+    assert_eq!(prov.conformance_state, "never_checked");
+    assert!(prov.foreign_checks.is_empty());
+
+    // The same derivation, in the JSON the MCP read serialises.
+    let json = serde_json::to_value(&prov).unwrap();
+    assert_eq!(json["check_state"], "checked_ok");
+    assert_eq!(json["last_check"]["identity"], "checker-s1");
+    assert_eq!(json["sealed"]["checks_carried"], true);
+
+    // The health checks axis counts the archive's entities.
+    let axis = crate::ops::health::health_checks_axis(&mounted, Some("specs"));
+    let m = &axis["specs"];
+    assert_eq!(m["checked_ok"], 1, "{axis}");
+    assert_eq!(m["check_failed"], 1, "{axis}");
+    assert_eq!(m["never_checked"], 0, "{axis}");
+    assert_eq!(m["check_stale"], 0, "{axis}");
+    assert_eq!(m["conformance"]["checked_ok"], 1, "{axis}");
+    assert_eq!(m["conformance"]["never_checked"], 1, "{axis}");
+    assert_eq!(m["foreign_kinds"]["x-audit"], 1, "{axis}");
+    assert_eq!(m["sealed"]["carried"], true, "{axis}");
+    assert_eq!(
+        m["independence"]["unconfirmable"]["items"][0], "specs--beta",
+        "the independence reading stays unconfirmable on an archive: {axis}"
+    );
+
+    // The read-only refusal stands: nothing on the mount records a check.
+    let mut mounted = mounted;
+    let (actor, client) = cli_actor();
+    let err = mounted
+        .record_check(
+            "specs",
+            "specs--alpha",
+            Verdict::Ok,
+            CheckKind::Verification,
+            None,
+            actor,
+            Some(&client),
+        )
+        .unwrap_err();
+    assert_eq!(err.code(), "READ_ONLY_MOUNT");
+}
+
+/// AC3 complement: a sealed record whose hash differs from the sealed
+/// entity (the entity was edited after the check) reads stale, never
+/// fresh, on the mount.
+#[test]
+fn sealed_record_over_a_later_edit_reads_stale_never_fresh() {
+    use crate::check::{CheckKind, RecordKind, Verdict};
+    let tmp = TempDir::new().unwrap();
+    let mut engine = ledgered_folder_mem(&tmp, &["Alpha"]);
+    check_as(
+        &mut engine,
+        "checker-s1",
+        "specs--alpha",
+        Verdict::Ok,
+        RecordKind::Engine(CheckKind::Verification),
+        None,
+    );
+    let (actor, client) = cli_actor();
+    engine
+        .update_entity(
+            crate::UpdateEntityArgs {
+                id: crate::EntityId::new("specs", "alpha"),
+                expected_hash: None,
+                sections: [("identity".to_string(), "edited after the check".to_string())]
+                    .into_iter()
+                    .collect(),
+                append_sections: Default::default(),
+                patch_sections: Default::default(),
+                sections_unset: Vec::new(),
+                metadata: Default::default(),
+                metadata_unset: Vec::new(),
+                dry_run: false,
+                declare_relations: Vec::new(),
+                anchors: Vec::new(),
+                anchors_unset: Vec::new(),
+                relations_unset: Vec::new(),
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    let bytes = engine.export_mem_to_bytes("specs").unwrap();
+    let mounted = Engine::from_archive_bytes(bytes).unwrap();
+    let prov = mounted.entity_provenance("specs", "specs--alpha").unwrap();
+    assert_eq!(prov.check_state, "check_stale");
+    assert!(
+        prov.last_check.is_some(),
+        "the stale record is still served"
+    );
+    let axis = crate::ops::health::health_checks_axis(&mounted, Some("specs"));
+    assert_eq!(axis["specs"]["check_stale"], 1, "{axis}");
+    assert_eq!(axis["specs"]["checked_ok"], 0, "{axis}");
+}
+
+/// AC3 complement: an archive sealed without the member reads
+/// `never_checked` with the reason stated, and a workspace ledger beside
+/// the mount (holding a fresh ok record for the very id) is never
+/// consulted for it.
+#[test]
+fn archive_mount_never_reads_the_workspace_ledger() {
+    let tmp = TempDir::new().unwrap();
+    let (engine, _dir) = folder_mem_with_entities(&tmp, &["Alpha"]);
+    let bytes = engine.export_mem_to_bytes("specs").unwrap();
+    let mut mounted = Engine::from_archive_bytes(bytes).unwrap();
+    let hash = mounted
+        .get_entity(&crate::EntityId::new("specs", "alpha"))
+        .unwrap()
+        .content_hash
+        .clone();
+    let ws = TempDir::new().unwrap();
+    crate::check::CheckLedger::for_workspace(ws.path())
+        .record(&crate::check::CheckRecord {
+            ts: 1,
+            entity: "specs--alpha".to_string(),
+            verdict: "ok".to_string(),
+            method: None,
+            entity_hash: hash,
+            actor: "cli".to_string(),
+            client: None,
+            role: "checker".to_string(),
+            identity: Some("checker-beside".to_string()),
+            kind: None,
+            schema_ref: None,
+            finding: None,
+            renamed_from: None,
+        })
+        .unwrap();
+    mounted.set_workspace_root(ws.path().to_path_buf());
+
+    let prov = mounted.entity_provenance("specs", "specs--alpha").unwrap();
+    assert_eq!(prov.check_state, "never_checked");
+    assert!(prov.last_check.is_none());
+    let sealed = prov.sealed.as_ref().unwrap();
+    assert!(!sealed.checks_carried);
+    assert_eq!(
+        sealed.checks_reason.as_deref(),
+        Some("the archive carries no check records; every state reads never_checked")
+    );
+    let axis = crate::ops::health::health_checks_axis(&mounted, Some("specs"));
+    assert_eq!(axis["specs"]["never_checked"], 1, "{axis}");
+    assert_eq!(axis["specs"]["sealed"]["carried"], false, "{axis}");
+    assert!(
+        axis["specs"]["sealed"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("no check records"),
+        "{axis}"
+    );
+}
+
+/// AC3 complement: a writable mem never reads a sealed member. A
+/// `.memstead/checks.json` file dropped into a folder mem's directory is
+/// not a source of check state; only the workspace ledger is.
+#[test]
+fn writable_mem_never_reads_a_sealed_member() {
+    let tmp = TempDir::new().unwrap();
+    let (engine, dir) = folder_mem_with_entities(&tmp, &["Alpha"]);
+    let hash = engine
+        .get_entity(&crate::EntityId::new("specs", "alpha"))
+        .unwrap()
+        .content_hash
+        .clone();
+    let member = serde_json::json!({
+        "version": 1,
+        "entities": {"alpha": {"verification": {
+            "ts": 1, "verdict": "ok", "entity_hash": hash, "actor": "cli",
+            "role": "checker", "identity": "checker-planted"
+        }}}
+    });
+    std::fs::write(
+        dir.join(".memstead").join("checks.json"),
+        member.to_string(),
+    )
+    .unwrap();
+    let engine = Engine::from_mounts(vec![(
+        folder_mount("specs", dir.clone()),
+        Box::new(FilesystemBackend::new(dir)) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+    assert!(engine.archive_checks_for("specs").is_none());
+    let (state, rec) = engine.entity_check_state("specs", "specs--alpha").unwrap();
+    assert_eq!(state, crate::check::CheckState::NeverChecked);
+    assert!(rec.is_none());
+}

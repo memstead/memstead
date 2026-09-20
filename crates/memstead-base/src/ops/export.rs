@@ -19,9 +19,9 @@ use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
 use memstead_schema::{
-    ARCHIVE_ANCHORS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX,
-    ArchiveProvenance, EntityProvenance, MemConfig, PublishConversionError, SchemaSourceError,
-    SchemaSourceFile, collect_schema_source, published_config_from,
+    ARCHIVE_ANCHORS_PATH, ARCHIVE_CHECKS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_PROVENANCE_PATH,
+    ARCHIVE_SCHEMA_PREFIX, ArchiveProvenance, EntityProvenance, MemConfig, PublishConversionError,
+    SchemaSourceError, SchemaSourceFile, collect_schema_source, published_config_from,
 };
 use zip::{CompressionMethod, DateTime, write::SimpleFileOptions};
 
@@ -132,6 +132,106 @@ pub fn build_redacted_archive_provenance(
     )
 }
 
+/// Build the sealed check-records member from a workspace ledger: for
+/// every entity the archive carries (`entity_paths`, the mem-relative
+/// paths), the latest ledger record per kind, as [`crate::check::SealedChecks`].
+/// Records of other mems, and records of entities the archive does not
+/// carry (deleted since the check), are not sealed; the method note
+/// passes through the same private-pattern redaction the provenance
+/// member applies, and identities travel verbatim. `None` when no
+/// record qualifies, so a mem with no record exports byte-identically
+/// to one exported by an engine without this member.
+pub fn build_redacted_sealed_checks(
+    records: &[crate::check::CheckRecord],
+    mem_name: &str,
+    entity_paths: &[String],
+) -> (
+    Option<crate::check::SealedChecks>,
+    Vec<crate::ops::redaction::RedactionCount>,
+) {
+    use std::collections::BTreeMap;
+
+    let carried: std::collections::BTreeSet<&str> =
+        entity_paths.iter().map(String::as_str).collect();
+    // Ledger order is record order: a later line of the same (entity,
+    // kind) supersedes an earlier one, exactly as `latest_for_wire_kind`
+    // reads the ledger.
+    let mut latest: BTreeMap<String, BTreeMap<String, crate::check::CheckRecord>> = BTreeMap::new();
+    for rec in records {
+        let id = EntityId(rec.entity.clone());
+        if id.mem() != mem_name || !carried.contains(id.path()) {
+            continue;
+        }
+        let kind = crate::check::sealed_kind_of(rec);
+        if kind.is_empty() {
+            continue;
+        }
+        latest
+            .entry(id.path().to_string())
+            .or_default()
+            .insert(kind, rec.clone());
+    }
+    if latest.is_empty() {
+        return (None, Vec::new());
+    }
+    let mut redacted_total: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut sealed = crate::check::SealedChecks::new();
+    for (path, kinds) in latest {
+        let mut out = BTreeMap::new();
+        for (kind, rec) in kinds {
+            let mut sc = crate::check::SealedCheck::from_record(&rec);
+            if let Some(m) = sc.method.take() {
+                let (m, counts) = crate::ops::redaction::redact(&m);
+                crate::ops::redaction::tally(&mut redacted_total, counts);
+                sc.method = Some(m);
+            }
+            out.insert(kind, sc);
+        }
+        sealed.entities.insert(path, out);
+    }
+    (
+        Some(sealed),
+        crate::ops::redaction::counts_to_list(&redacted_total),
+    )
+}
+
+/// The sealed check-records member bytes for a mem, read from the
+/// workspace ledger when the engine has a workspace root: `None` (no
+/// member) without a root, without a ledger, or without a qualifying
+/// record. One reader for every export path, so the three storage arms
+/// seal the same bytes for the same ledger.
+pub fn sealed_checks_bytes_for(
+    workspace_root: Option<&Path>,
+    mem_name: &str,
+    entity_paths: &[String],
+) -> (Option<Vec<u8>>, Vec<crate::ops::redaction::RedactionCount>) {
+    let Some(root) = workspace_root else {
+        return (None, Vec::new());
+    };
+    let records = crate::check::CheckLedger::for_workspace(root).all();
+    let (sealed, redactions) = build_redacted_sealed_checks(&records, mem_name, entity_paths);
+    (sealed.and_then(|s| s.to_archive_bytes().ok()), redactions)
+}
+
+/// Fold two export paths' redaction counts into one list, in vocabulary
+/// order (the provenance member's and the checks member's).
+pub fn merge_redactions(
+    a: Vec<crate::ops::redaction::RedactionCount>,
+    b: Vec<crate::ops::redaction::RedactionCount>,
+) -> Vec<crate::ops::redaction::RedactionCount> {
+    use std::collections::BTreeMap;
+    let mut total: BTreeMap<&'static str, usize> = BTreeMap::new();
+    for rc in a.iter().chain(b.iter()) {
+        if let Some(class) = crate::ops::redaction::REDACTION_CLASSES
+            .iter()
+            .find(|c| c.name == rc.class)
+        {
+            *total.entry(class.name).or_insert(0) += rc.count;
+        }
+    }
+    crate::ops::redaction::counts_to_list(&total)
+}
+
 /// Byte-shaped output of [`export_mem_to_bytes`]. Bundles the
 /// produced archive bytes with the same metadata
 /// [`MemExportResult`] reports for path-based exports.
@@ -146,8 +246,9 @@ pub struct MemExportBytes {
     pub version: String,
     /// `.md` entity count in the produced archive.
     pub entity_count: usize,
-    /// Per-class private-pattern redactions in the provenance member
-    /// (mirrors `MemExportResult.redactions`); empty when none.
+    /// Per-class private-pattern redactions in the provenance and the
+    /// sealed-checks members (mirrors `MemExportResult.redactions`);
+    /// empty when none.
     pub redactions: Vec<crate::ops::redaction::RedactionCount>,
     /// Cross-mem edges whose target won't travel inside this archive —
     /// `install` will reject each. Mirrors
@@ -299,6 +400,13 @@ pub fn export_mem_to_bytes(
     // and thread it verbatim; export is the producer half of that contract.
     let anchors_bytes = backend.read_anchors_sidecar().ok().flatten();
 
+    // Source the sealed check records from the workspace ledger (the
+    // engine's, never the mem's): the latest record per entity and kind
+    // for the entities this archive carries. No root, no ledger, no
+    // record: no member.
+    let (checks_bytes, check_redactions) =
+        sealed_checks_bytes_for(workspace_root, explicit_name, &entity_paths);
+
     export_entries_to_bytes(
         config,
         workspace_root,
@@ -307,10 +415,11 @@ pub fn export_mem_to_bytes(
         md_entries,
         Some(&provenance),
         anchors_bytes.as_deref(),
+        checks_bytes.as_deref(),
         ref_schema_source,
     )
     .map(|mut r| {
-        r.redactions = redactions;
+        r.redactions = merge_redactions(redactions, check_redactions);
         r
     })
 }
@@ -369,6 +478,7 @@ pub fn export_entries_to_bytes(
     md_entries: Vec<(PathBuf, Vec<u8>)>,
     provenance: Option<&ArchiveProvenance>,
     anchors_bytes: Option<&[u8]>,
+    checks_bytes: Option<&[u8]>,
     ref_schema_source: Option<Vec<SchemaSourceFile>>,
 ) -> Result<MemExportBytes, MemExportError> {
     let explicit_name = archive_identity(mem_name);
@@ -403,6 +513,12 @@ pub fn export_entries_to_bytes(
     // validates it and the canonical re-pack threads it through unchanged.
     if let Some(anchors) = anchors_bytes {
         all_entries.push((ARCHIVE_ANCHORS_PATH.to_string(), anchors.to_vec()));
+    }
+    // Embed the sealed check records when the mem has any. A recognised
+    // `.memstead/` member like the anchors: strictly validated by the
+    // archive validator, threaded verbatim through the canonical re-pack.
+    if let Some(checks) = checks_bytes {
+        all_entries.push((ARCHIVE_CHECKS_PATH.to_string(), checks.to_vec()));
     }
     for sf in &schema_files {
         all_entries.push((

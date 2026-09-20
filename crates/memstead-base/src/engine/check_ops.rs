@@ -214,10 +214,70 @@ impl Engine {
             })
     }
 
+    /// The newest check record of one entity under one wire kind, from
+    /// the one source the mount has: the sealed member for an archive
+    /// mount (a workspace ledger beside it is never consulted, and an
+    /// archive sealed without records has none), the workspace ledger
+    /// for every other mount (a writable mem never reads a sealed
+    /// member; an engine with no workspace root has no ledger). Every
+    /// check-state read goes through here, so the derivation is the same
+    /// whatever the mount.
+    pub fn latest_check_record(
+        &self,
+        mem_name: &str,
+        entity_id: &str,
+        kind: &str,
+    ) -> Option<CheckRecord> {
+        if self.is_archive_mount(mem_name) {
+            let path = crate::EntityId(entity_id.to_string());
+            return self
+                .archive_checks_for(mem_name)
+                .and_then(|sealed| sealed.latest(path.path(), kind))
+                .map(|sc| sc.to_record(entity_id, kind));
+        }
+        self.workspace_root()
+            .map(CheckLedger::for_workspace)
+            .and_then(|l| l.latest_for_wire_kind(entity_id, kind))
+    }
+
+    /// The newest record per foreign `x-<name>` kind of one entity, in
+    /// kind order, from the same source as [`Self::latest_check_record`].
+    /// Recorded, listed, never aggregated into a state.
+    pub fn latest_foreign_checks(&self, mem_name: &str, entity_id: &str) -> Vec<CheckRecord> {
+        if self.is_archive_mount(mem_name) {
+            let path = crate::EntityId(entity_id.to_string());
+            return self
+                .archive_checks_for(mem_name)
+                .map(|sealed| {
+                    sealed
+                        .kinds_of(path.path())
+                        .filter(|(k, _)| k.starts_with(crate::check::FOREIGN_KIND_PREFIX))
+                        .map(|(k, sc)| sc.to_record(entity_id, k))
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+        let Some(ledger) = self.workspace_root().map(CheckLedger::for_workspace) else {
+            return Vec::new();
+        };
+        let mut latest: std::collections::BTreeMap<String, CheckRecord> =
+            std::collections::BTreeMap::new();
+        for rec in ledger.all() {
+            if rec.entity != entity_id {
+                continue;
+            }
+            if let Some(k) = rec.foreign_kind() {
+                latest.insert(k.to_string(), rec.clone());
+            }
+        }
+        latest.into_values().collect()
+    }
+
     /// Derive one entity's check state and newest check record.
     /// Refuses typed on unknown mem/entity; an engine with no
     /// workspace root has no check store and honestly derives
-    /// `never_checked` (no recorded checks exist).
+    /// `never_checked` (no recorded checks exist); an archive mount
+    /// derives from its sealed member the same way.
     pub fn entity_check_state(
         &self,
         mem_name: &str,
@@ -232,10 +292,8 @@ impl Engine {
             .ok_or_else(|| EngineError::NotFound {
                 id: entity_id.to_string(),
             })?;
-        let latest = self
-            .workspace_root()
-            .map(CheckLedger::for_workspace)
-            .and_then(|l| l.latest_for_kind(entity_id, CheckKind::Verification));
+        let latest =
+            self.latest_check_record(mem_name, entity_id, CheckKind::Verification.as_str());
         Ok((derive_state(latest.as_ref(), &current_hash), latest))
     }
 
@@ -259,10 +317,7 @@ impl Engine {
             .ok_or_else(|| EngineError::NotFound {
                 id: entity_id.to_string(),
             })?;
-        let latest = self
-            .workspace_root()
-            .map(CheckLedger::for_workspace)
-            .and_then(|l| l.latest_for_kind(entity_id, CheckKind::Conformance));
+        let latest = self.latest_check_record(mem_name, entity_id, CheckKind::Conformance.as_str());
         Ok((
             crate::check::derive_state_pinned(
                 latest.as_ref(),

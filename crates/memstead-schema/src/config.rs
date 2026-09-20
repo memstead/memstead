@@ -59,6 +59,15 @@ pub const ARCHIVE_PROVENANCE_PATH: &str = ".memstead/provenance.json";
 /// validation failure, unlike unknown future meta members which stay
 /// tolerate-and-ignore).
 pub const ARCHIVE_ANCHORS_PATH: &str = ".memstead/anchors.json";
+/// Member path of the optional sealed check records inside a sealed
+/// archive: per entity the latest check record per kind, so an archive
+/// mount answers check state from the archive itself. Additive: a mem
+/// with no check record omits it, an engine that does not recognise it
+/// tolerates it as an unknown meta member, and the published format
+/// number is unchanged. Recognised as a strict member on engines that
+/// know it (a malformed member is a typed validation failure), the way
+/// the anchors member is.
+pub const ARCHIVE_CHECKS_PATH: &str = ".memstead/checks.json";
 /// File extension (without dot) of a sealed archive — the sole spelling.
 /// The one deliberately-distinct token in a project that is otherwise
 /// "memstead" everywhere — short, and derived from the project name.

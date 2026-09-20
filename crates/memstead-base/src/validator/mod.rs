@@ -142,6 +142,12 @@ pub struct ValidatedMem {
     /// through the canonical re-pack so publish/normalize does not strip
     /// provenance anchors.
     pub anchors_bytes: Option<Vec<u8>>,
+    /// Raw bytes of the archive's sealed check-records member
+    /// (`.memstead/checks.json`), or `None` when the archive carries
+    /// none. Validated at extract time (shape, vocabulary, entity
+    /// roster) and threaded verbatim through the canonical re-pack so
+    /// publish/normalize does not strip the records.
+    pub checks_bytes: Option<Vec<u8>>,
 }
 
 /// Every reason the validator can reject an archive. Each variant
@@ -184,6 +190,8 @@ pub enum ValidationError {
     MissingConfig,
     #[error("invalid anchors sidecar (.memstead/anchors.json): {reason}")]
     InvalidAnchorsMember { reason: String },
+    #[error("invalid sealed check records (.memstead/checks.json): {reason}")]
+    InvalidChecksMember { reason: String },
     #[error("invalid config: {reason}")]
     InvalidConfig { reason: String },
     #[error("invalid name: {reason}")]
@@ -355,6 +363,7 @@ pub fn make_archive_self_contained(bytes: &[u8]) -> Result<SelfContainedArchive,
         embedded_schema.as_ref(),
         lenient.provenance_bytes.as_deref(),
         lenient.anchors_bytes.as_deref(),
+        lenient.checks_bytes.as_deref(),
     )?;
     // The strict pass is the proof: what comes out is exactly what
     // `install` accepts, or this returns the typed refusal.
@@ -514,6 +523,7 @@ fn validate_impl(
         embedded_schema.as_ref(),
         entries.provenance_bytes.as_deref(),
         entries.anchors_bytes.as_deref(),
+        entries.checks_bytes.as_deref(),
     )?;
 
     Ok(ValidatedMem {
@@ -527,6 +537,7 @@ fn validate_impl(
         dangling_cross_mem_edges: graph_result.dangling_cross_mem_edges,
         provenance_bytes: entries.provenance_bytes,
         anchors_bytes: entries.anchors_bytes,
+        checks_bytes: entries.checks_bytes,
     })
 }
 

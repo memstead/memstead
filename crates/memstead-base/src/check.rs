@@ -33,6 +33,7 @@
 //! and goes stale when the pin moves ([`derive_state_pinned`]): the
 //! prose it judged against is no longer the prose in force.
 
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -496,6 +497,205 @@ impl CheckLedger {
                 .rev()
                 .find(|r| r.entity == entity && r.kind.as_deref() == Some(kind)),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sealed check records: the archive member
+// ---------------------------------------------------------------------------
+
+/// Version of the sealed check-records member
+/// (`.memstead/checks.json`, [`memstead_schema::ARCHIVE_CHECKS_PATH`]).
+/// Read back by the archive mount; a reader tells "absent" from
+/// "not carried" by this line inside the member, so the published
+/// archive format number never moves for it.
+pub const SEALED_CHECKS_VERSION: u32 = 1;
+
+/// One sealed check record: the fields of the ledger line the archive
+/// carries, nothing invented. `kind` is the map key it sits under, the
+/// entity is the map key above that (its mem-relative path, so the
+/// member survives a remount under another mem name). The transport
+/// client and the structured finding stay in the workspace ledger: the
+/// archive answers state, and state derives from these fields alone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SealedCheck {
+    /// Unix epoch seconds at record time.
+    pub ts: u64,
+    /// `ok` | `failed`.
+    pub verdict: String,
+    /// The free-text method note, after the export's private-pattern
+    /// redaction (the same classes the provenance member applies).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    /// The entity's `content_hash` at check time: the freshness
+    /// baseline the mount compares against the sealed entity.
+    pub entity_hash: String,
+    /// Recorded actor category (`cli`, `agent`, ...).
+    pub actor: String,
+    /// The declared role, or `unspecified`.
+    pub role: String,
+    /// The declared identity, verbatim: a handle, never a person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
+    /// The schema pin a `conformance` record was judged against.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_ref: Option<String>,
+    /// The id the check was recorded under before a rename carried it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renamed_from: Option<String>,
+}
+
+impl SealedCheck {
+    /// The archive form of a ledger line.
+    pub fn from_record(rec: &CheckRecord) -> Self {
+        Self {
+            ts: rec.ts,
+            verdict: rec.verdict.clone(),
+            method: rec.method.clone(),
+            entity_hash: rec.entity_hash.clone(),
+            actor: rec.actor.clone(),
+            role: rec.role.clone(),
+            identity: rec.identity.clone(),
+            schema_ref: rec.schema_ref.clone(),
+            renamed_from: rec.renamed_from.clone(),
+        }
+    }
+
+    /// The ledger form under `entity_id` and the wire `kind` the record
+    /// sits under, so every derivation ([`derive_state`],
+    /// [`derive_state_pinned`]) and every surface that renders a
+    /// [`CheckRecord`] reads a sealed record the way it reads a ledger
+    /// line. A `verification` kind stays omitted, as the ledger writes it.
+    pub fn to_record(&self, entity_id: &str, kind: &str) -> CheckRecord {
+        CheckRecord {
+            ts: self.ts,
+            entity: entity_id.to_string(),
+            verdict: self.verdict.clone(),
+            method: self.method.clone(),
+            entity_hash: self.entity_hash.clone(),
+            actor: self.actor.clone(),
+            client: None,
+            role: self.role.clone(),
+            identity: self.identity.clone(),
+            kind: (kind != CheckKind::Verification.as_str()).then(|| kind.to_string()),
+            schema_ref: self.schema_ref.clone(),
+            finding: None,
+            renamed_from: self.renamed_from.clone(),
+        }
+    }
+}
+
+/// The sealed check-records member: per entity (keyed by mem-relative
+/// path) the latest record per kind (keyed by wire kind:
+/// `verification`, `conformance`, or a foreign `x-<name>`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SealedChecks {
+    pub version: u32,
+    #[serde(default)]
+    pub entities: BTreeMap<String, BTreeMap<String, SealedCheck>>,
+}
+
+impl SealedChecks {
+    /// An empty member of the current version.
+    pub fn new() -> Self {
+        Self {
+            version: SEALED_CHECKS_VERSION,
+            entities: BTreeMap::new(),
+        }
+    }
+
+    /// The latest sealed record of one entity (by mem-relative path)
+    /// under one wire kind.
+    pub fn latest(&self, entity_path: &str, kind: &str) -> Option<&SealedCheck> {
+        self.entities
+            .get(entity_path)
+            .and_then(|kinds| kinds.get(kind))
+    }
+
+    /// Every sealed kind of one entity, in key order.
+    pub fn kinds_of(&self, entity_path: &str) -> impl Iterator<Item = (&str, &SealedCheck)> {
+        self.entities
+            .get(entity_path)
+            .into_iter()
+            .flat_map(|kinds| kinds.iter().map(|(k, v)| (k.as_str(), v)))
+    }
+
+    /// Serialise to the canonical member bytes (pretty JSON, trailing
+    /// newline), deterministic for a given content: both maps are
+    /// ordered.
+    pub fn to_archive_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
+        let mut s = serde_json::to_string_pretty(self)?;
+        s.push('\n');
+        Ok(s.into_bytes())
+    }
+
+    /// Parse the member bytes. Shape only; [`Self::validate`] checks the
+    /// vocabulary and the entity roster.
+    pub fn from_archive_bytes(bytes: &[u8]) -> Result<Self, serde_json::Error> {
+        serde_json::from_slice(bytes)
+    }
+
+    /// The validator's shape check: the version this engine reads, every
+    /// kind in the vocabulary, every verdict in the vocabulary, a
+    /// non-empty hash, actor and role, and every entity path one the
+    /// archive carries (`carried` is the set of mem-relative entity
+    /// paths). The error names the first offending record.
+    pub fn validate(&self, carried: &std::collections::BTreeSet<String>) -> Result<(), String> {
+        if self.version != SEALED_CHECKS_VERSION {
+            return Err(format!(
+                "version {} is not the version this engine reads ({SEALED_CHECKS_VERSION})",
+                self.version
+            ));
+        }
+        for (path, kinds) in &self.entities {
+            if !carried.contains(path) {
+                return Err(format!(
+                    "entity `{path}` names no entity the archive carries"
+                ));
+            }
+            for (kind, rec) in kinds {
+                let at = format!("entity `{path}`, kind `{kind}`");
+                if RecordKind::from_wire(kind).is_none() {
+                    return Err(format!(
+                        "{at}: the kind is not one of {}",
+                        RecordKind::vocabulary_hint()
+                    ));
+                }
+                if Verdict::from_wire(&rec.verdict).is_none() {
+                    return Err(format!(
+                        "{at}: verdict `{}` is not one of {}",
+                        rec.verdict,
+                        VERDICTS.join(", ")
+                    ));
+                }
+                if rec.entity_hash.trim().is_empty() {
+                    return Err(format!("{at}: entity_hash is empty"));
+                }
+                if rec.actor.trim().is_empty() {
+                    return Err(format!("{at}: actor is empty"));
+                }
+                if rec.role.trim().is_empty() {
+                    return Err(format!("{at}: role is empty"));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Default for SealedChecks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The wire kind a ledger line sits under in the sealed member: an
+/// engine kind by its resolved name (a legacy kind-less line is
+/// `verification`), a foreign kind verbatim.
+pub fn sealed_kind_of(rec: &CheckRecord) -> String {
+    match rec.resolved_kind() {
+        Some(k) => k.as_str().to_string(),
+        None => rec.kind.clone().unwrap_or_default(),
     }
 }
 

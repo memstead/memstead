@@ -9,8 +9,8 @@
 use std::io::{Cursor, Read};
 
 use memstead_schema::{
-    ARCHIVE_ANCHORS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_META_DIR, ARCHIVE_PROVENANCE_PATH,
-    ARCHIVE_SCHEMA_PREFIX,
+    ARCHIVE_ANCHORS_PATH, ARCHIVE_CHECKS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_META_DIR,
+    ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX,
 };
 
 use super::{SizeCapKind, ValidationError, ValidatorLimits};
@@ -79,6 +79,15 @@ pub struct ArchiveEntries {
     /// failure (unlike unknown future meta members, which stay
     /// tolerate-and-ignore).
     pub anchors_bytes: Option<Vec<u8>>,
+    /// Raw bytes of the optional sealed check-records member
+    /// (`.memstead/checks.json`), or `None` when the archive carries
+    /// none (an archive sealed with no check record, or by an engine
+    /// before the member existed). Strict like the anchors member: a
+    /// recognised member that is not the declared shape, names a kind
+    /// outside the vocabulary or an entity the archive does not carry
+    /// is a typed validation failure; threaded verbatim through the
+    /// canonical re-pack on success.
+    pub checks_bytes: Option<Vec<u8>>,
 }
 
 /// Walk the archive, enforce archive-level rules, return entries in
@@ -113,6 +122,7 @@ pub fn extract_entries(
     let mut schema_files: Vec<SchemaFile> = Vec::new();
     let mut provenance_bytes: Option<Vec<u8>> = None;
     let mut anchors_bytes: Option<Vec<u8>> = None;
+    let mut checks_bytes: Option<Vec<u8>> = None;
     let mut seen_paths: Vec<String> = Vec::new();
     let mut uncompressed_total: u64 = 0;
 
@@ -181,6 +191,7 @@ pub fn extract_entries(
         let is_schema = is_schema_path(&path_string);
         let is_provenance = path_string == ARCHIVE_PROVENANCE_PATH;
         let is_anchors = path_string == ARCHIVE_ANCHORS_PATH;
+        let is_checks = path_string == ARCHIVE_CHECKS_PATH;
         // `.md` files inside the meta dir are NOT entities — without
         // this guard a `.memstead/notes.md` would slip past the
         // whitelist as markdown.
@@ -207,6 +218,7 @@ pub fn extract_entries(
             && !is_schema
             && !is_provenance
             && !is_anchors
+            && !is_checks
             && !path_string.ends_with(".md")
             && !path_string.starts_with(ARCHIVE_SCHEMA_PREFIX);
         if !is_config
@@ -214,6 +226,7 @@ pub fn extract_entries(
             && !is_schema
             && !is_provenance
             && !is_anchors
+            && !is_checks
             && !is_ignored_meta
         {
             return Err(ValidationError::UnknownFile(path_string));
@@ -289,6 +302,21 @@ pub fn extract_entries(
                 .validate_artifact_references()
                 .map_err(|reason| ValidationError::InvalidAnchorsMember { reason })?;
             anchors_bytes = Some(buf);
+        } else if is_checks {
+            // Strict like the anchors member: the shape and the vocabulary
+            // are checked here; the entity roster is checked once every
+            // entity path is known, below. Silently dropping a malformed
+            // member would read as "never checked", the one false answer
+            // the member exists to make impossible.
+            // The shape refuses here; the vocabulary and the entity
+            // roster are checked after the walk, once every entity path
+            // is known (zip order is not entity-first).
+            crate::check::SealedChecks::from_archive_bytes(&buf).map_err(|e| {
+                ValidationError::InvalidChecksMember {
+                    reason: e.to_string(),
+                }
+            })?;
+            checks_bytes = Some(buf);
         } else {
             let content = match std::str::from_utf8(&buf) {
                 Ok(s) => s.to_string(),
@@ -324,12 +352,27 @@ pub fn extract_entries(
     markdown_files.sort_by(|a, b| a.path.cmp(&b.path));
     schema_files.sort_by(|a, b| a.archive_path.cmp(&b.archive_path));
 
+    // The sealed check records: version, kind and verdict vocabulary,
+    // and the entity roster. A record naming an entity the archive does
+    // not carry is corruption, not a record that could be "stale".
+    if let Some(bytes) = &checks_bytes {
+        let carried: std::collections::BTreeSet<String> = markdown_files
+            .iter()
+            .map(|m| m.path.strip_suffix(".md").unwrap_or(&m.path).to_string())
+            .collect();
+        crate::check::SealedChecks::from_archive_bytes(bytes)
+            .map_err(|e| e.to_string())
+            .and_then(|sealed| sealed.validate(&carried))
+            .map_err(|reason| ValidationError::InvalidChecksMember { reason })?;
+    }
+
     Ok(ArchiveEntries {
         config_bytes,
         markdown_files,
         schema_files,
         provenance_bytes,
         anchors_bytes,
+        checks_bytes,
     })
 }
 
@@ -467,6 +510,99 @@ mod tests {
         let entries = extract_entries(&zip, &ValidatorLimits::DEFAULT)
             .expect("the pinned sentinel form is a valid member");
         assert!(entries.anchors_bytes.is_some());
+    }
+
+    fn checks_member(entity: &str, kind: &str, verdict: &str) -> Vec<u8> {
+        format!(
+            r#"{{"version":1,"entities":{{"{entity}":{{"{kind}":{{"ts":1,"verdict":"{verdict}","entity_hash":"h1","actor":"cli","role":"checker","identity":"checker-s1"}}}}}}}}"#
+        )
+        .into_bytes()
+    }
+
+    /// AC2: the sealed check-records member (`.memstead/checks.json`) is a
+    /// recognised strict meta member: surfaced verbatim, not an entity.
+    #[test]
+    fn recognises_valid_checks_member() {
+        let checks = checks_member("foo", "verification", "ok");
+        let archive = build_archive(&[
+            (".memstead/config.json", ok_config()),
+            (".memstead/checks.json", &checks),
+            ("foo.md", b"# Foo\n"),
+        ]);
+        let entries = extract_entries(&archive, &ValidatorLimits::DEFAULT).unwrap();
+        assert_eq!(
+            entries.checks_bytes.as_deref(),
+            Some(&checks[..]),
+            "checks bytes surface verbatim"
+        );
+        assert_eq!(entries.markdown_files.len(), 1, "checks is not an entity");
+
+        // Every kind spelling the vocabulary admits, foreign included.
+        for kind in ["conformance", "x-audit"] {
+            let checks = checks_member("foo", kind, "failed");
+            let archive = build_archive(&[
+                (".memstead/config.json", ok_config()),
+                (".memstead/checks.json", &checks),
+                ("foo.md", b"# Foo\n"),
+            ]);
+            extract_entries(&archive, &ValidatorLimits::DEFAULT)
+                .unwrap_or_else(|e| panic!("kind {kind} is in the vocabulary: {e}"));
+        }
+    }
+
+    /// AC2 complement: a malformed member refuses with the typed code
+    /// naming the member and the first offending record: not the
+    /// declared shape, an unknown kind spelling, an unknown verdict, a
+    /// record naming an entity the archive does not carry, a version
+    /// this engine does not read. (Unknown OTHER meta members keep
+    /// tolerate-and-ignore; a `checks.json` outside the meta dir is an
+    /// unknown root member as before.)
+    #[test]
+    fn rejects_malformed_checks_member() {
+        let refuse = |member: &[u8], expect: &str| {
+            let archive = build_archive(&[
+                (".memstead/config.json", ok_config()),
+                (".memstead/checks.json", member),
+                ("foo.md", b"# Foo\n"),
+            ]);
+            let err = extract_entries(&archive, &ValidatorLimits::DEFAULT).unwrap_err();
+            match &err {
+                ValidationError::InvalidChecksMember { reason } => {
+                    assert!(reason.contains(expect), "expected `{expect}` in: {reason}");
+                }
+                other => panic!("expected InvalidChecksMember, got {other:?}"),
+            }
+            assert!(
+                err.to_string().contains(".memstead/checks.json"),
+                "the refusal names the member: {err}"
+            );
+        };
+        refuse(b"{ this is not valid json", "key must be a string");
+        refuse(&checks_member("foo", "audit", "ok"), "kind `audit`");
+        refuse(
+            &checks_member("foo", "verification", "maybe"),
+            "verdict `maybe`",
+        );
+        refuse(
+            &checks_member("bar", "verification", "ok"),
+            "entity `bar` names no entity the archive carries",
+        );
+        refuse(
+            br#"{"version":2,"entities":{}}"#,
+            "version 2 is not the version this engine reads",
+        );
+
+        // Outside the meta dir: an unknown root member, as before.
+        let archive = build_archive(&[
+            (".memstead/config.json", ok_config()),
+            ("checks.json", &checks_member("foo", "verification", "ok")),
+            ("foo.md", b"# Foo\n"),
+        ]);
+        let err = extract_entries(&archive, &ValidatorLimits::DEFAULT).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::UnknownFile(ref p) if p == "checks.json"),
+            "got {err:?}"
+        );
     }
 
     /// The optional `.memstead/provenance.json` payload is recognised and

@@ -215,6 +215,11 @@ pub struct EntityProvenance {
     /// The newest `conformance` record, when one exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_conformance_check: Option<crate::check::CheckRecord>,
+    /// The newest record per foreign `x-<name>` kind, in kind order:
+    /// recorded verbatim, listed here, never aggregated into a state.
+    /// Empty (and absent from the JSON) when none was recorded.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub foreign_checks: Vec<crate::check::CheckRecord>,
     /// On an archive mount: the authoring rationale the archive seals
     /// for this entity (`.memstead/provenance.json`), in place of the
     /// recorded touches an archive does not carry. Absent on source
@@ -249,6 +254,16 @@ pub struct SealedProvenance {
     /// The actor category recorded with it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actor: Option<String>,
+    /// Whether the archive seals a check record for this entity
+    /// (`.memstead/checks.json`). The check states above derive from
+    /// those records alone on an archive mount; when `false` every
+    /// state reads `never_checked` and `checks_reason` says why.
+    pub checks_carried: bool,
+    /// Why no sealed check record answers for this entity: the archive
+    /// carries no check records at all, or none for this entity. Absent
+    /// when one is carried.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checks_reason: Option<String>,
 }
 
 fn touch_to_record(t: &EntityTouch) -> ProvenanceRecord {
@@ -308,15 +323,22 @@ impl Engine {
             last_check,
             conformance_state: conformance_state.as_str().to_string(),
             last_conformance_check,
+            foreign_checks: self.latest_foreign_checks(mem, entity_id),
             sealed: None,
         })
     }
 
     /// The provenance block of an entity on an archive mount: the sealed
     /// rationale where the payload carries one, `carried: false` where
-    /// it does not, and the check states the workspace ledger holds for
-    /// the id either way. Refuses `ENTITY_NOT_FOUND` for an id the mount
-    /// does not serve, as the history read does.
+    /// it does not, and the check states derived from the sealed check
+    /// records (`.memstead/checks.json`) the same way a workspace derives
+    /// them from its ledger: the sealed record's hash against the sealed
+    /// entity's content hash, so a record carried across a later edit
+    /// reads stale. An archive without the member, or without a record
+    /// for this entity, reads `never_checked` with the reason stated
+    /// (`checks_carried: false`, `checks_reason`); a workspace ledger
+    /// beside the mount is never consulted. Refuses `ENTITY_NOT_FOUND`
+    /// for an id the mount does not serve, as the history read does.
     fn sealed_provenance(
         &self,
         mem: &str,
@@ -332,6 +354,20 @@ impl Engine {
             });
         }
         let id = crate::EntityId(entity_id.to_string());
+        let (checks_carried, checks_reason) = match self.archive_checks_for(mem) {
+            None => (
+                false,
+                Some(
+                    "the archive carries no check records; every state reads never_checked"
+                        .to_string(),
+                ),
+            ),
+            Some(sealed) if sealed.kinds_of(id.path()).next().is_none() => (
+                false,
+                Some("the archive carries no check record for this entity".to_string()),
+            ),
+            Some(_) => (true, None),
+        };
         let sealed = match self.archive_provenance_for(mem) {
             Some(payload) => {
                 let history = Some(
@@ -348,6 +384,8 @@ impl Engine {
                         kind: rec.kind.clone(),
                         timestamp: rec.timestamp.clone(),
                         actor: rec.actor.clone(),
+                        checks_carried,
+                        checks_reason: checks_reason.clone(),
                     },
                     None => SealedProvenance {
                         carried: false,
@@ -356,6 +394,8 @@ impl Engine {
                         kind: None,
                         timestamp: None,
                         actor: None,
+                        checks_carried,
+                        checks_reason: checks_reason.clone(),
                     },
                 }
             }
@@ -366,6 +406,8 @@ impl Engine {
                 kind: None,
                 timestamp: None,
                 actor: None,
+                checks_carried,
+                checks_reason: checks_reason.clone(),
             },
         };
         let (check_state, last_check) = self.entity_check_state(mem, entity_id)?;
@@ -379,6 +421,7 @@ impl Engine {
             last_check,
             conformance_state: conformance_state.as_str().to_string(),
             last_conformance_check,
+            foreign_checks: self.latest_foreign_checks(mem, entity_id),
             sealed: Some(sealed),
         })
     }

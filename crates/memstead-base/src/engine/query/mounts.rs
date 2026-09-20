@@ -348,6 +348,35 @@ impl Engine {
             .and_then(|m| m.archive_provenance.as_ref())
     }
 
+    /// The sealed check records an archive mount carries
+    /// (`.memstead/checks.json`), or `None` when the mount is not an
+    /// archive or the archive carries none. The only check-state source
+    /// an archive mount has: a workspace ledger beside the mount is never
+    /// consulted for it, and a writable mount never reads a sealed member.
+    pub fn archive_checks_for(&self, mem: &str) -> Option<&crate::check::SealedChecks> {
+        self.mounts
+            .iter()
+            .find(|m| m.mount.mem == mem)
+            .filter(|m| {
+                matches!(
+                    m.mount.storage,
+                    crate::workspace::MountStorage::Archive { .. }
+                )
+            })
+            .and_then(|m| m.archive_checks.as_ref())
+    }
+
+    /// Whether `mem` is mounted from a sealed archive.
+    pub fn is_archive_mount(&self, mem: &str) -> bool {
+        self.mounts.iter().any(|m| {
+            m.mount.mem == mem
+                && matches!(
+                    m.mount.storage,
+                    crate::workspace::MountStorage::Archive { .. }
+                )
+        })
+    }
+
     /// Iterate `(mem_name, &MemConfig)` for every mount whose
     /// mem-config payload loaded at construction. Used by callers
     /// that walk every writable mount's config (`memstead health`'s

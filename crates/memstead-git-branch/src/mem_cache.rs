@@ -475,6 +475,63 @@ mod tests {
         );
     }
 
+    /// AC2: `memstead install` of an archive carrying the sealed
+    /// check-records member succeeds and caches the member; an archive
+    /// without it installs as today under a content key that does not
+    /// depend on the member's existence in the engine.
+    #[test]
+    fn install_accepts_archive_carrying_sealed_checks() {
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join("cache");
+        let _g = CacheGuard::install(&cache);
+
+        // Without the member.
+        let plain_src = tmp.path().join("plain").join("aws-patterns");
+        let plain = tmp.path().join("plain.mem");
+        build_valid_archive(&plain_src, &plain, "aws-patterns");
+        let plain_outcome = cache_install(&plain).expect("plain archive installs");
+        let plain_validated =
+            validate_and_normalize_archive(&std::fs::read(&plain_outcome.cache_path).unwrap())
+                .unwrap();
+        assert!(plain_validated.checks_bytes.is_none());
+
+        // With the member: the same mem, exported under a workspace root
+        // whose ledger holds a check of its one entity.
+        let ws = tmp.path().join("ws");
+        let mem_dir = ws.join("aws-patterns");
+        let sealed = tmp.path().join("sealed.mem");
+        build_valid_archive(&ws.join("placeholder"), &sealed, "aws-patterns");
+        memstead_base::check::CheckLedger::for_workspace(&ws)
+            .record(&memstead_base::check::CheckRecord {
+                ts: 1,
+                entity: "aws-patterns--alpha".to_string(),
+                verdict: "ok".to_string(),
+                method: None,
+                entity_hash: "h1".to_string(),
+                actor: "cli".to_string(),
+                client: None,
+                role: "checker".to_string(),
+                identity: Some("checker-s1".to_string()),
+                kind: None,
+                schema_ref: None,
+                finding: None,
+                renamed_from: None,
+            })
+            .unwrap();
+        let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
+        export_mem(&mem_dir, &config, &sealed, Some(&ws), None, None).unwrap();
+
+        let outcome = cache_install(&sealed).expect("archive with sealed checks installs");
+        assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
+        let cached = std::fs::read(&outcome.cache_path).unwrap();
+        let validated = validate_and_normalize_archive(&cached).unwrap();
+        assert!(
+            validated.checks_bytes.is_some(),
+            "the cached canonical bytes carry the member"
+        );
+        assert_ne!(outcome.cache_key, plain_outcome.cache_key);
+    }
+
     #[test]
     fn install_leaves_no_tmp_on_success() {
         let tmp = TempDir::new().unwrap();

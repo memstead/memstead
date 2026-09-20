@@ -335,6 +335,33 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 line.push('\n');
                 Some(line)
             };
+            // The conformance state and its record, and the newest record
+            // per foreign kind: the same source the verification line
+            // reads (the workspace ledger, or an archive's sealed records).
+            let render_more_checks = |prov: &serde_json::Value| -> String {
+                let mut out = String::new();
+                if let Some(state) = prov.get("conformance_state").and_then(|v| v.as_str())
+                    && state != "never_checked"
+                {
+                    out.push_str(&format!("- conformance state: {state}\n"));
+                    if let Some(l) = render_check(&prov["last_conformance_check"]) {
+                        out.push_str(&l.replacen("- last check:", "- last conformance check:", 1));
+                    }
+                }
+                if let Some(foreign) = prov.get("foreign_checks").and_then(|v| v.as_array()) {
+                    for rec in foreign {
+                        let kind = rec.get("kind").and_then(|v| v.as_str()).unwrap_or("x-");
+                        if let Some(l) = render_check(rec) {
+                            out.push_str(&l.replacen(
+                                "- last check:",
+                                &format!("- last {kind} check:"),
+                                1,
+                            ));
+                        }
+                    }
+                }
+                out
+            };
             match prov.get("unavailable") {
                 Some(reason) => {
                     text.push_str(&format!(
@@ -345,9 +372,18 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 }
                 None if prov.get("sealed").is_some() => {
                     text.push_str(&render_sealed(&prov["sealed"]));
+                    // The check states derive from the archive's sealed
+                    // check records; when none answers, the reason.
+                    if let Some(reason) = prov["sealed"]["checks_reason"].as_str() {
+                        text.push_str(&format!("- sealed checks: {reason}\n"));
+                    }
                     if let Some(state) = prov.get("check_state").and_then(|v| v.as_str()) {
                         text.push_str(&format!("- check state: {state}\n"));
                     }
+                    if let Some(l) = render_check(&prov["last_check"]) {
+                        text.push_str(&l);
+                    }
+                    text.push_str(&render_more_checks(prov));
                 }
                 None => {
                     if let Some(l) = render_rec("created by", "created_by") {
@@ -369,6 +405,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     if let Some(l) = render_check(&prov["last_check"]) {
                         text.push_str(&l);
                     }
+                    text.push_str(&render_more_checks(prov));
                 }
             }
         }

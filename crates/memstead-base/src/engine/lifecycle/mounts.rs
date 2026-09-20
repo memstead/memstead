@@ -355,8 +355,10 @@ impl Engine {
             last_known_head,
             mem_config,
             // A runtime-created mem is authored live, not installed from
-            // an archive — it carries no archive-borne provenance payload.
+            // an archive — it carries no archive-borne provenance payload
+            // and no sealed check records.
             archive_provenance: None,
+            archive_checks: None,
             // Registered live and loaded in this call — never deferred.
             deferred: false,
         });

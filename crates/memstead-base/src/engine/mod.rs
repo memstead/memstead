@@ -107,6 +107,14 @@ pub(crate) struct MountedBackend {
     /// malformed payload is downgraded to `None` rather than failing the
     /// mount: the member is additive.
     archive_provenance: Option<memstead_schema::ArchiveProvenance>,
+    /// The sealed check records an archive mount carries
+    /// (`.memstead/checks.json`), read at construction via
+    /// [`crate::backend::MemBackend::read_archive_checks`]. `None` on
+    /// every writable mount (their check state is the workspace
+    /// ledger's) and on an archive sealed without records; every
+    /// check-state read on an archive mount derives from this and never
+    /// from a workspace ledger ([`Engine::archive_checks_for`]).
+    archive_checks: Option<crate::check::SealedChecks>,
     /// `true` while a [`MountLifecycle::Lazy`] mount's entities have not
     /// been loaded into the store — the mount's metadata half (config,
     /// schema pin, provenance) is resolved at boot, the entity load is
@@ -501,6 +509,9 @@ pub type GitBranchExportFn = fn(
     // when the mem carried no anchors. The engine reads the branch tip; the
     // hook only embeds, keeping git tree-walking out of the fn-pointer.
     anchors_bytes: Option<&[u8]>,
+    // Engine-sourced sealed check records (from the workspace ledger) to
+    // embed at `.memstead/checks.json`. `None` when no record qualifies.
+    checks_bytes: Option<&[u8]>,
 ) -> Result<crate::ops::MemExportResult, BackendError>;
 
 /// `Engine::export_mem_to_bytes` dispatch for git-branch mounts.
@@ -526,6 +537,9 @@ pub type GitBranchExportToBytesFn = fn(
     // when the mem carried no anchors. Symmetric with `provenance_bytes`:
     // the engine reads the branch tip, the hook only embeds.
     anchors_bytes: Option<&[u8]>,
+    // Engine-sourced sealed check records (from the workspace ledger) to
+    // embed at `.memstead/checks.json`. `None` when no record qualifies.
+    checks_bytes: Option<&[u8]>,
 ) -> Result<crate::ops::MemExportBytes, BackendError>;
 
 /// `Engine::diff` dispatch for git-branch mounts. Walks the two refs

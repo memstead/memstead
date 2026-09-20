@@ -176,6 +176,7 @@ pub fn export_mem_from_branch(
     workspace_schemas_dir: Option<&Path>,
     provenance_bytes: Option<&[u8]>,
     anchors_bytes: Option<&[u8]>,
+    checks_bytes: Option<&[u8]>,
 ) -> Result<MemExportResult, MemExportError> {
     let out = export_mem_from_branch_to_bytes(
         mem_repo_gitdir,
@@ -185,6 +186,7 @@ pub fn export_mem_from_branch(
         workspace_schemas_dir,
         provenance_bytes,
         anchors_bytes,
+        checks_bytes,
     )?;
 
     if let Some(parent) = output_path.parent()
@@ -276,6 +278,7 @@ pub fn export_mem_from_branch_to_bytes(
     workspace_schemas_dir: Option<&Path>,
     provenance_bytes: Option<&[u8]>,
     anchors_bytes: Option<&[u8]>,
+    checks_bytes: Option<&[u8]>,
 ) -> Result<MemExportBytes, MemExportError> {
     let published = published_config_from(config, archive_identity(mem_name))?;
     let config_bytes = canonical_json(&published)
@@ -334,6 +337,14 @@ pub fn export_mem_from_branch_to_bytes(
     // anchors identically to the folder / in-memory exports.
     if let Some(anchors) = anchors_bytes {
         all_entries.push((ARCHIVE_ANCHORS_PATH.to_string(), anchors.to_vec()));
+    }
+    // Embed the sealed check records the engine read from the workspace
+    // ledger; this assembler only places the recognised member.
+    if let Some(checks) = checks_bytes {
+        all_entries.push((
+            memstead_schema::ARCHIVE_CHECKS_PATH.to_string(),
+            checks.to_vec(),
+        ));
     }
     for sf in &schema_files {
         all_entries.push((
@@ -812,9 +823,10 @@ mod tests {
 
             let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
             let out = tmp.path().join("fixture.mem");
-            let result =
-                export_mem_from_branch(&gitdir, "fixture", &config, &out, None, None, None, None)
-                    .unwrap();
+            let result = export_mem_from_branch(
+                &gitdir, "fixture", &config, &out, None, None, None, None, None,
+            )
+            .unwrap();
 
             assert_eq!(result.name, "fixture");
             assert_eq!(result.version, "1.0.0");
@@ -864,8 +876,10 @@ mod tests {
 
             let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
             let out = tmp.path().join("fixture.mem");
-            export_mem_from_branch(&gitdir, "fixture", &config, &out, None, None, None, None)
-                .unwrap();
+            export_mem_from_branch(
+                &gitdir, "fixture", &config, &out, None, None, None, None, None,
+            )
+            .unwrap();
 
             let file = std::fs::File::open(&out).unwrap();
             let mut archive = zip::ZipArchive::new(file).unwrap();
@@ -902,11 +916,13 @@ mod tests {
             );
             let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
             let out = tmp.path().join("fixture.mem");
-            export_mem_from_branch(&gitdir, "fixture", &config, &out, None, None, None, None)
-                .unwrap();
+            export_mem_from_branch(
+                &gitdir, "fixture", &config, &out, None, None, None, None, None,
+            )
+            .unwrap();
             let path_bytes = std::fs::read(&out).unwrap();
             let byte_bytes = export_mem_from_branch_to_bytes(
-                &gitdir, "fixture", &config, None, None, None, None,
+                &gitdir, "fixture", &config, None, None, None, None, None,
             )
             .unwrap()
             .bytes;
@@ -930,7 +946,7 @@ mod tests {
             );
             let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
             let bytes = export_mem_from_branch_to_bytes(
-                &gitdir, "fixture", &config, None, None, None, None,
+                &gitdir, "fixture", &config, None, None, None, None, None,
             )
             .unwrap()
             .bytes;
@@ -975,6 +991,7 @@ mod tests {
                 None,
                 None,
                 Some(sidecar),
+                None,
             )
             .unwrap()
             .bytes;
@@ -990,7 +1007,7 @@ mod tests {
             );
             // A None sidecar embeds no member (byte-identical to pre-anchor).
             let without = export_mem_from_branch_to_bytes(
-                &gitdir, "fixture", &config, None, None, None, None,
+                &gitdir, "fixture", &config, None, None, None, None, None,
             )
             .unwrap()
             .bytes;
@@ -1000,6 +1017,66 @@ mod tests {
             )
             .unwrap();
             assert!(entries_without.anchors_bytes.is_none());
+        }
+
+        /// AC1, git-branch path: the engine reads the workspace ledger and
+        /// hands the sealed check records here; the assembler places the
+        /// recognised `.memstead/checks.json` member, and a `None` embeds
+        /// no member (byte-identical to before the member existed).
+        #[test]
+        fn export_from_branch_embeds_supplied_checks_member() {
+            let tmp = TempDir::new().unwrap();
+            let (gitdir, mem_dir) = seed_mem_branch(
+                tmp.path(),
+                "fixture",
+                &[(
+                    "a.md",
+                    "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# A\n\n## Identity\n\nA.\n",
+                )],
+            );
+            let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
+            let checks = br#"{"version":1,"entities":{"a":{"verification":{"ts":1,"verdict":"ok","entity_hash":"h1","actor":"cli","role":"checker","identity":"checker-s1"}}}}"#;
+            let bytes = export_mem_from_branch_to_bytes(
+                &gitdir,
+                "fixture",
+                &config,
+                None,
+                None,
+                None,
+                None,
+                Some(checks),
+            )
+            .unwrap()
+            .bytes;
+            let entries = memstead_base::validator::archive::extract_entries(
+                &bytes,
+                &memstead_base::validator::ValidatorLimits::DEFAULT,
+            )
+            .unwrap();
+            assert_eq!(
+                entries.checks_bytes.as_deref(),
+                Some(&checks[..]),
+                "git-branch export must embed the supplied checks member"
+            );
+            let mounted = memstead_base::Engine::from_archive_bytes(bytes).unwrap();
+            let prov = mounted.entity_provenance("fixture", "fixture--a").unwrap();
+            assert_eq!(
+                prov.last_check.as_ref().and_then(|r| r.identity.as_deref()),
+                Some("checker-s1"),
+                "the mounted archive reads the handle back verbatim"
+            );
+
+            let without = export_mem_from_branch_to_bytes(
+                &gitdir, "fixture", &config, None, None, None, None, None,
+            )
+            .unwrap()
+            .bytes;
+            let entries_without = memstead_base::validator::archive::extract_entries(
+                &without,
+                &memstead_base::validator::ValidatorLimits::DEFAULT,
+            )
+            .unwrap();
+            assert!(entries_without.checks_bytes.is_none());
         }
 
         #[test]
@@ -1017,12 +1094,16 @@ mod tests {
             let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
             let out1 = tmp.path().join("a.mem");
             let out2 = tmp.path().join("b.mem");
-            export_mem_from_branch(&gitdir, "fixture", &config, &out1, None, None, None, None)
-                .unwrap();
+            export_mem_from_branch(
+                &gitdir, "fixture", &config, &out1, None, None, None, None, None,
+            )
+            .unwrap();
             // Sleep a few ms to defeat any wallclock-based determinism leak.
             std::thread::sleep(std::time::Duration::from_millis(10));
-            export_mem_from_branch(&gitdir, "fixture", &config, &out2, None, None, None, None)
-                .unwrap();
+            export_mem_from_branch(
+                &gitdir, "fixture", &config, &out2, None, None, None, None, None,
+            )
+            .unwrap();
             let a = std::fs::read(&out1).unwrap();
             let b = std::fs::read(&out2).unwrap();
             assert_eq!(

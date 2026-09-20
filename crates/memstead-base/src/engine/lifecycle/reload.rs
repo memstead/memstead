@@ -252,6 +252,11 @@ impl Engine {
             .ok()
             .flatten()
             .and_then(|bytes| memstead_schema::ArchiveProvenance::from_archive_bytes(&bytes).ok());
+        let archive_checks = backend
+            .read_archive_checks()
+            .ok()
+            .flatten()
+            .and_then(|bytes| crate::check::SealedChecks::from_archive_bytes(&bytes).ok());
         let config_pin = mem_config.as_ref().and_then(|c| c.schema.clone());
         let effective_pin = mount
             .migration_target
@@ -302,6 +307,7 @@ impl Engine {
             last_known_head,
             mem_config,
             archive_provenance,
+            archive_checks,
             // The reattach loads entities immediately below — a
             // quarantine return-to-service is never deferred.
             deferred: false,

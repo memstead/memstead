@@ -37,8 +37,12 @@ pub struct Args {
     /// archive's authoring provenance (`.memstead/provenance.json`) has
     /// every private-pattern span redacted to `[redacted:<class>]` —
     /// the leak scan's classes, one vocabulary — never stripped; the
-    /// report counts redactions per class. Entity bodies are not
-    /// rewritten.
+    /// report counts redactions per class. A `mem` archive also carries
+    /// the workspace ledger's latest check record per entity and kind
+    /// (`.memstead/checks.json`, absent when the mem has no record), the
+    /// method note redacted by the same classes and the checker's
+    /// identity handle verbatim; an archive mount derives its check state
+    /// from that member alone. Entity bodies are not rewritten.
     #[arg(long, value_enum, default_value_t = Format::Markdown)]
     pub format: Format,
 

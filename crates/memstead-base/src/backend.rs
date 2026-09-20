@@ -267,6 +267,19 @@ pub trait MemBackend: Send + Sync {
         Ok(None)
     }
 
+    /// Read the optional sealed check-records member
+    /// (`.memstead/checks.json`) the archive carries, if any.
+    ///
+    /// Returns the raw bytes the engine parses into a
+    /// [`crate::check::SealedChecks`] and derives check state from on an
+    /// archive mount ([`crate::Engine::archive_checks_for`]). Default
+    /// impl returns `Ok(None)`: a writable backend never carries the
+    /// member (its check state lives in the workspace ledger), and an
+    /// archive sealed without records signals "no records sealed".
+    fn read_archive_checks(&self) -> Result<Option<Vec<u8>>, BackendError> {
+        Ok(None)
+    }
+
     /// Write the per-mem `.memstead/config.json` payload. Symmetric
     /// counterpart to [`Self::read_mem_config`].
     ///

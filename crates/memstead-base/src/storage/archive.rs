@@ -249,6 +249,36 @@ impl crate::backend::MemBackend for ArchiveBackend {
         })
     }
 
+    fn read_archive_checks(&self) -> Result<Option<Vec<u8>>, BackendError> {
+        // The optional sealed check records live at `.memstead/checks.json`
+        // inside the zip. Same shape as `read_archive_provenance`: raw
+        // bytes on hit, Ok(None) on miss (an archive sealed with no check
+        // record, or by an engine before the member existed, omits it).
+        if let ArchiveSource::Path(p) = &self.source
+            && !p.is_file()
+        {
+            return Ok(None);
+        }
+        self.with_archive_reader(|reader| {
+            let mut archive = zip::ZipArchive::new(reader)
+                .map_err(|e| BackendError::Other(format!("zip open: {e}")))?;
+            let name = memstead_schema::ARCHIVE_CHECKS_PATH;
+            if archive.index_for_name(name).is_none() {
+                return Ok(None);
+            }
+            let mut entry = archive
+                .by_name(name)
+                .map_err(|e| BackendError::Other(format!("zip lookup: {e}")))?;
+            let cap = ValidatorLimits::DEFAULT.max_uncompressed_entry;
+            match read_zip_entry_bounded(&mut entry, cap).map_err(BackendError::Io)? {
+                BoundedZipRead::Within(bytes) => Ok(Some(bytes)),
+                BoundedZipRead::ExceedsCap => Err(BackendError::Other(format!(
+                    "archive check records '{name}' exceeds the {cap}-byte cap"
+                ))),
+            }
+        })
+    }
+
     fn read_anchors_sidecar(&self) -> Result<Option<Vec<u8>>, BackendError> {
         // The optional engine-owned anchors sidecar lives at
         // `.memstead/anchors.json` inside the zip. Same shape as

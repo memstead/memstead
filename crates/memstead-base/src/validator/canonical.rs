@@ -34,9 +34,10 @@ pub fn canonical_bytes(
     embedded_schema: Option<&Arc<Schema>>,
     provenance_bytes: Option<&[u8]>,
     anchors_bytes: Option<&[u8]>,
+    checks_bytes: Option<&[u8]>,
 ) -> Result<Vec<u8>, ValidationError> {
     let mut files: Vec<(String, Vec<u8>)> =
-        Vec::with_capacity(entities.len() + schema_files.len() + 3);
+        Vec::with_capacity(entities.len() + schema_files.len() + 4);
 
     let config_text = canonical_json(config)?;
     files.push((ARCHIVE_CONFIG_PATH.to_string(), config_text.into_bytes()));
@@ -60,6 +61,17 @@ pub fn canonical_bytes(
         files.push((
             memstead_schema::ARCHIVE_ANCHORS_PATH.to_string(),
             anchors.to_vec(),
+        ));
+    }
+
+    // Preserve the optional sealed check records verbatim, for the same
+    // reason: a normalized archive that lost them would answer
+    // `never_checked` for entities that were checked. Validated at
+    // extract time.
+    if let Some(checks) = checks_bytes {
+        files.push((
+            memstead_schema::ARCHIVE_CHECKS_PATH.to_string(),
+            checks.to_vec(),
         ));
     }
 
@@ -268,8 +280,8 @@ mod tests {
         // Same config + empty entities + empty schema files twice → identical
         // bytes.
         let c = config();
-        let a = canonical_bytes(&c, &[], &[], None, None, None).unwrap();
-        let b = canonical_bytes(&c, &[], &[], None, None, None).unwrap();
+        let a = canonical_bytes(&c, &[], &[], None, None, None, None).unwrap();
+        let b = canonical_bytes(&c, &[], &[], None, None, None, None).unwrap();
         assert_eq!(a, b);
     }
 

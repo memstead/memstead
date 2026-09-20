@@ -329,19 +329,12 @@ impl Engine {
     pub(crate) fn check_standing_provider(
         &self,
     ) -> impl Fn(&crate::entity::Entity, &str) -> CheckStanding + '_ {
-        let ledger = self
-            .workspace_root()
-            .map(crate::check::CheckLedger::for_workspace);
         let touches: std::cell::RefCell<HashMap<String, MemTouches>> =
             std::cell::RefCell::new(HashMap::new());
         move |entity: &crate::entity::Entity, kind: &str| {
-            let Some(ledger) = &ledger else {
-                return CheckStanding {
-                    state: CheckState::NeverChecked,
-                    independence: None,
-                };
-            };
-            let latest = ledger.latest_for_wire_kind(&entity.id.0, kind);
+            // One source per mount (the sealed member on an archive, the
+            // workspace ledger elsewhere), the same the entity read derives from.
+            let latest = self.latest_check_record(&entity.mem, &entity.id.0, kind);
             let state = crate::check::derive_state(latest.as_ref(), &entity.content_hash);
             if state != CheckState::CheckedOk {
                 return CheckStanding {
