@@ -367,7 +367,13 @@ pub struct MutationStamp {
 /// ancestor never moves: `sha` is the source branch's commit the fork's
 /// branch was created at, `mem` the source mem's name, and `remote` the
 /// mem-repo remote the source was fetched from when the fork was not
-/// local (`None` for a fork of a mounted mem). Author-only: the
+/// local (`None` for a fork of a mounted mem). `base` is the fork's own
+/// first commit: the one the fork makes on its branch right above the
+/// ancestor to carry its own name in its sidecars and self-links. A
+/// comparison between the fork and its source stands on `base`, never
+/// on `sha`, because the retarget is the fork's identity and not a
+/// change to review; [`Self::base_sha`] reads it with the fallback for
+/// a fork recorded before the field existed. Author-only: the
 /// published archive config never carries it, so an archive can never
 /// claim a lineage.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -381,6 +387,21 @@ pub struct ForkedFrom {
     /// from; absent for a local fork.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote: Option<String>,
+    /// The 40-hex sha of the fork's retarget commit, the first commit
+    /// on the fork's branch above `sha`. Absent on a fork made before
+    /// the fork commit existed; such a fork is read as based on `sha`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+}
+
+impl ForkedFrom {
+    /// The commit a comparison against the source starts from: the
+    /// fork's retarget commit when one was recorded, the ancestor
+    /// otherwise (a fork made before the fork commit existed carries
+    /// no `base` and its branch starts at the ancestor itself).
+    pub fn base_sha(&self) -> &str {
+        self.base.as_deref().unwrap_or(&self.sha)
+    }
 }
 
 /// Full mem configuration loaded from .memstead/config.json.
@@ -601,9 +622,10 @@ pub struct MemConfig {
     pub mutation_stamp: Option<MutationStamp>,
 
     /// The recorded ancestor of a mem created by `memstead mem fork`:
-    /// the source mem, the commit its branch started at, and the remote
-    /// when one was used. Written once at fork time and never moved
-    /// (the review mark is the moving cursor; the ancestor is not).
+    /// the source mem, the commit its branch started at, the remote
+    /// when one was used, and the fork's own first commit (`base`).
+    /// Written once at fork time and never moved (the review mark is
+    /// the moving cursor; the ancestor is not).
     /// Absent on every mem that was not forked. Wire key `forkedFrom`.
     ///
     /// Stripped from `PublishedMemConfig` (allowlist projection), whose

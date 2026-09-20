@@ -939,7 +939,34 @@ fn forked_from_round_trips_camel_case_and_is_absent_by_default() {
         "forkedFrom": { "mem": "specs", "sha": "b".repeat(40), "remote": "origin" }
     });
     let cfg = parse_mem_config(&remote).unwrap();
-    assert_eq!(cfg.forked_from.unwrap().remote.as_deref(), Some("origin"));
+    let origin = cfg.forked_from.unwrap();
+    assert_eq!(origin.remote.as_deref(), Some("origin"));
+    // No base recorded (a fork from before the fork commit existed):
+    // the fork reads as based on its ancestor, and the wire form
+    // carries no `base` key.
+    assert_eq!(origin.base, None);
+    assert_eq!(origin.base_sha(), "b".repeat(40));
+    let wire: Value = serde_json::to_value(&origin).unwrap();
+    assert!(wire.get("base").is_none(), "{wire}");
+
+    // A base recorded: read, round-tripped under its camelCase key,
+    // and what `base_sha` answers with.
+    let based = json!({
+        "schema": "default@1.0.0",
+        "forkedFrom": { "mem": "specs", "sha": "c".repeat(40), "base": "d".repeat(40) }
+    });
+    let cfg = parse_mem_config(&based).unwrap();
+    let origin = cfg.forked_from.as_ref().unwrap();
+    assert_eq!(
+        origin.sha,
+        "c".repeat(40),
+        "the ancestor stays the ancestor"
+    );
+    assert_eq!(origin.base.as_deref(), Some("d".repeat(40).as_str()));
+    assert_eq!(origin.base_sha(), "d".repeat(40));
+    let wire: Value = serde_json::to_value(&cfg).unwrap();
+    assert_eq!(wire["forkedFrom"]["base"], "d".repeat(40));
+    assert!(cfg.extra.is_empty(), "{:?}", cfg.extra);
 
     let plain = parse_mem_config(&json!({ "schema": "default@1.0.0" })).unwrap();
     assert!(plain.forked_from.is_none());
@@ -961,7 +988,7 @@ fn check_config_knows_every_modelled_key() {
         "unregisteredAt": "2026-01-01T00:00:00Z",
         "reviewMark": "c".repeat(40),
         "mutationStamp": { "engineVersion": "0.20.0", "schema": "default@1.0.0" },
-        "forkedFrom": { "mem": "specs", "sha": "a".repeat(40) }
+        "forkedFrom": { "mem": "specs", "sha": "a".repeat(40), "base": "b".repeat(40) }
     });
     let result = check_config(&cfg);
     assert!(result.valid, "{:?}", result.errors);
@@ -1030,6 +1057,7 @@ fn forked_from_survives_the_prior_struct_shape_through_extra() {
             mem: "specs".to_string(),
             sha: "a".repeat(40),
             remote: Some("origin".to_string()),
+            base: Some("b".repeat(40)),
         }),
         extra: HashMap::new(),
     };
@@ -1040,7 +1068,12 @@ fn forked_from_survives_the_prior_struct_shape_through_extra() {
     let mut prior: PriorMemConfig = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(
         prior.extra.get("forkedFrom"),
-        Some(&json!({ "mem": "specs", "sha": "a".repeat(40), "remote": "origin" })),
+        Some(&json!({
+            "mem": "specs",
+            "sha": "a".repeat(40),
+            "remote": "origin",
+            "base": "b".repeat(40)
+        })),
         "the prior shape keeps the field as an unknown key: {:?}",
         prior.extra
     );
