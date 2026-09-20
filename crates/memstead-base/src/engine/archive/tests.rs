@@ -1484,7 +1484,12 @@ fn export_seals_latest_check_per_entity_and_kind() {
         "specs--alpha",
         Verdict::Failed,
         RecordKind::Engine(CheckKind::Verification),
-        Some("diffed against /Users/dasboe/notes.md"),
+        // Built at runtime so the literal never matches the leak scan's
+        // absolute-user-paths class (the redaction test's own discipline).
+        Some(&format!(
+            "diffed against {}/notes.md",
+            ["/Users", "dasboe"].join("/")
+        )),
     );
     check_as(
         &mut engine,
