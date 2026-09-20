@@ -127,16 +127,23 @@ memstead mem fork knowledge@<sha> knowledge-proposal      # at a commit the sour
 memstead mem fork knowledge knowledge-proposal --remote origin   # source fetched from the remote
 ```
 
-The fork's branch starts at the source's commit, its config is the
-source's (same schema pin, same version and description) with
-`forkedFrom` (source mem, sha, remote when one was used) written in, and
-its entities read identical to the source's at that commit. A local fork
-carries the source's outgoing cross-link grants under its own name, so
-copied cross-mem edges read conformant from the first read; `mem list`
-shows the origin (`forked from ...`). The name obeys the same create rules
-as `mem init`, and every refusal (a sha not on the source branch, a name
-a branch sits above or below, an existing name, a folder or archive
-source) lands nothing.
+The fork's branch starts at the source's commit and makes one commit of
+its own right above it, the fork commit: the anchors and derivations
+sidecar ids and every body link the source qualified with its own name
+(`[[knowledge--slug]]`, `[[knowledge:slug]]`) now carry the fork's name,
+with hashes, spans and observations unchanged and links naming any other
+mem untouched. Its config is the source's (same schema pin, same version
+and description) with `forkedFrom` written in: source mem, `sha` (the
+ancestor on the source), `remote` when one was used, and `base` (the fork
+commit), the commit a later comparison against the source stands on. The
+entities read as the source's at that commit, under the fork's own name.
+A local fork carries the source's outgoing cross-link grants under its
+own name, so copied cross-mem edges read conformant from the first read;
+it starts with no check records (a fork's entity is not the same entity
+as its source's). `mem list` shows the origin (`forked from ...`, with the
+base). The name obeys the same create rules as `mem init`, and every
+refusal (a sha not on the source branch, a name a branch sits above or
+below, an existing name, a folder or archive source) lands nothing.
 
 With `--remote`, the source branch and the remote's `__MEMSTEAD` config
 are fetched into remote-tracking refs (the local `__MEMSTEAD` never

@@ -42,6 +42,34 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   from before this release reads a forked mem's config with the field
   preserved and unread (it lands in the config's unknown-field map and is
   written back verbatim), so the two engines can share one mem-repo.
+- **A fork carries its own identity in its links and sidecars.** Right
+  after its branch is created at the ancestor and before the mount is
+  registered, `mem fork` makes one commit on the fork's branch, the fork
+  commit (subject `memstead: fork mem <fork> from <source>@<sha>`,
+  committed by the engine with the caller's actor, note, role and
+  identity in the trailers), that moves every id and link naming the
+  source to the fork's name: the anchors sidecar's entity keys, the
+  derivations sidecar's source keys and same-mem targets, and every
+  mem-qualified self-link in an entity body (`[[<source>--slug]]`,
+  `[[<source>:slug]]`, labels kept), through the same rule `export` uses
+  for its leaf rename. Rows keep their hashes, spans and observations; a
+  link naming another mem and a code span are untouched; a body with
+  nothing to move keeps its bytes. So `memstead anchors <fork-entity>`
+  lists the rows the source's entity had, `health --include anchors` on
+  the fork counts the same rows as on the source, and a self-link no
+  longer parses as a cross-mem link into the source. `forkedFrom` gains
+  `base`, the fork commit's sha; `sha` stays the ancestor on the source.
+  A source with nothing to retarget still gets the commit (an empty
+  retarget is still the base: the tree is the ancestor's, the sha is the
+  fork's own), so every fork has one rule for where a comparison starts.
+  The remote form does the same after its fetch. A failure after the fork
+  commit rolls the branch (and with it the commit), the config and the
+  policy line back. Nothing in the workspace check ledger is copied or
+  rewritten: a fork starts unchecked, because a fork's entity is not the
+  same entity as its source's. A fork made before this change carries no
+  `base` and is read as based on `sha` wherever the base is consulted;
+  it reads and forks as before. `mem fork` and `mem list` show the base
+  (`base` in JSON, `base <sha>` in markdown).
 - **A sealed archive carries its check records.** `memstead export
   --format mem` (folder, in-memory and git-branch mems alike) writes one
   optional member, `.memstead/checks.json`: per entity of the archive, the
