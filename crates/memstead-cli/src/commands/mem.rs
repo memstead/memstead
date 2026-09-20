@@ -165,9 +165,9 @@ pub struct ForkArgs {
     pub name: String,
 
     /// Fetch the source branch and its config from this mem-repo remote
-    /// (`memstead mem-repo remote-add`) instead of a mounted mem. The
-    /// remote's `__MEMSTEAD` is read from a remote-tracking ref (the
-    /// local one never moves), the fetched tree is validated against
+    /// (`memstead mem-repo remote-add`) instead of a mounted mem. Your
+    /// own schema and mem registry is never changed by the fetch (only
+    /// the fork's config is added), the fetched tree is validated against
     /// the source's schema pin before the mount exists
     /// (`SCHEMA_VIOLATION_IN_FETCH`), and the pin must resolve in this
     /// workspace (`SCHEMA_NOT_FOUND`, remedy `memstead schema install`).
