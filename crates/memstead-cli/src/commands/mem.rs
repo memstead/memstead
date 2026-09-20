@@ -44,10 +44,14 @@ pub enum MemAction {
     /// Create a mem as a fork of another git-branch mem at a recorded
     /// ancestor: `<SOURCE>[@<SHA>] <NAME>`. The new branch starts at
     /// the source's commit (its tip, or the given sha the source
-    /// reaches), the config is the source's with `forkedFrom` (source,
-    /// sha, remote) written in and the source's schema pin copied, the
-    /// source's outgoing cross-link grants ride under the new name, and
-    /// the mount is registered. With `--remote <NAME>` the source branch
+    /// reaches) and makes one commit of its own above it, the fork
+    /// commit, which moves the anchors and derivations sidecar ids and
+    /// the mem-qualified self-links from the source's name to the new
+    /// one; the config is the source's with `forkedFrom` (source, sha,
+    /// remote, base: the fork commit) written in and the source's schema
+    /// pin copied, the source's outgoing cross-link grants ride under
+    /// the new name, and the mount is registered. A fork starts with no
+    /// check records. With `--remote <NAME>` the source branch
     /// and config are fetched from that mem-repo remote instead; the
     /// fetched tree is validated as `pull` validates, no grant is
     /// inherited, and a schema pin this workspace cannot resolve refuses
@@ -991,12 +995,15 @@ pub fn run_fork(ctx: &CliContext, args: ForkArgs) -> anyhow::Result<()> {
 }
 
 /// The origin block every surface renders the same way: the source
-/// mem, the ancestor sha, the remote when one was used.
+/// mem, the ancestor sha, the remote when one was used, and the fork
+/// commit's sha as `base` (null on a fork recorded before the fork
+/// commit existed, which reads as based on `sha`).
 fn forked_from_json(origin: &memstead_schema::ForkedFrom) -> serde_json::Value {
     serde_json::json!({
         "mem": origin.mem,
         "sha": origin.sha,
         "remote": origin.remote,
+        "base": origin.base,
     })
 }
 
@@ -1020,6 +1027,11 @@ fn render_mem_fork_markdown(r: &MemForkResponse) -> String {
         None => String::new(),
     };
     out.push_str(&format!("- Ancestor: `{}`{via}\n", r.forked_from.sha));
+    if let Some(base) = &r.forked_from.base {
+        out.push_str(&format!(
+            "- Base: `{base}` (the fork commit: sidecar ids and self-links carry the fork's name)\n"
+        ));
+    }
     out.push_str(&format!("- Branch: `{}`\n", r.branch_ref));
     out.push_str(&format!("- Schema: `{}`\n", r.schema_ref));
     let grants = match &r.inherited_grants {
@@ -1778,6 +1790,10 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
                 line.push_str(&format!(" — forked from `{mem}`@{short}"));
                 if let Some(remote) = origin["remote"].as_str() {
                     line.push_str(&format!(" via remote `{remote}`"));
+                }
+                if let Some(base) = origin["base"].as_str() {
+                    let short = &base[..base.len().min(12)];
+                    line.push_str(&format!(", base {short}"));
                 }
             }
             lines.push(line);
