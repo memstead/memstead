@@ -162,11 +162,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   refused, the re-read, the validation reading) is reported under
   `warnings` on the outcome, never as an error. The record keys proposals by id (the fork's name and
   base sha) and holds the proposer, ancestor, base, target tip at merge,
-  merger, time, and per entity the disposition, the reason and the hash
+  merger, time, the proposal's description in the owner's words (the
+  disposition file's top-level `description` slot, which the brief's
+  skeleton emits empty beside `dispositions`; when the slot is blank the
+  merge's `--note` stands in, and the key is left off the entry when
+  neither was given), and per entity the disposition, the reason
+  (required on `reject` and `adopt_with_changes`, optional on `adopt`,
+  recorded whenever given) and the hash
   of the proposed version (the landing body with the engine's date stamps
   left out, so the same body proposed again hashes the same); never a
-  body. `proposal list` renders it; `entity --provenance` names the
-  proposal, the merger and the disposition an entity came from; the
+  body. `proposal list` renders it, the description under the entry's
+  header; `entity --provenance` names the
+  proposal, the merger, the disposition an entity came from and the
+  proposal's description when the record carries one; the
   brief marks a re-proposal against it; a fork made from a target that
   carries one drops it in the fork commit (a fork carries no record).
   The record is a recognised optional meta member of a sealed archive

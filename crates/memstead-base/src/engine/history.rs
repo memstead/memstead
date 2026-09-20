@@ -206,6 +206,11 @@ pub struct ProvenanceRecord {
     /// (`adopt` or `adopt_with_changes`), when the record carries it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disposition: Option<String>,
+    /// On a touch a proposal merge made: the proposal in the owner's
+    /// words, when the target's proposal record carries a description
+    /// for that proposal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposal_description: Option<String>,
 }
 
 /// The entity read's derived provenance block: created-by and
@@ -305,6 +310,7 @@ fn touch_to_record(t: &EntityTouch) -> ProvenanceRecord {
         merged_by: t.merged_by.clone(),
         proposal: t.proposal.clone(),
         disposition: None,
+        proposal_description: None,
     }
 }
 
@@ -343,9 +349,9 @@ impl Engine {
         let (conformance_state, last_conformance_check) =
             self.entity_conformance_state(mem, entity_id)?;
         // A touch a proposal merge made names its proposal; the
-        // disposition it landed under is read from the target's own
-        // record, never from the commit (the record is the merge's
-        // second write, in the same commit).
+        // disposition it landed under and the proposal's description
+        // are read from the target's own record, never from the commit
+        // (the record is the merge's second write, in the same commit).
         let record = if oldest.as_ref().is_some_and(|t| t.proposal.is_some())
             || newest.as_ref().is_some_and(|t| t.proposal.is_some())
         {
@@ -356,13 +362,11 @@ impl Engine {
         let slug = crate::EntityId(entity_id.to_string()).path().to_string();
         let with_disposition = |t: &EntityTouch| -> ProvenanceRecord {
             let mut rec = touch_to_record(t);
-            if let (Some(pid), Some(record)) = (t.proposal.as_deref(), record.as_ref()) {
-                rec.disposition = record
-                    .proposals
-                    .iter()
-                    .find(|p| p.id == pid)
-                    .and_then(|p| p.entities.get(&slug))
-                    .map(|d| d.disposition.clone());
+            if let (Some(pid), Some(record)) = (t.proposal.as_deref(), record.as_ref())
+                && let Some(entry) = record.proposals.iter().find(|p| p.id == pid)
+            {
+                rec.disposition = entry.entities.get(&slug).map(|d| d.disposition.clone());
+                rec.proposal_description = entry.description.clone();
             }
             rec
         };

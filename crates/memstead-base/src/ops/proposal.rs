@@ -68,6 +68,16 @@ pub struct ProposalBrief {
     pub summary: ProposalSummary,
     /// One entry per entity the fork touched, sorted by slug.
     pub entries: Vec<ProposalEntry>,
+    /// The proposal in the owner's words: free text the owner writes
+    /// into the disposition file, which the merge records on the
+    /// proposal record's entry so a reader of the record (or of a
+    /// published archive) learns what the proposal was, not only what
+    /// happened to each entity. The skeleton emits it empty; the merge
+    /// trims it and treats a blank slot as absent (the merge's note
+    /// stands in then, when one was given). Absent in a file rendered
+    /// before the slot existed.
+    #[serde(default)]
+    pub description: String,
     /// The disposition skeleton, keyed by slug: the owner fills
     /// `disposition` (and `reason`, and for `adopt_with_changes` a
     /// `body`) and hands the file to the merge.
@@ -350,7 +360,8 @@ pub struct DispositionSlot {
     /// Empty in the skeleton; one of `accepts` once filled.
     pub disposition: String,
     /// Empty in the skeleton; required for `reject` and
-    /// `adopt_with_changes`.
+    /// `adopt_with_changes`, optional on `adopt`. Recorded whenever
+    /// given.
     pub reason: String,
     /// The values this slot accepts: the closed vocabulary, without
     /// `adopt` on a conflict entity.
@@ -428,6 +439,12 @@ pub struct ProposalRecordEntry {
     pub merged_by: Option<String>,
     #[serde(default)]
     pub at: String,
+    /// The proposal in the owner's words: the disposition file's
+    /// `description`, or the merge's note when the file carried none.
+    /// Absent when neither was given, and on every entry written before
+    /// the field existed; the key is left off the bytes then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Per slug: the disposition, the reason and the content hash of
     /// the proposed version (never its body).
     #[serde(default)]
@@ -438,6 +455,8 @@ pub struct ProposalRecordEntry {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecordedDisposition {
     pub disposition: String,
+    /// The owner's reason: always present on `reject` and
+    /// `adopt_with_changes`, present on `adopt` when the owner gave one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -738,6 +757,11 @@ pub fn render_proposal_record(target: &str, record: &ProposalRecord) -> String {
     ));
     for p in &record.proposals {
         out.push_str(&format!("\n## `{}`\n\n", p.id));
+        // The owner's words, as written, under the header.
+        if let Some(d) = &p.description {
+            out.push_str(d);
+            out.push_str("\n\n");
+        }
         out.push_str(&format!(
             "- Proposer: `{}`; merged by `{}` at {}\n",
             p.proposer.as_deref().unwrap_or("(unrecorded)"),
@@ -818,8 +842,9 @@ pub fn render_proposal_brief(brief: &ProposalBrief) -> String {
          `dispositions.<slug>.disposition` with one of `adopt`, `adopt_with_changes`, `reject`; \
          `reject` and `adopt_with_changes` need a `reason`; `adopt_with_changes` carries the \
          owner's final body as `body` in the shape a create takes (`title`, `sections`, \
-         `metadata`); a conflict entity accepts no `adopt`. The merge validates the file \
-         against these shas.\n",
+         `metadata`); a conflict entity accepts no `adopt`; `adopt` may carry a `reason` \
+         too. The top-level `description` slot takes the proposal in the owner's words, \
+         recorded with the merge. The merge validates the file against these shas.\n",
     );
     if brief.entries.is_empty() {
         out.push_str("\nThe fork has no change against its base.\n");
@@ -1103,12 +1128,14 @@ mod tests {
                 ..Default::default()
             },
             entries,
+            description: String::new(),
             dispositions,
         }
     }
 
     /// The skeleton carries the closed vocabulary, and a conflict slot
-    /// withholds `adopt`; the wire keys are the ones the merge reads.
+    /// withholds `adopt`; the wire keys are the ones the merge reads;
+    /// the description slot is emitted empty beside the dispositions.
     #[test]
     fn skeleton_vocabulary_is_closed_and_a_conflict_withholds_adopt() {
         let b = brief();
@@ -1136,10 +1163,17 @@ mod tests {
             "target_tip",
             "summary",
             "entries",
+            "description",
             "dispositions",
         ] {
             assert!(json.get(key).is_some(), "top-level key {key}");
         }
+        assert_eq!(json["description"], "");
+        // A file rendered before the slot existed still parses.
+        let mut older = json.clone();
+        older.as_object_mut().unwrap().remove("description");
+        let older: ProposalBrief = serde_json::from_value(older).unwrap();
+        assert_eq!(older, b);
         assert_eq!(json["entries"][0]["status"], "modified");
         assert_eq!(json["entries"][0]["precheck"]["outcome"], "clean");
         assert_eq!(json["entries"][1]["conflict"]["kind"], "target_modified");
@@ -1202,6 +1236,27 @@ mod tests {
         let bytes = br#"{"version": 1, "future": true, "proposals": [{"id": "f@b", "proposer": "p", "ancestor": "a", "base": "b", "target_tip": "d", "merged_by": "m", "at": "2026-09-20T00:00:00Z", "entities": {"alpha": {"disposition": "reject", "reason": "weak", "content_hash": "h1"}, "beta": {"disposition": "adopt", "content_hash": "h2"}}}]}"#;
         let record = ProposalRecord::from_bytes(bytes).unwrap();
         assert_eq!(record.proposals.len(), 1);
+        // An entry written before the description existed reads as
+        // none, and writes back without the key.
+        assert_eq!(record.proposals[0].description, None);
+        let written: serde_json::Value = serde_json::from_slice(&record.to_bytes()).unwrap();
+        assert!(written["proposals"][0].get("description").is_none());
+        let described = br#"{"version": 1, "proposals": [{"id": "f@b", "at": "2026-09-20T00:00:00Z", "description": "a staged exercise", "entities": {"beta": {"disposition": "adopt", "reason": "as proposed"}}}]}"#;
+        let described = ProposalRecord::from_bytes(described).unwrap();
+        assert_eq!(
+            described.proposals[0].description.as_deref(),
+            Some("a staged exercise")
+        );
+        assert_eq!(
+            described.proposals[0].entities["beta"].reason.as_deref(),
+            Some("as proposed")
+        );
+        let md = render_proposal_record("t", &described);
+        assert!(
+            md.contains("## `f@b`\n\na staged exercise\n\n- Proposer:"),
+            "{md}"
+        );
+        assert!(md.contains("- `beta`: adopt (as proposed)"), "{md}");
         // Same body under a new slug: matched by hash.
         let marks = record.rejections_matching("gamma", Some("h1"));
         assert_eq!(marks.len(), 1);

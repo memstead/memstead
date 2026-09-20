@@ -1130,11 +1130,18 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
     let (tmp, mut engine) = staged();
     let gitdir = gitdir_of(tmp.path());
 
-    // First proposal: eta rejected, the rest as in AC1.
+    // First proposal: eta rejected, the rest as in AC1; the file
+    // describes the proposal in the owner's words (untrimmed, so the
+    // record shows the trim) and gives beta's adoption a reason. The
+    // merge's note is given too: the file's description wins.
     let mut first = filled(&mut engine);
     let slot = first.dispositions.get_mut("eta").unwrap();
     slot.disposition = "reject".to_string();
     slot.reason = "weak sourcing".to_string();
+    first.dispositions.get_mut("beta").unwrap().reason = "as proposed".to_string();
+    const DESCRIPTION: &str =
+        "A staged exercise by the project's own agent, not outside participation.";
+    first.description = format!("  {DESCRIPTION}\n");
     let eta_hash = first
         .entries
         .iter()
@@ -1142,9 +1149,30 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
         .and_then(|e| e.content_hash.clone())
         .unwrap();
     let first_outcome = engine
-        .proposal_merge("specs-fork", &first, Actor::Cli, None, None)
+        .proposal_merge(
+            "specs-fork",
+            &first,
+            Actor::Cli,
+            None,
+            Some("the merge note, which the file's description outranks"),
+        )
         .unwrap();
     assert!(engine.store().get(&EntityId::new("specs", "eta")).is_none());
+    let after_first = engine.proposal_list("specs").unwrap();
+    assert_eq!(
+        after_first.proposals[0].description.as_deref(),
+        Some(DESCRIPTION),
+        "the file's description, trimmed, over the note"
+    );
+    assert_eq!(
+        after_first.proposals[0].entities["beta"].reason.as_deref(),
+        Some("as proposed"),
+        "an adopt's reason is recorded like the others"
+    );
+    assert_eq!(
+        after_first.proposals[0].entities["beta"].disposition,
+        "adopt"
+    );
 
     // Second fork: eta again, verbatim, and the same body as "Eta Two".
     engine.set_identity(Some(OWNER.to_string()));
@@ -1210,7 +1238,10 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
     );
 
     // Second merge: eta adopted after all, eta-two rejected by the mark.
+    // The skeleton's description slot is left empty and no note is
+    // given: the entry records no description.
     let mut second = brief.clone();
+    assert_eq!(second.description, "", "the skeleton emits the slot empty");
     second.dispositions.get_mut("eta").unwrap().disposition = "adopt".to_string();
     let slot = second.dispositions.get_mut("eta-two").unwrap();
     slot.disposition = "reject".to_string();
@@ -1220,12 +1251,19 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
         .unwrap();
     assert_eq!(second_outcome.merge_commits[0].identity, "proposer-p2");
 
-    // The record holds both, in order; `proposal list` renders both.
+    // The record holds both, in order; `proposal list` renders both,
+    // the first's description under its header.
     let record = engine.proposal_list("specs").unwrap();
     assert_eq!(record.proposals.len(), 2);
     assert_eq!(record.proposals[0].id, first.proposal_id);
     assert_eq!(record.proposals[1].id, second.proposal_id);
+    assert_eq!(
+        record.proposals[0].description.as_deref(),
+        Some(DESCRIPTION)
+    );
+    assert_eq!(record.proposals[1].description, None);
     assert_eq!(record.proposals[1].entities["eta"].disposition, "adopt");
+    assert_eq!(record.proposals[1].entities["eta"].reason, None);
     assert_eq!(
         record.proposals[1].entities["eta-two"].disposition,
         "reject"
@@ -1233,7 +1271,15 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
     let md = memstead_base::ops::render_proposal_record("specs", &record);
     assert!(md.contains(&format!("## `{}`", first.proposal_id)), "{md}");
     assert!(md.contains(&format!("## `{}`", second.proposal_id)), "{md}");
+    assert!(
+        md.contains(&format!(
+            "## `{}`\n\n{DESCRIPTION}\n\n- Proposer:",
+            first.proposal_id
+        )),
+        "{md}"
+    );
     assert!(md.contains("- `eta`: reject (weak sourcing)"), "{md}");
+    assert!(md.contains("- `beta`: adopt (as proposed)"), "{md}");
     assert!(
         md.contains("- `eta-two`: reject (a duplicate of eta)"),
         "{md}"
@@ -1242,6 +1288,19 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
     assert_eq!(record_on(&gitdir, "specs").unwrap(), record);
     assert!(record_on(&gitdir, "specs-fork").is_none());
     assert!(record_on(&gitdir, "specs-fork2").is_none());
+    // On the bytes: the first entry carries the key, the second has
+    // none at all (an older reader sees the entry it always saw).
+    let bytes = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string())
+        .read_entity(Path::new(RECORD))
+        .unwrap()
+        .unwrap();
+    let raw: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(raw["version"], 1);
+    assert_eq!(raw["proposals"][0]["description"], DESCRIPTION);
+    assert!(
+        raw["proposals"][1].get("description").is_none(),
+        "no key when neither the file nor the note described the proposal: {raw}"
+    );
 
     // A third fork rewording eta: marked by id against the first
     // rejection (the second proposal adopted it, and an adoption never
@@ -1279,7 +1338,8 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
         vec![("id".to_string(), first.proposal_id.clone())]
     );
 
-    // The provenance read names the proposal eta came from.
+    // The provenance read names the proposal eta came from (one with
+    // no description) and, on beta, the first proposal's description.
     let prov = engine.entity_provenance("specs", "specs--eta").unwrap();
     let created = prov.created_by.unwrap();
     assert_eq!(
@@ -1288,6 +1348,24 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
     );
     assert_eq!(created.identity.as_deref(), Some("proposer-p2"));
     assert_eq!(created.disposition.as_deref(), Some("adopt"));
+    assert_eq!(created.proposal_description, None);
+    let prov = engine.entity_provenance("specs", "specs--beta").unwrap();
+    let modified = prov.last_modified_by.unwrap();
+    assert_eq!(
+        modified.proposal.as_deref(),
+        Some(first.proposal_id.as_str())
+    );
+    assert_eq!(modified.disposition.as_deref(), Some("adopt"));
+    assert_eq!(modified.proposal_description.as_deref(), Some(DESCRIPTION));
+    let prov_json = serde_json::to_value(&modified).unwrap();
+    assert_eq!(prov_json["proposal_description"], DESCRIPTION);
+    assert!(
+        serde_json::to_value(&created)
+            .unwrap()
+            .get("proposal_description")
+            .is_none(),
+        "absent from the wire when the record carries none"
+    );
     // The record is not part of any entity's content hash: beta's hash
     // after the first merge is its hash after the second, which changed
     // the record and not beta.
@@ -1318,6 +1396,13 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
         .proposals_bytes
         .expect("the archive carries the record");
     assert_eq!(ProposalRecord::from_bytes(&sealed).unwrap(), record);
+    assert_eq!(
+        ProposalRecord::from_bytes(&sealed).unwrap().proposals[0]
+            .description
+            .as_deref(),
+        Some(DESCRIPTION),
+        "the member carries the description through the strict validation"
+    );
     let revalidated =
         memstead_base::validator::validate_and_normalize_archive(&validated.canonical_bytes)
             .unwrap();
@@ -1336,6 +1421,31 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
             .unwrap()
             .proposals_bytes
             .is_none()
+    );
+}
+
+/// A file whose description slot is blank records the merge's note as
+/// the proposal's description; whitespace alone in the slot counts as
+/// blank.
+#[test]
+fn the_note_stands_in_for_an_absent_description() {
+    let (_tmp, mut engine) = staged();
+    let mut file = filled(&mut engine);
+    file.description = "   \n".to_string();
+    engine
+        .proposal_merge(
+            "specs-fork",
+            &file,
+            Actor::Cli,
+            None,
+            Some("merged after the weekly review"),
+        )
+        .unwrap();
+    let record = engine.proposal_list("specs").unwrap();
+    assert_eq!(record.proposals.len(), 1);
+    assert_eq!(
+        record.proposals[0].description.as_deref(),
+        Some("merged after the weekly review")
     );
 }
 
@@ -1617,6 +1727,7 @@ fn predicted_record(file: &ProposalBrief, proposer: &str, at: &str) -> Vec<u8> {
             target_tip: file.target_tip.clone(),
             merged_by: Some(MERGER.to_string()),
             at: at.to_string(),
+            description: None,
             entities,
         }],
         ..ProposalRecord::default()

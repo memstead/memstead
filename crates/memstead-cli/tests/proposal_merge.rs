@@ -98,7 +98,12 @@ fn json_stdout(out: &std::process::Output) -> Value {
         .unwrap_or_else(|e| panic!("one JSON document on stdout; got:\n{text}\n({e})"))
 }
 
-/// The brief written to a file and filled: eta adopted, alpha rejected.
+/// The proposal in the owner's words, written into the file's
+/// `description` slot.
+const DESCRIPTION: &str = "A staged exercise by the project's own agent.";
+
+/// The brief written to a file and filled: eta adopted with a reason,
+/// alpha rejected, the proposal described.
 fn filled_brief(ws: &Path) -> std::path::PathBuf {
     let file = ws.join("brief.json");
     memstead()
@@ -114,7 +119,13 @@ fn filled_brief(ws: &Path) -> std::path::PathBuf {
         .assert()
         .success();
     let mut brief: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(
+        brief["description"], "",
+        "the skeleton emits the slot empty"
+    );
+    brief["description"] = Value::String(DESCRIPTION.into());
     brief["dispositions"]["eta"]["disposition"] = Value::String("adopt".into());
+    brief["dispositions"]["eta"]["reason"] = Value::String("adopted as proposed".into());
     brief["dispositions"]["alpha"]["disposition"] = Value::String("reject".into());
     brief["dispositions"]["alpha"]["reason"] = Value::String("the seed wording stands".into());
     fs::write(&file, serde_json::to_string_pretty(&brief).unwrap()).unwrap();
@@ -190,6 +201,7 @@ fn proposal_merge_lands_lists_and_shows_in_provenance() {
     assert_eq!(record["proposals"][0]["id"], proposal_id);
     assert_eq!(record["proposals"][0]["proposer"], "proposer-p1");
     assert_eq!(record["proposals"][0]["merged_by"], "owner-o1");
+    assert_eq!(record["proposals"][0]["description"], DESCRIPTION);
     assert_eq!(
         record["proposals"][0]["entities"]["alpha"]["disposition"],
         "reject"
@@ -197,6 +209,10 @@ fn proposal_merge_lands_lists_and_shows_in_provenance() {
     assert_eq!(
         record["proposals"][0]["entities"]["alpha"]["reason"],
         "the seed wording stands"
+    );
+    assert_eq!(
+        record["proposals"][0]["entities"]["eta"]["reason"],
+        "adopted as proposed"
     );
     let out = memstead()
         .current_dir(ws.path())
@@ -206,12 +222,17 @@ fn proposal_merge_lands_lists_and_shows_in_provenance() {
     assert!(out.status.success());
     let md = String::from_utf8_lossy(&out.stdout);
     assert!(md.contains("# Proposals merged into `alpha`"), "{md}");
-    assert!(md.contains(&format!("## `{proposal_id}`")), "{md}");
+    assert!(
+        md.contains(&format!(
+            "## `{proposal_id}`\n\n{DESCRIPTION}\n\n- Proposer:"
+        )),
+        "the description sits under the entry's header:\n{md}"
+    );
     assert!(
         md.contains("- `alpha`: reject (the seed wording stands)"),
         "{md}"
     );
-    assert!(md.contains("- `eta`: adopt"), "{md}");
+    assert!(md.contains("- `eta`: adopt (adopted as proposed)"), "{md}");
 
     // The provenance read names the proposal and the disposition.
     let out = memstead()
@@ -228,6 +249,7 @@ fn proposal_merge_lands_lists_and_shows_in_provenance() {
     assert_eq!(created["merged_by"], "owner-o1");
     assert_eq!(created["proposal"], proposal_id);
     assert_eq!(created["disposition"], "adopt");
+    assert_eq!(created["proposal_description"], DESCRIPTION);
     assert_eq!(envelope["mutation_provenance"]["check_state"], "checked_ok");
     let out = memstead()
         .current_dir(ws.path())
@@ -238,7 +260,8 @@ fn proposal_merge_lands_lists_and_shows_in_provenance() {
     let md = String::from_utf8_lossy(&out.stdout);
     assert!(
         md.contains(&format!(
-            "identity proposer-p1, merged by owner-o1 under proposal {proposal_id} (adopt)"
+            "identity proposer-p1, merged by owner-o1 under proposal {proposal_id} (adopt), \
+             described as \"{DESCRIPTION}\""
         )),
         "{md}"
     );
@@ -339,8 +362,8 @@ fn proposal_merge_refuses_without_identity_and_without_a_file() {
     assert_eq!(json_stdout(&out)["code"], "UNKNOWN_MEM");
 }
 
-/// The help texts name the file, the identity, the refusal codes and
-/// the record.
+/// The help texts name the file, the identity, the refusal codes, the
+/// record and the description slot.
 #[test]
 fn proposal_merge_and_list_help_name_the_contract() {
     let out = memstead()
@@ -359,7 +382,18 @@ fn proposal_merge_and_list_help_name_the_contract() {
         "PROPOSAL_DISPOSITIONS_INCOMPLETE",
         "Merged-By",
         ".memstead/proposals.json",
+        "`description`",
+        "a filled `description` wins",
     ] {
+        assert!(help.contains(needle), "help lacks {needle:?}:\n{help}");
+    }
+    let out = memstead()
+        .args(["proposal", "brief", "--help"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let help = String::from_utf8_lossy(&out.stdout);
+    for needle in ["--out", "`description`", "`adopt` may"] {
         assert!(help.contains(needle), "help lacks {needle:?}:\n{help}");
     }
     let out = memstead()

@@ -71,9 +71,10 @@ target entity the fork did not touch is absent. Each block carries:
 ## 3. Fill the disposition file
 
 The JSON form carries everything the markdown shows plus `dispositions`,
-a map keyed by slug:
+a map keyed by slug, and an empty `description` slot beside it:
 
 ```json
+"description": "",
 "dispositions": {
   "beta": { "disposition": "", "reason": "", "accepts": ["adopt", "adopt_with_changes", "reject"] },
   "epsilon": { "disposition": "", "reason": "", "accepts": ["adopt_with_changes", "reject"] }
@@ -83,13 +84,22 @@ a map keyed by slug:
 The vocabulary is closed: `adopt` takes the entity as the fork has it,
 `adopt_with_changes` lands the fork's version and then your final body,
 `reject` lands nothing. `reject` and `adopt_with_changes` need a
-`reason`. `adopt_with_changes` carries your final body as `body`, in the
+`reason`; `adopt` may carry one, and it is recorded like the others.
+`adopt_with_changes` carries your final body as `body`, in the
 shape a create takes (`title`, `sections`, `metadata`); the merge
 validates it through the write gate like any other write. A conflict
 entity accepts no `adopt`: the brief cannot merge two meanings, so you
 supply the merged body or reject. Fill every slot; the merge refuses a
 file with a slot left empty, a value outside the vocabulary, or a
 target tip that moved since the render.
+
+`description` is the proposal in your words: free text, as long as you
+like, recorded on the proposal record's entry so a reader of the record
+(or of an archive sealed from the mem) learns what the proposal was and
+not only what happened to each entity. A staged exercise by the
+project's own agent, say, would otherwise read as outside
+participation. Leave it blank and the merge's `--note`, when given,
+stands in; when neither is given the entry records none.
 
 ## 4. Over MCP
 
@@ -164,7 +174,9 @@ there is no MCP tool for it.
 The merge writes `.memstead/proposals.json` on the target branch, in the
 merge commit, appending one entry per merged proposal: the proposal's id
 (the fork's name and base sha), the proposer, the ancestor, the base, the
-target tip at merge, who merged and when, and per entity the
+target tip at merge, who merged and when, the description from the
+disposition file (or the merge's `--note` when the file carried none;
+the key is absent when neither was given), and per entity the
 disposition, the reason and the hash of the proposed version. Never a
 body: a rejected proposal leaves its hash and its reason, nothing that
 could be served.
@@ -175,9 +187,11 @@ memstead proposal list <target> --json     # the record as written
 memstead entity <target>--<slug> --provenance
 ```
 
-`proposal list` renders the record; `entity --provenance` names, on an
-entity a merge touched, the proposal, the merger and the disposition it
-landed under beside the proposer's identity; the brief of a later fork
+`proposal list` renders the record, the description under each entry's
+header; `entity --provenance` names, on an entity a merge touched, the
+proposal, the merger, the disposition it landed under and the
+proposal's description beside the proposer's identity; the brief of a
+later fork
 marks a re-proposal against it. The record travels: `export` seals it
 into the archive as a recognised meta member, `proposal list` reads it
 off an installed archive, and an engine older than the member installs

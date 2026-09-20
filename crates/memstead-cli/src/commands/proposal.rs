@@ -37,17 +37,19 @@ pub enum ProposalAction {
     /// lands nothing. The merge commit carries the proposer's identity
     /// (read from the fork's own commits, never from you) with
     /// `Merged-By:` and `Proposal:` beside it, writes the proposal
-    /// record (`.memstead/proposals.json`) on the target branch, records
-    /// a verification check per entity it created or updated under your
-    /// identity, and validates the whole target store afterwards.
-    /// `--identity` is required. Every refusal lands nothing. A human's
-    /// act on the owner's branch: CLI-only.
+    /// record (`.memstead/proposals.json`) on the target branch with the
+    /// file's `description` (the proposal in your words) and every
+    /// disposition, records a verification check per entity it created
+    /// or updated under your identity, and validates the whole target
+    /// store afterwards. `--identity` is required. Every refusal lands
+    /// nothing. A human's act on the owner's branch: CLI-only.
     Merge(MergeArgs),
     /// List the proposals merged into a mem: the record the merge keeps
     /// on the target branch (`.memstead/proposals.json`), one block per
-    /// proposal with its id, proposer, merger, shas, time and every
-    /// disposition with its reason. Reads a sealed archive's record
-    /// too. A read: it writes nothing.
+    /// proposal with its id, its description when one was recorded,
+    /// proposer, merger, shas, time and every disposition with its
+    /// reason. Reads a sealed archive's record too. A read: it writes
+    /// nothing.
     List(ListArgs),
 }
 
@@ -68,13 +70,16 @@ pub struct BriefArgs {
     /// Write the JSON form of the brief to this file: the fillable
     /// disposition file. It carries everything the markdown shows plus
     /// `dispositions`, keyed by entity slug, each with an empty
-    /// `disposition` and `reason` and the values it accepts. The
+    /// `disposition` and `reason` and the values it accepts, and an
+    /// empty top-level `description` slot beside them for the proposal
+    /// in the owner's words (free text; the merge records it on the
+    /// proposal record so a reader learns what the proposal was). The
     /// vocabulary is closed: `adopt`, `adopt_with_changes`, `reject`;
-    /// `reject` and `adopt_with_changes` need a `reason`;
-    /// `adopt_with_changes` carries the owner's final body as `body`
-    /// in the shape a create takes (`title`, `sections`, `metadata`);
-    /// a conflict entity accepts no `adopt`. Stdout still carries the
-    /// brief (markdown, or the same JSON under `--json`).
+    /// `reject` and `adopt_with_changes` need a `reason`, `adopt` may
+    /// carry one; `adopt_with_changes` carries the owner's final body
+    /// as `body` in the shape a create takes (`title`, `sections`,
+    /// `metadata`); a conflict entity accepts no `adopt`. Stdout still
+    /// carries the brief (markdown, or the same JSON under `--json`).
     #[arg(long, value_name = "FILE")]
     pub out: Option<PathBuf>,
 }
@@ -99,12 +104,18 @@ pub struct MergeArgs {
     /// `adopt` on a conflict entity refuses `PROPOSAL_CONFLICT`; an
     /// adopted entity whose last fork commit carries no identity
     /// refuses `PROPOSAL_UNATTRIBUTED`; a body the target's write gate
-    /// refuses lands nothing and returns the gate's own code.
+    /// refuses lands nothing and returns the gate's own code. A
+    /// `reason` on an `adopt` is recorded like the others. The file's
+    /// top-level `description` (free text, the proposal in your words;
+    /// blank counts as absent) is recorded on the proposal record's
+    /// entry.
     #[arg(long, value_name = "FILE")]
     pub dispositions: PathBuf,
 
     /// Agent-authored provenance note (one sentence, at most 280
-    /// characters) for the merge commits' note record.
+    /// characters) for the merge commits' note record. When the
+    /// disposition file carries no `description`, the note is recorded
+    /// as the proposal's description too; a filled `description` wins.
     #[arg(long)]
     pub note: Option<String>,
 }

@@ -225,6 +225,7 @@ impl Engine {
             target_tip,
             summary,
             entries,
+            description: String::new(),
             dispositions,
         })
     }

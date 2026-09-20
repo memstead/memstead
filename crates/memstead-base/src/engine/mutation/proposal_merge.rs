@@ -116,7 +116,10 @@ struct Adopted {
 impl Engine {
     /// Apply `file` (the brief's JSON with `dispositions` filled) onto
     /// the mem `fork` was forked from. The merger is the session's
-    /// identity ([`Engine::set_identity`]) and is required.
+    /// identity ([`Engine::set_identity`]) and is required. The file's
+    /// `description` (trimmed; blank is absent) is recorded on the
+    /// proposal record's entry as the proposal in the owner's words;
+    /// when the file carries none, `note` stands in.
     ///
     /// Refusals, each landing nothing: `INVALID_INPUT` (no merger
     /// identity; the file names another fork; a value outside the
@@ -524,6 +527,10 @@ impl Engine {
         };
 
         // ---- The record ----
+        // The proposal in the owner's words: the file's slot, trimmed,
+        // else the merge's note; the file wins when both are given.
+        let description = crate::vcs::normalise_identity(Some(&file.description))
+            .or_else(|| crate::vcs::normalise_identity(note));
         let mut record = self.read_proposal_record(&target)?.unwrap_or_default();
         let mut distinct_proposers: Vec<String> = Vec::new();
         for a in &adopted {
@@ -539,6 +546,7 @@ impl Engine {
             target_tip: brief.target_tip.clone(),
             merged_by: Some(merger.clone()),
             at: self.now_iso(),
+            description,
             entities: slots
                 .iter()
                 .map(|s| {

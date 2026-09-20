@@ -278,7 +278,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     line.push_str(&format!(", identity {identity}"));
                 }
                 // A touch a proposal merge made names the merger, the
-                // proposal and the disposition it landed under.
+                // proposal, the disposition it landed under and, when
+                // the record carries one, the proposal's description in
+                // the owner's words (one line here; `proposal list`
+                // shows it as written).
                 if let Some(proposal) = r["proposal"].as_str() {
                     line.push_str(&format!(
                         ", merged by {} under proposal {proposal}",
@@ -286,6 +289,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     ));
                     if let Some(d) = r["disposition"].as_str() {
                         line.push_str(&format!(" ({d})"));
+                    }
+                    if let Some(d) = r["proposal_description"].as_str() {
+                        let one_line = d.split_whitespace().collect::<Vec<_>>().join(" ");
+                        line.push_str(&format!(", described as \"{one_line}\""));
                     }
                 }
                 Some(line)
