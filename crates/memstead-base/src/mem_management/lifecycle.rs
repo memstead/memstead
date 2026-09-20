@@ -60,7 +60,7 @@ fn now_iso_utc() -> String {
 /// `create_mem`. `Present` carries the diagnostic payload the
 /// `MEM_STORAGE_RESIDUE_DETECTED` error envelope renders, plus the
 /// parsed existing config (for tombstone + reattach branches).
-enum ResidueProbe {
+pub(super) enum ResidueProbe {
     None,
     Present {
         branch_ref: String,
@@ -89,7 +89,7 @@ enum ResidueProbe {
 /// Failures from the probe collapse to `None` so the create flow
 /// falls through to its prior behaviour (the seed-commit step's
 /// existing `HashMismatch` is the fallback safety net).
-fn residue_probe_for_workspace(
+pub(super) fn residue_probe_for_workspace(
     engine: &crate::Engine,
     workspace_root: Option<&std::path::Path>,
     branch_full_path: &str,
@@ -1053,7 +1053,7 @@ pub struct MemCreateResponse {
 ///   than a regex no-match.
 /// - `invalid_char` — fallback for anything else the grammar rejects
 ///   (non-printable, non-ASCII letters, reserved characters).
-fn classify_invalid_mem_name(name: &str) -> Option<&'static str> {
+pub(super) fn classify_invalid_mem_name(name: &str) -> Option<&'static str> {
     if name.is_empty() {
         return Some("empty");
     }
@@ -1112,8 +1112,6 @@ pub fn create_mem(
     engine: &mut crate::Engine,
     mut params: MemCreateParams,
 ) -> Result<MemCreateResponse, FullEngineError> {
-    use std::path::Path;
-
     // ---- Step 0: input validation ----
     if let Some(note) = params.note.as_deref()
         && note.chars().count() > NOTE_MAX_LEN
@@ -1234,102 +1232,14 @@ pub fn create_mem(
     // any allowlist'd region. Every safety-shaped check (schema
     // canonicalisation, basename invariant, name collision) stays
     // unconditional.
-    // Hierarchical paths are first-class. The allowlist candidate IS
-    // the mem name (no `<path>/<name>` composition step —
-    // `params.name` already carries the full path).
-    let candidate: String = params.name.clone();
-
     if !params.operator_mode {
-        let create_rule_set = CreateRuleSet::new(engine.settings().mem_create_rules.clone())
-            .map_err(|e| crate::EngineError::InvalidInput(format!("mem_create_rules: {e}")))?;
-        let patterns_for_errors: Vec<String> = create_rule_set.patterns();
-
-        if create_rule_set.is_empty() {
-            return Err(FullEngineError::MemPathNotAllowed {
-                attempted: canonical.clone(),
-                candidate,
-                patterns: patterns_for_errors,
-                reason: "no_allowlist_configured",
-                policy_table: "mem_management.create",
-            });
-        }
-        let matched_rule = match create_rule_set.first_match(Path::new(&candidate)) {
-            Some(r) => r.clone(),
-            None => {
-                return Err(FullEngineError::MemPathNotAllowed {
-                    attempted: canonical.clone(),
-                    candidate,
-                    patterns: patterns_for_errors,
-                    reason: "no_match",
-                    policy_table: "mem_management.create",
-                });
-            }
-        };
-
-        // Outside-workspace check (skipped when no workspace_root is
-        // set — tests / ad-hoc).
-        if let Some(root) = workspace_root.as_ref()
-            && canonical.strip_prefix(root).is_err()
-        {
-            return Err(FullEngineError::MemPathNotAllowed {
-                attempted: canonical.clone(),
-                candidate,
-                patterns: patterns_for_errors,
-                reason: "outside_workspace",
-                policy_table: "mem_management.create",
-            });
-        }
-
-        // ---- Step 1b: schema gate ----
-        let schema_wildcard = matched_rule
-            .schemas
-            .iter()
-            .any(|s| s == crate::SCHEMA_WILDCARD);
-        if !schema_wildcard {
-            let requested_canonical = canonical_schema_ref.to_string();
-            let mut allowed_canonical: Vec<String> = Vec::with_capacity(matched_rule.schemas.len());
-            let mut allowed = false;
-            for raw in &matched_rule.schemas {
-                let parsed: memstead_schema::SchemaRef = match raw.parse() {
-                    Ok(r) => r,
-                    Err(_) => {
-                        return Err(crate::EngineError::InvalidInput(format!(
-                            "[mem_management] rule {:?}: schema entry {:?} is not a valid `name@version` pin",
-                            matched_rule.pattern, raw,
-                        ))
-                        .into());
-                    }
-                };
-                let resolved = crate::engine::SchemaResolver::new(&builtin_schemas)
-                    .resolve(&parsed)
-                    .map_err(|sources| {
-                        crate::EngineError::SchemaNotFound {
-                            mem: params.name.clone(),
-                            pin: parsed.to_string(),
-                            sources,
-                            install_hint: None,
-                        }
-                        .with_schema_install_probe(engine.workspace_root())
-                    })?;
-                let canon_str = memstead_schema::SchemaRef::new(
-                    resolved.manifest.name.clone(),
-                    resolved.version.clone(),
-                )
-                .to_string();
-                if canon_str == requested_canonical {
-                    allowed = true;
-                }
-                allowed_canonical.push(canon_str);
-            }
-            if !allowed {
-                return Err(FullEngineError::MemSchemaNotAllowed {
-                    candidate,
-                    matched_pattern: matched_rule.pattern.clone(),
-                    requested_schema: requested_canonical,
-                    allowed_schemas: allowed_canonical,
-                });
-            }
-        }
+        admit_by_create_rules(
+            engine,
+            &params.name,
+            &canonical,
+            &canonical_schema_ref,
+            &builtin_schemas,
+        )?;
     }
 
     // ---- Step 1c: basename invariant ----
@@ -1947,13 +1857,127 @@ pub fn create_mem(
     })
 }
 
+/// The create rules' verdict on a name a mem is about to take, shared by
+/// `create_mem` and `fork_mem` (a fork obeys the same
+/// `[[mem_management.create]]` table as any created mem). Runs the
+/// allowlist match on the candidate (the full mem name), the
+/// outside-workspace check on `canonical`, and the matched rule's
+/// schema gate against `canonical_schema_ref`; returns the matched
+/// rule. Operator mode skips the call entirely at both call sites.
+pub(super) fn admit_by_create_rules(
+    engine: &crate::Engine,
+    name: &str,
+    canonical: &std::path::Path,
+    canonical_schema_ref: &memstead_schema::SchemaRef,
+    catalogue: &[std::sync::Arc<memstead_schema::Schema>],
+) -> Result<crate::workspace::CreateRuleSetting, FullEngineError> {
+    use std::path::Path;
+    // Hierarchical paths are first-class. The allowlist candidate IS
+    // the mem name (no `<path>/<name>` composition step: the name
+    // already carries the full path).
+    let candidate: String = name.to_string();
+    let workspace_root = engine.workspace_root();
+    let create_rule_set = CreateRuleSet::new(engine.settings().mem_create_rules.clone())
+        .map_err(|e| crate::EngineError::InvalidInput(format!("mem_create_rules: {e}")))?;
+    let patterns_for_errors: Vec<String> = create_rule_set.patterns();
+
+    if create_rule_set.is_empty() {
+        return Err(FullEngineError::MemPathNotAllowed {
+            attempted: canonical.to_path_buf(),
+            candidate,
+            patterns: patterns_for_errors,
+            reason: "no_allowlist_configured",
+            policy_table: "mem_management.create",
+        });
+    }
+    let matched_rule = match create_rule_set.first_match(Path::new(&candidate)) {
+        Some(r) => r.clone(),
+        None => {
+            return Err(FullEngineError::MemPathNotAllowed {
+                attempted: canonical.to_path_buf(),
+                candidate,
+                patterns: patterns_for_errors,
+                reason: "no_match",
+                policy_table: "mem_management.create",
+            });
+        }
+    };
+
+    // Outside-workspace check (skipped when no workspace_root is
+    // set — tests / ad-hoc).
+    if let Some(root) = workspace_root
+        && canonical.strip_prefix(root).is_err()
+    {
+        return Err(FullEngineError::MemPathNotAllowed {
+            attempted: canonical.to_path_buf(),
+            candidate,
+            patterns: patterns_for_errors,
+            reason: "outside_workspace",
+            policy_table: "mem_management.create",
+        });
+    }
+
+    // Schema gate against the matched rule's `schemas` list; `["*"]`
+    // admits any schema.
+    let schema_wildcard = matched_rule
+        .schemas
+        .iter()
+        .any(|s| s == crate::SCHEMA_WILDCARD);
+    if !schema_wildcard {
+        let requested_canonical = canonical_schema_ref.to_string();
+        let mut allowed_canonical: Vec<String> = Vec::with_capacity(matched_rule.schemas.len());
+        let mut allowed = false;
+        for raw in &matched_rule.schemas {
+            let parsed: memstead_schema::SchemaRef = match raw.parse() {
+                Ok(r) => r,
+                Err(_) => {
+                    return Err(crate::EngineError::InvalidInput(format!(
+                        "[mem_management] rule {:?}: schema entry {:?} is not a valid `name@version` pin",
+                        matched_rule.pattern, raw,
+                    ))
+                    .into());
+                }
+            };
+            let resolved = crate::engine::SchemaResolver::new(catalogue)
+                .resolve(&parsed)
+                .map_err(|sources| {
+                    crate::EngineError::SchemaNotFound {
+                        mem: name.to_string(),
+                        pin: parsed.to_string(),
+                        sources,
+                        install_hint: None,
+                    }
+                    .with_schema_install_probe(workspace_root)
+                })?;
+            let canon_str = memstead_schema::SchemaRef::new(
+                resolved.manifest.name.clone(),
+                resolved.version.clone(),
+            )
+            .to_string();
+            if canon_str == requested_canonical {
+                allowed = true;
+            }
+            allowed_canonical.push(canon_str);
+        }
+        if !allowed {
+            return Err(FullEngineError::MemSchemaNotAllowed {
+                candidate,
+                matched_pattern: matched_rule.pattern.clone(),
+                requested_schema: requested_canonical,
+                allowed_schemas: allowed_canonical,
+            });
+        }
+    }
+    Ok(matched_rule)
+}
+
 /// A sibling spelling git can hold for a name that sits below an
 /// existing mem branch: the parent's path and the rest of the name
 /// joined by a hyphen (`stocks/impfpflicht/anker` beside
 /// `stocks/impfpflicht` becomes `stocks/impfpflicht-anker`). `None`
 /// when the name is the parent of existing branches instead: no
 /// single spelling follows from that shape.
-fn sibling_name_suggestion(name: &str, conflicting: &[String]) -> Option<String> {
+pub(super) fn sibling_name_suggestion(name: &str, conflicting: &[String]) -> Option<String> {
     conflicting
         .iter()
         .filter_map(|parent| {

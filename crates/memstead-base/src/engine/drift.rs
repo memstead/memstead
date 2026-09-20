@@ -1139,12 +1139,7 @@ impl Engine {
         // is not there" into "the schema pin did not resolve", which is true
         // of a quarantined mem and tells the reader nothing about why their
         // push failed (04/05).
-        let blobs = (hook.read_tree)(gitdir, ref_name).map_err(|e| match e {
-            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
-                EngineError::UnknownRef(msg.trim_start_matches("UNKNOWN_REF:").trim().to_string())
-            }
-            other => EngineError::Backend(other),
-        })?;
+        let blobs = Self::read_ref_blobs(hook, gitdir, ref_name)?;
         let schema = self
             .schemas
             .get(mem)
@@ -1158,7 +1153,47 @@ impl Engine {
                 install_hint: None,
             })?
             .clone();
+        Self::validate_blobs_against_schema(mem, ref_name, blobs, schema.as_ref())
+    }
 
+    /// The same whole-tree validation `pull` runs before it moves a
+    /// pointer, for a mem that is not mounted yet: the caller resolved
+    /// the schema itself (a fork validates the fetched source tree
+    /// against the source's pin before the mount exists). Refuses with
+    /// `SCHEMA_VIOLATION_IN_FETCH`, the pull path's code.
+    pub(crate) fn validate_ref_with_schema(
+        hook: &crate::engine::GitBranchOps,
+        gitdir: &std::path::Path,
+        mem: &str,
+        ref_name: &str,
+        schema: &memstead_schema::Schema,
+    ) -> Result<(), EngineError> {
+        let blobs = Self::read_ref_blobs(hook, gitdir, ref_name)?;
+        Self::validate_blobs_against_schema(mem, ref_name, blobs, schema)
+    }
+
+    /// Every `.md` blob at `ref_name`; an absent ref is `UNKNOWN_REF`.
+    fn read_ref_blobs(
+        hook: &crate::engine::GitBranchOps,
+        gitdir: &std::path::Path,
+        ref_name: &str,
+    ) -> Result<Vec<(String, String)>, EngineError> {
+        (hook.read_tree)(gitdir, ref_name).map_err(|e| match e {
+            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
+                EngineError::UnknownRef(msg.trim_start_matches("UNKNOWN_REF:").trim().to_string())
+            }
+            other => EngineError::Backend(other),
+        })
+    }
+
+    /// The permissive parse plus the strict per-entity pass over the
+    /// blobs of one ref, against one schema.
+    fn validate_blobs_against_schema(
+        mem: &str,
+        ref_name: &str,
+        blobs: Vec<(String, String)>,
+        schema: &memstead_schema::Schema,
+    ) -> Result<(), EngineError> {
         let mut source_entries: Vec<crate::entity::source::SourceEntry> = Vec::new();
         for (rel_path, content) in blobs {
             source_entries.push(crate::entity::source::SourceEntry {
@@ -1172,12 +1207,8 @@ impl Engine {
         // can build Entity values for the strict validator. The
         // loader silently absorbs frontmatter / title / section
         // drift; the strict pass below is what catches it.
-        let load_result = crate::entity::loader::parse_entries(
-            source_entries.clone(),
-            Vec::new(),
-            mem,
-            schema.as_ref(),
-        );
+        let load_result =
+            crate::entity::loader::parse_entries(source_entries.clone(), Vec::new(), mem, schema);
         let mut violations: Vec<String> = load_result
             .errors
             .iter()

@@ -56,6 +56,8 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     prune_residue: prune_residue_dispatch,
     prune_config_blob: prune_config_blob_dispatch,
     branch_namespace_conflicts: branch_namespace_conflicts_dispatch,
+    create_branch_at: create_branch_at_dispatch,
+    read_config_at_ref: read_config_at_ref_dispatch,
     rename_mem_storage: rename_mem_storage_dispatch,
     write_schema: write_schema_dispatch,
     read_schema_file: read_schema_file_dispatch,
@@ -190,6 +192,52 @@ fn branch_namespace_conflicts_dispatch(
 ) -> Result<Vec<String>, memstead_base::backend::BackendError> {
     crate::mem_repo_config::branch_namespace_conflicts_at_gitdir(gitdir, branch_full_path)
         .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
+}
+
+/// Dispatcher for `fork_mem`: the fork's branch, created at the
+/// source's commit in one ref-edit that refuses an existing ref. The
+/// object must be a commit already in the store (a local branch's
+/// history, or one a fetch just brought in); a sha naming anything
+/// else refuses before the ref is touched.
+fn create_branch_at_dispatch(
+    gitdir: &std::path::Path,
+    branch_full_path: &str,
+    sha: &str,
+) -> Result<(), memstead_base::backend::BackendError> {
+    use memstead_base::backend::BackendError;
+    let oid = gix::ObjectId::from_hex(sha.as_bytes())
+        .map_err(|e| BackendError::Other(format!("fork: {sha:?} is not a full object id: {e}")))?;
+    let repo = gix::open(gitdir)
+        .map_err(|e| BackendError::Other(format!("gix open {}: {e}", gitdir.display())))?;
+    repo.find_commit(oid).map_err(|e| {
+        BackendError::Other(format!("fork: {sha} is not a commit in the mem-repo: {e}"))
+    })?;
+    let ref_name = format!("refs/heads/{branch_full_path}");
+    crate::mem_repo_config::commit_refs_at_gitdir(
+        gitdir,
+        &[crate::mem_repo_config::RefSpec {
+            ref_name: ref_name.clone(),
+            new_oid: oid,
+            expected: gix::refs::transaction::PreviousValue::MustNotExist,
+            log_message: format!("memstead: fork branch at {sha}"),
+        }],
+    )
+    .map_err(|e| BackendError::Other(format!("create {ref_name} at {sha}: {e}")))
+}
+
+/// Dispatcher for the remote fork's config read: one mem's config blob
+/// from the `__MEMSTEAD` tree at a remote-tracking ref. The local
+/// `refs/heads/__MEMSTEAD` is never consulted here and never moved.
+fn read_config_at_ref_dispatch(
+    gitdir: &std::path::Path,
+    ref_name: &str,
+    mem: &str,
+) -> Result<Option<Vec<u8>>, memstead_base::backend::BackendError> {
+    crate::storage::git_tree::read_blob_from_ref(
+        gitdir,
+        ref_name,
+        &format!("mems/{mem}/config.json"),
+    )
 }
 
 /// Dispatcher for `memstead_base::mem_management::rename_mem` on git-branch

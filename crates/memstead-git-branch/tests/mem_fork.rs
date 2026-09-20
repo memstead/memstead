@@ -1,0 +1,812 @@
+//! `fork_mem` on the git-branch backend: a mem forks from another
+//! mem's branch at a recorded ancestor.
+//!
+//! AC1 (local form): the branch starts at the source's tip or at a
+//! given sha the source reaches, the config is the source's with
+//! `forkedFrom` written in and the source's cursors left behind, the
+//! entities read identical, the source's cross-link grants are
+//! inherited, and every refusal lands nothing.
+//!
+//! AC2 (remote form): the source branch and config come from a second
+//! bare mem-repo declared as a remote, the fetched tree is validated
+//! before the mount exists, no grant is inherited, the local
+//! `__MEMSTEAD` is never fetched over, and an unresolvable pin refuses
+//! naming `memstead schema install`.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use memstead_base::backend::MemBackend;
+use memstead_base::mem_management::{self, MemForkParams, StorageKind};
+use memstead_base::vcs::Actor;
+use memstead_base::{CreateEntityArgs, FullEngineError};
+use memstead_git_branch::mem_repo_config::{commit_config_at_gitdir, read_config_at_gitdir};
+use memstead_git_branch::ops::transport::{
+    push_in_gitdir, read_md_blobs_at_ref, remote_add_in_gitdir, resolve_ref_in_gitdir,
+};
+use memstead_git_branch::storage::git_tree::GitTreeBackend;
+use memstead_git_branch::test_support::init_real_mem_repo;
+use memstead_git_branch::vcs::CommitContext;
+use memstead_git_branch::workspace_store::engine_from_workspace_root;
+use memstead_schema::workspace_config::CrossLinkValue;
+use tempfile::TempDir;
+
+const WORKSPACE_HEAD: &str = "format = \"memstead-git-branch-2\"\n\n\
+     [persistence_adapter]\nname = \"file-two-layer\"\n\n";
+
+fn seed_sections() -> indexmap::IndexMap<String, String> {
+    let mut sections = indexmap::IndexMap::new();
+    sections.insert("identity".to_string(), "seed identity".to_string());
+    sections.insert("purpose".to_string(), "seed purpose".to_string());
+    sections
+}
+
+fn create_entity_in(engine: &mut memstead_base::Engine, mem: &str, title: &str) {
+    engine
+        .create_entity(
+            CreateEntityArgs {
+                anchors: Vec::new(),
+                mem: mem.to_string(),
+                title: title.to_string(),
+                entity_type: "spec".to_string(),
+                sections: seed_sections(),
+                metadata: Default::default(),
+                relations: Vec::new(),
+                dry_run: false,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .unwrap_or_else(|e| panic!("create entity {title:?} in mem {mem:?}: {e:?}"));
+}
+
+fn relate(engine: &mut memstead_base::Engine, from: (&str, &str), to: (&str, &str)) {
+    engine
+        .relate_entity(
+            memstead_base::RelateEntityArgs {
+                source: memstead_base::EntityId::new(from.0, from.1),
+                expected_hash: None,
+                rel_type: "DEPENDS_ON".to_string(),
+                target: memstead_base::EntityId::new(to.0, to.1),
+                remove: false,
+                description: None,
+                dry_run: false,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .unwrap_or_else(|e| panic!("relate {from:?} -> {to:?}: {e:?}"));
+}
+
+fn gitdir_of(root: &Path) -> PathBuf {
+    root.join("mem-repo").join(".git").canonicalize().unwrap()
+}
+
+fn sha_of(gitdir: &Path, ref_name: &str) -> Option<String> {
+    resolve_ref_in_gitdir(gitdir, ref_name).unwrap()
+}
+
+fn workspace_toml(root: &Path) -> String {
+    std::fs::read_to_string(root.join(".memstead/workspace.toml")).unwrap()
+}
+
+fn params(source: &str, name: &str) -> MemForkParams {
+    MemForkParams {
+        source: source.to_string(),
+        sha: None,
+        name: name.to_string(),
+        remote: None,
+        note: None,
+        operator_mode: true,
+        actor: Actor::Cli,
+        client: None,
+    }
+}
+
+/// One entity's shape with the mem prefix stripped from its own and
+/// its targets' ids, so a source and its fork compare as equal.
+type Shape = (String, String, Vec<(String, String)>, Vec<(String, String)>);
+
+fn shapes(engine: &memstead_base::Engine, mem: &str) -> Vec<Shape> {
+    let mut out: Vec<Shape> = engine
+        .store()
+        .all_entities()
+        .filter(|e| e.id.mem() == mem && !e.stub)
+        .map(|e| {
+            let sections = e
+                .sections
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            let rels = e
+                .relationships
+                .iter()
+                .map(|r| {
+                    let target = if r.target.mem() == mem {
+                        r.target.path().to_string()
+                    } else {
+                        r.target.to_string()
+                    };
+                    (r.rel_type.clone(), target)
+                })
+                .collect();
+            (e.file_path.clone(), e.entity_type.clone(), sections, rels)
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// Every blob of the tree at `ref_name`, path to object id.
+fn tree_blobs(gitdir: &Path, ref_name: &str) -> BTreeMap<String, String> {
+    let repo = gix::open(gitdir).unwrap();
+    let id = repo.rev_parse_single(ref_name).unwrap();
+    let tree = id
+        .object()
+        .unwrap()
+        .try_into_commit()
+        .unwrap()
+        .tree()
+        .unwrap();
+    let entries = tree.traverse().breadthfirst.files().unwrap();
+    entries
+        .into_iter()
+        .filter(|e| e.mode.is_blob())
+        .map(|e| {
+            (
+                String::from_utf8(e.filepath.to_vec()).unwrap(),
+                e.oid.to_string(),
+            )
+        })
+        .collect()
+}
+
+/// Nothing of `name` exists: no branch, no config blob, no policy line,
+/// no mount.
+fn assert_nothing_landed(engine: &memstead_base::Engine, root: &Path, name: &str) {
+    let gitdir = gitdir_of(root);
+    assert_eq!(
+        sha_of(&gitdir, &format!("refs/heads/{name}")),
+        None,
+        "no branch for {name}"
+    );
+    assert!(
+        read_config_at_gitdir(&gitdir, name).is_err(),
+        "no config blob for {name}"
+    );
+    assert!(
+        !workspace_toml(root).contains(name),
+        "no policy line for {name}: {}",
+        workspace_toml(root)
+    );
+    assert!(
+        !engine.mem_names().contains(&name),
+        "no mount for {name}: {:?}",
+        engine.mem_names()
+    );
+}
+
+fn code_of(err: &FullEngineError) -> &'static str {
+    err.code()
+}
+
+// ---------------------------------------------------------------------
+// AC1: the local form
+// ---------------------------------------------------------------------
+
+/// A source with two entities, a cross-mem edge under a grant, a
+/// description and a version, forked at its tip under the create
+/// rules: the fork's branch is the source's commit, its config is the
+/// source's plus the origin, its entities read identical, it carries
+/// the source's grant under its own name (on disk and in the running
+/// engine), it survives a reboot, and a later write moves only its
+/// own branch.
+#[test]
+fn local_fork_starts_at_the_sources_tip_with_its_config_entities_and_grants() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".memstead")).unwrap();
+    std::fs::write(
+        tmp.path().join(".memstead/workspace.toml"),
+        format!(
+            "{WORKSPACE_HEAD}[[mem_management.create]]\npattern = \"*\"\nschemas = [\"*\"]\n\n\
+             [cross_mem_links]\nspecs = [\"plans\"]\n"
+        ),
+    )
+    .unwrap();
+    init_real_mem_repo(
+        tmp.path(),
+        &[("specs", "default@1.0.0"), ("plans", "default@1.0.0")],
+    );
+    let gitdir = gitdir_of(tmp.path());
+    // The source's config carries a description and a version the
+    // fork must copy.
+    commit_config_at_gitdir(
+        &gitdir,
+        "specs",
+        br#"{"schema": "default@1.0.0", "version": "0.4.0", "description": "the specs"}"#,
+        &CommitContext::internal(),
+        "seed",
+    )
+    .unwrap();
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "plans", "Roadmap");
+    create_entity_in(&mut engine, "specs", "Alpha");
+    create_entity_in(&mut engine, "specs", "Beta");
+    relate(&mut engine, ("specs", "beta"), ("specs", "alpha"));
+    relate(&mut engine, ("specs", "alpha"), ("plans", "roadmap"));
+    let source_tip = sha_of(&gitdir, "refs/heads/specs").unwrap();
+    let plans_tip = sha_of(&gitdir, "refs/heads/plans").unwrap();
+
+    let mut p = params("specs", "specs-fork");
+    p.operator_mode = false;
+    let response = mem_management::fork_mem(&mut engine, p).expect("local fork lands");
+
+    // The response names what was created and where it came from.
+    assert_eq!(response.name, "specs-fork");
+    assert_eq!(response.branch_ref, "refs/heads/specs-fork");
+    assert_eq!(response.forked_from.mem, "specs");
+    assert_eq!(response.forked_from.sha, source_tip);
+    assert_eq!(response.forked_from.remote, None);
+    assert_eq!(response.schema_ref.to_string(), "default@1.0.0");
+    assert_eq!(
+        response.inherited_grants,
+        Some(CrossLinkValue::List(vec!["plans".to_string()]))
+    );
+
+    // The branch is the source's commit: same sha, so the same tree
+    // (entities and the anchors sidecar alike).
+    assert_eq!(
+        sha_of(&gitdir, "refs/heads/specs-fork").as_deref(),
+        Some(source_tip.as_str())
+    );
+    // The config on __MEMSTEAD is the source's plus the origin.
+    let cfg = read_config_at_gitdir(&gitdir, "specs-fork").unwrap();
+    assert_eq!(cfg.schema.unwrap().to_string(), "default@1.0.0");
+    assert_eq!(cfg.version.unwrap().to_string(), "0.4.0");
+    assert_eq!(cfg.description.as_deref(), Some("the specs"));
+    let origin = cfg.forked_from.expect("origin recorded");
+    assert_eq!(origin.mem, "specs");
+    assert_eq!(origin.sha, source_tip);
+    assert_eq!(origin.remote, None);
+    // The source's own config is untouched by the fork.
+    let source_cfg = read_config_at_gitdir(&gitdir, "specs").unwrap();
+    assert!(source_cfg.forked_from.is_none());
+
+    // The entities, relationships included, read identical.
+    assert_eq!(shapes(&engine, "specs-fork"), shapes(&engine, "specs"));
+    assert_eq!(shapes(&engine, "specs-fork").len(), 2);
+
+    // The grant rides under the fork's name: on disk through the
+    // policy writer, and in the running engine.
+    let toml = workspace_toml(tmp.path());
+    assert!(
+        toml.contains("specs-fork = [\"plans\"]"),
+        "inherited grant written: {toml}"
+    );
+    assert!(
+        toml.contains("specs = [\"plans\"]"),
+        "source keeps its grant"
+    );
+    assert!(engine.cross_mem_link_allowed("specs-fork", "plans"));
+    assert!(
+        engine.mem_names().contains(&"specs-fork"),
+        "{:?}",
+        engine.mem_names()
+    );
+
+    // A later write to the fork moves only the fork's branch.
+    create_entity_in(&mut engine, "specs-fork", "Gamma");
+    assert_ne!(
+        sha_of(&gitdir, "refs/heads/specs-fork").unwrap(),
+        source_tip,
+        "the fork's branch moved"
+    );
+    assert_eq!(
+        sha_of(&gitdir, "refs/heads/specs").unwrap(),
+        source_tip,
+        "the source's branch did not"
+    );
+    assert_eq!(sha_of(&gitdir, "refs/heads/plans").unwrap(), plans_tip);
+    drop(engine);
+
+    // A reboot loads the fork from the persisted mount with its origin
+    // and its edge conformant under the inherited grant.
+    let engine = engine_from_workspace_root(tmp.path()).expect("reboot");
+    let cfg = engine.mem_config_for("specs-fork").expect("config loaded");
+    assert_eq!(cfg.forked_from.as_ref().unwrap().sha, source_tip);
+    assert_eq!(shapes(&engine, "specs-fork").len(), 3);
+    assert!(engine.cross_mem_link_allowed("specs-fork", "plans"));
+}
+
+/// `<source>@<sha>`: the fork starts at the named commit, which the
+/// source branch reaches, and carries only what that commit carried.
+#[test]
+fn local_fork_at_a_given_sha_starts_there() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let gitdir = gitdir_of(tmp.path());
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "specs", "Alpha");
+    let first = sha_of(&gitdir, "refs/heads/specs").unwrap();
+    create_entity_in(&mut engine, "specs", "Beta");
+    let tip = sha_of(&gitdir, "refs/heads/specs").unwrap();
+    assert_ne!(first, tip);
+
+    let mut p = params("specs", "specs-early");
+    // An abbreviated sha resolves like a full one.
+    p.sha = Some(first[..12].to_string());
+    let response = mem_management::fork_mem(&mut engine, p).expect("fork at sha lands");
+    assert_eq!(response.forked_from.sha, first);
+    assert_eq!(
+        sha_of(&gitdir, "refs/heads/specs-early").as_deref(),
+        Some(first.as_str())
+    );
+    let names: Vec<String> = shapes(&engine, "specs-early")
+        .into_iter()
+        .map(|s| s.0)
+        .collect();
+    assert_eq!(names, vec!["alpha.md".to_string()]);
+    assert_eq!(shapes(&engine, "specs").len(), 2, "the source keeps both");
+}
+
+/// A source with no grants forks with none; the source's sync state
+/// and review mark are its own cursors and are not copied.
+#[test]
+fn fork_of_a_mem_without_grants_adds_none_and_copies_no_cursor() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("plans", "default@1.0.0")]);
+    let gitdir = gitdir_of(tmp.path());
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "plans", "Roadmap");
+    let tip = sha_of(&gitdir, "refs/heads/plans").unwrap();
+    engine
+        .set_mem_sync_state("plans", "docs/tree#synced", "abc123", None)
+        .unwrap();
+    engine.set_review_mark("plans", Some(&tip), None).unwrap();
+    let source_cfg = read_config_at_gitdir(&gitdir, "plans").unwrap();
+    assert!(!source_cfg.sync_state.is_empty());
+    assert_eq!(source_cfg.review_mark.as_deref(), Some(tip.as_str()));
+    let toml_before = workspace_toml(tmp.path());
+
+    let response =
+        mem_management::fork_mem(&mut engine, params("plans", "plans-fork")).expect("fork lands");
+    assert_eq!(response.inherited_grants, None);
+    assert_eq!(
+        workspace_toml(tmp.path()),
+        toml_before,
+        "no policy line for a fork of a mem without grants"
+    );
+    let cfg = read_config_at_gitdir(&gitdir, "plans-fork").unwrap();
+    assert!(
+        cfg.sync_state.is_empty(),
+        "sync state is the source's cursor"
+    );
+    assert!(
+        cfg.review_mark.is_none(),
+        "the review mark is the source's cursor"
+    );
+    assert!(cfg.unregistered_at.is_none());
+    assert_eq!(cfg.forked_from.unwrap().mem, "plans");
+}
+
+/// Every local refusal is typed and lands nothing: no branch, no
+/// config blob, no policy line, no mount.
+#[test]
+fn local_fork_refusals_land_nothing() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".memstead")).unwrap();
+    std::fs::write(
+        tmp.path().join(".memstead/workspace.toml"),
+        format!(
+            "{WORKSPACE_HEAD}[[mem_management.create]]\npattern = \"proposals/*\"\n\
+             schemas = [\"*\"]\n\n[[mem_management.create]]\npattern = \"planning-only/*\"\n\
+             schemas = [\"planning@0.1.0\"]\n\n[cross_mem_links]\nspecs = \"*\"\n"
+        ),
+    )
+    .unwrap();
+    init_real_mem_repo(
+        tmp.path(),
+        &[("specs", "default@1.0.0"), ("plans", "default@1.0.0")],
+    );
+    let gitdir = gitdir_of(tmp.path());
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "specs", "Alpha");
+    create_entity_in(&mut engine, "plans", "Roadmap");
+    let plans_tip = sha_of(&gitdir, "refs/heads/plans").unwrap();
+    // A folder mem beside the git-branch mems, for the source-kind refusal.
+    mem_management::create_mem(
+        &mut engine,
+        mem_management::MemCreateParams {
+            name: "notes".to_string(),
+            location: PathBuf::from("notes"),
+            schema_ref: "default@1.0.0".parse().unwrap(),
+            vcs: None,
+            note: None,
+            operator_mode: true,
+            recovery: None,
+            write_guidance: Default::default(),
+            storage: Some(StorageKind::Folder),
+            actor: Actor::Cli,
+            client: None,
+        },
+    )
+    .expect("folder mem");
+    let memstead_before = sha_of(&gitdir, "refs/heads/__MEMSTEAD").unwrap();
+
+    // A sha not reachable from the source branch.
+    let mut p = params("specs", "proposals/wrong-sha");
+    p.sha = Some(plans_tip.clone());
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "UNKNOWN_REF", "{err}");
+    assert!(err.to_string().contains("refs/heads/specs"), "{err}");
+    assert_nothing_landed(&engine, tmp.path(), "proposals/wrong-sha");
+
+    // A sha nothing resolves.
+    let mut p = params("specs", "proposals/no-sha");
+    p.sha = Some("deadbeef".to_string());
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "UNKNOWN_REF", "{err}");
+    assert_nothing_landed(&engine, tmp.path(), "proposals/no-sha");
+
+    // A malformed name.
+    let err = mem_management::fork_mem(&mut engine, params("specs", "Specs Fork")).unwrap_err();
+    assert_eq!(code_of(&err), "INVALID_MEM_NAME", "{err}");
+
+    // A name the create rules do not admit (agent posture).
+    let mut p = params("specs", "elsewhere");
+    p.operator_mode = false;
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "MEM_PATH_NOT_ALLOWED", "{err}");
+    assert_nothing_landed(&engine, tmp.path(), "elsewhere");
+
+    // A source pin the matched rule's allowlist does not admit.
+    let mut p = params("specs", "planning-only/copy");
+    p.operator_mode = false;
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "MEM_SCHEMA_NOT_ALLOWED", "{err}");
+    assert_nothing_landed(&engine, tmp.path(), "planning-only/copy");
+
+    // A name a branch sits above.
+    let err = mem_management::fork_mem(&mut engine, params("specs", "specs/child")).unwrap_err();
+    assert_eq!(code_of(&err), "MEM_NAME_REF_CONFLICT", "{err}");
+    assert_nothing_landed(&engine, tmp.path(), "specs/child");
+
+    // An existing mem name.
+    let err = mem_management::fork_mem(&mut engine, params("specs", "plans")).unwrap_err();
+    assert_eq!(code_of(&err), "MEM_NAME_COLLISION", "{err}");
+    assert_eq!(
+        sha_of(&gitdir, "refs/heads/plans").as_deref(),
+        Some(plans_tip.as_str())
+    );
+
+    // The source is a folder mem.
+    let err = mem_management::fork_mem(&mut engine, params("notes", "notes-fork")).unwrap_err();
+    assert_eq!(code_of(&err), "INVALID_INPUT", "{err}");
+    assert!(err.to_string().contains("folder"), "{err}");
+    assert_nothing_landed(&engine, tmp.path(), "notes-fork");
+
+    // The source is not mounted.
+    let err = mem_management::fork_mem(&mut engine, params("ghost", "ghost-fork")).unwrap_err();
+    assert_eq!(code_of(&err), "UNKNOWN_MEM", "{err}");
+    assert_nothing_landed(&engine, tmp.path(), "ghost-fork");
+
+    // A fork under its own name.
+    let err = mem_management::fork_mem(&mut engine, params("specs", "specs")).unwrap_err();
+    assert_eq!(code_of(&err), "INVALID_INPUT", "{err}");
+
+    // Residue at the name (an unregistered mem's branch and config).
+    let stale = GitTreeBackend::new(gitdir.clone(), "refs/heads/stale".to_string());
+    stale
+        .write_entity(
+            Path::new("old.md"),
+            b"---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\n---\n# Old\n\n## Identity\n\nold\n\n## Purpose\n\nold\n",
+        )
+        .unwrap();
+    let stale_tip = stale.commit("stale", &CommitContext::internal()).unwrap();
+    commit_config_at_gitdir(
+        &gitdir,
+        "stale",
+        br#"{"schema": "default@1.0.0"}"#,
+        &CommitContext::internal(),
+        "stale config",
+    )
+    .unwrap();
+    let err = mem_management::fork_mem(&mut engine, params("specs", "stale")).unwrap_err();
+    assert_eq!(code_of(&err), "MEM_STORAGE_RESIDUE_DETECTED", "{err}");
+    assert_eq!(
+        sha_of(&gitdir, "refs/heads/stale").as_deref(),
+        Some(stale_tip.as_str()),
+        "the residue is neither adopted nor destroyed"
+    );
+
+    // Across every refusal: the source's wildcard grant never leaked
+    // under another name, the mount roster is unchanged, and the
+    // registry ref moved only for the residue fixture and the folder
+    // create, never for a refused fork.
+    let toml = workspace_toml(tmp.path());
+    assert_eq!(toml.matches("= \"*\"").count(), 1, "{toml}");
+    let mut names = engine.mem_names();
+    names.sort_unstable();
+    assert_eq!(names, vec!["notes", "plans", "specs"]);
+    let _ = memstead_before;
+}
+
+// ---------------------------------------------------------------------
+// AC2: the remote form, with a second bare mem-repo as the remote
+// ---------------------------------------------------------------------
+
+/// Workspace A with mem `specs` (two entities, a description and a
+/// version), pushed to a bare remote; workspace B declares that remote
+/// as `origin`. Returns `(a, b, remote, specs tip sha)`.
+fn remote_fixture() -> (TempDir, TempDir, TempDir, String) {
+    let a = TempDir::new().unwrap();
+    init_real_mem_repo(a.path(), &[("specs", "default@1.0.0")]);
+    let a_gitdir = gitdir_of(a.path());
+    commit_config_at_gitdir(
+        &a_gitdir,
+        "specs",
+        br#"{"schema": "default@1.0.0", "version": "0.4.0", "description": "from A"}"#,
+        &CommitContext::internal(),
+        "seed",
+    )
+    .unwrap();
+    let mut engine_a = engine_from_workspace_root(a.path()).expect("A boots");
+    create_entity_in(&mut engine_a, "specs", "Alpha");
+    create_entity_in(&mut engine_a, "specs", "Beta");
+    relate(&mut engine_a, ("specs", "beta"), ("specs", "alpha"));
+    drop(engine_a);
+    let tip = sha_of(&a_gitdir, "refs/heads/specs").unwrap();
+
+    let remote = TempDir::new().unwrap();
+    gix::init_bare(remote.path()).unwrap();
+    remote_add_in_gitdir(&a_gitdir, "origin", remote.path().to_str().unwrap()).unwrap();
+    push_in_gitdir(&a_gitdir, "origin", "specs", "specs", false).unwrap();
+    push_in_gitdir(&a_gitdir, "origin", "__MEMSTEAD", "__MEMSTEAD", false).unwrap();
+
+    let b = TempDir::new().unwrap();
+    init_real_mem_repo(b.path(), &[("local", "default@1.0.0")]);
+    let b_gitdir = gitdir_of(b.path());
+    remote_add_in_gitdir(&b_gitdir, "origin", remote.path().to_str().unwrap()).unwrap();
+    (a, b, remote, tip)
+}
+
+/// Push one extra branch of A (with its config blob on A's
+/// `__MEMSTEAD`) to the remote: `entries` are `(path, content)` pairs.
+fn push_branch_from_a(a: &Path, name: &str, config: &[u8], entries: &[(&str, &[u8])]) -> String {
+    let gitdir = gitdir_of(a);
+    let writer = GitTreeBackend::new(gitdir.clone(), format!("refs/heads/{name}"));
+    for (path, content) in entries {
+        writer.write_entity(Path::new(path), content).unwrap();
+    }
+    let sha = writer.commit("seed", &CommitContext::internal()).unwrap();
+    commit_config_at_gitdir(&gitdir, name, config, &CommitContext::internal(), "seed").unwrap();
+    push_in_gitdir(&gitdir, "origin", name, name, false).unwrap();
+    push_in_gitdir(&gitdir, "origin", "__MEMSTEAD", "__MEMSTEAD", true).unwrap();
+    sha
+}
+
+/// The remote fork: the branch is the remote's commit, the config is
+/// the remote's with the origin naming source, sha and remote, the
+/// entities load, no grant is inherited, the local `__MEMSTEAD` gained
+/// exactly the fork's config blob and nothing else, and the fork
+/// survives a reboot.
+#[test]
+fn remote_fork_fetches_the_source_branch_and_config() {
+    let (_a, b, _remote, tip) = remote_fixture();
+    let b_gitdir = gitdir_of(b.path());
+    let mut engine = engine_from_workspace_root(b.path()).expect("B boots");
+    let registry_before = tree_blobs(&b_gitdir, "refs/heads/__MEMSTEAD");
+    let toml_before = workspace_toml(b.path());
+
+    let mut p = params("specs", "specs-copy");
+    p.remote = Some("origin".to_string());
+    let response = mem_management::fork_mem(&mut engine, p).expect("remote fork lands");
+    assert_eq!(response.forked_from.mem, "specs");
+    assert_eq!(response.forked_from.sha, tip);
+    assert_eq!(response.forked_from.remote.as_deref(), Some("origin"));
+    assert_eq!(response.inherited_grants, None);
+    assert_eq!(
+        sha_of(&b_gitdir, "refs/heads/specs-copy").as_deref(),
+        Some(tip.as_str())
+    );
+
+    let cfg = read_config_at_gitdir(&b_gitdir, "specs-copy").unwrap();
+    assert_eq!(cfg.description.as_deref(), Some("from A"));
+    assert_eq!(cfg.version.unwrap().to_string(), "0.4.0");
+    let origin = cfg.forked_from.unwrap();
+    assert_eq!(
+        (origin.mem.as_str(), origin.remote.as_deref()),
+        ("specs", Some("origin"))
+    );
+    assert_eq!(origin.sha, tip);
+
+    // The entities and their edge came with the branch.
+    let fork_shapes = shapes(&engine, "specs-copy");
+    assert_eq!(fork_shapes.len(), 2);
+    assert!(
+        fork_shapes.iter().any(|s| s
+            .3
+            .contains(&("DEPENDS_ON".to_string(), "alpha".to_string()))),
+        "{fork_shapes:?}"
+    );
+
+    // No grant from the remote's policy: the workspace file is untouched.
+    assert_eq!(workspace_toml(b.path()), toml_before);
+
+    // The remote's registry was fetched to a tracking ref; the local
+    // __MEMSTEAD gained exactly the fork's config blob.
+    assert!(sha_of(&b_gitdir, "refs/remotes/origin/__MEMSTEAD").is_some());
+    assert!(sha_of(&b_gitdir, "refs/remotes/origin/specs").is_some());
+    let mut expected = registry_before;
+    let registry_after = tree_blobs(&b_gitdir, "refs/heads/__MEMSTEAD");
+    let fork_blob = registry_after
+        .get("mems/specs-copy/config.json")
+        .expect("the fork's config blob");
+    expected.insert("mems/specs-copy/config.json".to_string(), fork_blob.clone());
+    assert_eq!(registry_after, expected, "no other blob moved");
+    // A's own config never appears under the source's name locally.
+    assert!(read_config_at_gitdir(&b_gitdir, "specs").is_err());
+    drop(engine);
+
+    let engine = engine_from_workspace_root(b.path()).expect("reboot");
+    assert_eq!(shapes(&engine, "specs-copy").len(), 2);
+    assert_eq!(
+        engine
+            .mem_config_for("specs-copy")
+            .unwrap()
+            .forked_from
+            .as_ref()
+            .unwrap()
+            .remote
+            .as_deref(),
+        Some("origin")
+    );
+}
+
+/// `<source>@<sha> --remote`: the fork starts at the named commit of
+/// the fetched branch.
+#[test]
+fn remote_fork_at_a_given_sha_starts_there() {
+    let (a, b, _remote, first) = remote_fixture();
+    // A moves on; the remote follows.
+    let a_gitdir = gitdir_of(a.path());
+    let mut engine_a = engine_from_workspace_root(a.path()).expect("A boots");
+    create_entity_in(&mut engine_a, "specs", "Gamma");
+    drop(engine_a);
+    push_in_gitdir(&a_gitdir, "origin", "specs", "specs", false).unwrap();
+    let tip = sha_of(&a_gitdir, "refs/heads/specs").unwrap();
+    assert_ne!(first, tip);
+
+    let mut engine = engine_from_workspace_root(b.path()).expect("B boots");
+    let mut p = params("specs", "specs-early");
+    p.remote = Some("origin".to_string());
+    p.sha = Some(first.clone());
+    let response = mem_management::fork_mem(&mut engine, p).expect("remote fork at sha");
+    assert_eq!(response.forked_from.sha, first);
+    assert_eq!(shapes(&engine, "specs-early").len(), 2);
+}
+
+/// Every remote refusal is typed and lands nothing; the local
+/// `__MEMSTEAD` is never fetched over.
+#[test]
+fn remote_fork_refusals_land_nothing() {
+    let (a, b, _remote, _tip) = remote_fixture();
+    let b_gitdir = gitdir_of(b.path());
+    // A branch whose config pins a schema B cannot resolve.
+    let valid = b"---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\n---\n# Valid\n\n## Identity\n\nv\n\n## Purpose\n\nv\n";
+    push_branch_from_a(
+        a.path(),
+        "weird",
+        br#"{"schema": "nowhere@1.0.0"}"#,
+        &[("valid.md", valid)],
+    );
+    // A branch whose tree fails the schema.
+    push_branch_from_a(
+        a.path(),
+        "broken",
+        br#"{"schema": "default@1.0.0"}"#,
+        &[("broken.md", b"# Broken\n\nno frontmatter, no sections\n")],
+    );
+
+    let mut engine = engine_from_workspace_root(b.path()).expect("B boots");
+    let registry_before = sha_of(&b_gitdir, "refs/heads/__MEMSTEAD").unwrap();
+    let local_tip = sha_of(&b_gitdir, "refs/heads/local").unwrap();
+
+    // An unknown remote.
+    let mut p = params("specs", "from-nowhere");
+    p.remote = Some("nowhere".to_string());
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "UNKNOWN_REMOTE", "{err}");
+    assert_nothing_landed(&engine, b.path(), "from-nowhere");
+
+    // A branch the remote does not have, named with the remote.
+    let mut p = params("ghost", "ghost-copy");
+    p.remote = Some("origin".to_string());
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "UNKNOWN_REF", "{err}");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("origin") && msg.contains("refs/heads/ghost"),
+        "{msg}"
+    );
+    assert_nothing_landed(&engine, b.path(), "ghost-copy");
+
+    // A sha not on the fetched branch (B's own local tip).
+    let mut p = params("specs", "specs-off");
+    p.remote = Some("origin".to_string());
+    p.sha = Some(local_tip);
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "UNKNOWN_REF", "{err}");
+    assert_nothing_landed(&engine, b.path(), "specs-off");
+
+    // A source pin this workspace cannot resolve: typed, naming the
+    // pin and the remedy, landing no branch and no config.
+    let mut p = params("weird", "weird-copy");
+    p.remote = Some("origin".to_string());
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "SCHEMA_NOT_FOUND", "{err}");
+    let msg = err.to_string();
+    assert!(msg.contains("nowhere@1.0.0"), "{msg}");
+    assert!(msg.contains("memstead schema install"), "{msg}");
+    assert_nothing_landed(&engine, b.path(), "weird-copy");
+
+    // A fetched tree failing the schema: the pull path's code.
+    let mut p = params("broken", "broken-copy");
+    p.remote = Some("origin".to_string());
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "SCHEMA_VIOLATION_IN_FETCH", "{err}");
+    assert_nothing_landed(&engine, b.path(), "broken-copy");
+
+    // The local registry ref never moved for a refused fork, and the
+    // fetches landed on tracking refs only.
+    assert_eq!(
+        sha_of(&b_gitdir, "refs/heads/__MEMSTEAD").unwrap(),
+        registry_before
+    );
+    assert!(sha_of(&b_gitdir, "refs/remotes/origin/__MEMSTEAD").is_some());
+    assert!(read_md_blobs_at_ref(&b_gitdir, "refs/heads/local").is_ok());
+}
+
+/// A workspace without a mem-repo cannot fork: typed `INVALID_INPUT`
+/// naming the reason.
+#[test]
+fn fork_refuses_a_folder_only_workspace() {
+    let tmp = TempDir::new().unwrap();
+    let mem = tmp.path().join("notes");
+    std::fs::create_dir_all(mem.join(".memstead")).unwrap();
+    std::fs::write(
+        mem.join(".memstead/config.json"),
+        r#"{"schema": "default@1.0.0"}"#,
+    )
+    .unwrap();
+    let mut engine = memstead_base::Engine::from_mounts(vec![(
+        memstead_base::Mount {
+            mem: "notes".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: memstead_base::MountStorage::Folder { path: mem },
+            capability: memstead_base::MountCapability::Write,
+            lifecycle: memstead_base::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        },
+        memstead_base::instantiate_local_backend(&memstead_base::Mount {
+            mem: "notes".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: memstead_base::MountStorage::Folder {
+                path: tmp.path().join("notes"),
+            },
+            capability: memstead_base::MountCapability::Write,
+            lifecycle: memstead_base::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        })
+        .unwrap(),
+    )])
+    .expect("folder engine");
+    engine.set_workspace_root(tmp.path().to_path_buf());
+    let err = mem_management::fork_mem(&mut engine, params("notes", "notes-fork")).unwrap_err();
+    assert_eq!(code_of(&err), "INVALID_INPUT", "{err}");
+    assert!(err.to_string().contains("mem-repo"), "{err}");
+}

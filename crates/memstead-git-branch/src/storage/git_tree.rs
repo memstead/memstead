@@ -983,7 +983,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
 /// Used by `read_mem_config` to read per-mem configs from
 /// `__MEMSTEAD` without needing a full full `MemConfig` parser path —
 /// the engine parses bytes uniformly across backends.
-fn read_blob_from_ref(
+pub(crate) fn read_blob_from_ref(
     gitdir: &Path,
     ref_name: &str,
     path: &str,

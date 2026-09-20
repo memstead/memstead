@@ -665,6 +665,23 @@ pub type GitBranchPruneConfigBlobFn = fn(
 pub type GitBranchNamespaceConflictsFn =
     fn(gitdir: &Path, branch_full_path: &str) -> Result<Vec<String>, BackendError>;
 
+/// `fork_mem` dispatch: create `refs/heads/<branch_full_path>` at
+/// `sha`, a full commit id already in the object store, in one
+/// ref-edit that refuses when the ref exists. The branch is the
+/// fork's lineage claim: its first commit is the source's, never a
+/// fresh seed.
+pub type GitBranchCreateBranchAtFn =
+    fn(gitdir: &Path, branch_full_path: &str, sha: &str) -> Result<(), BackendError>;
+
+/// `fork_mem` dispatch for the remote form: one mem's config blob
+/// (`mems/<mem>/config.json`) from the `__MEMSTEAD` tree at
+/// `ref_name`, the remote-tracking ref a fetch just placed
+/// (`refs/remotes/<remote>/__MEMSTEAD`), never the local
+/// `refs/heads/__MEMSTEAD`. `Ok(None)` when the ref or the blob is
+/// absent. Read-only.
+pub type GitBranchReadConfigAtRefFn =
+    fn(gitdir: &Path, ref_name: &str, mem: &str) -> Result<Option<Vec<u8>>, BackendError>;
+
 /// `rename_mem` dispatch for the git-branch backend: move the mem's
 /// content branch `refs/heads/<old>` to `refs/heads/<new>` at the same
 /// tip (history preserved) and relocate the `__MEMSTEAD:mems/<old>/`
@@ -747,6 +764,8 @@ pub struct GitBranchOps {
     pub prune_residue: GitBranchPruneResidueFn,
     pub prune_config_blob: GitBranchPruneConfigBlobFn,
     pub branch_namespace_conflicts: GitBranchNamespaceConflictsFn,
+    pub create_branch_at: GitBranchCreateBranchAtFn,
+    pub read_config_at_ref: GitBranchReadConfigAtRefFn,
     pub rename_mem_storage: GitBranchRenameMemStorageFn,
     pub write_schema: GitBranchWriteSchemaFn,
     pub read_schema_file: GitBranchReadSchemaFileFn,

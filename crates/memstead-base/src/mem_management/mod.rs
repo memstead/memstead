@@ -23,7 +23,9 @@
 //! [`crate::Engine::cross_mem_link_allowed`] synthesises a
 //! [`CreateRuleSet`] from on multi-folder workspaces.
 
+pub mod fork;
 pub mod lifecycle;
+pub use fork::*;
 pub use lifecycle::*;
 
 use std::path::Path;
