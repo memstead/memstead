@@ -46,6 +46,7 @@ pub mod independence;
 pub mod lifecycle;
 pub mod mutation;
 pub mod outcomes;
+pub mod proposal;
 pub mod query;
 pub mod review;
 pub mod roster;

@@ -24,6 +24,7 @@ pub mod health;
 pub mod health_compose;
 pub mod integrity;
 pub mod labelling;
+pub mod proposal;
 pub mod redaction;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod search;
@@ -41,6 +42,7 @@ pub use changes::{
 pub use commit_envelope::{CommitEnvelope, EntityChange};
 pub use diff::{Diff, DiffConfig, EntityDiff, IncomingRipple};
 pub use export::{MemExportBytes, MemExportError};
+pub use proposal::{ProposalBrief, ProposalChange, ProposalEntry, render_proposal_brief};
 pub use transport::{
     FetchOutcome, PullOutcome, PushAllOutcome, PushOutcome, PushedRef, RefusedRef,
     RemoteAddOutcome, RemoteRefState, RemoteRefStatus, RemoteStatusOutcome, UpdatedRef,
