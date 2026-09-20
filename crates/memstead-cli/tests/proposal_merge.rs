@@ -69,6 +69,8 @@ fn seed() -> TempDir {
             "purpose=A new card.",
             "--identity",
             "proposer-p1",
+            "--role",
+            "author",
             "--quiet",
         ])
         .assert()
@@ -221,6 +223,8 @@ fn proposal_merge_lands_lists_and_shows_in_provenance() {
     let envelope = json_stdout(&out);
     let created = &envelope["mutation_provenance"]["created_by"];
     assert_eq!(created["identity"], "proposer-p1");
+    // The role the proposer wrote the fork commit under rides the merge.
+    assert_eq!(created["role"], "author");
     assert_eq!(created["merged_by"], "owner-o1");
     assert_eq!(created["proposal"], proposal_id);
     assert_eq!(created["disposition"], "adopt");
@@ -236,6 +240,10 @@ fn proposal_merge_lands_lists_and_shows_in_provenance() {
         md.contains(&format!(
             "identity proposer-p1, merged by owner-o1 under proposal {proposal_id} (adopt)"
         )),
+        "{md}"
+    );
+    assert!(
+        md.contains("role author, at ") && !md.contains("role unspecified"),
         "{md}"
     );
 

@@ -20,7 +20,7 @@ use memstead_base::check::{CheckKind, CheckState, Verdict};
 use memstead_base::engine::independence::Independence;
 use memstead_base::mem_management::{self, MemForkParams};
 use memstead_base::ops::proposal::{PrecheckOutcome, ProposalBrief, ProposalRecord};
-use memstead_base::vcs::Actor;
+use memstead_base::vcs::{Actor, Role};
 use memstead_base::{
     CreateEntityArgs, DeleteEntityArgs, EntityId, RenameEntityArgs, UpdateEntityArgs,
 };
@@ -319,8 +319,10 @@ fn staged() -> (TempDir, memstead_base::Engine) {
     )
     .expect("fork lands");
 
-    // The proposer's changes.
+    // The proposer's changes, written as an author: the role rides the
+    // fork commits and, after the merge, the proposer's merge commit.
     engine.set_identity(Some(PROPOSER.to_string()));
+    engine.set_role(Role::Author);
     update_sections(
         &mut engine,
         ("specs-fork", "beta"),
@@ -394,8 +396,9 @@ fn staged() -> (TempDir, memstead_base::Engine) {
         .commit("memstead: create specs-fork--lambda", &ctx)
         .unwrap();
 
-    // The owner's changes meanwhile.
+    // The owner's changes meanwhile, under no role.
     engine.set_identity(Some(OWNER.to_string()));
+    engine.set_role(Role::Unspecified);
     update_sections(
         &mut engine,
         ("specs", "epsilon"),
@@ -590,6 +593,8 @@ fn merge_lands_the_six_shapes_under_two_identities_with_checks_and_the_record() 
     let merge_note = notes.iter().find(|n| n.sha == merge.sha).unwrap();
     assert_eq!(merge_note.tool_verb.as_deref(), Some("proposal-merge"));
     assert_eq!(merge_note.identity.as_deref(), Some(PROPOSER));
+    // The proposer's role, off the fork commit, rides the merge commit.
+    assert_eq!(merge_note.role.as_deref(), Some("author"));
     assert_eq!(merge_note.merged_by.as_deref(), Some(MERGER));
     assert_eq!(merge_note.proposal.as_deref(), Some(proposal_id.as_str()));
     assert_eq!(merge_note.entity_ids, merge.entities);
@@ -600,6 +605,8 @@ fn merge_lands_the_six_shapes_under_two_identities_with_checks_and_the_record() 
     let amend_note = notes.iter().find(|n| n.sha == amend.sha).unwrap();
     assert_eq!(amend_note.tool_verb.as_deref(), Some("proposal-amend"));
     assert_eq!(amend_note.identity.as_deref(), Some(MERGER));
+    // The amend commit keeps the merger's own role: none declared.
+    assert_eq!(amend_note.role, None);
     assert_eq!(amend_note.merged_by.as_deref(), Some(MERGER));
     assert_eq!(amend_note.proposal.as_deref(), Some(proposal_id.as_str()));
     assert!(amend_note.created_ids.is_empty());
@@ -610,6 +617,7 @@ fn merge_lands_the_six_shapes_under_two_identities_with_checks_and_the_record() 
     assert!(!eta_prov.story_truncated);
     let created = eta_prov.created_by.as_ref().unwrap();
     assert_eq!(created.identity.as_deref(), Some(PROPOSER));
+    assert_eq!(created.role, "author");
     assert_eq!(created.merged_by.as_deref(), Some(MERGER));
     assert_eq!(created.proposal.as_deref(), Some(proposal_id.as_str()));
     assert_eq!(created.disposition.as_deref(), Some("adopt"));
@@ -617,6 +625,7 @@ fn merge_lands_the_six_shapes_under_two_identities_with_checks_and_the_record() 
     let beta_prov = engine.entity_provenance("specs", "specs--beta").unwrap();
     let last = beta_prov.last_modified_by.as_ref().unwrap();
     assert_eq!(last.identity.as_deref(), Some(PROPOSER));
+    assert_eq!(last.role, "author");
     assert_eq!(last.merged_by.as_deref(), Some(MERGER));
     assert_eq!(last.disposition.as_deref(), Some("adopt"));
     assert_eq!(
@@ -626,6 +635,7 @@ fn merge_lands_the_six_shapes_under_two_identities_with_checks_and_the_record() 
     let eps_prov = engine.entity_provenance("specs", "specs--epsilon").unwrap();
     let last = eps_prov.last_modified_by.as_ref().unwrap();
     assert_eq!(last.identity.as_deref(), Some(MERGER));
+    assert_eq!(last.role, "unspecified");
     assert_eq!(last.verb.as_deref(), Some("proposal-amend"));
     assert_eq!(last.disposition.as_deref(), Some("adopt_with_changes"));
 
@@ -774,13 +784,16 @@ fn merge_lands_the_six_shapes_under_two_identities_with_checks_and_the_record() 
 
 /// Two proposer identities on one fork: one commit per identity, in
 /// slug order, each parent-pinned to the one before; the record names
-/// both.
+/// both. Each commit carries its own proposer's role: p1 wrote as an
+/// author, p2 declared none, and the provenance of p2's entity reads
+/// unspecified.
 #[test]
 fn merge_commits_once_per_proposer_identity_in_slug_order() {
     let (tmp, mut engine) = staged();
     let gitdir = gitdir_of(tmp.path());
-    // A second proposer touches alpha on the fork.
+    // A second proposer touches alpha on the fork, under no role.
     engine.set_identity(Some("proposer-p2".to_string()));
+    assert_eq!(engine.current_role(), Role::Unspecified);
     update_sections(
         &mut engine,
         ("specs-fork", "alpha"),
@@ -813,6 +826,13 @@ fn merge_commits_once_per_proposer_identity_in_slug_order() {
     assert_eq!(notes[1].sha, outcome.merge_commits[1].sha);
     assert_eq!(notes[2].sha, outcome.merge_commits[0].sha);
     assert_eq!(notes[3].sha, target_tip);
+    assert_eq!(notes[1].role.as_deref(), Some("author"));
+    assert_eq!(notes[2].role, None);
+    let alpha_prov = engine.entity_provenance("specs", "specs--alpha").unwrap();
+    let last = alpha_prov.last_modified_by.as_ref().unwrap();
+    assert_eq!(last.identity.as_deref(), Some("proposer-p2"));
+    assert_eq!(last.role, "unspecified");
+    assert_eq!(last.verb.as_deref(), Some("proposal-merge"));
     let record = record_on(&gitdir, "specs").unwrap();
     assert_eq!(
         record.proposals[0].proposer.as_deref(),

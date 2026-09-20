@@ -6,12 +6,14 @@
 //! picture as it stands, never the file's copy), validates the
 //! disposition file against it (coverage, the closed vocabulary, the
 //! reasons, no `adopt` on a conflict, the pinned tips), reads the
-//! proposer of every adopted entity off the fork commit that last
-//! touched it, rehearses every adopted body through the target's write
-//! gate, and only then lands: one commit on the target branch per
-//! proposer identity (in slug order, each parent-pinned to the tip
-//! before it) carrying every adopted entity as the fork has it, the
-//! record sidecar in the last of them; a second commit under the
+//! proposer of every adopted entity (the identity and the role) off the
+//! fork commit that last touched it, rehearses every adopted body
+//! through the target's write gate, and only then lands: one commit on
+//! the target branch per proposer identity (in slug order, each
+//! parent-pinned to the tip before it) carrying every adopted entity as
+//! the fork has it, under the proposer's identity and the role the fork
+//! commit of the group's first entity in slug order named, the record
+//! sidecar in the last of them; a second commit under the
 //! merger's identity with the owner's final bodies for
 //! `adopt_with_changes`; a verification check record per entity the
 //! merge created or updated, under the merger's identity; and a
@@ -98,10 +100,14 @@ impl Landing {
     }
 }
 
-/// One adopted entry's plan: the slug, its proposer, and the writes.
+/// One adopted entry's plan: the slug, its proposer (the identity and
+/// the role off the fork commit that last touched it), and the writes.
 struct Adopted {
     slug: String,
     proposer: String,
+    /// The role the proposer's fork commit named; `Unspecified` when it
+    /// carried no `Role:` trailer.
+    role: Role,
     landings: Vec<Landing>,
     /// The owner's final body, for `adopt_with_changes`.
     amend: Option<DispositionBody>,
@@ -290,7 +296,9 @@ impl Engine {
             .map_err(EngineError::Backend)?
             .notes
         };
-        let mut proposers: BTreeMap<String, String> = BTreeMap::new();
+        // Per adopted slug: the proposer's identity and the role the
+        // same commit named (absence recorded as `Unspecified`).
+        let mut proposers: BTreeMap<String, (String, Role)> = BTreeMap::new();
         for slot in slots.iter().filter(|s| s.disposition != DISPOSITION_REJECT) {
             let fork_id = EntityId::new(fork, &slot.entry.slug);
             let touch = filter_notes_for_entity(fork_id.as_ref(), &notes)
@@ -298,7 +306,12 @@ impl Engine {
                 .next();
             match touch.as_ref().and_then(|t| t.identity.clone()) {
                 Some(identity) => {
-                    proposers.insert(slot.entry.slug.clone(), identity);
+                    let role = touch
+                        .as_ref()
+                        .and_then(|t| t.role.as_deref())
+                        .and_then(Role::from_wire)
+                        .unwrap_or_default();
+                    proposers.insert(slot.entry.slug.clone(), (identity, role));
                 }
                 None => {
                     return Err(EngineError::ProposalUnattributed {
@@ -411,9 +424,11 @@ impl Engine {
                         }
                     }
                 }
+                let (proposer, role) = proposers[slug].clone();
                 adopted.push(Adopted {
                     slug: slug.to_string(),
-                    proposer: proposers[slug].clone(),
+                    proposer,
+                    role,
                     landings,
                     amend: slot.body.clone(),
                 });
@@ -592,12 +607,18 @@ impl Engine {
                     ));
                 }
             };
+            // The proposer's role rides the merge commit beside the
+            // identity: the role off the fork commit that last touched
+            // the group's first entity in slug order (one commit per
+            // proposer, so one role; a proposer who wrote under several
+            // roles lands under the first slug's).
+            let role = group.first().map(|a| a.role).unwrap_or_default();
             let mut ctx = CommitContext::new(
                 Some(MERGE_TOOL),
                 actor,
                 client.cloned(),
                 note.map(String::from),
-                Role::Unspecified,
+                role,
                 Some(proposer.clone()),
             );
             ctx.entity_ids = Some(ids.clone());

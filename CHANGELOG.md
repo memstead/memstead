@@ -135,7 +135,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   every adopted entity as the fork has it (created, updated or deleted;
   anchors and self-links under the target's ids; relations the fork
   dropped removed), subject `memstead: proposal-merge <id>`, trailers
-  `Identity: <proposer>`, `Merged-By: <merger>`, `Proposal: <id>`,
+  `Identity: <proposer>`, `Role: <role>` when the proposer's fork commit
+  named one (the proposer's role rides the merge commit, so the
+  provenance read of a merged entity names the role the proposer wrote
+  under; a proposer whose commits named several roles lands under the
+  role of the group's first entity in slug order), `Merged-By:
+  <merger>`, `Proposal: <id>`,
   `Entities:` and `Created:` (the ids the commit brought into the target,
   so their story reads the merge as their creation); the record
   `.memstead/proposals.json` rides the last of these. The commits land
