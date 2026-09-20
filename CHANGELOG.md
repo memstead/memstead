@@ -72,6 +72,44 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `base` and is read as based on `sha` wherever the base is consulted;
   it reads and forks as before. `mem fork` and `mem list` show the base
   (`base` in JSON, `base <sha>` in markdown).
+- **The review brief of a fork: `memstead proposal brief <fork>` and
+  `memstead_proposal_brief`.** The owner of a mem reads a fork's changes
+  against the mem it was forked from, three ways, and gets the disposition
+  file to fill. The fork's changes are read against its base
+  (`forkedFrom.base`, the fork commit; the ancestor `forkedFrom.sha` for a
+  fork made before fork commits existed) and the source mem's branch tip
+  at render time; the four shas are printed so the merge can pin them.
+  Entities match by slug across the two mems, bodies compare with
+  mem-qualified self-links normalised, so a link the fork commit
+  retargeted is never a difference. One block per entity the fork added,
+  modified, deleted or renamed (a rename is a recorded rename or a
+  byte-identical move, never a similarity guess): the sections and
+  metadata that differ against the base, the target's referrers, the
+  anchor rows read from the fork's sidecar under the fork's ids
+  (artifact, grain, class, span, last recorded state; no observation is
+  fetched), a mechanics precheck through the target's write gate (the
+  create or update the merge would run, rehearsed by the gate's own dry
+  run: `clean`, `failed` with the typed code, or `not_run`; never a
+  content judgement), a conflict mark where the target modified, deleted
+  or created the same entity since the ancestor (with the three versions
+  and the sections differing on each side), and a re-proposal mark where
+  the target's proposal record (`.memstead/proposals.json`, written by
+  the merge; absent means no rejections) holds a rejection of the same
+  content hash or the same id. A target entity the fork did not touch is
+  absent. The markdown reads for a human; the JSON (`--json`, and the file
+  `--out <file>` writes) carries the same plus `dispositions`, keyed by
+  slug, each with an empty `disposition` and `reason` and the values it
+  accepts: `adopt`, `adopt_with_changes`, `reject` (a conflict entity
+  accepts no `adopt`); `reject` and `adopt_with_changes` need a `reason`,
+  `adopt_with_changes` carries the owner's final body as `body` in the
+  shape a create takes (`title`, `sections`, `metadata`). The MCP tool
+  `memstead_proposal_brief` (read-only, one parameter `fork`) serves the
+  markdown on the text channel and the same JSON as `structured_content`,
+  so the owner's agent can pre-fill the brief; the merge itself stays
+  CLI-only. Both surfaces refuse `INVALID_INPUT` for a mem with no
+  `forkedFrom` and `UNKNOWN_MEM` for a fork whose source is not mounted,
+  and the brief writes nothing: the fork, the target and the workspace
+  state are byte-identical after a render.
 - **A sealed archive carries its check records.** `memstead export
   --format mem` (folder, in-memory and git-branch mems alike) writes one
   optional member, `.memstead/checks.json`: per entity of the archive, the
