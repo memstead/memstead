@@ -4779,8 +4779,8 @@ fn a_derived_entity_anchor_is_pinned_to_its_target_at_write() {
         &mut engine,
         "Derived claim",
         vec![
-            entity(&target.id.to_string(), "derived", None),
-            entity(&target.id.to_string(), "anchored", Some("author-h")),
+            entity(target.id.as_ref(), "derived", None),
+            entity(target.id.as_ref(), "anchored", Some("author-h")),
             entity("src--nope", "derived", None),
             entity("nowhere--x", "derived", None),
         ],
@@ -4792,14 +4792,14 @@ fn a_derived_entity_anchor_is_pinned_to_its_target_at_write() {
             .cloned()
             .unwrap()
     };
-    let pinned = row(&target.id.to_string(), "derived");
+    let pinned = row(target.id.as_ref(), "derived");
     assert_eq!(
         pinned.anchor.hash.as_deref(),
         Some(target_hash_at_write.as_str())
     );
     assert_eq!(pinned.anchor.hash_source, Some(AnchorHashSource::Pinned));
     assert_eq!(pinned.state, Some(crate::anchor::AnchorState::Resolves));
-    let kept = row(&target.id.to_string(), "anchored");
+    let kept = row(target.id.as_ref(), "anchored");
     assert_eq!(
         kept.anchor.hash.as_deref(),
         Some("author-h"),
@@ -4878,7 +4878,7 @@ fn a_derived_entity_anchor_is_pinned_to_its_target_at_write() {
     let id2 = spec_with_anchors(
         &mut engine,
         "Anchored claim",
-        vec![entity(&target.id.to_string(), "anchored", None)],
+        vec![entity(target.id.as_ref(), "anchored", None)],
     );
     let r = engine.entity_anchors_resolved(&id2);
     assert_eq!(r[0].anchor.hash_source, Some(AnchorHashSource::Pinned));

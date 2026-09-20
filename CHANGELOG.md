@@ -9,6 +9,50 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **An anchor carries the span it quotes and resolves on its presence.**
+  The anchor element (`memstead_create` / `memstead_update` `anchors[]`,
+  the CLI `--anchor <JSON>`) takes `span`, the verbatim words the entity
+  quotes, beside `content` on the `url`, `span` and `file` grains of a
+  hash-bearing class. With `content` the write refuses `INVALID_ANCHOR`,
+  naming the span, unless the span occurs in the content; the row then
+  records the span, a hash over its canonical form (`span_hash`) and the
+  document's prepared hash (`hash_source: author`). Without `content` the
+  row is accepted with the span unverified. A span beside `hash`, on the
+  `entity` or `tree` grains, or empty refuses. The comparison runs in the
+  canonical span form (NFC, whitespace runs to one space, soft hyphens and
+  line-end hyphens removed, typographic quotes, dashes and ligatures to
+  ASCII) and is exact beyond it: digits, decimal marks, units, case and
+  word order compare exactly, with no similarity threshold anywhere.
+  `verify-anchors --observations` with a `content` row resolves a span row
+  while the span is present, whatever else on the page changed (the new
+  document hash becomes the row's `last_observed`), and reads the new
+  anchor state **`span_absent`** once the words are gone, never `drifted`;
+  an `absent` observation stays `recheck`, and a `hash` observation
+  carries no text and leaves the row as it was. Path rows are checked live
+  against the file. The verify report, `memstead anchors`, the health
+  `anchors` and `open_questions` axes (`anchors_span_absent`), the
+  per-entity read and the fidelity report show the state; findings record
+  it as `drifted`-class. The span is part of a row's identity beside
+  artifact, grain and class: several spans on one document are several
+  rows, `anchors_unset` may name a `span` to remove one, and a payload
+  naming one identity twice refuses. **Anchors sidecar version 3:** a
+  sidecar carries version 3 only once a row holds a span or a `pinned`
+  hash source; version 1 and 2 sidecars load and re-save with every row
+  unchanged; an engine that reads only versions 1 and 2 refuses a
+  version-3 sidecar typed rather than loading the rows with their span
+  dropped: every read surface reports `ANCHORS_SIDECAR_UNREADABLE`
+  (`unsupported anchors sidecar version 3`, the mem named, no row
+  counted), and an anchor write, a delete or a rename in that mem refuses
+  on the same parse error, so nothing is silently rewritten. Upgrade, or
+  remove the sidecar to re-record anchors. **Derived and anchored entity-grain rows
+  are pinned at write:** written without a hash while the target is
+  loaded, the row takes the target's prepared hash as the engine computes
+  it then (`hash_source: pinned`), so the next verify reads it against the
+  target as it was when the claim was made, never backfilled from a later
+  state; an unresolvable target leaves the row hash-less. The
+  fidelity-contract page now describes `derived` as hash-bearing, which
+  the code always was.
+
 - **The sizing harness measures the warm path.** `xtask sizing-curve`
   spawns one `memstead-mcp` server per size point after the cold leg and
   times `memstead_search`, `memstead_entity` with relations and

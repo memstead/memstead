@@ -2970,3 +2970,28 @@ fn instruction_length_stays_within_budget() {
          (the error-code list is the sanctioned cut) or consciously raise the budget"
     );
 }
+
+/// The quoted-span attribute rides the EXISTING anchor element: both
+/// mutation tools expose `span` on their `anchors[]` element, and
+/// `memstead_update` exposes it on the `anchors_unset[]` selector, with no
+/// tool added (the expected-tools set above is unchanged). A drop on either
+/// side trips this pin.
+#[test]
+fn anchor_element_exposes_span_on_create_and_update() {
+    for tool in ["memstead_create", "memstead_update"] {
+        let schema = schema_for(tool);
+        assert!(
+            schema.contains("\"span\""),
+            "{tool} schema must expose `span` on the anchor element. Schema: {schema}"
+        );
+        assert!(
+            schema.contains("span_absent"),
+            "{tool} schema must name the `span_absent` state beside the span. Schema: {schema}"
+        );
+    }
+    let update = schema_for("memstead_update");
+    assert!(
+        update.contains("AnchorUnsetParam") && update.contains("quoting this span"),
+        "memstead_update's anchors_unset selector must take a span. Schema: {update}"
+    );
+}

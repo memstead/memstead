@@ -53,7 +53,11 @@ reference its source:
 
 - **anchored** — a hash-bearing anchor to a specific source artifact; its content
   can be checked against the source.
-- **derived** — produced from the source but without a byte-level hash anchor.
+- **derived** — computed or synthesised from one or more input artifacts
+  (`derived_from` lists them). Hash-bearing like `anchored`, so it takes part in
+  drift adjudication; an entity-grain `derived` row written without a hash is
+  pinned at write to its target's prepared hash (`hash_source: pinned`), so the
+  next verify reads it against the target as it was when the claim was made.
 - **authored** — a human or agent wrote it directly; the source *informed* the
   author but does not own the bytes.
 - **informed-by** — the artifact shaped the entity without being reproduced in it.
@@ -62,6 +66,48 @@ reference its source:
 reported as its own bucket. Measuring authored prose against a source it was never
 meant to reproduce would manufacture false drift; the contract refuses to do that,
 and says so where the excluded bucket appears.
+
+## Quoted spans: the claim is the words, not the page
+
+A hash-bearing anchor on the `url`, `span` or `file` grain can carry the verbatim
+words the entity quotes, as `span` beside `content`. The write checks that the
+span occurs in the supplied content and refuses (`INVALID_ANCHOR`, naming the
+span) when it does not; the stored row then carries the span, a hash over it
+(`span_hash`) and the document's prepared hash. A span written without content is
+accepted with the span unverified until an observation with text adjudicates it.
+
+From then on the row is adjudicated on the span's **presence**, not on the
+document hash: it `resolves` while the words are in the observed text, whatever
+else on the page changed (the new document hash is kept as the row's last
+observation), and reads **`span_absent`** once they are gone. It never reads
+`drifted`: the row's claim is the span, and the page around it moving is not the
+claim moving. Two entities quoting one document from two different extractions
+resolve from one observation as long as each span is present, which is what a
+whole-document hash could not give them. The span is part of the row's identity
+beside artifact, grain and class, so several spans on one document are several
+rows, each with its own state, and `anchors_unset` can name a span to remove one.
+
+The comparison runs in the **canonical span form** and is exact beyond it. The
+form removes exactly the noise two extractions of one document disagree on:
+Unicode NFC composition; every run of whitespace (spaces, tabs, line breaks) to
+one space; soft hyphens removed; a hyphen directly followed by a line break
+removed, so a word split at a line end matches its unsplit form; typographic
+quotes, guillemets and dashes to their ASCII forms; the ligatures ﬀ ﬁ ﬂ ﬃ ﬄ
+resolved to their letter pairs. Nothing else: a changed digit, a comma against
+a point, a changed unit, a changed case, a reordered word or a dropped negation
+reads absent, and no similarity threshold exists anywhere on the path. Case
+folding is deliberately absent (capitalisation carries meaning in the sources'
+languages), and so is NFKC (it would equate `m²` with `m2`).
+
+An `absent` observation reads `recheck` for a span row as for any other: a failed
+retrieval is not the source saying the words are gone. A `hash` observation
+carries no text to look in and leaves the row as it was.
+
+The anchor states, then: `resolves`, `drifted`, `recheck`, `orphaned` (the
+artifact is gone) and `span_absent` (the artifact stands, the quoted words do
+not). Span rows are stored in anchors sidecar version 3; an engine that reads
+only versions 1 and 2 refuses such a sidecar typed rather than loading the rows
+with their span dropped.
 
 ## Url anchors: observed by you, aged by the engine
 
