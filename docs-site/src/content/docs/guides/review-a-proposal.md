@@ -1,6 +1,6 @@
 ---
 title: Review a proposal to a mem
-description: "Read a fork's changes against the mem it was forked from, three ways, and fill the disposition file the merge consumes."
+description: "Read a fork's changes against the mem it was forked from, three ways, fill the disposition file, merge it under both identities, and read the record the merge keeps."
 sidebar:
   order: 8
 ---
@@ -99,3 +99,85 @@ with the disposition skeleton rides `structured_content`, so the agent
 can pre-fill the dispositions for the owner to confirm. The tool is
 read-only and refuses with the same codes the CLI uses. The merge itself
 is a human's act on the owner's branch and stays on the CLI.
+
+## 5. Merge the filled file
+
+```sh
+memstead proposal merge <fork> --dispositions brief.json --identity <you>
+memstead proposal merge <fork> --dispositions brief.json --identity <you> --json
+```
+
+The merge re-renders the brief and checks the file against it before
+anything lands: every entity the brief lists has a slot and no slot
+names an entity it does not (`PROPOSAL_DISPOSITIONS_INCOMPLETE`), every
+value is in the vocabulary, `reject` and `adopt_with_changes` carry a
+reason and `adopt_with_changes` a body (`INVALID_INPUT`), no conflict
+entity is adopted as is (`PROPOSAL_CONFLICT`), and the target tip, the
+fork tip and the base the file recorded are still the branches' tips
+(`PROPOSAL_STALE`, naming both shas: re-render and fill again). Then it
+reads the proposer of every adopted entity off the fork commit that
+last touched it; an entity whose last fork commit carries no identity
+refuses `PROPOSAL_UNATTRIBUTED`, because a merge never invents an author.
+Then every adopted body goes through the target's write gate, and a
+deletion is judged against the target's referrers as the adopted bodies
+leave them. Only after all of that does anything land, and a refusal at
+any step lands nothing: the target, the fork, the sidecars and the
+workspace state are byte-identical afterwards.
+
+What lands, per disposition:
+
+- `adopt`: the entity as the fork has it, created, updated or deleted in
+  the target, with its anchor rows and self-links under the target's
+  ids and the relations the fork dropped removed;
+- `adopt_with_changes`: the fork's version first, then your final body
+  in a second commit under your identity. The body's `sections` replace
+  the landed ones, its `metadata` sets the fields it names (a field it
+  omits keeps the landed value), its `relations`, when given, replace
+  the landed ones; a `title` that differs refuses, since a title change
+  is a rename;
+- `reject`: nothing.
+
+The merge commit sits on the target branch, parent-pinned to the tip
+the file recorded, and carries the proposer's identity as the mutation's
+identity with the merger's beside it: `Identity: <proposer>`,
+`Merged-By: <you>`, `Proposal: <id>`, plus `Entities:` and `Created:`
+(the ids the commit brought into the target). When adopted entities
+were last touched by different proposers, there is one commit per
+proposer identity, in slug order, each pinned to the one before. After
+the commits the merge records a verification check under your identity
+for every adopted entity, against the hash that landed (the second
+commit's for `adopt_with_changes`), so `health --include checks` reads
+them `confirmed_independent`; and it re-reads the whole target from its
+backend and reports, under `validation`, the integrity and conformance
+findings before and after the merge. `new_findings` is empty when the
+store validates.
+
+`--identity` is required: the merge records who merged beside who
+proposed. The verb is CLI-only, a human's act on the owner's branch;
+there is no MCP tool for it.
+
+## 6. The record
+
+The merge writes `.memstead/proposals.json` on the target branch, in the
+merge commit, appending one entry per merged proposal: the proposal's id
+(the fork's name and base sha), the proposer, the ancestor, the base, the
+target tip at merge, who merged and when, and per entity the
+disposition, the reason and the hash of the proposed version. Never a
+body: a rejected proposal leaves its hash and its reason, nothing that
+could be served.
+
+```sh
+memstead proposal list <target>            # one block per proposal
+memstead proposal list <target> --json     # the record as written
+memstead entity <target>--<slug> --provenance
+```
+
+`proposal list` renders the record; `entity --provenance` names, on an
+entity a merge touched, the proposal, the merger and the disposition it
+landed under beside the proposer's identity; the brief of a later fork
+marks a re-proposal against it. The record travels: `export` seals it
+into the archive as a recognised meta member, `proposal list` reads it
+off an installed archive, and an engine older than the member installs
+such an archive and ignores it. A fork made from a target that carries a
+record does not inherit it: the fork commit drops it, since the record
+belongs to the target branch.

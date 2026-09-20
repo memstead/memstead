@@ -110,6 +110,64 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `forkedFrom` and `UNKNOWN_MEM` for a fork whose source is not mounted,
   and the brief writes nothing: the fork, the target and the workspace
   state are byte-identical after a render.
+- **The proposal merge and the proposal record: `memstead proposal merge
+  <fork> --dispositions <file> --identity <merger>` and `memstead proposal
+  list <target>`.** The owner applies a filled brief onto the mem the fork
+  was forked from. The merge re-renders the brief and validates the file
+  against it: every listed entity has a slot and no slot names an entity
+  the brief lacks (`PROPOSAL_DISPOSITIONS_INCOMPLETE`, listing both), each
+  value is `adopt`, `adopt_with_changes` or `reject`, `reject` and
+  `adopt_with_changes` carry a reason and `adopt_with_changes` a body
+  (`INVALID_INPUT`), `adopt` is refused on a conflict entity
+  (`PROPOSAL_CONFLICT`), and the target tip, the fork tip and the base the
+  file recorded must be the branches' current ones (`PROPOSAL_STALE`,
+  naming both shas and the brief to re-render). The proposer of every
+  adopted entity is read from the fork commit that last touched it, never
+  from the caller; an adopted entity whose last fork commit carries no
+  `Identity:` trailer refuses `PROPOSAL_UNATTRIBUTED` naming it. Every
+  adopted body is rehearsed through the target's write gate (the gate's
+  own code on refusal), and a deletion is judged against the target's
+  referrers as the adopted bodies leave them (`HAS_INCOMING_REFS`). Only
+  then does anything land: one commit on the target branch per proposer
+  identity, in slug order, each parent-pinned to the tip before it, with
+  every adopted entity as the fork has it (created, updated or deleted;
+  anchors and self-links under the target's ids; relations the fork
+  dropped removed), subject `memstead: proposal-merge <id>`, trailers
+  `Identity: <proposer>`, `Merged-By: <merger>`, `Proposal: <id>`,
+  `Entities:` and `Created:` (the ids the commit brought into the target,
+  so their story reads the merge as their creation); the record
+  `.memstead/proposals.json` rides the last of these. `adopt_with_changes`
+  lands the fork's version there and the owner's final body in a second
+  commit under the merger's identity (`memstead: proposal-amend <id>`,
+  the same `Proposal:` and `Merged-By:` trailers); the owner's body sets
+  the sections it carries, the metadata it names, and its relations when
+  given. After the commits the merge records a verification check per
+  adopted entity under the merger's identity (`method` names the
+  proposal) against the landed hash, so the checks axis reads it
+  `confirmed_independent`, then re-reads the whole target from its
+  backend and reports the integrity and conformance findings before and
+  after (`validation` on the outcome; `new_findings` is empty when the
+  store validates). The record keys proposals by id (the fork's name and
+  base sha) and holds the proposer, ancestor, base, target tip at merge,
+  merger, time, and per entity the disposition, the reason and the hash
+  of the proposed version (the landing body with the engine's date stamps
+  left out, so the same body proposed again hashes the same); never a
+  body. `proposal list` renders it; `entity --provenance` names the
+  proposal, the merger and the disposition an entity came from; the
+  brief marks a re-proposal against it; a fork made from a target that
+  carries one drops it in the fork commit (a fork carries no record).
+  The record is a recognised optional meta member of a sealed archive
+  (validated as a record, carried through the canonical re-pack, read
+  off an archive mount): archives sealed before this carry none, and an
+  engine older than the member tolerates it as an unrecognised
+  `.memstead/` file. Every refusal lands nothing: the target branch, the
+  fork, the sidecars and the workspace state are byte-identical after it;
+  nothing is ever written to the fork. Both verbs are CLI-only (the
+  parity registry carries the rationale: a human's act on the owner's
+  branch); no MCP tool. The note reader parses the three new trailers;
+  the independence reading now absorbs a multi-entity commit's
+  `Entities:` list (so a batch-authored entity's author is visible to it)
+  and breaks a same-second tie on the oldest-committed touch.
 - **A sealed archive carries its check records.** `memstead export
   --format mem` (folder, in-memory and git-branch mems alike) writes one
   optional member, `.memstead/checks.json`: per entity of the archive, the
