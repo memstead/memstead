@@ -218,6 +218,7 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         no_verdict("review-mark diff", READS_DATA),
         no_verdict("projection brief", READS_DATA),
         no_verdict("proposal brief", READS_DATA),
+        no_verdict("proposal list", READS_DATA),
         no_verdict("projection check-path", READS_DATA),
         // The check ledger: the one surface deliberately outside the
         // rule, because its verdict is the caller's claim about the
@@ -290,6 +291,7 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         no_verdict("branch-reset", TRANSPORT),
         no_verdict("mem init", MUTATION),
         no_verdict("mem fork", MUTATION),
+        no_verdict("proposal merge", MUTATION),
         no_verdict("mem unregister", MUTATION),
         no_verdict("mem delete", MUTATION),
         no_verdict("mem rename", MUTATION),

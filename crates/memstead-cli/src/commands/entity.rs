@@ -268,12 +268,27 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                             .ok()
                     })
                     .unwrap_or_else(|| "unrecorded".to_string());
-                Some(format!(
+                let mut line = format!(
                     "- {label}: {} ({}), role {}, at {at}",
                     r["client"].as_str().unwrap_or("unrecorded"),
                     r["actor"].as_str().unwrap_or("unrecorded"),
                     r["role"].as_str().unwrap_or("unspecified"),
-                ))
+                );
+                if let Some(identity) = r["identity"].as_str() {
+                    line.push_str(&format!(", identity {identity}"));
+                }
+                // A touch a proposal merge made names the merger, the
+                // proposal and the disposition it landed under.
+                if let Some(proposal) = r["proposal"].as_str() {
+                    line.push_str(&format!(
+                        ", merged by {} under proposal {proposal}",
+                        r["merged_by"].as_str().unwrap_or("unrecorded")
+                    ));
+                    if let Some(d) = r["disposition"].as_str() {
+                        line.push_str(&format!(" ({d})"));
+                    }
+                }
+                Some(line)
             };
             text.push_str(
                 "

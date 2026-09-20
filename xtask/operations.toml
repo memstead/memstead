@@ -87,8 +87,17 @@ name = "proposal-brief"
 mcp = "memstead_proposal_brief"
 cli = "proposal brief"
 # The brief is a read the owner's agent pre-fills over MCP; the merge
-# (plan-proposal 03) stays CLI-only as a human's act on the owner's
-# branch.
+# stays CLI-only as a human's act on the owner's branch.
+
+[[operation]]
+name = "proposal-merge"
+cli = "proposal merge"
+rationale = "the merge is the owner's act on the owner's branch: it lands another identity's work under that identity and the owner's beside it, commits to the target branch and writes the proposal record, so it stays on the script and human side beside fetch, pull, push and fork; the MCP slot stays blank on purpose"
+
+[[operation]]
+name = "proposal-list"
+cli = "proposal list"
+rationale = "the record the merge keeps is read on the same side the merge is made: the owner's CLI (the brief already serves its re-proposal marks over MCP), so the MCP slot stays blank on purpose"
 
 [[operation]]
 name = "branch-reset"
