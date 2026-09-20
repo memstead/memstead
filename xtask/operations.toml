@@ -78,6 +78,11 @@ name = "push"
 cli = "push"
 
 [[operation]]
+name = "mem-fork"
+cli = "mem fork"
+rationale = "a fork is a lineage act on the mem-repo (a branch at a recorded ancestor, a config carrying its origin, a fetch from a declared remote): transport and lineage stay on the script and human side beside fetch, pull and push, so the MCP slot stays blank on purpose"
+
+[[operation]]
 name = "branch-reset"
 cli = "branch-reset"
 # Deliberately absent from MCP (history rewriting stays off the agent

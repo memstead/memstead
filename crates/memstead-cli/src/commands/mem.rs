@@ -31,7 +31,8 @@ use crate::outer_gitignore::{OuterRepoOutcome, apply_outer_gitignore};
 use crate::output::ExitKind;
 use crate::setup::{CliContext, CliEngine, find_workspace_root};
 use memstead_base::mem_management::{
-    self, MemCreateParams, MemCreateResponse, MemDeleteParams, MemDeleteResponse,
+    self, MemCreateParams, MemCreateResponse, MemDeleteParams, MemDeleteResponse, MemForkParams,
+    MemForkResponse,
 };
 
 /// Subcommands under `memstead mem`.
@@ -40,6 +41,19 @@ pub enum MemAction {
     /// Register a new mem via the engine's mem-management
     /// orchestrator.
     Init(InitArgs),
+    /// Create a mem as a fork of another git-branch mem at a recorded
+    /// ancestor: `<SOURCE>[@<SHA>] <NAME>`. The new branch starts at
+    /// the source's commit (its tip, or the given sha the source
+    /// reaches), the config is the source's with `forkedFrom` (source,
+    /// sha, remote) written in and the source's schema pin copied, the
+    /// source's outgoing cross-link grants ride under the new name, and
+    /// the mount is registered. With `--remote <NAME>` the source branch
+    /// and config are fetched from that mem-repo remote instead; the
+    /// fetched tree is validated as `pull` validates, no grant is
+    /// inherited, and a schema pin this workspace cannot resolve refuses
+    /// naming `memstead schema install`. The name obeys the create rules
+    /// like `mem init`; every refusal lands nothing.
+    Fork(ForkArgs),
     /// Router-only removal — unregisters the mem from the workspace
     /// but leaves its stored content in place for archive workflows.
     /// Cross-mem grants pointing at the unregistered mem stay valid
@@ -129,6 +143,51 @@ pub enum MemAction {
     /// vs read-only). Markdown by default; pass `--json` (root flag)
     /// for the structured envelope.
     List(ListArgs),
+}
+
+/// `memstead mem fork <SOURCE>[@<SHA>] <NAME> [--remote <NAME>]` arguments.
+#[derive(Args, Debug)]
+pub struct ForkArgs {
+    /// The source mem, optionally with the commit to start at:
+    /// `<source>` forks at the source branch's tip, `<source>@<sha>` at
+    /// that commit (a full or abbreviated sha; it must be on the source
+    /// branch, `UNKNOWN_REF` otherwise). Local form: a mounted
+    /// git-branch mem of the workspace's mem-repo (a folder, archive or
+    /// in-memory source refuses `INVALID_INPUT`). With `--remote`: the
+    /// branch and the config of that name on the remote.
+    pub source: String,
+
+    /// The new mem's name: the full hierarchical identifier, under the
+    /// same grammar and `[[mem_management.create]]` rules as `mem init`
+    /// (`MEM_PATH_NOT_ALLOWED`, `MEM_SCHEMA_NOT_ALLOWED`); an existing
+    /// name refuses `MEM_NAME_COLLISION`, a name a branch sits above or
+    /// below `MEM_NAME_REF_CONFLICT`.
+    pub name: String,
+
+    /// Fetch the source branch and its config from this mem-repo remote
+    /// (`memstead mem-repo remote-add`) instead of a mounted mem. The
+    /// remote's `__MEMSTEAD` is read from a remote-tracking ref (the
+    /// local one never moves), the fetched tree is validated against
+    /// the source's schema pin before the mount exists
+    /// (`SCHEMA_VIOLATION_IN_FETCH`), and the pin must resolve in this
+    /// workspace (`SCHEMA_NOT_FOUND`, remedy `memstead schema install`).
+    /// No grant is inherited from a remote; the create rule's
+    /// `default_cross_links` apply as for any created mem. Unknown
+    /// remote: `UNKNOWN_REMOTE`; a branch the remote lacks: `UNKNOWN_REF`.
+    #[arg(long)]
+    pub remote: Option<String>,
+
+    /// Optional provenance note (≤280 chars) recorded on the fork's
+    /// config commit. Under `require_notes` a missing note warns
+    /// `NOTE_MISSING`.
+    #[arg(long)]
+    pub note: Option<String>,
+
+    /// Bypass the workspace `[[mem_management.create]]` allowlist for
+    /// this invocation. See `InitArgs::operator_mode` for the design
+    /// rationale. Also settable via `MEMSTEAD_OPERATOR_MODE=1`.
+    #[arg(long = "operator-mode")]
+    pub operator_mode: bool,
 }
 
 /// `memstead mem list` — no positional args. The verb itself is the
@@ -872,6 +931,116 @@ fn render_mem_create_markdown(r: &MemCreateResponse) -> String {
     out
 }
 
+/// `memstead mem fork <SOURCE>[@<SHA>] <NAME>` — the in-process engine
+/// call, honouring the create allowlist by default like `init`.
+pub fn run_fork(ctx: &CliContext, args: ForkArgs) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| generic_error(format!("determine current directory: {e}")))?;
+    if find_workspace_root(&cwd).is_none() {
+        return Err(validation_error(format!(
+            "no workspace found above {}. Run `memstead mem-repo init` first or \
+             change directory into an existing workspace.",
+            cwd.display(),
+        )));
+    }
+    // `<source>[@<sha>]`: the `@` splits the source name from the commit.
+    let (source, sha) = match args.source.split_once('@') {
+        Some((source, sha)) => (source.to_string(), Some(sha.to_string())),
+        None => (args.source.clone(), None),
+    };
+    if source.is_empty() || sha.as_deref() == Some("") {
+        return Err(invalid_input_error(format!(
+            "source {:?} must be `<source>` or `<source>@<sha>`",
+            args.source
+        )));
+    }
+    let params = MemForkParams {
+        source,
+        sha,
+        name: args.name.clone(),
+        remote: args.remote.clone(),
+        note: args.note.clone(),
+        operator_mode: resolve_operator_mode(args.operator_mode),
+        actor: memstead_base::vcs::Actor::Cli,
+        client: Some(crate::setup::cli_client_id()),
+    };
+    // Either workspace shape reaches the engine: a folder-only
+    // workspace refuses inside `fork_mem` with `INVALID_INPUT` naming
+    // the reason (no mem-repo, so no branch to fork), the same code the
+    // engine gives every other caller.
+    let mut engine = ctx.cli_engine()?;
+    let response =
+        mem_management::fork_mem(engine.base_mut(), params).map_err(full_engine_err_to_cli)?;
+    if ctx.json {
+        crate::output::print_json(&serde_json::json!({
+            "name": response.name,
+            "branch_ref": response.branch_ref,
+            "schema_ref": response.schema_ref.to_string(),
+            "forked_from": forked_from_json(&response.forked_from),
+            "inherited_grants": inherited_grants_json(response.inherited_grants.as_ref()),
+            "warnings": response
+                .warnings
+                .iter()
+                .map(|w| serde_json::json!({"code": w.code(), "message": w.message()}))
+                .collect::<Vec<_>>(),
+        }))?;
+    } else {
+        crate::output::print_markdown(&render_mem_fork_markdown(&response));
+    }
+    Ok(())
+}
+
+/// The origin block every surface renders the same way: the source
+/// mem, the ancestor sha, the remote when one was used.
+fn forked_from_json(origin: &memstead_schema::ForkedFrom) -> serde_json::Value {
+    serde_json::json!({
+        "mem": origin.mem,
+        "sha": origin.sha,
+        "remote": origin.remote,
+    })
+}
+
+/// The inherited grant value: `"*"`, a list of targets, or `null`.
+fn inherited_grants_json(
+    value: Option<&memstead_schema::workspace_config::CrossLinkValue>,
+) -> serde_json::Value {
+    use memstead_schema::workspace_config::CrossLinkValue;
+    match value {
+        None => serde_json::Value::Null,
+        Some(CrossLinkValue::Wildcard) => serde_json::json!("*"),
+        Some(CrossLinkValue::List(targets)) => serde_json::json!(targets),
+    }
+}
+
+fn render_mem_fork_markdown(r: &MemForkResponse) -> String {
+    use memstead_schema::workspace_config::CrossLinkValue;
+    let mut out = format!("# Mem `{}` forked from `{}`\n\n", r.name, r.forked_from.mem);
+    let via = match &r.forked_from.remote {
+        Some(remote) => format!(" via remote `{remote}`"),
+        None => String::new(),
+    };
+    out.push_str(&format!("- Ancestor: `{}`{via}\n", r.forked_from.sha));
+    out.push_str(&format!("- Branch: `{}`\n", r.branch_ref));
+    out.push_str(&format!("- Schema: `{}`\n", r.schema_ref));
+    let grants = match &r.inherited_grants {
+        None => "none".to_string(),
+        Some(CrossLinkValue::Wildcard) => "`*`".to_string(),
+        Some(CrossLinkValue::List(targets)) => targets
+            .iter()
+            .map(|t| format!("`{t}`"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    };
+    out.push_str(&format!("- Inherited cross-link grants: {grants}\n"));
+    if !r.warnings.is_empty() {
+        out.push_str("\n## Warnings\n\n");
+        for w in &r.warnings {
+            out.push_str(&format!("- **{}**: {}\n", w.code(), w.message()));
+        }
+    }
+    out
+}
+
 /// Render a successful `MemDeleteResponse` as a CLI markdown block.
 /// `verb` is the CLI subcommand name (`"delete"` or `"unregister"`)
 /// — drives the heading prose so the output matches the user's
@@ -1546,6 +1715,12 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
                 // form: a reader of this surface meets one casing.
                 serde_json::json!({ "engine_version": st.engine_version, "schema": st.schema })
             }),
+            // The recorded ancestor of a forked mem: source, sha, remote.
+            // Absent (null) on every mem that was not forked.
+            "forked_from": cfg
+                .and_then(|c| c.forked_from.as_ref())
+                .map(forked_from_json)
+                .unwrap_or(serde_json::Value::Null),
         }));
     }
 
@@ -1595,6 +1770,15 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
             );
             if let Some(desc) = v["description"].as_str() {
                 line.push_str(&format!(" — {desc}"));
+            }
+            if let Some(origin) = v["forked_from"].as_object() {
+                let mem = origin["mem"].as_str().unwrap_or("?");
+                let sha = origin["sha"].as_str().unwrap_or("?");
+                let short = &sha[..sha.len().min(12)];
+                line.push_str(&format!(" — forked from `{mem}`@{short}"));
+                if let Some(remote) = origin["remote"].as_str() {
+                    line.push_str(&format!(" via remote `{remote}`"));
+                }
             }
             lines.push(line);
         }

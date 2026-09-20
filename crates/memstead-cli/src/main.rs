@@ -198,6 +198,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::BranchReset(args) => commands::branch_reset::run(&ctx, args),
         Command::Mem { action } => match action {
             commands::mem::MemAction::Init(args) => commands::mem::run(&ctx, args),
+            commands::mem::MemAction::Fork(args) => commands::mem::run_fork(&ctx, args),
             commands::mem::MemAction::Unregister(args) => commands::mem::run_unregister(&ctx, args),
             commands::mem::MemAction::Delete(args) => commands::mem::run_delete(&ctx, args),
             commands::mem::MemAction::Rename(args) => commands::mem::run_rename(&ctx, args),
