@@ -962,6 +962,7 @@ mod tests {
             identity: None,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         vcs.commit(&[&mem], "memstead: update specs--a", &ctx)
             .unwrap();
@@ -991,6 +992,7 @@ mod tests {
             identity: None,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         vcs.commit(&[&mem], "external edits (1 files)", &ctx)
             .unwrap();
@@ -1021,6 +1023,7 @@ mod tests {
             identity: None,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         vcs.commit(&[&mem], "memstead: create specs--a", &ctx_no_client)
             .unwrap();
@@ -1044,6 +1047,7 @@ mod tests {
             identity: None,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         vcs.commit(&[&mem], "memstead: create specs--b", &ctx_with_client)
             .unwrap();
@@ -1086,6 +1090,7 @@ mod tests {
             identity: None,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         let msg = format_commit_message("subject\n", &ctx);
         assert_eq!(msg, "subject\n\nTool: memstead_create\nActor: agent");
@@ -1114,6 +1119,7 @@ mod tests {
             identity: None,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         let msg = format_commit_message("memstead: update specs--a", &ctx);
         // Find the last paragraph — everything after the final `\n\n`.
@@ -1164,6 +1170,7 @@ mod tests {
             identity: None,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         let msg = format_commit_message("memstead: update specs--a", &ctx);
         assert_eq!(
@@ -1187,6 +1194,7 @@ mod tests {
             identity: None,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         let msg = format_commit_message("subject", &ctx);
         assert_eq!(msg, "subject\n\nTool: memstead_update\nActor: agent");
@@ -1205,6 +1213,7 @@ mod tests {
             identity: None,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         let msg = format_commit_message("subject", &ctx);
         assert_eq!(msg, "subject\n\nTool: memstead_create\nActor: agent");

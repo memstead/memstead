@@ -92,6 +92,20 @@ pub struct EntityTouch {
     /// absence, never inferred from actor or client.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<String>,
+    /// On a proposal merge (or amend) touch: the merger's identity from
+    /// the `Merged-By:` trailer, beside `identity` (the proposer on the
+    /// merge commit). Never compared by the independence gate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merged_by: Option<String>,
+    /// On a proposal merge (or amend) touch: the proposal's id from the
+    /// `Proposal:` trailer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<String>,
+    /// True when this touch is a proposal merge that created the entity
+    /// in the target (the id sits in the commit's `Created:` trailer):
+    /// the story's birth, as a `create` would be.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub created_by_merge: bool,
 }
 
 /// Where the returned story starts — the visible-truncation contract:
@@ -179,6 +193,19 @@ pub struct ProvenanceRecord {
     /// commit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verb: Option<String>,
+    /// On a touch a proposal merge made: the merger's identity
+    /// (`Merged-By:`), beside `identity`, which names the proposer on
+    /// the merge commit and the merger on the amend commit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merged_by: Option<String>,
+    /// On a touch a proposal merge made: the proposal's id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<String>,
+    /// On a touch a proposal merge made: the disposition the target's
+    /// proposal record holds for this entity under that proposal
+    /// (`adopt` or `adopt_with_changes`), when the record carries it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disposition: Option<String>,
 }
 
 /// The entity read's derived provenance block: created-by and
@@ -275,6 +302,9 @@ fn touch_to_record(t: &EntityTouch) -> ProvenanceRecord {
         timestamp: t.timestamp,
         reference: t.reference.clone(),
         verb: t.verb.clone(),
+        merged_by: t.merged_by.clone(),
+        proposal: t.proposal.clone(),
+        disposition: None,
     }
 }
 
@@ -312,12 +342,36 @@ impl Engine {
         let (check_state, last_check) = self.entity_check_state(mem, entity_id)?;
         let (conformance_state, last_conformance_check) =
             self.entity_conformance_state(mem, entity_id)?;
+        // A touch a proposal merge made names its proposal; the
+        // disposition it landed under is read from the target's own
+        // record, never from the commit (the record is the merge's
+        // second write, in the same commit).
+        let record = if oldest.as_ref().is_some_and(|t| t.proposal.is_some())
+            || newest.as_ref().is_some_and(|t| t.proposal.is_some())
+        {
+            self.read_proposal_record(mem).ok().flatten()
+        } else {
+            None
+        };
+        let slug = crate::EntityId(entity_id.to_string()).path().to_string();
+        let with_disposition = |t: &EntityTouch| -> ProvenanceRecord {
+            let mut rec = touch_to_record(t);
+            if let (Some(pid), Some(record)) = (t.proposal.as_deref(), record.as_ref()) {
+                rec.disposition = record
+                    .proposals
+                    .iter()
+                    .find(|p| p.id == pid)
+                    .and_then(|p| p.entities.get(&slug))
+                    .map(|d| d.disposition.clone());
+            }
+            rec
+        };
         Ok(EntityProvenance {
             created_by: match (&oldest, truncated) {
-                (Some(t), false) => Some(touch_to_record(t)),
+                (Some(t), false) => Some(with_disposition(t)),
                 _ => None,
             },
-            last_modified_by: newest.as_ref().map(touch_to_record),
+            last_modified_by: newest.as_ref().map(with_disposition),
             story_truncated: truncated,
             check_state: check_state.as_str().to_string(),
             last_check,
@@ -516,11 +570,14 @@ impl Engine {
             // `created_by` for every batch-authored entity, which
             // silently degraded the checks independence gate to
             // `unconfirmable` (found 2026-08-28, graph-plans pilot).
+            // A proposal merge that lists the id under `Created:` brought
+            // the entity into the target: its creation, under the
+            // proposer's identity (plan-proposal 03).
             Some(oldest)
                 if matches!(
                     oldest.verb.as_deref(),
                     Some("create") | Some("batch-create")
-                ) =>
+                ) || oldest.created_by_merge =>
             {
                 StoryStart::Recorded
             }
@@ -618,7 +675,7 @@ fn parse_cursor(c: &str) -> Option<(String, usize)> {
 /// deleted before this entity existed) — absorbing it would attribute
 /// a stranger's touches to this entity and present the polluted story
 /// as `Recorded` (found by plan 03/02's grading gate).
-fn filter_notes_for_entity(
+pub(crate) fn filter_notes_for_entity(
     entity_id: &str,
     notes: &[crate::ops::agent_notes::CommitNote],
 ) -> Vec<EntityTouch> {
@@ -641,6 +698,9 @@ fn filter_notes_for_entity(
             logical_op: n.logical_operation_id.clone(),
             role: n.role.clone(),
             identity: n.identity.clone(),
+            merged_by: n.merged_by.clone(),
+            proposal: n.proposal.clone(),
+            created_by_merge: false,
         };
         if n.tool_verb.as_deref() == Some("rename") {
             if let Some((old, new)) = n.entity_id.as_deref().and_then(parse_rename_pair)
@@ -663,10 +723,14 @@ fn filter_notes_for_entity(
         } else if n.entity_ids.iter().any(|id| id == &current) {
             let mut touch = base(&current);
             touch.batch_entity_ids = n.entity_ids.clone();
+            // A proposal merge that lists this id under `Created:`
+            // brought it into the target: its creation, same stop.
+            let created_by_merge = n.created_ids.iter().any(|id| id == &current);
+            touch.created_by_merge = created_by_merge;
             out.push(touch);
             // A batch-create that lists this entity is its creation —
             // nothing older can touch it, same stop as single create.
-            if n.tool_verb.as_deref() == Some("batch-create") {
+            if n.tool_verb.as_deref() == Some("batch-create") || created_by_merge {
                 break;
             }
         }
@@ -723,6 +787,9 @@ fn filter_provenance_for_entity(
                 logical_op: p.logical_operation_id.clone(),
                 role: p.role.as_trailer().map(str::to_string),
                 identity: p.identity.clone(),
+                merged_by: None,
+                proposal: None,
+                created_by_merge: false,
             }
         })
         .collect();
@@ -758,6 +825,9 @@ mod tests {
             role: Some("author".into()),
             identity: Some("author-x".into()),
             entity_ids: ids.into_iter().map(str::to_string).collect(),
+            merged_by: None,
+            proposal: None,
+            created_ids: Vec::new(),
             timestamp: 1,
         };
         // Newest-first: an update, then the batch create, then an
@@ -783,6 +853,70 @@ mod tests {
             ),
             "the story-start acceptance covers the batch verb"
         );
+    }
+
+    /// Plan-proposal 03: a `proposal-merge` note that lists the id under
+    /// `Created:` is the entity's creation (the walk stops there and the
+    /// story reads `Recorded`); one that lists it only under `Entities:`
+    /// is an update touch and the walk continues to the older create.
+    #[test]
+    fn proposal_merge_note_creates_or_touches() {
+        use crate::ops::agent_notes::CommitNote;
+        let merge = |sha: &str, ids: Vec<&str>, created: Vec<&str>| CommitNote {
+            mem: "m".into(),
+            sha: sha.into(),
+            subject: "memstead: proposal-merge f@b".into(),
+            tool_verb: Some("proposal-merge".into()),
+            entity_id: Some("f@b".into()),
+            note: None,
+            actor: Some("cli".into()),
+            tool: Some("proposal_merge".into()),
+            client: None,
+            logical_operation_id: None,
+            role: None,
+            identity: Some("proposer-p1".into()),
+            entity_ids: ids.into_iter().map(str::to_string).collect(),
+            merged_by: Some("owner".into()),
+            proposal: Some("f@b".into()),
+            created_ids: created.into_iter().map(str::to_string).collect(),
+            timestamp: 2,
+        };
+        let create = CommitNote {
+            mem: "m".into(),
+            sha: "c1".into(),
+            subject: "memstead: create m--beta".into(),
+            tool_verb: Some("create".into()),
+            entity_id: Some("m--beta".into()),
+            note: None,
+            actor: Some("cli".into()),
+            tool: None,
+            client: None,
+            logical_operation_id: None,
+            role: None,
+            identity: Some("owner".into()),
+            entity_ids: Vec::new(),
+            merged_by: None,
+            proposal: None,
+            created_ids: Vec::new(),
+            timestamp: 1,
+        };
+        let notes = vec![
+            merge("c2", vec!["m--beta", "m--eta"], vec!["m--eta"]),
+            create.clone(),
+        ];
+        // eta: created by the merge; the walk stops at the merge.
+        let eta = super::filter_notes_for_entity("m--eta", &notes);
+        assert_eq!(eta.len(), 1);
+        assert!(eta[0].created_by_merge);
+        assert_eq!(eta[0].identity.as_deref(), Some("proposer-p1"));
+        assert_eq!(eta[0].merged_by.as_deref(), Some("owner"));
+        assert_eq!(eta[0].proposal.as_deref(), Some("f@b"));
+        // beta: touched by the merge, created earlier.
+        let beta = super::filter_notes_for_entity("m--beta", &notes);
+        assert_eq!(beta.len(), 2);
+        assert!(!beta[0].created_by_merge);
+        assert_eq!(beta[1].verb.as_deref(), Some("create"));
+        let _ = create;
     }
 
     const SEED: &str = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Seed\n\n## Identity\n\nSeed.\n";

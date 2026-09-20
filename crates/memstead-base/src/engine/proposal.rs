@@ -229,13 +229,17 @@ impl Engine {
         })
     }
 
-    /// The target's proposal record, `None` when the branch carries
-    /// none; a record that does not parse refuses, named.
-    fn read_proposal_record(&self, target: &str) -> Result<Option<ProposalRecord>, EngineError> {
+    /// The target's proposal record, `None` when the mem carries none
+    /// (a git-branch mem without the sidecar, an archive sealed without
+    /// the member); a record that does not parse refuses, named.
+    pub(crate) fn read_proposal_record(
+        &self,
+        target: &str,
+    ) -> Result<Option<ProposalRecord>, EngineError> {
         let mount = self.find_mount(target)?;
         let bytes = mount
             .backend
-            .read_entity(Path::new(PROPOSAL_RECORD_PATH))
+            .read_proposal_record()
             .map_err(EngineError::Backend)?;
         match bytes {
             None => Ok(None),
@@ -341,7 +345,7 @@ impl Engine {
                 target_schema.as_deref(),
             )
         });
-        let content_hash = landing_entity.as_ref().map(|e| e.content_hash.clone());
+        let content_hash = landing_body.as_deref().map(proposal_content_hash);
 
         // The conflict: the target moved the same slug (or, for a
         // rename, the slug the entity had) since the ancestor.
@@ -458,7 +462,7 @@ impl Engine {
             );
         }
         let target_id = EntityId::new(target, slug);
-        let target_has = self.store.get(&target_id).is_some_and(|e| !e.stub);
+        let target_has = self.target_holds(&target_id);
         if let Some(c) = conflict {
             match c.kind {
                 ConflictKind::TargetDeleted => {
@@ -474,103 +478,37 @@ impl Engine {
                 ConflictKind::TargetModified => {}
             }
         }
-        let sections: indexmap::IndexMap<String, String> = landing
-            .sections
-            .iter()
-            .filter(|(k, _)| k.as_str() != "relationships")
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let metadata: indexmap::IndexMap<String, String> = landing
-            .metadata
-            .iter()
-            .filter(|(k, _)| !STAMPED_METADATA.contains(&k.as_str()))
-            .map(|(k, v)| (k.clone(), v.to_frontmatter_string()))
-            .collect();
         let snapshot = self.store.clone();
-        let outcome: Result<(), EngineError> = if target_has {
-            let existing = self.store.get(&target_id).cloned();
-            let (sections_unset, metadata_unset, declare_relations) = match existing {
-                Some(existing) => {
-                    let sections_unset: Vec<String> = existing
-                        .sections
-                        .keys()
-                        .filter(|k| k.as_str() != "relationships" && !sections.contains_key(*k))
-                        .cloned()
-                        .collect();
-                    let metadata_unset: Vec<String> = existing
-                        .metadata
-                        .keys()
-                        .filter(|k| {
-                            !STAMPED_METADATA.contains(&k.as_str()) && !metadata.contains_key(*k)
-                        })
-                        .cloned()
-                        .collect();
-                    let declare_relations: Vec<crate::ops::RelateArg> = landing
-                        .relationships
-                        .iter()
-                        .filter(|r| {
-                            !existing
-                                .relationships
-                                .iter()
-                                .any(|x| x.rel_type == r.rel_type && x.target == r.target)
-                        })
-                        .map(|r| crate::ops::RelateArg {
-                            target: r.target.clone(),
-                            rel_type: r.rel_type.clone(),
-                            description: r.description.clone(),
-                        })
-                        .collect();
-                    (sections_unset, metadata_unset, declare_relations)
-                }
-                None => (Vec::new(), Vec::new(), Vec::new()),
+        let existing = self.store.get(&target_id).filter(|e| !e.stub).cloned();
+        let outcome: Result<(), EngineError> =
+            match self.landing_write_args(target, slug, landing, existing.as_ref()) {
+                // The dry run keeps the relations the fork dropped (the
+                // repair gate reserves `relations_unset` for a non-conformant
+                // entity); the merge removes them before it composes.
+                LandingWrite::Update(args) => self
+                    .update_entity(
+                        crate::UpdateEntityArgs {
+                            dry_run: true,
+                            relations_unset: Vec::new(),
+                            ..*args
+                        },
+                        crate::vcs::Actor::Cli,
+                        None,
+                        None,
+                    )
+                    .map(|_| ()),
+                LandingWrite::Create(args) => self
+                    .create_entity(
+                        crate::CreateEntityArgs {
+                            dry_run: true,
+                            ..*args
+                        },
+                        crate::vcs::Actor::Cli,
+                        None,
+                        None,
+                    )
+                    .map(|_| ()),
             };
-            self.update_entity(
-                crate::UpdateEntityArgs {
-                    id: target_id.clone(),
-                    expected_hash: None,
-                    sections,
-                    append_sections: Default::default(),
-                    patch_sections: Default::default(),
-                    sections_unset,
-                    metadata,
-                    metadata_unset,
-                    dry_run: true,
-                    declare_relations,
-                    anchors: Vec::new(),
-                    anchors_unset: Vec::new(),
-                    relations_unset: Vec::new(),
-                },
-                crate::vcs::Actor::Cli,
-                None,
-                None,
-            )
-            .map(|_| ())
-        } else {
-            self.create_entity(
-                crate::CreateEntityArgs {
-                    mem: target.to_string(),
-                    title: landing.title.clone(),
-                    entity_type: landing.entity_type.clone(),
-                    sections,
-                    metadata,
-                    relations: landing
-                        .relationships
-                        .iter()
-                        .map(|r| crate::ops::RelateArg {
-                            target: r.target.clone(),
-                            rel_type: r.rel_type.clone(),
-                            description: r.description.clone(),
-                        })
-                        .collect(),
-                    anchors: Vec::new(),
-                    dry_run: true,
-                },
-                crate::vcs::Actor::Cli,
-                None,
-                None,
-            )
-            .map(|_| ())
-        };
         self.store = snapshot;
         let operation = if target_has { "update" } else { "create" };
         match outcome {
@@ -586,8 +524,132 @@ impl Engine {
     }
 }
 
+/// The write the merge would run in the target for a landing body:
+/// an update of the entity the target holds, or a create.
+pub(crate) enum LandingWrite {
+    Create(Box<crate::CreateEntityArgs>),
+    Update(Box<crate::UpdateEntityArgs>),
+}
+
+impl Engine {
+    /// Whether the target holds a real (non-stub) entity at `id`.
+    pub(crate) fn target_holds(&self, id: &EntityId) -> bool {
+        self.store.get(id).is_some_and(|e| !e.stub)
+    }
+
+    /// The create or update that lands `landing` (the fork's version
+    /// under the target's name) in the target as the fork has it: every
+    /// section and metadata field set, the target's sections and fields
+    /// the fork lacks unset, the fork's relations declared and the
+    /// target's relations the fork lacks unset. `existing` is the entity
+    /// the target holds at the slug (an update), or `None` (a create).
+    /// The brief's precheck rehearses exactly this; the merge applies it.
+    pub(crate) fn landing_write_args(
+        &self,
+        target: &str,
+        slug: &str,
+        landing: &Entity,
+        existing: Option<&Entity>,
+    ) -> LandingWrite {
+        let target_id = EntityId::new(target, slug);
+        let sections: indexmap::IndexMap<String, String> = landing
+            .sections
+            .iter()
+            .filter(|(k, _)| k.as_str() != "relationships")
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let metadata: indexmap::IndexMap<String, String> = landing
+            .metadata
+            .iter()
+            .filter(|(k, _)| !STAMPED_METADATA.contains(&k.as_str()))
+            .map(|(k, v)| (k.clone(), v.to_frontmatter_string()))
+            .collect();
+        let relations: Vec<crate::ops::RelateArg> = landing
+            .relationships
+            .iter()
+            .map(|r| crate::ops::RelateArg {
+                target: r.target.clone(),
+                rel_type: r.rel_type.clone(),
+                description: r.description.clone(),
+            })
+            .collect();
+        match existing {
+            Some(existing) => {
+                let sections_unset: Vec<String> = existing
+                    .sections
+                    .keys()
+                    .filter(|k| k.as_str() != "relationships" && !sections.contains_key(*k))
+                    .cloned()
+                    .collect();
+                let metadata_unset: Vec<String> = existing
+                    .metadata
+                    .keys()
+                    .filter(|k| {
+                        !STAMPED_METADATA.contains(&k.as_str()) && !metadata.contains_key(*k)
+                    })
+                    .cloned()
+                    .collect();
+                let declare_relations: Vec<crate::ops::RelateArg> = relations
+                    .iter()
+                    .filter(|r| {
+                        !existing
+                            .relationships
+                            .iter()
+                            .any(|x| x.rel_type == r.rel_type && x.target == r.target)
+                    })
+                    .cloned()
+                    .collect();
+                // The relations the fork dropped. The merge removes them
+                // from the store's copy before the update composes (the
+                // repair gate keeps `relations_unset` for non-conformant
+                // entities); the precheck's dry run leaves them, which
+                // only makes it stricter.
+                let relations_unset: Vec<crate::ops::RelationUnsetArg> = existing
+                    .relationships
+                    .iter()
+                    .filter(|x| {
+                        !landing
+                            .relationships
+                            .iter()
+                            .any(|r| r.rel_type == x.rel_type && r.target == x.target)
+                    })
+                    .map(|x| crate::ops::RelationUnsetArg {
+                        target: x.target.clone(),
+                        rel_type: x.rel_type.clone(),
+                    })
+                    .collect();
+                LandingWrite::Update(Box::new(crate::UpdateEntityArgs {
+                    id: target_id,
+                    expected_hash: None,
+                    sections,
+                    append_sections: Default::default(),
+                    patch_sections: Default::default(),
+                    sections_unset,
+                    metadata,
+                    metadata_unset,
+                    dry_run: false,
+                    declare_relations,
+                    anchors: Vec::new(),
+                    anchors_unset: Vec::new(),
+                    relations_unset,
+                }))
+            }
+            None => LandingWrite::Create(Box::new(crate::CreateEntityArgs {
+                mem: target.to_string(),
+                title: landing.title.clone(),
+                entity_type: landing.entity_type.clone(),
+                sections,
+                metadata,
+                relations,
+                anchors: Vec::new(),
+                dry_run: false,
+            })),
+        }
+    }
+}
+
 /// The sha a ref resolves to; `UNKNOWN_REF` when it does not.
-fn resolve_sha(
+pub(crate) fn resolve_sha(
     ops: &crate::engine::GitBranchOps,
     gitdir: &Path,
     ref_name: &str,
@@ -694,17 +756,49 @@ fn side_changes(entries: &[EntityDiff]) -> BTreeMap<String, SideChange> {
     out
 }
 
+/// The hash the brief and the record key a proposed version by: the
+/// landing body with the engine's date stamps (`created_date`,
+/// `last_modified`) dropped from the frontmatter, so the same body
+/// proposed again from another fork, on another day, hashes the same
+/// and a recorded rejection is recognised. The entity's own `_hash`
+/// stays the file hash; this one exists for the re-proposal match.
+pub(crate) fn proposal_content_hash(landing_body: &str) -> String {
+    let mut out = String::with_capacity(landing_body.len());
+    let mut in_frontmatter = false;
+    for (i, line) in landing_body.split_inclusive('\n').enumerate() {
+        let trimmed = line.trim_end_matches(['\n', '\r']);
+        if i == 0 && trimmed == "---" {
+            in_frontmatter = true;
+            out.push_str(line);
+            continue;
+        }
+        if in_frontmatter {
+            if trimmed == "---" {
+                in_frontmatter = false;
+            } else if STAMPED_METADATA
+                .iter()
+                .filter(|k| **k != "type")
+                .any(|k| trimmed.starts_with(&format!("{k}:")))
+            {
+                continue;
+            }
+        }
+        out.push_str(line);
+    }
+    crate::entity::parser::compute_hash(&out)
+}
+
 /// A body with the mem-qualified self-links of `from` rewritten to
 /// `to` (`[[from--slug]]`, `[[from:slug]]`), code spans and links
 /// naming any other mem untouched. The export retargeting rule.
-fn normalise_to(body: &str, from: &str, to: &str) -> String {
+pub(crate) fn normalise_to(body: &str, from: &str, to: &str) -> String {
     let bytes = crate::ops::export::retarget_mem_links(body.as_bytes().to_vec(), from, to);
     String::from_utf8(bytes).unwrap_or_else(|_| body.to_string())
 }
 
 /// Parse a body under `mem` against the schema; `None` when the type
 /// is unknown or the body does not parse.
-fn parse_body(
+pub(crate) fn parse_body(
     body: &str,
     rel_path: &str,
     mem: &str,

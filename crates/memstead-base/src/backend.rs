@@ -280,6 +280,18 @@ pub trait MemBackend: Send + Sync {
         Ok(None)
     }
 
+    /// Read the engine-owned proposal record
+    /// ([`crate::ops::proposal::PROPOSAL_RECORD_PATH`]) bytes, if any:
+    /// the sidecar a proposal merge writes on the target branch, keyed
+    /// by proposal id with every disposition. The default reads the
+    /// path through [`Self::read_entity`], which is the git-branch
+    /// backend's tree read; the archive backend overrides to read the
+    /// sealed member. `Ok(None)` for a mem no proposal was ever merged
+    /// into.
+    fn read_proposal_record(&self) -> Result<Option<Vec<u8>>, BackendError> {
+        self.read_entity(Path::new(crate::ops::proposal::PROPOSAL_RECORD_PATH))
+    }
+
     /// Write the per-mem `.memstead/config.json` payload. Symmetric
     /// counterpart to [`Self::read_mem_config`].
     ///

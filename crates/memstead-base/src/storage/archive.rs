@@ -279,6 +279,36 @@ impl crate::backend::MemBackend for ArchiveBackend {
         })
     }
 
+    fn read_proposal_record(&self) -> Result<Option<Vec<u8>>, BackendError> {
+        // The optional proposal record lives at `.memstead/proposals.json`
+        // inside the zip (a sealed target that proposals were merged
+        // into). Same shape as `read_archive_checks`: raw bytes on hit,
+        // Ok(None) on miss.
+        if let ArchiveSource::Path(p) = &self.source
+            && !p.is_file()
+        {
+            return Ok(None);
+        }
+        self.with_archive_reader(|reader| {
+            let mut archive = zip::ZipArchive::new(reader)
+                .map_err(|e| BackendError::Other(format!("zip open: {e}")))?;
+            let name = crate::ops::proposal::PROPOSAL_RECORD_PATH;
+            if archive.index_for_name(name).is_none() {
+                return Ok(None);
+            }
+            let mut entry = archive
+                .by_name(name)
+                .map_err(|e| BackendError::Other(format!("zip lookup: {e}")))?;
+            let cap = ValidatorLimits::DEFAULT.max_uncompressed_entry;
+            match read_zip_entry_bounded(&mut entry, cap).map_err(BackendError::Io)? {
+                BoundedZipRead::Within(bytes) => Ok(Some(bytes)),
+                BoundedZipRead::ExceedsCap => Err(BackendError::Other(format!(
+                    "archive proposal record '{name}' exceeds the {cap}-byte cap"
+                ))),
+            }
+        })
+    }
+
     fn read_anchors_sidecar(&self) -> Result<Option<Vec<u8>>, BackendError> {
         // The optional engine-owned anchors sidecar lives at
         // `.memstead/anchors.json` inside the zip. Same shape as

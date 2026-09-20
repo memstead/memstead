@@ -127,11 +127,14 @@ pub struct ProposalEntry {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entity_type: Option<String>,
-    /// The content hash of the proposed version as it would land in
-    /// the target (the fork's body with its self-links under the
-    /// target's name); absent for a deletion. The proposal record
-    /// stores the same hash, so a rejected body is recognised when a
-    /// later fork proposes it again.
+    /// The hash of the proposed version as it would land in the target
+    /// (the fork's body with its self-links under the target's name),
+    /// computed with the engine's date stamps (`created_date`,
+    /// `last_modified`) left out, so the same body proposed again from
+    /// another fork hashes the same; absent for a deletion. The
+    /// proposal record stores the same hash, so a rejected body is
+    /// recognised when a later fork proposes it again. Not the
+    /// entity's `_hash` (the file hash, stamps included).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
     /// How the fork's version differs from the base (absent for an
@@ -385,7 +388,7 @@ impl DispositionSlot {
 /// disposition, so a rejected claim cannot return unseen. The merge
 /// writes it; the brief reads it. Unknown keys are tolerated so an
 /// older reader survives a newer writer.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProposalRecord {
     #[serde(default = "default_record_version")]
     pub version: u32,
@@ -395,6 +398,17 @@ pub struct ProposalRecord {
 
 fn default_record_version() -> u32 {
     PROPOSAL_RECORD_VERSION
+}
+
+impl Default for ProposalRecord {
+    /// The empty record at the current format version (the derive
+    /// would say version 0).
+    fn default() -> Self {
+        Self {
+            version: PROPOSAL_RECORD_VERSION,
+            proposals: Vec::new(),
+        }
+    }
 }
 
 /// One merged proposal in the record.
@@ -476,6 +490,263 @@ impl ProposalRecord {
 /// The proposal id the record keys by: the fork's name and its base sha.
 pub fn proposal_id(fork: &str, base: &str) -> String {
     format!("{fork}@{base}")
+}
+
+impl ProposalRecord {
+    /// Serialise the record as the bytes the merge commits: pretty
+    /// JSON with a trailing newline, diff-friendly on the branch.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut s = serde_json::to_string_pretty(self).expect("proposal record serialises");
+        s.push('\n');
+        s.into_bytes()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The merge: the owner's body and the outcome
+// ---------------------------------------------------------------------------
+
+/// The owner's final body under `adopt_with_changes`, in the shape a
+/// create takes: `sections` (key to content), `metadata` (key to
+/// value), an optional `title` (which must equal the landed title: a
+/// title change is a rename, not a merge) and optional `relations`
+/// (which replace the landed relations when present). Parsed from
+/// [`DispositionSlot::body`] by the merge; the write gate validates the
+/// result like any update.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DispositionBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub sections: indexmap::IndexMap<String, String>,
+    #[serde(default)]
+    pub metadata: indexmap::IndexMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relations: Option<Vec<DispositionRelation>>,
+}
+
+/// One relation of an owner's final body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DispositionRelation {
+    pub target: String,
+    pub rel_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// What `Engine::proposal_merge` did: the commits it landed, one line
+/// per entity the brief listed, the check records it wrote, and the
+/// post-merge validation of the target.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposalMergeOutcome {
+    pub fork: String,
+    pub target: String,
+    pub proposal_id: String,
+    /// The merger's identity (the session's `--identity`).
+    pub merged_by: String,
+    /// The target tip the file pinned, which the first merge commit
+    /// has as its parent.
+    pub target_tip_before: String,
+    /// The target tip after the last commit the merge landed.
+    pub target_tip_after: String,
+    /// The merge commits, one per proposer identity in slug order,
+    /// each parent-pinned to the previous.
+    pub merge_commits: Vec<MergeCommit>,
+    /// The commit carrying the owner's final bodies of every
+    /// `adopt_with_changes` entity, under the merger's identity; absent
+    /// when none was needed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amend_commit: Option<MergeCommit>,
+    /// One line per entity the brief listed, in slug order.
+    pub entities: Vec<MergedEntity>,
+    /// The record sidecar's path on the target branch.
+    pub record_path: String,
+    /// The post-merge validation of the whole target store.
+    pub validation: MergeValidation,
+}
+
+/// One commit a merge landed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeCommit {
+    pub sha: String,
+    /// The commit's `Identity:` trailer: the proposer on a merge commit,
+    /// the merger on the amend commit.
+    pub identity: String,
+    /// The target ids the commit touched, in slug order.
+    pub entities: Vec<String>,
+}
+
+/// What the merge did with one entity of the brief.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergedEntity {
+    pub slug: String,
+    pub target_id: String,
+    pub disposition: String,
+    /// `created`, `updated`, `deleted`, `noop` (the fork's version
+    /// equals the target's), or `none` (rejected: nothing landed).
+    pub action: String,
+    /// The proposer whose identity the merge commit carries for this
+    /// entity; absent on a rejected entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposer: Option<String>,
+    /// The content hash of the entity as it stands in the target after
+    /// the merge (after the amend commit for `adopt_with_changes`);
+    /// absent for a deletion or a rejection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    /// Whether a verification check record under the merger's identity
+    /// was written for it (every adopted entity that still exists).
+    pub check_recorded: bool,
+}
+
+/// The post-merge validation: the target mem re-read from its backend
+/// after the last commit, with every entity parsing under the schema
+/// and the integrity and conformance axes reporting no finding the
+/// pre-merge store did not already carry. The write gate ran per
+/// adopted entity before anything landed; this is the whole-store
+/// reading after.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeValidation {
+    /// Entities the target serves after the re-read.
+    pub entities: usize,
+    /// Findings (integrity and conformance axes) before the merge.
+    pub findings_before: usize,
+    /// Findings after the merge.
+    pub findings_after: usize,
+    /// Findings present after the merge and absent before, as
+    /// `<id>: <code>`; empty when the store validates.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub new_findings: Vec<String>,
+    /// Whether every entity of the target parsed on the re-read.
+    pub all_entities_parse: bool,
+}
+
+impl MergeValidation {
+    /// Whether the whole store validates: everything parses and no new
+    /// finding appeared.
+    pub fn is_clean(&self) -> bool {
+        self.all_entities_parse && self.new_findings.is_empty()
+    }
+}
+
+/// Render a merge outcome for a human.
+pub fn render_proposal_merge(o: &ProposalMergeOutcome) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "# Proposal `{}` merged into `{}`\n\n",
+        o.proposal_id, o.target
+    ));
+    out.push_str(&format!("- Merged by: `{}`\n", o.merged_by));
+    out.push_str(&format!(
+        "- Target tip: `{}` before, `{}` after\n",
+        o.target_tip_before, o.target_tip_after
+    ));
+    for c in &o.merge_commits {
+        out.push_str(&format!(
+            "- Merge commit `{}` under proposer `{}`: {}\n",
+            c.sha,
+            c.identity,
+            c.entities
+                .iter()
+                .map(|e| format!("`{e}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(c) = &o.amend_commit {
+        out.push_str(&format!(
+            "- Amend commit `{}` under merger `{}`: {}\n",
+            c.sha,
+            c.identity,
+            c.entities
+                .iter()
+                .map(|e| format!("`{e}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    out.push_str(&format!(
+        "- Record: `{}` on `{}`\n",
+        o.record_path, o.target
+    ));
+    out.push_str("\n## Entities\n\n");
+    for e in &o.entities {
+        let mut line = format!("- `{}`: {} ({})", e.slug, e.disposition, e.action);
+        if let Some(p) = &e.proposer {
+            line.push_str(&format!(", proposer `{p}`"));
+        }
+        if let Some(h) = &e.content_hash {
+            line.push_str(&format!(", hash `{h}`"));
+        }
+        if e.check_recorded {
+            line.push_str(", check recorded");
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    let v = &o.validation;
+    out.push_str("\n## Validation\n\n");
+    out.push_str(&format!(
+        "- {} entities re-read; every entity parses: {}; findings {} before, {} after\n",
+        v.entities,
+        if v.all_entities_parse { "yes" } else { "NO" },
+        v.findings_before,
+        v.findings_after
+    ));
+    if v.new_findings.is_empty() {
+        out.push_str("- New findings: none (the whole store validates)\n");
+    } else {
+        out.push_str("- New findings:\n");
+        for f in &v.new_findings {
+            out.push_str(&format!("  - {f}\n"));
+        }
+    }
+    out
+}
+
+/// Render a target's proposal record for a human: one block per
+/// merged proposal, newest last, with every disposition.
+pub fn render_proposal_record(target: &str, record: &ProposalRecord) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("# Proposals merged into `{target}`\n\n"));
+    if record.proposals.is_empty() {
+        out.push_str("No proposal has been merged into this mem.\n");
+        return out;
+    }
+    out.push_str(&format!(
+        "- Record: `{PROPOSAL_RECORD_PATH}` (version {}), {} proposal(s)\n",
+        record.version,
+        record.proposals.len()
+    ));
+    for p in &record.proposals {
+        out.push_str(&format!("\n## `{}`\n\n", p.id));
+        out.push_str(&format!(
+            "- Proposer: `{}`; merged by `{}` at {}\n",
+            p.proposer.as_deref().unwrap_or("(unrecorded)"),
+            p.merged_by.as_deref().unwrap_or("(unrecorded)"),
+            if p.at.is_empty() {
+                "(unrecorded)"
+            } else {
+                &p.at
+            }
+        ));
+        out.push_str(&format!(
+            "- Ancestor `{}`; base `{}`; target tip at merge `{}`\n",
+            p.ancestor, p.base, p.target_tip
+        ));
+        for (slug, d) in &p.entities {
+            let mut line = format!("- `{slug}`: {}", d.disposition);
+            if let Some(r) = &d.reason {
+                line.push_str(&format!(" ({r})"));
+            }
+            if let Some(h) = &d.content_hash {
+                line.push_str(&format!(", proposed hash `{h}`"));
+            }
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -928,5 +1199,6 @@ mod tests {
         // Malformed bytes refuse rather than read as empty.
         assert!(ProposalRecord::from_bytes(b"not json").is_err());
         assert_eq!(ProposalRecord::default().proposals.len(), 0);
+        assert_eq!(ProposalRecord::default().version, PROPOSAL_RECORD_VERSION);
     }
 }

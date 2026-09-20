@@ -196,6 +196,26 @@ pub struct CommitContext<'a> {
     /// alone. `None`/empty for single-entity commits — those name their
     /// one id in the subject (and thus `entity_id`), so no list is needed.
     pub entity_ids: Option<Vec<String>>,
+    /// The proposal a merge commit applies, when this commit is one.
+    /// [`format_commit_message`] emits `Proposal: <id>`, `Merged-By:
+    /// <merger>` and, for the entities the commit created, `Created:
+    /// id1, id2, …`; `parse_commit_message` recovers all three. The
+    /// trailers are additive beside `Identity:` (the proposer on a
+    /// merge commit, the merger on the amend commit that follows an
+    /// `adopt_with_changes`) and are never compared by the checks
+    /// independence gate. `None` for every other commit.
+    pub proposal: Option<ProposalTrailers>,
+}
+
+/// The trailers a proposal merge adds to a commit: the proposal's id
+/// (the fork's name and base sha), the merger's identity, and the ids
+/// the commit created (so the entity story reads a merge that brought
+/// an entity into the target as its creation).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalTrailers {
+    pub proposal: String,
+    pub merged_by: String,
+    pub created: Vec<String>,
 }
 
 impl<'a> CommitContext<'a> {
@@ -213,6 +233,7 @@ impl<'a> CommitContext<'a> {
             identity: None,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         }
     }
 }
@@ -331,6 +352,7 @@ impl<'a> CommitContext<'a> {
             identity,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         }
     }
 }
@@ -372,6 +394,18 @@ pub fn format_commit_message(prose: &str, ctx: &CommitContext<'_>) -> String {
     // subject. Ids never contain `, ` so the join is unambiguous.
     if let Some(ids) = ctx.entity_ids.as_ref().filter(|v| !v.is_empty()) {
         trailers.push(format!("Entities: {}", ids.join(", ")));
+    }
+    // `Merged-By:`, `Proposal:` and `Created:` mark a proposal merge:
+    // the merger beside the proposer's `Identity:`, the proposal the
+    // commit applies, and the ids it created (recovered by
+    // `parse_commit_message`; the entity story treats such a commit as
+    // those entities' creation).
+    if let Some(p) = ctx.proposal.as_ref() {
+        trailers.push(format!("Merged-By: {}", p.merged_by));
+        trailers.push(format!("Proposal: {}", p.proposal));
+        if !p.created.is_empty() {
+            trailers.push(format!("Created: {}", p.created.join(", ")));
+        }
     }
     let note_body = ctx.note.as_deref().map(str::trim).filter(|n| !n.is_empty());
     match note_body {

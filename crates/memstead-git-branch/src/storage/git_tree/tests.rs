@@ -28,6 +28,7 @@ fn ctx_for_test<'a>() -> CommitContext<'a> {
         identity: None,
         logical_operation_id: None,
         entity_ids: None,
+        proposal: None,
     }
 }
 
@@ -745,6 +746,7 @@ fn ctx_with_note<'a>(note: &'a str) -> CommitContext<'a> {
         identity: None,
         logical_operation_id: None,
         entity_ids: None,
+        proposal: None,
     }
 }
 
@@ -878,6 +880,7 @@ fn backend_read_provenance_reconstructs_from_commit_log() {
             identity: None,
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         },
     );
 

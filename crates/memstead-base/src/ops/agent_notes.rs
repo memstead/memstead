@@ -61,6 +61,19 @@ pub struct CommitNote {
     /// serde-omitted) for single-entity commits.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub entity_ids: Vec<String>,
+    /// The merger's identity from the `Merged-By:` trailer of a
+    /// proposal merge commit; absent on every other commit.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub merged_by: Option<String>,
+    /// The proposal id from the `Proposal:` trailer of a proposal
+    /// merge (or amend) commit; absent on every other commit.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub proposal: Option<String>,
+    /// Ids a proposal merge commit created in the target, from the
+    /// `Created:` trailer: the entity story reads such a commit as
+    /// those entities' creation. Empty on every other commit.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub created_ids: Vec<String>,
     /// Commit timestamp in seconds since unix epoch.
     pub timestamp: i64,
 }

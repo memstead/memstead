@@ -84,6 +84,13 @@ pub struct ParsedCommit {
     /// commits carry their id in `entity_id` instead. Round-trips with
     /// `format_commit_message`'s `Entities: id1, id2, …` emission.
     pub entity_ids: Vec<String>,
+    /// Value of the `Merged-By:` trailer of a proposal merge commit.
+    pub merged_by: Option<String>,
+    /// Value of the `Proposal:` trailer of a proposal merge or amend
+    /// commit.
+    pub proposal: Option<String>,
+    /// Ids from the `Created:` trailer of a proposal merge commit.
+    pub created_ids: Vec<String>,
 }
 
 /// Parse one commit body — subject on the first line, optional note
@@ -127,6 +134,9 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
     let mut role: Option<String> = None;
     let mut identity: Option<String> = None;
     let mut entity_ids: Vec<String> = Vec::new();
+    let mut merged_by: Option<String> = None;
+    let mut proposal: Option<String> = None;
+    let mut created_ids: Vec<String> = Vec::new();
     if let Some(start) = first_trailer_idx {
         for line in &body_lines[start..] {
             if let Some((key, value)) = split_trailer(line) {
@@ -140,13 +150,11 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
                     "Role" if role.is_none() => role = Some(value.to_string()),
                     "Identity" if identity.is_none() => identity = Some(value.to_string()),
                     "Entities" if entity_ids.is_empty() => {
-                        entity_ids = value
-                            .split(',')
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_string)
-                            .collect();
+                        entity_ids = split_id_list(value);
                     }
+                    "Merged-By" if merged_by.is_none() => merged_by = Some(value.to_string()),
+                    "Proposal" if proposal.is_none() => proposal = Some(value.to_string()),
+                    "Created" if created_ids.is_empty() => created_ids = split_id_list(value),
                     _ => {}
                 }
             }
@@ -165,7 +173,20 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
         role,
         identity,
         entity_ids,
+        merged_by,
+        proposal,
+        created_ids,
     }
+}
+
+/// A comma-separated id list trailer value (`Entities:`, `Created:`).
+fn split_id_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn parse_subject(subject: &str) -> (Option<String>, Option<String>) {
@@ -345,6 +366,9 @@ pub fn agent_notes_since(
             role: parsed.role,
             identity: parsed.identity,
             entity_ids: parsed.entity_ids,
+            merged_by: parsed.merged_by,
+            proposal: parsed.proposal,
+            created_ids: parsed.created_ids,
             timestamp,
         });
     }
@@ -377,6 +401,7 @@ mod tests {
             identity: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         }
     }
 
@@ -400,6 +425,7 @@ mod tests {
             identity: Default::default(),
             logical_operation_id: Some("logop-abc123def456"),
             entity_ids: None,
+            proposal: None,
         };
         let raw = crate::vcs::format_commit_message("memstead: rename a → b", &ctx);
         assert!(
@@ -430,6 +456,7 @@ mod tests {
             identity: Some("plenum-agent".into()),
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         let raw = crate::vcs::format_commit_message("memstead: update v:x", &ctx);
         assert!(
@@ -446,6 +473,55 @@ mod tests {
             "an undeclared identity emits no trailer; got:\n{raw}"
         );
         assert_eq!(parse_commit_message(&raw).identity, None);
+    }
+
+    /// Plan-proposal 03: a merge commit's `Merged-By:`, `Proposal:` and
+    /// `Created:` trailers round-trip beside `Identity:` (the proposer)
+    /// and `Entities:`; a commit without them parses every field absent.
+    #[test]
+    fn parser_round_trips_proposal_trailers() {
+        let merge_ctx = crate::vcs::CommitContext {
+            actor: crate::vcs::Actor::Cli,
+            client: None,
+            tool: Some("proposal_merge"),
+            note: None,
+            role: Default::default(),
+            identity: Some("proposer-p1".into()),
+            logical_operation_id: None,
+            entity_ids: Some(vec!["specs--beta".to_string(), "specs--eta".to_string()]),
+            proposal: Some(memstead_base::vcs::ProposalTrailers {
+                proposal: "specs-fork@abc".to_string(),
+                merged_by: "owner-o1".to_string(),
+                created: vec!["specs--eta".to_string()],
+            }),
+        };
+        let raw = crate::vcs::format_commit_message(
+            "memstead: proposal-merge specs-fork@abc",
+            &merge_ctx,
+        );
+        for needle in [
+            "Identity: proposer-p1",
+            "Entities: specs--beta, specs--eta",
+            "Merged-By: owner-o1",
+            "Proposal: specs-fork@abc",
+            "Created: specs--eta",
+        ] {
+            assert!(raw.contains(needle), "missing {needle:?} in:\n{raw}");
+        }
+        let parsed = parse_commit_message(&raw);
+        assert_eq!(parsed.tool_verb.as_deref(), Some("proposal-merge"));
+        assert_eq!(parsed.identity.as_deref(), Some("proposer-p1"));
+        assert_eq!(parsed.merged_by.as_deref(), Some("owner-o1"));
+        assert_eq!(parsed.proposal.as_deref(), Some("specs-fork@abc"));
+        assert_eq!(parsed.created_ids, vec!["specs--eta"]);
+        assert_eq!(parsed.entity_ids, vec!["specs--beta", "specs--eta"]);
+
+        let plain = parse_commit_message(&crate::vcs::format_commit_message(
+            "memstead: update specs--beta",
+            &ctx(),
+        ));
+        assert!(plain.merged_by.is_none() && plain.proposal.is_none());
+        assert!(plain.created_ids.is_empty());
     }
 
     #[test]
@@ -466,6 +542,7 @@ mod tests {
                 "specs--beta".to_string(),
                 "memos--gamma".to_string(),
             ]),
+            proposal: None,
         };
         let raw = crate::vcs::format_commit_message("memstead: batch-update (3 entities)", &ctx);
         assert!(
@@ -526,6 +603,7 @@ mod tests {
             identity: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         let raw = crate::vcs::format_commit_message("memstead: rename a → b", &ctx);
         let parsed = parse_commit_message(&raw);
@@ -557,6 +635,7 @@ mod tests {
             identity: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
+            proposal: None,
         };
         let raw = crate::vcs::format_commit_message("memstead: update specs--alpha", &ctx);
         assert!(raw.contains("Actor: app"), "missing app trailer:\n{raw}");

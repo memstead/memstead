@@ -207,10 +207,16 @@ impl Engine {
                     )
                 {
                     for n in &changes.notes {
-                        let Some(entity) = n.entity_id.as_deref() else {
-                            continue;
-                        };
-                        out.absorb(entity, n.timestamp, n.identity.clone());
+                        if let Some(entity) = n.entity_id.as_deref() {
+                            out.absorb(entity, n.timestamp, n.identity.clone());
+                        }
+                        // A multi-entity commit (a batch, a proposal merge)
+                        // names its entities in the `Entities:` trailer and
+                        // a count in its subject; the identity touches
+                        // every one of them.
+                        for entity in &n.entity_ids {
+                            out.absorb(entity, n.timestamp, n.identity.clone());
+                        }
                     }
                     out.follow_renames();
                 }
@@ -308,10 +314,13 @@ impl Engine {
             }
             None => {
                 // Not a criterion: today's rule, the entity's own author.
+                // The author is the oldest touch; touches are absorbed
+                // newest-first, so among touches in one second the last
+                // absorbed is the one committed first.
                 let author = touches
                     .by_entity
                     .get(&entity.id.0)
-                    .and_then(|t| t.iter().min_by_key(|(ts, _)| *ts))
+                    .and_then(|t| t.iter().rev().min_by_key(|(ts, _)| *ts))
                     .and_then(|(_, id)| id.clone());
                 let reading = match author {
                     Some(a) if a == checker => Independence::SelfChecked,

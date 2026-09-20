@@ -17,6 +17,7 @@ fn ctx_for_test<'a>() -> CommitContext<'a> {
         identity: None,
         logical_operation_id: None,
         entity_ids: None,
+        proposal: None,
     }
 }
 
