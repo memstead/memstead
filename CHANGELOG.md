@@ -368,7 +368,7 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   qualified links to it (`retarget_mem_links`, both forms, code spans
   untouched; a no-op for a flat mem), and the CLI removes the archive
   when the self-contained pass refuses, naming that nothing was
-  written. Found by the trustwork project's first bundle.
+  written. Found on the first export of a hierarchical mem.
 
 - **A rename keeps the entity's check history, and the independence
   reading follows the rename.** `memstead rename` moved the file, the
@@ -391,8 +391,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **A git-branch mem name that git's ref namespace cannot hold refuses
   before anything is written, a failed seed leaves no config behind,
   and a config left behind is removable.** Git keeps refs as files in
-  directories, so `refs/heads/stocks/impfpflicht/anker` cannot exist
-  beside the mem branch `stocks/impfpflicht`, in either order of
+  directories, so `refs/heads/library/sample/notes` cannot exist
+  beside the mem branch `library/sample`, in either order of
   creation. `mem init` used to find that out inside its seed commit
   (`git-tree writer: ref ... vanished during CAS recovery`), after the
   mem's config had already landed on `__MEMSTEAD`, leaving a config
@@ -401,7 +401,7 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   first and refuses `MEM_NAME_REF_CONFLICT` for a name that an existing
   mem branch sits above or below, naming the branches in
   `details.conflicting_branches` and, for the child case, a sibling
-  spelling in `details.suggestion` (`stocks/impfpflicht-anker`); (2) a
+  spelling in `details.suggestion` (`library/sample-notes`); (2) a
   seed commit that fails after the config write rolls the config back
   through a config-only prune that never touches a branch; (3)
   `mem delete <name> --operator-mode` recognises the config-only
@@ -412,10 +412,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - **The convention-derived process mem name of a nested destination
   is a sibling, not a child.** Decision, recorded here: for a binding
-  `<mem>/<stem>` whose destination is a nested mem (`stocks/impfpflicht`),
-  the derived process mem is `<mem>-<stem>` (`stocks/impfpflicht-anker`),
+  `<mem>/<stem>` whose destination is a nested mem (`library/sample`),
+  the derived process mem is `<mem>-<stem>` (`library/sample-notes`),
   the last separator hyphenated, because the former derivation
-  `stocks/impfpflicht/anker` names a branch git cannot hold beside the
+  `library/sample/notes` names a branch git cannot hold beside the
   destination's own. The convention for a single-component destination
   is unchanged (`engine/graph` pairs with `engine/graph`); note that on
   a mem-repo workspace that name is equally a child path of the
@@ -429,12 +429,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   destination with different mems. They pair identically now.
 
 - **A nested mem name is a legal binding destination.** `memstead
-  projection init --mem stocks/impfpflicht` refused
+  projection init --mem library/sample` refused
   `PROJECTION_INVALID_NAME` although nested mem names (`team/sub-mem`)
   are first-class everywhere else in the engine: the workspace create
   rules, git-branch mounts, `mem list`. The binding store now keys a mem
   by its path, so the record lands at
-  `.memstead/projections/stocks/impfpflicht/anker.json`, the loader
+  `.memstead/projections/library/sample/notes.json`, the loader
   walks nested tiers, and the per-binding state (`state/findings`,
   `state/advance`) nests the same way. The canonical binding id
   `<mem>/<stem>` splits at its LAST separator, through one shared parser
@@ -443,7 +443,7 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `report`, the run resolver, the cursor, the findings and advance
   stores. The traversal guard is unchanged in substance: every component
   of the mem path and the stem still refuses `.`, `..`, backslashes,
-  `:` and NUL, so `stocks/../x` is refused as before. A mem's store
+  `:` and NUL, so `library/../x` is refused as before. A mem's store
   removal and relocation now move the mem's own record files rather
   than its whole directory, so a nested mem's tier under a parent path
   is never swept away with the parent.
@@ -4928,7 +4928,8 @@ byte-sealed and loadable, so out-of-repo pins keep working unchanged.
   a pin that resolves nowhere. `memstead schema install` never boots at
   all on the mem-repo flavour — it validates through the same
   `validate_schema_package` gate and seals onto the
-  `__MEMSTEAD:schemas/` ref directly, so the full plenum recovery path
+  `__MEMSTEAD:schemas/` ref directly, so the full recovery path for a
+  workspace whose pinned schema cannot be resolved
   (install the missing package, repin, boot green) works end to end on
   an unbootable workspace. `memstead projection migrate` no longer
   deadlocks when its reconcile-cursor seeding meets a workspace that
@@ -5431,7 +5432,7 @@ byte-sealed and loadable, so out-of-repo pins keep working unchanged.
   declared heading gets a distinct `SECTION_HEADING_MISMATCH` health
   issue naming both the found heading and the catch-all the content
   landed in — instead of the misleading "required section is empty"
-  report that sent the plenum operator hunting for content that was
+  report that sends an operator hunting for content that was
   present all along. The parser now retains the file's literal `## `
   heading list per entity (a derived, never-persisted parse artefact)
   to power the distinction.
