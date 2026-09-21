@@ -638,7 +638,7 @@ fn local_fork_refusals_land_nothing() {
 // The fork commit: sidecars and self-links carry the fork's name
 // ---------------------------------------------------------------------
 
-/// The trustwork case shape: a source whose entity carries a url span
+/// The full fork shape: a source whose entity carries a url span
 /// row, a derived entity-grain row and a file row with an observation,
 /// whose derivations sidecar holds baselines keyed by its ids, and whose
 /// bodies qualify self-links with the mem's own name beside links to
@@ -1440,7 +1440,7 @@ fn remote_fork_refusals_land_nothing() {
     assert!(read_md_blobs_at_ref(&b_gitdir, "refs/heads/local").is_ok());
 }
 
-/// The trustwork case: the source pins a workspace-local newer
+/// The locally newer pin: the source pins a workspace-local newer
 /// generation of a builtin-named schema (`planning@0.7.0`, where the
 /// forking workspace holds only the builtin generations). A fork
 /// copies the pin and never re-pins, so the refusal names the pin and

@@ -185,8 +185,8 @@ pub fn find_branches_by_leaf_at_gitdir(
 
 /// Every local branch whose name sits above or below `branch_full_path`
 /// in git's ref namespace: a branch that is a path prefix of it
-/// (`stocks/impfpflicht` for `stocks/impfpflicht/anker`) or that it is a
-/// path prefix of (`stocks/impfpflicht` for `stocks`). Git keeps refs as
+/// (`library/sample` for `library/sample/notes`) or that it is a
+/// path prefix of (`library/sample` for `library`). Git keeps refs as
 /// files in directories, so such a pair can never coexist: creating the
 /// second ref fails with a low-level ref-edit error. The mem-create
 /// orchestrator asks this BEFORE any write, so the refusal is typed and
@@ -869,30 +869,29 @@ mod tests {
     /// path conflicts, a sibling or the exact name does not.
     #[test]
     fn branch_namespace_conflicts_find_parents_and_children_only() {
-        let tmp = init_mem_repo_with_hierarchical_branch("stocks/impfpflicht");
+        let tmp = init_mem_repo_with_hierarchical_branch("library/sample");
         let gitdir = tmp.path().join("mem-repo").join(".git");
-        seal_branches(&gitdir, &["stocks/impfpflicht-anker", "planning/plan-a"]);
+        seal_branches(&gitdir, &["library/sample-notes", "planning/plan-a"]);
 
         // Below an existing branch: the existing one is the conflict.
         let below =
-            super::branch_namespace_conflicts_at_gitdir(&gitdir, "stocks/impfpflicht/anker")
-                .unwrap();
-        assert_eq!(below, vec!["stocks/impfpflicht".to_string()]);
+            super::branch_namespace_conflicts_at_gitdir(&gitdir, "library/sample/notes").unwrap();
+        assert_eq!(below, vec!["library/sample".to_string()]);
         // Above existing branches: every child is a conflict, sorted.
-        let above = super::branch_namespace_conflicts_at_gitdir(&gitdir, "stocks").unwrap();
+        let above = super::branch_namespace_conflicts_at_gitdir(&gitdir, "library").unwrap();
         assert_eq!(
             above,
             vec![
-                "stocks/impfpflicht".to_string(),
-                "stocks/impfpflicht-anker".to_string()
+                "library/sample".to_string(),
+                "library/sample-notes".to_string()
             ]
         );
         // A sibling, a prefix that is not a path segment, and the exact
         // name are no conflict.
         for free in [
-            "stocks/other",
-            "stocks/impf",
-            "stocks/impfpflicht",
+            "library/other",
+            "library/sam",
+            "library/sample",
             "planning/plan-b",
         ] {
             let hits = super::branch_namespace_conflicts_at_gitdir(&gitdir, free).unwrap();

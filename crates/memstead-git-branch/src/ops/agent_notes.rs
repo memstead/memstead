@@ -453,18 +453,18 @@ mod tests {
             tool: Some("memstead_update"),
             note: None,
             role: Default::default(),
-            identity: Some("plenum-agent".into()),
+            identity: Some("agent-a".into()),
             logical_operation_id: None,
             entity_ids: None,
             proposal: None,
         };
         let raw = crate::vcs::format_commit_message("memstead: update v:x", &ctx);
         assert!(
-            raw.contains("Identity: plenum-agent"),
+            raw.contains("Identity: agent-a"),
             "format_commit_message must emit the Identity trailer; got:\n{raw}"
         );
         let parsed = parse_commit_message(&raw);
-        assert_eq!(parsed.identity.as_deref(), Some("plenum-agent"));
+        assert_eq!(parsed.identity.as_deref(), Some("agent-a"));
 
         ctx.identity = None;
         let raw = crate::vcs::format_commit_message("memstead: update v:x", &ctx);
