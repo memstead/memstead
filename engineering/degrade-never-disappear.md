@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-08-08T08:05:08Z
-last_modified: 2026-08-08T08:05:08Z
+last_modified: 2026-09-21T11:30:39Z
 authority: accepted
 universality: domain-wide
 tags: availability, boot, quarantine, agent-trust
@@ -21,7 +21,7 @@ Engine boot and every serving surface over it. Mem-level: the per-mount boot loo
 
 ## Justification
 
-Memstead's core promise is that the data is always readable — markdown + git, no lock-in. The engine inverted that promise at the worst moment, twice in two days: one mem with a bad schema pin took thirteen mems and 9,100 entities offline (plenum, 2026-08-06/07), and one legacy projection config took fifteen mems offline (expertise, 2026-08-07); in both cases the MCP server exited without a word, leaving sessions holding dead tool grants. The isolation idiom already existed in the loader (per-file parse errors collect instead of failing boot; a round-trip-violating sealed schema degrades to a health warning) — this principle extends the proven pattern to pin resolution and mount instantiation. Best-effort serving of a broken mem was rejected: an agent reasoning over a silently partial mem produces confidently wrong conclusions; the failure must be visible at mem granularity.
+Memstead's core promise is that the data is always readable — markdown + git, no lock-in. The engine inverted that promise at the worst moment, twice in two days: one mem with a bad schema pin took thirteen mems and 9,100 entities offline (a sibling workspace, 2026-08-06/07), and one legacy projection config took fifteen mems offline (a second workspace, 2026-08-07); in both cases the MCP server exited without a word, leaving sessions holding dead tool grants. The isolation idiom already existed in the loader (per-file parse errors collect instead of failing boot; a round-trip-violating sealed schema degrades to a health warning) — this principle extends the proven pattern to pin resolution and mount instantiation. Best-effort serving of a broken mem was rejected: an agent reasoning over a silently partial mem produces confidently wrong conclusions; the failure must be visible at mem granularity.
 
 ## Exceptions
 

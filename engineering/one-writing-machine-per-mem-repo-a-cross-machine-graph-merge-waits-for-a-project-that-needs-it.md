@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-10T14:08:00Z
-last_modified: 2026-09-20T02:54:38Z
+last_modified: 2026-09-21T11:30:21Z
 status: superseded
 decided_on: 2026-09-10
 deciders: operator (in-session), implementing agent
@@ -37,4 +37,4 @@ The 2026-09-10 review of prune separated two questions the merge word had fused.
 
 ## Notes
 
-2026-09-20 amendment: the trigger named in Decision fired (trustwork must merge a second lineage into an owner's mem); superseded by [[engineering--build-proposals-as-forks-with-a-recorded-ancestor-merged-entity-wise-under-two-identities]], which keeps the design order recorded under Consequences.
+2026-09-20 amendment: the trigger named in Decision fired (a project that publishes reviewed claim collections on the engine must merge a second lineage into an owner's mem); superseded by [[engineering--build-proposals-as-forks-with-a-recorded-ancestor-merged-entity-wise-under-two-identities]], which keeps the design order recorded under Consequences.

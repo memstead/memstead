@@ -1,10 +1,10 @@
 ---
 type: decision
 created_date: 2026-08-19T03:28:35Z
-last_modified: 2026-08-19T03:28:35Z
+last_modified: 2026-09-21T11:38:03Z
 status: accepted
 decided_on: 2026-08-19
-deciders: operator (WOENENN needs statement 2026-08-18, ratified; bundle decision 27), implemented in backlog-sweep plan 03b
+deciders: operator (a field programme's needs statement of 2026-08-18, ratified; bundle decision 27), implemented in backlog-sweep plan 03b
 scope: subsystem
 tags: ingest, issue-tracker, forge-medium, pilot, mirror
 ---

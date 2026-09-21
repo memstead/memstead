@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-08-08T07:41:35Z
-last_modified: 2026-08-08T07:41:35Z
+last_modified: 2026-09-21T11:30:40Z
 authority: accepted
 universality: domain-wide
 tags: boot, repair, cli, recovery, agent-trust
@@ -20,7 +20,7 @@ Every CLI verb that a boot-failure message names as its repair command — today
 
 ## Justification
 
-During the 2026-08-06/07 plenum outage, both escape routes the engine itself named — `memstead schema install` and `memstead mem set-schema` — failed on exactly the boot they were supposed to repair; the workspace was saved only by hand-copying a schema package that happened to survive in another checkout's build directory. An error message that names a repair command which cannot run in the failed state is worse than no message: it burns the agent's trust in every other repair command the engine names. The engine already carried the correct pattern (`memstead projection migrate` deliberately operates below engine boot); this principle generalizes it. Realized alongside [[engineering--type-boot-failures-at-the-seam-with-one-shared-message-across-surfaces]], which makes boot failures name these commands — the naming is truthful only while this principle holds.
+During the 2026-08-06/07 outage of a sibling workspace, both escape routes the engine itself named — `memstead schema install` and `memstead mem set-schema` — failed on exactly the boot they were supposed to repair; the workspace was saved only by hand-copying a schema package that happened to survive in another checkout's build directory. An error message that names a repair command which cannot run in the failed state is worse than no message: it burns the agent's trust in every other repair command the engine names. The engine already carried the correct pattern (`memstead projection migrate` deliberately operates below engine boot); this principle generalizes it. Realized alongside [[engineering--type-boot-failures-at-the-seam-with-one-shared-message-across-surfaces]], which makes boot failures name these commands — the naming is truthful only while this principle holds.
 
 ## Exceptions
 
