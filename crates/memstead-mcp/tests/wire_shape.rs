@@ -424,7 +424,7 @@ fn full_memstead_schema_unknown_name_emits_entity_not_found() {
 
 /// A full-verbosity request scoped to a small
 /// type selection on the measured large schema (`software@0.4.0` — the
-/// 60.2 KB field spill, 2026-08-18 WOENENN ingest) returns the named
+/// 60.2 KB field spill, 2026-08-18 field ingest) returns the named
 /// types' complete prose in one under-budget reply, with every
 /// unserved type named in `types_omitted`. Complement: an unknown type
 /// name in the selection refuses `UNKNOWN_ENTITY_TYPE` naming the

@@ -1677,7 +1677,7 @@ fn estimate_payload_tokens(value: &serde_json::Value) -> usize {
 /// two measured packages land on the intended sides: `default@1.3.0`
 /// (~52 KB) keeps serving in full — today's behaviour on today's reply
 /// sizes — while `software@0.4.0` (60.2 KB, the observed harness spill,
-/// 2026-08-18 WOENENN ingest) degrades visibly to the per-type steer
+/// 2026-08-18 field ingest) degrades visibly to the per-type steer
 /// instead of overflowing the pipe.
 pub const DEFAULT_SCHEMA_FULL_BUDGET: usize = 15_000;
 
