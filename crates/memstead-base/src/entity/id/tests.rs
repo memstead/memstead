@@ -199,16 +199,12 @@ fn validate_and_derive_slug_admits_and_reports_dropped_chars() {
         ("../escape", &['.', '/'], "escape"),
         ("path/to/entity", &['/'], "pathtoentity"),
         ("a\\b", &['\\'], "ab"),
-        ("Wohnung 2.OG rechts", &['.'], "wohnung-2og-rechts"),
+        ("Raum 2.OG rechts", &['.'], "raum-2og-rechts"),
+        ("Anhang 4a – Übersicht", &['–'], "anhang-4a-übersicht"),
         (
-            "Anlage 4a – Leistungsbeschreibung",
-            &['–'],
-            "anlage-4a-leistungsbeschreibung",
-        ),
-        (
-            "Bösenberg Grundstücks GmbH & Co. KG",
+            "Müller & Söhne GmbH & Co. KG",
             &['&', '.'],
-            "bösenberg-grundstücks-gmbh-co-kg",
+            "müller-söhne-gmbh-co-kg",
         ),
     ];
     for (title, expected_dropped, expected_slug) in cases {

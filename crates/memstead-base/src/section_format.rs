@@ -1176,7 +1176,7 @@ mod check_tests {
             None,
             None,
         );
-        let ok = "arc:20/13/073:4559-4985:09b80726ef42:0a582b1c5530 | 2022-01-26 · Sample Author · https://example.org/arc/20/20013.pdf
+        let ok = "arc:12/34/567:100-200:0123456789ab:ba9876543210 | 2020-01-01 · Sample Author · https://example.org/arc/12/1234.pdf
 ";
         assert!(
             check_section_format(&d, ok).is_empty(),
@@ -1184,11 +1184,11 @@ mod check_tests {
             check_section_format(&d, ok)
         );
         // Missing span hash — the checker's regex class, declared.
-        let bad = "arc:20/13/073:4559-4985:09b80726ef42 | 2022-01-26 · Author · https://example.org
+        let bad = "arc:12/34/567:100-200:0123456789ab | 2020-01-01 · Author · https://example.org
 ";
         assert_eq!(check_section_format(&d, bad).len(), 1);
         // Missing the two-halves separator.
-        let bad = "arc:20/13/073:4559-4985:09b80726ef42:0a582b1c5530 2022-01-26
+        let bad = "arc:12/34/567:100-200:0123456789ab:ba9876543210 2020-01-01
 ";
         assert_eq!(check_section_format(&d, bad).len(), 1);
     }

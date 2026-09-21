@@ -381,22 +381,19 @@ fn prose_render_falls_back_to_display_for_trivial_variants() {
 #[test]
 fn already_exists_names_the_occupying_title_on_both_channels() {
     let err = EngineError::AlreadyExists {
-        id: "muehle--bösenberg-grundstücks-gmbh-co-kg".to_string(),
-        existing_title: "Bösenberg Grundstücks GmbH Co KG".to_string(),
+        id: "specs--müller-söhne-gmbh-co-kg".to_string(),
+        existing_title: "Müller Söhne GmbH Co KG".to_string(),
         existing_is_stub: false,
     };
     assert!(
         err.to_string()
-            .contains("occupied by 'Bösenberg Grundstücks GmbH Co KG'"),
+            .contains("occupied by 'Müller Söhne GmbH Co KG'"),
         "got: {err}"
     );
     let details = err.details();
-    assert_eq!(
-        details["existing_title"],
-        "Bösenberg Grundstücks GmbH Co KG"
-    );
+    assert_eq!(details["existing_title"], "Müller Söhne GmbH Co KG");
     assert_eq!(details["existing_is_stub"], false);
-    assert_eq!(details["id"], "muehle--bösenberg-grundstücks-gmbh-co-kg");
+    assert_eq!(details["id"], "specs--müller-söhne-gmbh-co-kg");
 }
 
 /// A stub occupant states it is a stub; a titleless stub must not

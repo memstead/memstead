@@ -366,8 +366,8 @@ mod tests {
         v4["title"] = serde_json::json!("Sample subject Übersicht");
         v4["subject"] = serde_json::json!({
             "scope": "A sample scope",
-            "method": "Primärquellen, händisch geprüft",
-            "exclusions": ["Einträge nach 2023", "Presseberichte"],
+            "method": "Beispieldaten, händisch gepflegt",
+            "exclusions": ["Einträge nach 2023", "Entwürfe"],
         });
         let parsed = parse(v4).expect("format 4 accepted");
         assert_eq!(parsed.title.as_deref(), Some("Sample subject Übersicht"));
@@ -375,12 +375,9 @@ mod tests {
         assert_eq!(subject.scope, "A sample scope");
         assert_eq!(
             subject.method.as_deref(),
-            Some("Primärquellen, händisch geprüft")
+            Some("Beispieldaten, händisch gepflegt")
         );
-        assert_eq!(
-            subject.exclusions,
-            vec!["Einträge nach 2023", "Presseberichte"]
-        );
+        assert_eq!(subject.exclusions, vec!["Einträge nach 2023", "Entwürfe"]);
 
         // Formats 1 and 2 keep their current refusals.
         let mut v2 = ok_config();

@@ -142,7 +142,7 @@ pub fn enforce_id_length(id: &str) -> Result<(), SlugError> {
 /// degrades to a deterministic short hash of the title
 /// (`entity-<8-hex>`) rather than failing. Titles that are already
 /// slug-form — case-less scripts (`知識グラフ`) and lowercase
-/// single-token Latin (`wohnung`) — produce slug == title, so
+/// single-token Latin (`garden`) — produce slug == title, so
 /// Obsidian-style `[[<title>]]` authoring round-trips without lookup
 /// for exactly those titles; any other title (a capital, a space:
 /// `Knowledge Graph`) derives a different slug, and the strict

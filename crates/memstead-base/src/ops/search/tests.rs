@@ -194,12 +194,11 @@ fn search_direction_narrows_related_to_and_expansion() {
 fn search_finds_metadata_values_and_keys() {
     let mut store = Store::new();
     // `carrier` holds the identifier-shaped value in an UNDECLARED
-    // metadata field (the default schema declares no `aktenzeichen`).
+    // metadata field (the default schema declares no `docket`).
     let mut carrier = make_entity("carrier", "specs");
-    carrier.metadata.insert(
-        "aktenzeichen".into(),
-        MetadataValue::String("20/54/033".into()),
-    );
+    carrier
+        .metadata
+        .insert("docket".into(), MetadataValue::String("12/34/567".into()));
     store.upsert(carrier.id.clone(), carrier);
     // `prose` carries the shared term in its prose only.
     let mut prose = make_entity("prose", "specs");
@@ -225,7 +224,7 @@ fn search_finds_metadata_values_and_keys() {
     };
 
     // The motivating case: the identifier-shaped value is found.
-    let result = run_search(&store, &q("20/54/033"));
+    let result = run_search(&store, &q("12/34/567"));
     assert_eq!(result.hits.len(), 1, "identifier found: {result:?}");
     assert_eq!(result.hits[0].title, "carrier");
     // …and the hit is identifiable as a metadata match.
@@ -239,7 +238,7 @@ fn search_finds_metadata_values_and_keys() {
     );
 
     // The KEY finds its carrier too.
-    let result = run_search(&store, &q("aktenzeichen"));
+    let result = run_search(&store, &q("docket"));
     assert_eq!(result.hits.len(), 1);
     assert_eq!(result.hits[0].title, "carrier");
 

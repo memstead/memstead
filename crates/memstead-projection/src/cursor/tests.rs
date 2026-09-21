@@ -2901,12 +2901,12 @@ fn engine_state_never_enumerates_even_when_allowed() {
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path();
     for rel in [
-        ".memstead/state/findings/muehle/f.json",
-        ".memstead/projections/muehle/f.json",
-        ".memstead.cache/ingest/source-cursor/muehle/f/f.json",
+        ".memstead/state/findings/notes/f.json",
+        ".memstead/projections/notes/f.json",
+        ".memstead.cache/ingest/source-cursor/notes/f/f.json",
         "custom-repo/README.md",
-        "Allgemein/Protokoll.md",
-        "Allgemein/Vertrag.md",
+        "General/Contract.md",
+        "General/Minutes.md",
     ] {
         let path = root.join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2925,12 +2925,12 @@ fn engine_state_never_enumerates_even_when_allowed() {
         serde_json::json!({
             "format": "memstead-mounts-3",
             "mounts": [{
-                "mem": "muehle",
+                "mem": "notes",
                 "schema": "default@1.0.0",
                 "storage": {
                     "type": "git-branch",
                     "gitdir": "custom-repo/.git",
-                    "branch": "refs/heads/muehle"
+                    "branch": "refs/heads/notes"
                 },
                 "capability": "write",
                 "lifecycle": "eager",
@@ -2959,7 +2959,7 @@ fn engine_state_never_enumerates_even_when_allowed() {
     let got = enumerate_facet_files(&source, &[], root);
     assert_eq!(
         got,
-        vec!["Allgemein/Protokoll.md", "Allgemein/Vertrag.md"],
+        vec!["General/Contract.md", "General/Minutes.md"],
         "only source artifacts may enter the denominator"
     );
 }
@@ -2989,12 +2989,12 @@ fn git_slice_excludes_engine_state() {
         serde_json::json!({
             "format": "memstead-mounts-3",
             "mounts": [{
-                "mem": "muehle",
+                "mem": "notes",
                 "schema": "default@1.0.0",
                 "storage": {
                     "type": "git-branch",
                     "gitdir": "custom-repo/.git",
-                    "branch": "refs/heads/muehle"
+                    "branch": "refs/heads/notes"
                 },
                 "capability": "write",
                 "lifecycle": "eager",

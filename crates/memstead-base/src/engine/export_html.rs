@@ -566,8 +566,8 @@ mod tests {
     fn fixture_engine(tmp: &TempDir) -> Engine {
         let mem_dir = tmp.path().to_path_buf();
         std::fs::write(
-            mem_dir.join("bösenberg-söhne-rev-21.md"),
-            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Bösenberg & Söhne — Rev. 2.1\n\n## Identity\n\nCited in [[target-entity]] and [[über-ziele]] and cross-mem [[other--far-away]].\n\n<script>alert('x')</script>\n\n![diagram](https://evil.example/x.png)\n\nSee [docs](https://example.org/page), [broken](#bogus-frag), [evil](javascript:alert(2)).\n\n## Purpose\n\nZweck mit Umlauten: äöüß.\n",
+            mem_dir.join("müller-söhne-rev-21.md"),
+            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Müller & Söhne — Rev. 2.1\n\n## Identity\n\nCited in [[target-entity]] and [[über-ziele]] and cross-mem [[other--far-away]].\n\n<script>alert('x')</script>\n\n![diagram](https://evil.example/x.png)\n\nSee [docs](https://example.org/page), [broken](#bogus-frag), [evil](javascript:alert(2)).\n\n## Purpose\n\nZweck mit Umlauten: äöüß.\n",
         )
         .unwrap();
         std::fs::write(
@@ -722,7 +722,7 @@ mod tests {
         assert!(html.contains("<strong>Exported:</strong> 2026-08-10"));
         assert!(html.contains("<nav>"), "type-grouped index");
         assert!(
-            html.contains("Bösenberg &amp; Söhne — Rev. 2.1"),
+            html.contains("Müller &amp; Söhne — Rev. 2.1"),
             "widened title escaped: {html}"
         );
         assert!(html.contains("äöüß"), "umlauts verbatim");
@@ -804,7 +804,7 @@ mod tests {
         // Localized change: edit one entity; the untouched entity's
         // section block stays byte-identical.
         let untouched_block = {
-            let start = html.find("id=\"specs--bösenberg-söhne-rev-21\"").unwrap();
+            let start = html.find("id=\"specs--müller-söhne-rev-21\"").unwrap();
             let end = html[start..].find("</section>").unwrap() + start;
             html[start..end].to_string()
         };

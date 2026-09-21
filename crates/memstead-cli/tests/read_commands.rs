@@ -1344,20 +1344,20 @@ fn search_finds_identifier_shaped_metadata_value() {
     // A file carrying the identifier in a metadata field the schema
     // never declared — tolerated on load, and now findable.
     fs::write(
-        dir.join("akte.md"),
+        dir.join("record.md"),
         r#"---
 type: spec
-aktenzeichen: 20/54/033
+docket: 12/34/567
 ---
-# Akte
+# Record
 
 ## Identity
 
-Die Akte selbst.
+The record itself.
 
 ## Purpose
 
-Nachweis für Suche in Metadaten.
+Shows that search reaches metadata values.
 "#,
     )
     .unwrap();
@@ -1365,10 +1365,10 @@ Nachweis für Suche in Metadaten.
 
     memstead()
         .current_dir(tmp.path())
-        .args(["--json", "search", "20/54/033"])
+        .args(["--json", "search", "12/34/567"])
         .assert()
         .success()
-        .stdout(contains("cli-test--akte").and(contains("\"metadata\"")));
+        .stdout(contains("cli-test--record").and(contains("\"metadata\"")));
 }
 
 /// `memstead due` (first-author-path plan 08): the CLI wiring — a

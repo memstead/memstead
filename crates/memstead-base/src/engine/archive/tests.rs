@@ -73,8 +73,8 @@ fn export_round_trips_title_and_subject() {
             "title": "Sample subject Übersicht",
             "subject": {
                 "scope": "A sample scope: naïve façade, what is covered and what is not",
-                "method": "Primärquellen, händisch geprüft",
-                "exclusions": ["Einträge nach 2023", "Presseberichte", "Άλλα θέματα"],
+                "method": "Beispieldaten, händisch gepflegt",
+                "exclusions": ["Einträge nach 2023", "Entwürfe", "Άλλα θέματα"],
             },
         })
         .to_string(),
@@ -110,11 +110,11 @@ fn export_round_trips_title_and_subject() {
     );
     assert_eq!(
         subject.method.as_deref(),
-        Some("Primärquellen, händisch geprüft")
+        Some("Beispieldaten, händisch gepflegt")
     );
     assert_eq!(
         subject.exclusions,
-        vec!["Einträge nach 2023", "Presseberichte", "Άλλα θέματα"],
+        vec!["Einträge nach 2023", "Entwürfe", "Άλλα θέματα"],
         "exclusions preserved in order, non-ASCII intact"
     );
 

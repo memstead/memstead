@@ -550,8 +550,8 @@ mod tests {
     #[test]
     fn no_allowlist_configured_names_the_grant_command() {
         let err = FullEngineError::MemPathNotAllowed {
-            attempted: PathBuf::from("/ws/muehle"),
-            candidate: "muehle".into(),
+            attempted: PathBuf::from("/ws/notes"),
+            candidate: "notes".into(),
             patterns: vec![],
             reason: "no_allowlist_configured",
             policy_table: "mem_management.create",
@@ -590,8 +590,8 @@ mod tests {
 
         // Delete-path variant names allow-delete, without a schema pin.
         let err = FullEngineError::MemPathNotAllowed {
-            attempted: PathBuf::from("/ws/muehle"),
-            candidate: "muehle".into(),
+            attempted: PathBuf::from("/ws/notes"),
+            candidate: "notes".into(),
             patterns: vec![],
             reason: "no_allowlist_configured",
             policy_table: "mem_management.delete",

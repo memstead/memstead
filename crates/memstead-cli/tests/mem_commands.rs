@@ -798,11 +798,11 @@ fn mem_title_and_subject_lifecycle() {
             "--scope",
             "A sample scope",
             "--method",
-            "Primärquellen, händisch geprüft",
+            "Beispieldaten, händisch gepflegt",
             "--exclusion",
             "Einträge nach 2023",
             "--exclusion",
-            "Presseberichte",
+            "Entwürfe",
         ])
         .assert()
         .success()

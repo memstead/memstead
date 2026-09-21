@@ -4644,7 +4644,7 @@ fn title_chars_dropped_warning_rides_create_and_clean_titles_stay_silent() {
     let create = server.memstead_create(Parameters(CreateParams {
         anchors: None,
         mem: Some("specs".to_string()),
-        title: "Bösenberg Grundstücks GmbH & Co. KG".to_string(),
+        title: "Müller & Söhne GmbH & Co. KG".to_string(),
         entity_type: "spec".to_string(),
         sections: Some(sections.clone()),
         metadata: None,
@@ -4660,7 +4660,7 @@ fn title_chars_dropped_warning_rides_create_and_clean_titles_stay_silent() {
         extract_text(&create),
     );
     let payload = create.structured_content.as_ref().expect("payload");
-    assert_eq!(payload["id"], "specs--bösenberg-grundstücks-gmbh-co-kg");
+    assert_eq!(payload["id"], "specs--müller-söhne-gmbh-co-kg");
     let warning = payload["warnings"]
         .as_array()
         .expect("warnings array")
@@ -4678,13 +4678,10 @@ fn title_chars_dropped_warning_rides_create_and_clean_titles_stay_silent() {
         dropped.contains(&"&") && dropped.contains(&"."),
         "{warning}"
     );
-    assert_eq!(
-        warning["details"]["slug"],
-        "bösenberg-grundstücks-gmbh-co-kg"
-    );
+    assert_eq!(warning["details"]["slug"], "müller-söhne-gmbh-co-kg");
     // Verbatim title on the entity read.
     let read = server.memstead_entity(Parameters(EntityParams {
-        id: "specs--bösenberg-grundstücks-gmbh-co-kg".to_string(),
+        id: "specs--müller-söhne-gmbh-co-kg".to_string(),
         sections: None,
         token_budget: None,
         chunk: None,
@@ -4693,7 +4690,7 @@ fn title_chars_dropped_warning_rides_create_and_clean_titles_stay_silent() {
         include_provenance: None,
     }));
     let entity = read.structured_content.as_ref().expect("entity payload");
-    assert_eq!(entity["title"], "Bösenberg Grundstücks GmbH & Co. KG");
+    assert_eq!(entity["title"], "Müller & Söhne GmbH & Co. KG");
 
     // Complement: a clean title carries no divergence warning.
     let clean = server.memstead_create(Parameters(CreateParams {

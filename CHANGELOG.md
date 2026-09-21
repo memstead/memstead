@@ -4368,8 +4368,8 @@ overdue: **a schema-language change means the next release is due within days**
 — no released binary should refuse a key this repository's own examples,
 built-ins, and `schema new` scaffold emit.
 
-**The doorway itself** is the headline. Titles are display text — `Bösenberg
-Grundstücks GmbH & Co. KG`, `Wohnung 2.OG rechts`, `RFC 2119 §5` all create and
+**The doorway itself** is the headline. Titles are display text — `Müller &
+Söhne GmbH & Co. KG`, `Raum 2.OG rechts`, `RFC 2119 §5` all create and
 render verbatim, deriving their slug exactly as the pipeline always did, with a
 lossy derivation now *warning* rather than refusing. And one polarity rule
 covers both declaration kinds: **a section or metadata field is optional unless
@@ -4499,8 +4499,8 @@ byte-sealed and loadable, so out-of-repo pins keep working unchanged.
   "caller must type it".
 - **Titles are display text: the grammar widens, the slug stays, the
   divergence warns.** A title is now any single-line text —
-  `Bösenberg Grundstücks GmbH & Co. KG`, `Wohnung 2.OG rechts`,
-  `Anlage 4a – Leistungsbeschreibung`, `Acme Inc.`, `RFC 2119 §5` all
+  `Müller & Söhne GmbH & Co. KG`, `Raum 2.OG rechts`,
+  `Anhang 4a – Übersicht`, `Acme Inc.`, `RFC 2119 §5` all
   create, render verbatim as the H1 and on every read surface, and
   derive their slug exactly as the permissive pipeline always did
   (characters outside Unicode alphanumerics/whitespace/hyphen
@@ -5294,7 +5294,7 @@ byte-sealed and loadable, so out-of-repo pins keep working unchanged.
   it needs no `filterable` declaration and works for undeclared
   fields. It joins the free-text query at a fixed weight below
   title/section prose, so identifier-shaped values (the motivating
-  case: a search for `20/54/033` silently returned zero while an
+  case: a search for `12/34/567` silently returned zero while an
   entity carried exactly that value) are found without enum/date
   tokens swamping prose ranking. A hit matched through metadata
   reports `field: "metadata"` in its matched-terms breakdown. The
