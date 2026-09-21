@@ -38,6 +38,17 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$ZERO" ] && continue
   out="$( { [ -s "$patterns" ] && git grep -nIiE -f "$patterns" "$local_sha" -- . 2>/dev/null
             [ -s "$words" ] && git grep -nIiwE -f "$words" "$local_sha" -- . 2>/dev/null; } | sort -u)"
+  # Binary files are skipped above, and a sealed archive is a zip: unpack
+  # every tracked `.mem` / `.zip` of the pushed commit and scan its members.
+  for arc in $(git ls-tree -r --name-only "$local_sha" 2>/dev/null | grep -E '\.(mem|zip)$'); do
+    tmp="$(mktemp)"
+    git cat-file -p "$local_sha:$arc" > "$tmp" 2>/dev/null
+    hits="$( { [ -s "$patterns" ] && unzip -p "$tmp" 2>/dev/null | grep -aIiE -f "$patterns"
+               [ -s "$words" ] && unzip -p "$tmp" 2>/dev/null | grep -aIiwE -f "$words"; } | sort -u | sed "s|^|$arc (inside): |")"
+    rm -f "$tmp"
+    [ -n "$hits" ] && out="$out
+$hits"
+  done
   if [ -n "$out" ]; then
     echo "pre-push: REFUSED, $local_ref carries words from the local denylist:" >&2
     printf '%s\n' "$out" | cut -c1-200 >&2
