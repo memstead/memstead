@@ -337,7 +337,7 @@ mod tests {
         let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
         // No workspace context — the schema-source resolver falls through
         // to the embedded builtin.
-        export_mem(&mem_dir, &config, archive_path, None, None, None).unwrap();
+        export_mem(&mem_dir, &config, archive_path, None, None, None, None).unwrap();
     }
 
     /// Cache-side install convenience for the test fixtures — no
@@ -520,7 +520,7 @@ mod tests {
             })
             .unwrap();
         let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
-        export_mem(&mem_dir, &config, &sealed, Some(&ws), None, None).unwrap();
+        export_mem(&mem_dir, &config, &sealed, Some(&ws), None, None, None).unwrap();
 
         let outcome = cache_install(&sealed).expect("archive with sealed checks installs");
         assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
@@ -628,8 +628,16 @@ mod tests {
         ).unwrap();
         let src_b = tmp.path().join("b.mem");
         let cfg_b = memstead_schema::load_and_validate(&src_b_dir.join("alpha")).unwrap();
-        crate::ops::export::export_mem(&src_b_dir.join("alpha"), &cfg_b, &src_b, None, None, None)
-            .unwrap();
+        crate::ops::export::export_mem(
+            &src_b_dir.join("alpha"),
+            &cfg_b,
+            &src_b,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert_ne!(
             std::fs::read(&src_a).unwrap(),
             std::fs::read(&src_b).unwrap(),

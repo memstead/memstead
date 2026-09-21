@@ -19,6 +19,15 @@
 //!
 //! The `transition_requires_checks` gate consumes the same reading: a
 //! plan cannot complete on the executor's own checks.
+//!
+//! An archive mount records no history at the engine seam, so nothing
+//! on the mount can derive the reading; the export derives it once per
+//! sealed record from the source mem's provenance and seals it beside
+//! the record (`independence` on [`crate::check::SealedCheck`]), and the
+//! mount serves the sealed reading. The archive is immutable, so the
+//! reading at export time is the reading, not a stamp that could go
+//! stale. A member sealed by an older writer carries none and reads
+//! `unconfirmable`, as before.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -42,12 +51,34 @@ pub enum Independence {
 }
 
 impl Independence {
+    /// Every reading, in wire order.
+    pub const ALL: [Self; 3] = [
+        Self::ConfirmedIndependent,
+        Self::SelfChecked,
+        Self::Unconfirmable,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ConfirmedIndependent => "confirmed_independent",
             Self::SelfChecked => "self_checked",
             Self::Unconfirmable => "unconfirmable",
         }
+    }
+
+    /// Parse the wire form (the string [`Self::as_str`] renders, as the
+    /// sealed member carries it). Closed: anything else is `None`.
+    pub fn from_wire(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.as_str() == s)
+    }
+
+    /// The vocabulary, for an error message.
+    pub fn vocabulary_hint() -> String {
+        Self::ALL
+            .iter()
+            .map(|r| r.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -188,8 +219,8 @@ impl Engine {
     /// Gather one mem's touches from its provenance record. Git-branch
     /// mems walk the branch's commit notes once; folder and in-memory
     /// mems read their ledger; an archive records no history at the
-    /// engine seam and yields no touches (its checks stay
-    /// `unconfirmable` unless the ledger's own author identity decides).
+    /// engine seam and yields no touches ([`Self::independence_of`]
+    /// serves the reading the export sealed instead).
     pub fn mem_touches(&self, mem: &str) -> MemTouches {
         let mut out = MemTouches::default();
         let Some(m) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
@@ -286,13 +317,24 @@ impl Engine {
         })
     }
 
-    /// The independence reading of one ok check on `entity`.
+    /// The independence reading of one ok check on `entity`. On an
+    /// archive mount the reading is the one the export sealed beside the
+    /// record ([`Self::sealed_independence_of`]): the mount has no
+    /// touches to derive from, and a member sealed without the reading
+    /// stays `unconfirmable`.
     pub fn independence_of(
         &self,
         entity: &crate::entity::Entity,
         check: &CheckRecord,
         touches: &MemTouches,
     ) -> (Independence, Option<Executors>) {
+        if self.is_archive_mount(&entity.mem) {
+            return (
+                self.sealed_independence_of(&entity.mem, check)
+                    .unwrap_or(Independence::Unconfirmable),
+                None,
+            );
+        }
         let Some(checker) = check.identity.as_deref() else {
             return (Independence::Unconfirmable, None);
         };
@@ -329,6 +371,40 @@ impl Engine {
                 };
                 (reading, None)
             }
+        }
+    }
+
+    /// The reading an archive mount's sealed member carries for `check`
+    /// (the record [`Self::latest_check_record`] served from it): the
+    /// sealed record under the same entity path and wire kind, at the
+    /// same timestamp and hash. `None` off an archive mount, for a record
+    /// the member does not hold, or for one sealed by a writer that
+    /// carried no reading.
+    pub fn sealed_independence_of(&self, mem: &str, check: &CheckRecord) -> Option<Independence> {
+        let sealed = self.archive_checks_for(mem)?;
+        let id = crate::EntityId(check.entity.clone());
+        let kind = crate::check::sealed_kind_of(check);
+        sealed
+            .latest(id.path(), &kind)
+            .filter(|sc| sc.ts == check.ts && sc.entity_hash == check.entity_hash)
+            .and_then(crate::check::SealedCheck::sealed_independence)
+    }
+
+    /// The export's reader of the independence reading to seal beside
+    /// each check record of `mem`: the same derivation
+    /// [`Self::independence_of`] serves live (the entity as loaded, the
+    /// ledger record, the mem's touches gathered once), so the archive
+    /// carries exactly what the source engine would have answered at
+    /// export time. `None` for a record whose entity the engine does
+    /// not hold (the export does not seal those either).
+    pub fn sealed_independence_reader(
+        &self,
+        mem: &str,
+    ) -> impl Fn(&CheckRecord) -> Option<Independence> + '_ {
+        let touches = self.mem_touches(mem);
+        move |rec: &CheckRecord| {
+            let entity = self.store.get(&crate::EntityId(rec.entity.clone()))?;
+            Some(self.independence_of(entity, rec, &touches).0)
         }
     }
 

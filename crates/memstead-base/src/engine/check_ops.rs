@@ -458,7 +458,9 @@ mod tests {
     /// `status: complete` on a fresh independent record of `check_kind`
     /// on the plan itself (`transition_requires_self_check`).
     fn self_check_gated_engine(tmp: &tempfile::TempDir, check_kind: &str) -> crate::Engine {
-        let schemas_dir = tmp.path().join("schemas");
+        // The workspace's fixed authored-schema location, so an export
+        // of the mem finds the schema source to embed.
+        let schemas_dir = tmp.path().join(".memstead").join("schemas");
         let pkg = schemas_dir.join("selfgate");
         std::fs::create_dir_all(pkg.join("types")).unwrap();
         std::fs::write(
@@ -525,7 +527,12 @@ write_rules: []
         )
         .unwrap();
         let mem_dir = tmp.path().join("bundles");
-        std::fs::create_dir_all(&mem_dir).unwrap();
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format": 1, "schema": "selfgate@0.1.0", "version": "1.0.0"}"#,
+        )
+        .unwrap();
         let writer = crate::storage::FilesystemBackend::new(mem_dir.clone());
         let mount = crate::workspace::Mount {
             mem: "bundles".to_string(),
@@ -769,6 +776,45 @@ write_rules: []
             "{axis}"
         );
         assert!(engine.constraint_findings(Some("bundles")).is_empty());
+    }
+
+    /// The gate on the archive mount. A complete plan exported to a
+    /// `.mem` and mounted from bytes used to report
+    /// `transition_requires_self_check` unsatisfied (`unconfirmable`):
+    /// the mount has no provenance to derive independence from. The
+    /// export seals the reading beside the record, so the mount's
+    /// constraints axis is clean and its checks axis lists the plan
+    /// `confirmed_independent`, exactly as the source engine did.
+    #[test]
+    fn sealed_independence_holds_the_transition_gate_on_the_archive_mount() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "verification");
+        engine.set_identity(Some("author-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+        check_plan(&mut engine, "checker-c", &id, "verification");
+        engine.set_identity(Some("author-a".to_string()));
+        set_status(&mut engine, &id, "complete").expect("the gate admits the write");
+        assert!(engine.constraint_findings(Some("bundles")).is_empty());
+
+        let bytes = engine.export_mem_to_bytes("bundles").unwrap();
+        let mounted = crate::Engine::from_archive_bytes(bytes).unwrap();
+        assert!(mounted.is_archive_mount("bundles"));
+        let findings = mounted.constraint_findings(Some("bundles"));
+        assert!(findings.is_empty(), "{findings:?}");
+        let entity = mounted.get_entity(&id).unwrap();
+        let standing = (mounted.check_standing_provider())(entity, "verification");
+        assert!(standing.confirms(), "{standing:?}");
+        let axis = crate::ops::health::health_checks_axis(&mounted, Some("bundles"));
+        assert_eq!(
+            axis["bundles"]["independence"]["confirmed_independent"]["items"],
+            serde_json::json!([id.as_ref()]),
+            "{axis}"
+        );
+        assert_eq!(
+            axis["bundles"]["checked_ok"],
+            serde_json::json!(1),
+            "{axis}"
+        );
     }
 
     /// A record already stale before the write licenses nothing: the

@@ -283,7 +283,10 @@ over a later edit reads `check_stale`, never fresh. An archive without the membe
 reads `never_checked` and says so; a workspace ledger beside the mount is never
 consulted for it. Identities travel exactly as declared, and the method note
 passes the provenance member's redaction; nothing is anonymised and nothing is
-mapped to a person.
+mapped to a person. Each sealed record also carries the independence reading
+the export derived for it from the source mem's provenance (the archive has
+none of its own), so the mount answers "was that check independent of the
+executors" the way the source engine did at export time.
 
 ## The report leads with a verdict
 

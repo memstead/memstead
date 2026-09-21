@@ -135,6 +135,15 @@ mount is not consulted for it, and an archive without the member reads
 `never_checked` with the reason stated. The read-only refusal stands: nothing
 records a check on an archive mount.
 
+The author≠checker independence reading travels too. An archive records no
+history at the engine seam, so the mount cannot derive who executed the work;
+the export derives the reading per sealed record from the source mem's
+provenance (`confirmed_independent`, `self_checked` or `unconfirmable`) and
+seals it beside the record. The mount serves that reading in the checks axis
+and in the transition gates, so a plan whose criteria were confirmed
+independently stays satisfied on the archive. A member sealed before the
+reading existed reads `unconfirmable`.
+
 ## Publishing over a private source: `--redact-anchors`
 
 A mem built from a source carries provenance anchors — durable records tying

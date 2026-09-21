@@ -132,19 +132,30 @@ pub fn build_redacted_archive_provenance(
     )
 }
 
+/// The export's source of the independence reading to seal beside one
+/// ledger record: the engine's derivation over the live mem
+/// ([`crate::Engine::sealed_independence_reader`]). `None` from the
+/// reader seals no reading for that record.
+pub type IndependenceReader<'a> =
+    &'a dyn Fn(&crate::check::CheckRecord) -> Option<crate::engine::independence::Independence>;
+
 /// Build the sealed check-records member from a workspace ledger: for
 /// every entity the archive carries (`entity_paths`, the mem-relative
 /// paths), the latest ledger record per kind, as [`crate::check::SealedChecks`].
 /// Records of other mems, and records of entities the archive does not
 /// carry (deleted since the check), are not sealed; the method note
 /// passes through the same private-pattern redaction the provenance
-/// member applies, and identities travel verbatim. `None` when no
+/// member applies, and identities travel verbatim. Each sealed record
+/// carries the author≠checker independence reading `independence`
+/// derives for it (the archive mount serves that reading, having no
+/// history to derive one from); without a reader, none. `None` when no
 /// record qualifies, so a mem with no record exports byte-identically
 /// to one exported by an engine without this member.
 pub fn build_redacted_sealed_checks(
     records: &[crate::check::CheckRecord],
     mem_name: &str,
     entity_paths: &[String],
+    independence: Option<IndependenceReader<'_>>,
 ) -> (
     Option<crate::check::SealedChecks>,
     Vec<crate::ops::redaction::RedactionCount>,
@@ -180,6 +191,9 @@ pub fn build_redacted_sealed_checks(
         let mut out = BTreeMap::new();
         for (kind, rec) in kinds {
             let mut sc = crate::check::SealedCheck::from_record(&rec);
+            sc.independence = independence
+                .and_then(|read| read(&rec))
+                .map(|r| r.as_str().to_string());
             if let Some(m) = sc.method.take() {
                 let (m, counts) = crate::ops::redaction::redact(&m);
                 crate::ops::redaction::tally(&mut redacted_total, counts);
@@ -199,17 +213,21 @@ pub fn build_redacted_sealed_checks(
 /// workspace ledger when the engine has a workspace root: `None` (no
 /// member) without a root, without a ledger, or without a qualifying
 /// record. One reader for every export path, so the three storage arms
-/// seal the same bytes for the same ledger.
+/// seal the same bytes for the same ledger. `independence` is the
+/// engine's reader of the reading each record is sealed with
+/// ([`build_redacted_sealed_checks`]).
 pub fn sealed_checks_bytes_for(
     workspace_root: Option<&Path>,
     mem_name: &str,
     entity_paths: &[String],
+    independence: Option<IndependenceReader<'_>>,
 ) -> (Option<Vec<u8>>, Vec<crate::ops::redaction::RedactionCount>) {
     let Some(root) = workspace_root else {
         return (None, Vec::new());
     };
     let records = crate::check::CheckLedger::for_workspace(root).all();
-    let (sealed, redactions) = build_redacted_sealed_checks(&records, mem_name, entity_paths);
+    let (sealed, redactions) =
+        build_redacted_sealed_checks(&records, mem_name, entity_paths, independence);
     (sealed.and_then(|s| s.to_archive_bytes().ok()), redactions)
 }
 
@@ -305,6 +323,7 @@ pub fn export_mem(
     workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
     ref_schema_source: Option<Vec<SchemaSourceFile>>,
+    independence: Option<IndependenceReader<'_>>,
 ) -> Result<MemExportResult, MemExportError> {
     let basename = mem_dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let explicit_name = config.name.as_deref().unwrap_or(basename);
@@ -315,6 +334,7 @@ pub fn export_mem(
         workspace_schemas_dir,
         explicit_name,
         ref_schema_source,
+        independence,
     )?;
 
     if let Some(parent) = output_path.parent()
@@ -355,6 +375,10 @@ pub fn export_mem(
 /// precedence the git-branch export path applies — so a folder mem in
 /// a mem-repo workspace seals the schema the loader resolved. `None`
 /// keeps the historical disk/builtin chain unchanged.
+///
+/// `independence`: the engine's reader of the independence reading each
+/// sealed check record carries ([`sealed_checks_bytes_for`]); a caller
+/// without an engine passes `None` and seals records without one.
 pub fn export_mem_to_bytes(
     mem_dir: &Path,
     config: &MemConfig,
@@ -362,6 +386,7 @@ pub fn export_mem_to_bytes(
     workspace_schemas_dir: Option<&Path>,
     explicit_name: &str,
     ref_schema_source: Option<Vec<SchemaSourceFile>>,
+    independence: Option<IndependenceReader<'_>>,
 ) -> Result<MemExportBytes, MemExportError> {
     if !mem_dir.is_dir() {
         return Err(MemExportError::DirNotFound(mem_dir.display().to_string()));
@@ -405,7 +430,7 @@ pub fn export_mem_to_bytes(
     // for the entities this archive carries. No root, no ledger, no
     // record: no member.
     let (checks_bytes, check_redactions) =
-        sealed_checks_bytes_for(workspace_root, explicit_name, &entity_paths);
+        sealed_checks_bytes_for(workspace_root, explicit_name, &entity_paths, independence);
 
     export_entries_to_bytes(
         config,

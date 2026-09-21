@@ -11917,8 +11917,10 @@ mod schema_payload {
                 ).unwrap();
             let archive = tmp.path().join("frozen.mem");
             let config = memstead_schema::load_and_validate(&src).unwrap();
-            memstead_git_branch::ops::export::export_mem(&src, &config, &archive, None, None, None)
-                .unwrap();
+            memstead_git_branch::ops::export::export_mem(
+                &src, &config, &archive, None, None, None, None,
+            )
+            .unwrap();
 
             let unified = server.unified_engine();
             let mut engine = unified.lock().unwrap_or_else(|e| e.into_inner());

@@ -226,6 +226,7 @@ impl Engine {
                 workspace_root,
                 workspace_schemas_dir,
                 self.ref_schema_source_for(config),
+                Some(&self.sealed_independence_reader(mem_name)),
             )
             .map_err(|e| EngineError::Backend(BackendError::Other(format!("export_mem: {e}")))),
             MountStorage::GitBranch { gitdir, branch } => {
@@ -252,11 +253,13 @@ impl Engine {
                 // with the bytes-export path so the disk `.mem` carries anchors.
                 let anchors_bytes = mount.backend.read_anchors_sidecar().ok().flatten();
                 // The sealed check records come from the workspace ledger
-                // the engine holds; the hook only places the member.
+                // the engine holds, each with the independence reading the
+                // engine derives; the hook only places the member.
                 let (checks_bytes, check_redactions) = crate::ops::export::sealed_checks_bytes_for(
                     workspace_root,
                     mem_name,
                     &entity_paths,
+                    Some(&self.sealed_independence_reader(mem_name)),
                 );
                 (hook.export)(
                     gitdir,

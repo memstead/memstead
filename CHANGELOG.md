@@ -36,7 +36,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   record stale before the export keeps its hash and still reads stale. The
   ledger line and the sealed record gain the optional `carried_from` field;
   every existing line and member parses unchanged, and a mem whose bytes
-  the export never rewrites exports byte-identically.
+  the export never rewrites exports byte-identically. Third, the archive
+  mount had nothing to derive the author≠checker independence reading
+  from (no commit trailers, no ledger), so every sealed ok read
+  `unconfirmable`, the transition gates (`transition_requires_checks`,
+  `transition_requires_self_check`) reported `CONSTRAINT_UNSATISFIED` on
+  every complete plan of an archived bundle, and no served card could say a
+  check was independent. A sealed record now carries its independence
+  reading (`independence`: `confirmed_independent`, `self_checked` or
+  `unconfirmable`), derived at export time by the same rule the live
+  engine applies and served on the mount in its place; the export re-key
+  and the self-contained re-pack keep it, a member an older writer sealed
+  reads `unconfirmable` as before, and an older engine ignores the field.
 
 ### Added
 

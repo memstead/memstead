@@ -2004,7 +2004,7 @@ fn archive_mount_derives_check_state_from_sealed_member() {
     assert_eq!(m["sealed"]["carried"], true, "{axis}");
     assert_eq!(
         m["independence"]["unconfirmable"]["items"][0], "specs--beta",
-        "the independence reading stays unconfirmable on an archive: {axis}"
+        "written under no identity, the sealed reading is unconfirmable: {axis}"
     );
 
     // The read-only refusal stands: nothing on the mount records a check.
@@ -2022,6 +2022,174 @@ fn archive_mount_derives_check_state_from_sealed_member() {
         )
         .unwrap_err();
     assert_eq!(err.code(), "READ_ONLY_MOUNT");
+}
+
+/// The independence reading travels with the sealed record. An archive
+/// mount has no provenance to derive it from, so before this every
+/// sealed ok read `unconfirmable` and no transition gate could hold on
+/// the mount. The export now seals the reading the source engine
+/// derives per record (`independence` on the member), and the mount
+/// serves it through the same `independence_of` the health axis and the
+/// gate provider read: an entity written under `author-a` and checked
+/// under `checker-b` reads `confirmed_independent`, the author's own
+/// check reads `self_checked`, and a member an older writer sealed
+/// (no field) keeps reading `unconfirmable`. The self-contained re-pack
+/// keeps the field.
+#[test]
+fn export_seals_the_independence_reading_the_mount_serves() {
+    use crate::check::{CheckKind, RecordKind, Verdict};
+    use crate::engine::independence::Independence;
+    let tmp = TempDir::new().unwrap();
+    let (mut engine, _dir) = folder_mem_with_entities(&tmp, &[]);
+    engine.set_workspace_root(tmp.path().to_path_buf());
+    engine.set_identity(Some("author-a".to_string()));
+    let (actor, client) = cli_actor();
+    for t in ["Alpha", "Beta", "Gamma"] {
+        engine
+            .create_entity(empty_create_args("specs", t), actor, Some(&client), None)
+            .unwrap();
+    }
+    let verification = || RecordKind::Engine(CheckKind::Verification);
+    check_as(
+        &mut engine,
+        "checker-b",
+        "specs--alpha",
+        Verdict::Ok,
+        verification(),
+        None,
+    );
+    check_as(
+        &mut engine,
+        "author-a",
+        "specs--beta",
+        Verdict::Ok,
+        verification(),
+        None,
+    );
+    check_as(
+        &mut engine,
+        "checker-b",
+        "specs--gamma",
+        Verdict::Ok,
+        verification(),
+        None,
+    );
+
+    let items = |axis: &serde_json::Value, bucket: &str| -> Vec<String> {
+        let mut v: Vec<String> = axis["specs"]["independence"][bucket]["items"]
+            .as_array()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .map(|x| x.as_str().unwrap().to_string())
+            .collect();
+        v.sort();
+        v
+    };
+    // The control: the live engine's reading, derived from the folder ledger.
+    let live = crate::ops::health::health_checks_axis(&engine, Some("specs"));
+    assert_eq!(
+        items(&live, "confirmed_independent"),
+        ["specs--alpha", "specs--gamma"],
+        "{live}"
+    );
+    assert_eq!(items(&live, "self_checked"), ["specs--beta"], "{live}");
+
+    let bytes = engine.export_mem_to_bytes("specs").unwrap();
+    let sealed = sealed_checks_of(&bytes).expect("the archive carries the checks member");
+    let reading = |slug: &str| {
+        sealed
+            .latest(slug, "verification")
+            .unwrap()
+            .independence
+            .clone()
+    };
+    assert_eq!(reading("alpha").as_deref(), Some("confirmed_independent"));
+    assert_eq!(reading("beta").as_deref(), Some("self_checked"));
+    assert_eq!(reading("gamma").as_deref(), Some("confirmed_independent"));
+    assert_eq!(
+        sealed
+            .latest("alpha", "verification")
+            .unwrap()
+            .sealed_independence(),
+        Some(Independence::ConfirmedIndependent)
+    );
+
+    let assert_served = |bytes: Vec<u8>, label: &str| {
+        let mounted = Engine::from_archive_bytes(bytes).unwrap();
+        let axis = crate::ops::health::health_checks_axis(&mounted, Some("specs"));
+        assert_eq!(axis["specs"]["checked_ok"], 3, "{label}: {axis}");
+        assert_eq!(
+            items(&axis, "confirmed_independent"),
+            ["specs--alpha", "specs--gamma"],
+            "{label}: {axis}"
+        );
+        assert_eq!(
+            items(&axis, "self_checked"),
+            ["specs--beta"],
+            "{label}: {axis}"
+        );
+        assert!(items(&axis, "unconfirmable").is_empty(), "{label}: {axis}");
+        assert_eq!(
+            axis["specs"]["independence"]["readings"]["specs--alpha"][0]["reading"],
+            "confirmed_independent",
+            "{label}: {axis}"
+        );
+        // The gate provider reads the same sealed reading.
+        let provider = mounted.check_standing_provider();
+        let alpha = mounted
+            .get_entity(&crate::EntityId::new("specs", "alpha"))
+            .unwrap();
+        let standing = provider(alpha, "verification");
+        assert!(standing.confirms(), "{label}: {standing:?}");
+        let beta = mounted
+            .get_entity(&crate::EntityId::new("specs", "beta"))
+            .unwrap();
+        let standing = provider(beta, "verification");
+        assert!(!standing.confirms(), "{label}: {standing:?}");
+        assert_eq!(standing.label(), "self_checked", "{label}");
+        assert_eq!(
+            mounted.sealed_independence_of(
+                "specs",
+                &mounted
+                    .latest_check_record("specs", "specs--beta", "verification")
+                    .unwrap()
+            ),
+            Some(Independence::SelfChecked),
+            "{label}"
+        );
+    };
+    assert_served(bytes.clone(), "export");
+    let self_contained = crate::validator::make_archive_self_contained(&bytes).unwrap();
+    assert_served(self_contained.bytes, "self-contained");
+
+    // A member an older writer sealed: the same records, no reading.
+    let entries = extract_entries(&bytes, &ValidatorLimits::DEFAULT).unwrap();
+    let mut older: serde_json::Value =
+        serde_json::from_slice(entries.checks_bytes.as_deref().unwrap()).unwrap();
+    for kinds in older["entities"].as_object_mut().unwrap().values_mut() {
+        for rec in kinds.as_object_mut().unwrap().values_mut() {
+            rec.as_object_mut().unwrap().remove("independence");
+        }
+    }
+    let older_bytes = serde_json::to_vec_pretty(&older).unwrap();
+    assert!(!String::from_utf8_lossy(&older_bytes).contains("independence"));
+    let rewritten = rewrite_zip_member(&bytes, memstead_schema::ARCHIVE_CHECKS_PATH, &older_bytes);
+    let mounted = Engine::from_archive_bytes(rewritten).unwrap();
+    let axis = crate::ops::health::health_checks_axis(&mounted, Some("specs"));
+    assert_eq!(axis["specs"]["checked_ok"], 3, "{axis}");
+    assert!(items(&axis, "confirmed_independent").is_empty(), "{axis}");
+    assert!(items(&axis, "self_checked").is_empty(), "{axis}");
+    assert_eq!(
+        items(&axis, "unconfirmable"),
+        ["specs--alpha", "specs--beta", "specs--gamma"],
+        "{axis}"
+    );
+    let alpha = mounted
+        .get_entity(&crate::EntityId::new("specs", "alpha"))
+        .unwrap();
+    let standing = (mounted.check_standing_provider())(alpha, "verification");
+    assert!(!standing.confirms(), "{standing:?}");
+    assert_eq!(standing.label(), "unconfirmable");
 }
 
 /// AC3 complement: a sealed record whose hash differs from the sealed

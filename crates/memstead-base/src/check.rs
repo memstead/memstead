@@ -632,10 +632,22 @@ pub struct SealedCheck {
     /// own rewrite of the entity bytes).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub carried_from: Option<CarriedFrom>,
+    /// The author≠checker independence reading
+    /// ([`crate::engine::independence::Independence`], wire form:
+    /// `confirmed_independent`, `self_checked`, `unconfirmable`) the
+    /// export derived for this record from the mem's provenance at
+    /// export time. The archive records no history at the engine seam,
+    /// so the reading cannot be re-derived on the mount; sealed here it
+    /// is the fact an immutable archive carries. Absent from a member an
+    /// older writer sealed: the mount then reads `unconfirmable`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub independence: Option<String>,
 }
 
 impl SealedCheck {
-    /// The archive form of a ledger line.
+    /// The archive form of a ledger line, with no independence reading
+    /// yet (the export derives and sets it; see
+    /// [`crate::ops::export::build_redacted_sealed_checks`]).
     pub fn from_record(rec: &CheckRecord) -> Self {
         Self {
             ts: rec.ts,
@@ -648,7 +660,16 @@ impl SealedCheck {
             schema_ref: rec.schema_ref.clone(),
             renamed_from: rec.renamed_from.clone(),
             carried_from: rec.carried_from.clone(),
+            independence: None,
         }
+    }
+
+    /// The sealed independence reading, parsed; `None` when the member
+    /// carries none (an older writer) or a value outside the vocabulary.
+    pub fn sealed_independence(&self) -> Option<crate::engine::independence::Independence> {
+        self.independence
+            .as_deref()
+            .and_then(crate::engine::independence::Independence::from_wire)
     }
 
     /// The ledger form under `entity_id` and the wire `kind` the record
@@ -718,8 +739,9 @@ impl SealedChecks {
     /// was fresh against the source content stays fresh against the
     /// archived content. A record keyed to any other hash was stale
     /// before the export and keeps its hash, so it still reads stale on
-    /// the mount. Equal hashes change nothing. Returns the number of
-    /// records moved.
+    /// the mount. Equal hashes change nothing; every other field, the
+    /// sealed independence reading included, stays as sealed. Returns the
+    /// number of records moved.
     pub fn rekey_entity(&mut self, entity_path: &str, pre_hash: &str, post_hash: &str) -> usize {
         if pre_hash == post_hash {
             return 0;
@@ -794,6 +816,14 @@ impl SealedChecks {
                 }
                 if rec.role.trim().is_empty() {
                     return Err(format!("{at}: role is empty"));
+                }
+                if let Some(reading) = rec.independence.as_deref()
+                    && crate::engine::independence::Independence::from_wire(reading).is_none()
+                {
+                    return Err(format!(
+                        "{at}: independence `{reading}` is not one of {}",
+                        crate::engine::independence::Independence::vocabulary_hint()
+                    ));
                 }
             }
         }
@@ -1028,10 +1058,58 @@ mod tests {
         let back = v.to_record("m--a", "verification");
         assert_eq!(back.carried_from, v.carried_from);
         assert_eq!(SealedCheck::from_record(&back), *v);
-        // A pre-marker member line still parses.
+        // A pre-marker member line still parses, and reads no independence.
         let legacy = r#"{"ts":1,"verdict":"ok","entity_hash":"h","actor":"cli","role":"checker"}"#;
         let parsed: SealedCheck = serde_json::from_str(legacy).unwrap();
         assert!(parsed.carried_from.is_none());
+        assert!(parsed.independence.is_none());
+        assert!(parsed.sealed_independence().is_none());
+    }
+
+    /// The sealed independence reading survives the export re-key, is
+    /// dropped from the ledger form (the ledger derives, never stores
+    /// it), parses only from the vocabulary, and fails the validator
+    /// outside it.
+    #[test]
+    fn sealed_independence_is_kept_by_rekey_and_closed_in_vocabulary() {
+        use crate::engine::independence::Independence;
+        let mut sealed = SealedChecks::new();
+        let mut fresh = SealedCheck::from_record(&rec("m--a", "ok", "h1"));
+        fresh.independence = Some(Independence::ConfirmedIndependent.as_str().to_string());
+        sealed.entities.insert(
+            "a".into(),
+            BTreeMap::from([("verification".to_string(), fresh)]),
+        );
+        assert_eq!(sealed.rekey_entity("a", "h1", "h2"), 1);
+        let v = sealed.latest("a", "verification").unwrap();
+        assert_eq!(
+            v.sealed_independence(),
+            Some(Independence::ConfirmedIndependent)
+        );
+        let bytes = sealed.to_archive_bytes().unwrap();
+        let back = SealedChecks::from_archive_bytes(&bytes).unwrap();
+        assert_eq!(back, sealed);
+        assert!(v.to_record("m--a", "verification").carried_from.is_some());
+        let carried: std::collections::BTreeSet<String> = ["a".to_string()].into();
+        assert!(back.validate(&carried).is_ok());
+
+        let mut foreign = sealed.clone();
+        foreign
+            .entities
+            .get_mut("a")
+            .unwrap()
+            .get_mut("verification")
+            .unwrap()
+            .independence = Some("trusted".into());
+        assert!(
+            foreign
+                .latest("a", "verification")
+                .unwrap()
+                .sealed_independence()
+                .is_none()
+        );
+        let err = foreign.validate(&carried).unwrap_err();
+        assert!(err.contains("independence `trusted`"), "{err}");
     }
 
     #[test]
