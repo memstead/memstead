@@ -70,11 +70,11 @@ fn export_round_trips_title_and_subject() {
             "format": 1,
             "schema": "default@1.0.0",
             "version": "1.0.0",
-            "title": "Einrichtungsbezogene Impfpflicht Deutschland",
+            "title": "Sample subject Übersicht",
             "subject": {
-                "scope": "Die einrichtungsbezogene Impfpflicht — Rechtslage und Vollzug",
+                "scope": "A sample scope: naïve façade, what is covered and what is not",
                 "method": "Primärquellen, händisch geprüft",
-                "exclusions": ["Länderverordnungen nach 2023", "Presseberichte", "Άλλα θέματα"],
+                "exclusions": ["Einträge nach 2023", "Presseberichte", "Άλλα θέματα"],
             },
         })
         .to_string(),
@@ -102,14 +102,11 @@ fn export_round_trips_title_and_subject() {
         crate::validator::validate_and_normalize_archive(&bytes).expect("archive re-validates");
     let cfg = &validated.config;
     assert_eq!(cfg.format, memstead_schema::PUBLISHED_MEM_FORMAT);
-    assert_eq!(
-        cfg.title.as_deref(),
-        Some("Einrichtungsbezogene Impfpflicht Deutschland")
-    );
+    assert_eq!(cfg.title.as_deref(), Some("Sample subject Übersicht"));
     let subject = cfg.subject.as_ref().expect("subject rides the archive");
     assert_eq!(
         subject.scope,
-        "Die einrichtungsbezogene Impfpflicht — Rechtslage und Vollzug"
+        "A sample scope: naïve façade, what is covered and what is not"
     );
     assert_eq!(
         subject.method.as_deref(),
@@ -117,11 +114,7 @@ fn export_round_trips_title_and_subject() {
     );
     assert_eq!(
         subject.exclusions,
-        vec![
-            "Länderverordnungen nach 2023",
-            "Presseberichte",
-            "Άλλα θέματα"
-        ],
+        vec!["Einträge nach 2023", "Presseberichte", "Άλλα θέματα"],
         "exclusions preserved in order, non-ASCII intact"
     );
 

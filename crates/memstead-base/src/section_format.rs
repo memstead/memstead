@@ -1076,22 +1076,23 @@ mod check_tests {
 
     #[test]
     fn paragraph_pattern_checks_each_source_line() {
-        // The anker two-halves citation shape — the left half may
-        // contain spaces (the `bverfg:1 BvR 2649/21` case must pass).
+        // A two-part citation shape: the left half may contain
+        // spaces (the `handbook:ch 4 sec 2.1` case must pass).
         let d = def(
             "paragraph+",
             Some(r"(?<quelle>\S[^|]*?) \| (?<aussage>.+)"),
             None,
             None,
         );
-        let ok = "bverfg:1 BvR 2649/21 Rn. 183 | Der Staat schuldet Schutz.\ngg:art-20a | Schutzauftrag.\n";
+        let ok =
+            "handbook:ch 4 sec 2.1 p. 183 | The first claim.\nmanual:art-20a | The second claim.\n";
         assert!(
             check_section_format(&d, ok).is_empty(),
             "{:?}",
             check_section_format(&d, ok)
         );
         // The observed silent-deviation shape: missing ` | ` separator.
-        let bad = "bverfg:1 BvR 2649/21 Rn. 183 — Der Staat schuldet Schutz.\n";
+        let bad = "handbook:ch 4 sec 2.1 p. 183 — The first claim.\n";
         let violations = check_section_format(&d, bad);
         assert_eq!(violations.len(), 1);
         assert!(matches!(
@@ -1161,22 +1162,21 @@ mod check_tests {
         assert_eq!(*row_line, Some(3));
     }
 
-    /// The plenum coordinate grammar: the
-    /// seven-times-duplicated two-halves Belegzeile — machine
-    /// coordinate `<quelle>:<dokument>:<von>-<bis>:<hash12>:<hash12>`,
-    /// ` | `, then the public Fundstelle — expressed as a declaration,
-    /// without a line of project Python.
+    /// A coordinate grammar in two halves: the machine coordinate
+    /// `<source>:<document>:<from>-<to>:<hash12>:<hash12>`, ` | `, then
+    /// the public locator, expressed once as a declaration instead of
+    /// being re-checked by project-side scripts.
     #[test]
-    fn plenum_coordinate_grammar_is_declarable() {
+    fn two_part_coordinate_grammar_is_declarable() {
         let d = def(
             "paragraph+",
             Some(
-                r"(?<quelle>[a-z]+):(?<dokument>[^:|]+):(?<von>\d+)-(?<bis>\d+):(?<dokument_hash>[0-9a-f]{12}):(?<span_hash>[0-9a-f]{12}) \| (?<fundstelle>.+)",
+                r"(?<source>[a-z]+):(?<document>[^:|]+):(?<from>\d+)-(?<to>\d+):(?<document_hash>[0-9a-f]{12}):(?<span_hash>[0-9a-f]{12}) \| (?<locator>.+)",
             ),
             None,
             None,
         );
-        let ok = "btp:20/13/073:4559-4985:09b80726ef42:0a582b1c5530 | 2022-01-26 · Tino Chrupalla · https://dserver.bundestag.de/btp/20/20013.pdf
+        let ok = "arc:20/13/073:4559-4985:09b80726ef42:0a582b1c5530 | 2022-01-26 · Sample Author · https://example.org/arc/20/20013.pdf
 ";
         assert!(
             check_section_format(&d, ok).is_empty(),
@@ -1184,12 +1184,11 @@ mod check_tests {
             check_section_format(&d, ok)
         );
         // Missing span hash — the checker's regex class, declared.
-        let bad =
-            "btp:20/13/073:4559-4985:09b80726ef42 | 2022-01-26 · Chrupalla · https://example.org
+        let bad = "arc:20/13/073:4559-4985:09b80726ef42 | 2022-01-26 · Author · https://example.org
 ";
         assert_eq!(check_section_format(&d, bad).len(), 1);
         // Missing the two-halves separator.
-        let bad = "btp:20/13/073:4559-4985:09b80726ef42:0a582b1c5530 2022-01-26
+        let bad = "arc:20/13/073:4559-4985:09b80726ef42:0a582b1c5530 2022-01-26
 ";
         assert_eq!(check_section_format(&d, bad).len(), 1);
     }

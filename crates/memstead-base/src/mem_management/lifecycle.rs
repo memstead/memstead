@@ -1326,8 +1326,8 @@ pub fn create_mem(
     }
 
     // ---- Step 2a: ref-namespace probe (git-branch only, before any write) ----
-    // Git keeps refs as files in directories, so `refs/heads/stocks/impfpflicht`
-    // and `refs/heads/stocks/impfpflicht/anker` can never coexist. Without
+    // Git keeps refs as files in directories, so `refs/heads/library/sample`
+    // and `refs/heads/library/sample/notes` can never coexist. Without
     // this probe the second create failed inside its seed commit, with a
     // low-level ref-edit error, after the config had already landed on
     // `__MEMSTEAD`. Asked here, with nothing written yet, the refusal is
@@ -1973,8 +1973,8 @@ pub(super) fn admit_by_create_rules(
 
 /// A sibling spelling git can hold for a name that sits below an
 /// existing mem branch: the parent's path and the rest of the name
-/// joined by a hyphen (`stocks/impfpflicht/anker` beside
-/// `stocks/impfpflicht` becomes `stocks/impfpflicht-anker`). `None`
+/// joined by a hyphen (`library/sample/notes` beside
+/// `library/sample` becomes `library/sample-notes`). `None`
 /// when the name is the parent of existing branches instead: no
 /// single spelling follows from that shape.
 pub(super) fn sibling_name_suggestion(name: &str, conflicting: &[String]) -> Option<String> {

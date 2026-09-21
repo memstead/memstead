@@ -269,8 +269,8 @@ fn make_entity(name: &str, has_required: bool) -> Entity {
 }
 
 /// A sealed-violator type: section key `answers` with heading
-/// `Answers argued` (derives to `answers_argued`) — the plenum
-/// finding's exact shape. Loads fine; only new installs refuse.
+/// `Answers argued` (derives to `answers_argued`), the shape a
+/// sealed schema was first found with. Loads fine; only new installs refuse.
 fn violating_type() -> std::sync::Arc<TypeDefinition> {
     let manifest = r#"name: debate
 version: 0.1.0

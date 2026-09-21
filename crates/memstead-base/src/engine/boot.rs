@@ -185,11 +185,11 @@ impl Engine {
         let mut load_warnings: Vec<WarningHint> = Vec::new();
 
         // Mem-level failures quarantine the mem instead of failing the
-        // workspace (degrade, never disappear — plenum/expertise
-        // 2026-08-06/07, where one broken mem took every healthy
-        // sibling offline). Nothing is weakened: everything that
-        // failed the boot still fails it, the blast radius shrinks to
-        // the one mem, which serves nothing until repaired + reloaded.
+        // workspace (degrade, never disappear: before this, one
+        // broken mem took every healthy sibling offline). Nothing is
+        // weakened: everything that failed the boot still fails it,
+        // the blast radius shrinks to the one mem, which serves
+        // nothing until repaired + reloaded.
         let mut quarantined: Vec<crate::engine::QuarantinedMem> = Vec::new();
         let mut quarantined_idx: std::collections::HashSet<usize> =
             std::collections::HashSet::new();
@@ -297,9 +297,10 @@ impl Engine {
             let schema = match resolved {
                 Ok(schema) => schema,
                 Err(sources) => {
-                    // Unresolvable pin: the plenum failure class —
-                    // quarantine this mem, serve the rest. When the
-                    // pin names a workspace-authored package that
+                    // Unresolvable pin (the mem names a schema no
+                    // source can supply): quarantine this mem, serve
+                    // the rest. When the pin names a
+                    // workspace-authored package that
                     // FAILED to load (e.g. one still on the retired
                     // `propagating_relationships` key), that load
                     // failure is the honest reason — not a generic

@@ -903,7 +903,7 @@ fn load_bearing_resolves_explicit_then_required_then_all() {
     assert_eq!(keys, vec!["a", "b"], "no declaration at all: every section");
 }
 
-/// The anker metric, mechanised: a notes-only edit leaves the prepared
+/// The load-bearing distinction, mechanised: a notes-only edit leaves the prepared
 /// hash intact; a load-bearing edit breaks it.
 #[test]
 fn notes_edit_keeps_the_hash_load_bearing_edit_breaks_it() {

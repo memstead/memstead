@@ -878,8 +878,9 @@ fn title_grammar_rule_matches_validator_behaviour() {
         assert!(got.dropped_chars.is_empty(), "{ok:?} drops nothing");
     }
     // Admitted per the rule, with characters outside the slug
-    // alphabet dropped from the slug and reported — the plenum
-    // collision list plus representative symbol/punctuation cases.
+    // alphabet dropped from the slug and reported: the characters
+    // observed colliding in real titles plus representative
+    // symbol/punctuation cases.
     for (title, dropped) in [
         ("v1.0", '.'),
         ("a (draft)", '('),

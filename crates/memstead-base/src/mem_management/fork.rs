@@ -844,12 +844,12 @@ mod tests {
         );
         assert_eq!(
             retarget_entity_id(
-                "stocks/ai-citations--claim-one",
-                "stocks/ai-citations",
-                "proposals/ai-citations-001"
+                "library/sample--claim-one",
+                "library/sample",
+                "proposals/sample-001"
             )
             .as_deref(),
-            Some("proposals/ai-citations-001--claim-one")
+            Some("proposals/sample-001--claim-one")
         );
         // A slug with dashes keeps them.
         assert_eq!(

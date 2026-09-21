@@ -1,6 +1,6 @@
-//! The proof schemas (grounding, plenum) end to end through create,
-//! update and health, plus the required-outgoing warnings on create
-//! and update.
+//! The proof schemas (grounding, uniqueness and vocabulary) end to
+//! end through create, update and health, plus the required-outgoing
+//! warnings on create and update.
 
 use super::*;
 
@@ -37,7 +37,7 @@ fn proof_create(
 
 const GROUNDING_MANIFEST: &str = r#"name: grounding
 version: 0.1.0
-description: anker-shaped grounding proof schema
+description: grounding proof schema
 when_to_use: constraint-proof tests
 types:
   - anchor
@@ -139,11 +139,13 @@ required_outgoing:
 write_rules: []
 "#;
 
-/// The anker proof: the grounding-shaped
-/// schema answers `pruefe_kette.py`'s check questions 1–3 from
-/// health output alone — no project Python.
+/// The grounding proof: a schema of judgments standing on other
+/// judgments answers three chain-check questions from health output
+/// alone, where a project would otherwise script them: which entities
+/// descend from a fallen one, which trade-off has one side only, and
+/// which entity is marked checked without naming its checker.
 #[test]
-fn anker_proof_grounding_schema_answers_check_questions_from_health() {
+fn grounding_schema_answers_chain_check_questions_from_health() {
     let tmp = TempDir::new().unwrap();
     let mut engine = engine_with_proof_schema(
         &tmp,
@@ -275,12 +277,12 @@ fn anker_proof_grounding_schema_answers_check_questions_from_health() {
     assert_eq!(onesided_report.missing[0].relationships, vec!["OPPOSES"]);
 }
 
-const PLENUM_MANIFEST: &str = r#"name: plenum-proof
+const RECORD_MANIFEST: &str = r#"name: record-proof
 version: 0.1.0
-description: plenum-shaped uniqueness and vocabulary proof schema
+description: uniqueness and vocabulary proof schema
 when_to_use: constraint-proof tests
 types:
-  - rede
+  - record
   - vocabulary
 relationships:
   mode: strict
@@ -299,10 +301,10 @@ community:
   seed: 42
 "#;
 
-fn plenum_rede_type(unique_severity: &str) -> String {
+fn record_type(unique_severity: &str) -> String {
     format!(
-        r#"name: rede
-description: one speech
+        r#"name: record
+description: one imported record
 when_to_use: tests
 sections:
   - key: body
@@ -312,13 +314,13 @@ sections:
     catch_all: true
     write_rules: []
 metadata_fields:
-  - key: rede_id
+  - key: record_id
     description: source id
     field_type: string
-  - key: rede_sha256
+  - key: record_sha256
     description: content hash
     field_type: string
-  - key: kategorie
+  - key: category
     description: category from the shared vocabulary
     field_type: string
 title_weight: 100.0
@@ -329,18 +331,18 @@ no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
-  - rede_id
-  - rede_sha256
-  - kategorie
+  - record_id
+  - record_sha256
+  - category
 health_required_fields:
   - body
 staleness_threshold_days: 90
 constraints:
   - kind: unique
-    fields: [rede_id, rede_sha256]
+    fields: [record_id, record_sha256]
     severity: {unique_severity}
   - kind: enum_from_neighbour
-    field: kategorie
+    field: category
     rel_type: REFERENCES
     section: terms
 write_rules: []
@@ -348,7 +350,7 @@ write_rules: []
     )
 }
 
-const PLENUM_VOCABULARY: &str = r#"name: vocabulary
+const RECORD_VOCABULARY: &str = r#"name: vocabulary
 description: the shared term list
 when_to_use: tests
 sections:
@@ -380,35 +382,35 @@ staleness_threshold_days: 90
 write_rules: []
 "#;
 
-/// The plenum proof, uniqueness half: a
+/// The record proof, uniqueness half: a
 /// second create with the same declared key tuple refuses with a
-/// typed code naming the colliding entity — the 37-duplicates
-/// scenario bounces at the engine. Health reports a pre-existing
+/// typed code naming the colliding entity, so an import that repeats
+/// a source record bounces at the engine. Health reports a pre-existing
 /// violation planted under a warn-tier variant.
 #[test]
-fn plenum_proof_uniqueness_refuses_duplicates_and_health_reports_planted_ones() {
+fn unique_constraint_refuses_duplicates_and_health_reports_planted_ones() {
     // Block tier: the duplicate refuses, naming the collider.
     let tmp = TempDir::new().unwrap();
-    let rede = plenum_rede_type("block");
+    let record = record_type("block");
     let mut engine = engine_with_proof_schema(
         &tmp,
-        "plenum-proof",
-        PLENUM_MANIFEST,
-        &[("rede", &rede), ("vocabulary", PLENUM_VOCABULARY)],
+        "record-proof",
+        RECORD_MANIFEST,
+        &[("record", &record), ("vocabulary", RECORD_VOCABULARY)],
     );
     let first = proof_create(
         &mut engine,
-        "rede",
-        "Speech One",
-        &[("rede_id", "19-42"), ("rede_sha256", "abc123")],
+        "record",
+        "Record One",
+        &[("record_id", "19-42"), ("record_sha256", "abc123")],
         vec![],
     )
     .unwrap();
     let err = proof_create(
         &mut engine,
-        "rede",
-        "Speech One Duplicate",
-        &[("rede_id", "19-42"), ("rede_sha256", "abc123")],
+        "record",
+        "Record One Duplicate",
+        &[("record_id", "19-42"), ("record_sha256", "abc123")],
         vec![],
     )
     .unwrap_err();
@@ -421,35 +423,35 @@ fn plenum_proof_uniqueness_refuses_duplicates_and_health_reports_planted_ones() 
     // A different tuple passes.
     proof_create(
         &mut engine,
-        "rede",
-        "Speech Two",
-        &[("rede_id", "19-43"), ("rede_sha256", "def456")],
+        "record",
+        "Record Two",
+        &[("record_id", "19-43"), ("record_sha256", "def456")],
         vec![],
     )
     .unwrap();
 
     // Warn tier: plant the duplicate, health reports it.
     let tmp = TempDir::new().unwrap();
-    let rede = plenum_rede_type("warn");
+    let record = record_type("warn");
     let mut engine = engine_with_proof_schema(
         &tmp,
-        "plenum-proof",
-        PLENUM_MANIFEST,
-        &[("rede", &rede), ("vocabulary", PLENUM_VOCABULARY)],
+        "record-proof",
+        RECORD_MANIFEST,
+        &[("record", &record), ("vocabulary", RECORD_VOCABULARY)],
     );
     proof_create(
         &mut engine,
-        "rede",
+        "record",
         "Planted A",
-        &[("rede_id", "19-42"), ("rede_sha256", "abc123")],
+        &[("record_id", "19-42"), ("record_sha256", "abc123")],
         vec![],
     )
     .unwrap();
     let planted = proof_create(
         &mut engine,
-        "rede",
+        "record",
         "Planted B",
-        &[("rede_id", "19-42"), ("rede_sha256", "abc123")],
+        &[("record_id", "19-42"), ("record_sha256", "abc123")],
         vec![],
     )
     .unwrap();
@@ -473,30 +475,30 @@ fn plenum_proof_uniqueness_refuses_duplicates_and_health_reports_planted_ones() 
     );
 }
 
-/// The plenum proof, enum-from-neighbour half: renaming a value in the neighbour's section makes
+/// The record proof, enum-from-neighbour half: renaming a value in the neighbour's section makes
 /// every stale holder a health finding.
 #[test]
-fn plenum_proof_enum_from_neighbour_flags_stale_holders_after_rename() {
+fn enum_from_neighbour_flags_stale_holders_after_rename() {
     let tmp = TempDir::new().unwrap();
-    let rede = plenum_rede_type("warn");
+    let record = record_type("warn");
     let mut engine = engine_with_proof_schema(
         &tmp,
-        "plenum-proof",
-        PLENUM_MANIFEST,
-        &[("rede", &rede), ("vocabulary", PLENUM_VOCABULARY)],
+        "record-proof",
+        RECORD_MANIFEST,
+        &[("record", &record), ("vocabulary", RECORD_VOCABULARY)],
     );
     let (actor, client) = cli_actor();
 
     // The vocabulary entity enumerates the legal categories.
     let mut sections = IndexMap::new();
     sections.insert("body".to_string(), "the term list.".to_string());
-    sections.insert("terms".to_string(), "- haushalt\n- verkehr\n".to_string());
+    sections.insert("terms".to_string(), "- red\n- green\n".to_string());
     let vocab = engine
         .create_entity(
             CreateEntityArgs {
                 anchors: Vec::new(),
                 mem: "proof".to_string(),
-                title: "Kategorien".to_string(),
+                title: "Categories".to_string(),
                 entity_type: "vocabulary".to_string(),
                 sections,
                 metadata: IndexMap::new(),
@@ -512,9 +514,9 @@ fn plenum_proof_enum_from_neighbour_flags_stale_holders_after_rename() {
     // A holder whose value is backed: clean.
     let holder = proof_create(
         &mut engine,
-        "rede",
+        "record",
         "Holder",
-        &[("kategorie", "haushalt")],
+        &[("category", "red")],
         vec![rel(&vocab.id.0, "REFERENCES")],
     )
     .unwrap();
@@ -533,7 +535,7 @@ fn plenum_proof_enum_from_neighbour_flags_stale_holders_after_rename() {
     // goes stale and health flags it.
     let current = engine.get_entity(&vocab.id).unwrap().content_hash.clone();
     let mut sections = IndexMap::new();
-    sections.insert("terms".to_string(), "- finanzen\n- verkehr\n".to_string());
+    sections.insert("terms".to_string(), "- crimson\n- green\n".to_string());
     engine
         .update_entity(
             crate::engine::UpdateEntityArgs {
@@ -569,7 +571,7 @@ fn plenum_proof_enum_from_neighbour_flags_stale_holders_after_rename() {
     assert!(stale.violations.iter().any(|v| matches!(
         v,
         crate::ops::health::UnsatisfiedConstraint::EnumFromNeighbour { value, .. }
-            if value == "haushalt"
+            if value == "red"
     )));
 }
 

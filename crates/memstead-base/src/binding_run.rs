@@ -435,12 +435,12 @@ mod tests {
     fn derived_process_mem_name_keeps_flat_ids_and_hyphenates_nested_ones() {
         assert_eq!(derived_process_mem_name("engine/graph"), "engine/graph");
         assert_eq!(
-            derived_process_mem_name("stocks/impfpflicht/anker"),
-            "stocks/impfpflicht-anker"
+            derived_process_mem_name("library/sample/notes"),
+            "library/sample-notes"
         );
         assert_eq!(
-            derived_process_mem_name("planning/plan-first-stock/anker"),
-            "planning/plan-first-stock-anker"
+            derived_process_mem_name("planning/plan-first-sample/notes"),
+            "planning/plan-first-sample-notes"
         );
         assert_eq!(derived_process_mem_name("a/b/c/d"), "a/b/c-d");
         // A malformed id passes through: nothing to derive from.
@@ -600,11 +600,11 @@ pub const PROCESS_MEM_SCHEMA_NAME: &str = "ingest";
 /// where the destination declares none. For a single-component
 /// destination it is the binding id itself (`engine/graph`), unchanged
 /// since the convention was set. For a nested destination
-/// (`stocks/impfpflicht`) the id's last separator becomes a hyphen
-/// (`stocks/impfpflicht-anker`): a sibling of the destination in the
+/// (`library/sample`) the id's last separator becomes a hyphen
+/// (`library/sample-notes`): a sibling of the destination in the
 /// same namespace directory, because git keeps refs as files in
-/// directories and cannot hold `stocks/impfpflicht/anker` beside the
-/// branch `stocks/impfpflicht`. The one derivation every consumer uses
+/// directories and cannot hold `library/sample/notes` beside the
+/// branch `library/sample`. The one derivation every consumer uses
 /// (the brief renderer, the open-questions health axis), so the two
 /// cannot pair differently. A malformed id passes through unchanged.
 pub fn derived_process_mem_name(binding_id: &str) -> String {

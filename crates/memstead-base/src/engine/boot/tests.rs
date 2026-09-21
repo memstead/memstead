@@ -2415,8 +2415,8 @@ fn ingest_0_3_entries_are_leaves_prior_version_unchanged() {
 
 /// A workspace mixing one broken mem with healthy siblings boots,
 /// serves the healthy mems fully, and refuses typed on the
-/// quarantined one — the plenum shape (one bad pin, thirteen
-/// healthy hostages) can no longer occur. Drives the pin-failure
+/// quarantined one, so one bad pin can no longer hold every
+/// healthy sibling hostage. Drives the pin-failure
 /// and missing-pin variants in one fixture.
 #[test]
 fn broken_mem_quarantines_while_healthy_siblings_serve() {

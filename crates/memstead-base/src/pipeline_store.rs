@@ -332,7 +332,7 @@ pub fn is_single_component(value: &str) -> bool {
 /// This is the shape a mem name takes wherever the engine nests mems
 /// (`team/sub-mem`), and the shape the per-mem store tier mirrors on
 /// disk. Every component must pass [`is_single_component`], so
-/// `stocks/../x`, `a//b`, `/a` and `a/` are refused with the same
+/// `library/../x`, `a//b`, `/a` and `a/` are refused with the same
 /// traversal argument as a single bad component.
 pub fn is_mem_path(value: &str) -> bool {
     !value.is_empty() && value.split('/').all(is_single_component)
@@ -747,7 +747,7 @@ mod tests {
         }
         // A separator is legal in a mem (a nested name) but never in a
         // name, and a nested mem still refuses a traversal component.
-        for evil_mem in ["stocks/../escape", "stocks/..", "a//b", "/a", "a/"] {
+        for evil_mem in ["library/../escape", "library/..", "a//b", "/a", "a/"] {
             assert!(
                 write_binding(root, evil_mem, "ok", &binding).is_err(),
                 "mem '{}' must refuse",
@@ -787,13 +787,13 @@ mod tests {
         let root = tmp.path();
         let binding = sample_binding();
 
-        write_binding(root, "stocks/impfpflicht", "anker", &binding).unwrap();
+        write_binding(root, "library/sample", "notes", &binding).unwrap();
         assert!(
-            root.join(".memstead/projections/stocks/impfpflicht/anker.json")
+            root.join(".memstead/projections/library/sample/notes.json")
                 .is_file(),
             "the record lands under the nested tier"
         );
-        let back = read_binding(root, "stocks/impfpflicht", "anker").unwrap();
+        let back = read_binding(root, "library/sample", "notes").unwrap();
         assert_eq!(back, binding);
 
         // The loader walks into the nested tier and keys by the full path.
@@ -803,11 +803,11 @@ mod tests {
             .iter()
             .map(|r| (r.mem.as_str(), r.name.as_str()))
             .collect();
-        assert_eq!(keys, vec![("stocks/impfpflicht", "anker")]);
+        assert_eq!(keys, vec![("library/sample", "notes")]);
 
         // A record of the parent path sits beside the nested tier, and
         // each mem reads only its own records.
-        write_binding(root, "stocks", "index", &binding).unwrap();
+        write_binding(root, "library", "index", &binding).unwrap();
         let names = |mem: &str| -> Vec<String> {
             mem_binding_records(root, mem)
                 .unwrap()
@@ -815,8 +815,8 @@ mod tests {
                 .map(|(n, _)| n)
                 .collect()
         };
-        assert_eq!(names("stocks/impfpflicht"), vec!["anker".to_string()]);
-        assert_eq!(names("stocks"), vec!["index".to_string()]);
+        assert_eq!(names("library/sample"), vec!["notes".to_string()]);
+        assert_eq!(names("library"), vec!["index".to_string()]);
         let configs = load_pipeline_configs(root).unwrap();
         let keys: Vec<_> = configs
             .bindings
@@ -825,31 +825,31 @@ mod tests {
             .collect();
         assert_eq!(
             keys,
-            vec![("stocks", "index"), ("stocks/impfpflicht", "anker")]
+            vec![("library", "index"), ("library/sample", "notes")]
         );
 
         // Rename and delete follow the nested tier and leave the other
         // mem's records alone.
-        rename_projection(root, "stocks/impfpflicht", "anker", "anker-2").unwrap();
+        rename_projection(root, "library/sample", "notes", "notes-2").unwrap();
         assert!(
-            root.join(".memstead/projections/stocks/impfpflicht/anker-2.json")
+            root.join(".memstead/projections/library/sample/notes-2.json")
                 .is_file()
         );
-        remove_mem_store(root, "stocks").unwrap();
+        remove_mem_store(root, "library").unwrap();
         assert!(
             !root
-                .join(".memstead/projections/stocks/index.json")
+                .join(".memstead/projections/library/index.json")
                 .exists(),
             "the parent path's own record is gone"
         );
         assert!(
-            root.join(".memstead/projections/stocks/impfpflicht/anker-2.json")
+            root.join(".memstead/projections/library/sample/notes-2.json")
                 .is_file(),
             "a nested mem's tier survives the parent path's removal"
         );
-        remove_mem_store(root, "stocks/impfpflicht").unwrap();
+        remove_mem_store(root, "library/sample").unwrap();
         assert!(
-            !root.join(".memstead/projections/stocks").exists(),
+            !root.join(".memstead/projections/library").exists(),
             "emptied tiers are pruned up to the projections root"
         );
         assert!(root.join(".memstead/projections").is_dir());
@@ -863,10 +863,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         let binding = sample_binding();
-        write_binding(root, "stocks", "index", &binding).unwrap();
-        write_binding(root, "stocks/impfpflicht", "anker", &binding).unwrap();
+        write_binding(root, "library", "index", &binding).unwrap();
+        write_binding(root, "library/sample", "notes", &binding).unwrap();
 
-        let moved = relocate_mem_store(root, "stocks", "evidence").unwrap();
+        let moved = relocate_mem_store(root, "library", "evidence").unwrap();
         assert_eq!(moved.len(), 1);
         assert_eq!(moved[0].0, "index");
         assert!(
@@ -874,23 +874,19 @@ mod tests {
                 .is_file()
         );
         assert!(
-            root.join(".memstead/projections/stocks/impfpflicht/anker.json")
+            root.join(".memstead/projections/library/sample/notes.json")
                 .is_file(),
             "the nested mem is another mem and does not move"
         );
         // A nested mem relocates by its full path, and its old tier is
         // pruned once empty.
-        let moved = relocate_mem_store(root, "stocks/impfpflicht", "stocks/vaccine").unwrap();
-        assert_eq!(moved[0].0, "anker");
+        let moved = relocate_mem_store(root, "library/sample", "library/other").unwrap();
+        assert_eq!(moved[0].0, "notes");
         assert!(
-            root.join(".memstead/projections/stocks/vaccine/anker.json")
+            root.join(".memstead/projections/library/other/notes.json")
                 .is_file()
         );
-        assert!(
-            !root
-                .join(".memstead/projections/stocks/impfpflicht")
-                .exists()
-        );
+        assert!(!root.join(".memstead/projections/library/sample").exists());
     }
 
     /// The one binding-id parser: the stem is the last segment, the mem
@@ -899,12 +895,12 @@ mod tests {
     fn parse_binding_id_splits_at_the_last_separator() {
         assert_eq!(parse_binding_id("engine/graph"), Some(("engine", "graph")));
         assert_eq!(
-            parse_binding_id("stocks/impfpflicht/anker"),
-            Some(("stocks/impfpflicht", "anker"))
+            parse_binding_id("library/sample/notes"),
+            Some(("library/sample", "notes"))
         );
         assert_eq!(
-            parse_binding_id("planning/plan-first-stock/anker"),
-            Some(("planning/plan-first-stock", "anker"))
+            parse_binding_id("planning/plan-first-sample/notes"),
+            Some(("planning/plan-first-sample", "notes"))
         );
         for malformed in [
             "noslash",
@@ -913,9 +909,9 @@ mod tests {
             "engine/",
             "engine//graph",
             "../escape",
-            "stocks/../graph",
-            "stocks/./graph",
-            "stocks/impfpflicht/..",
+            "library/../graph",
+            "library/./graph",
+            "library/sample/..",
             "a\\b/graph",
             "c:evil/graph",
         ] {
@@ -926,12 +922,12 @@ mod tests {
                 malformed.escape_default()
             );
         }
-        assert!(is_mem_path("stocks"));
-        assert!(is_mem_path("stocks/impfpflicht"));
-        assert!(!is_mem_path("stocks/../x"));
+        assert!(is_mem_path("library"));
+        assert!(is_mem_path("library/sample"));
+        assert!(!is_mem_path("library/../x"));
         assert!(!is_mem_path(""));
-        assert!(is_single_component("anker"));
-        assert!(!is_single_component("stocks/anker"));
+        assert!(is_single_component("notes"));
+        assert!(!is_single_component("library/notes"));
     }
 
     #[test]

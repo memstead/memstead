@@ -492,14 +492,14 @@ mod tests {
                 note: None,
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
-                identity: Some("plenum-agent"),
+                identity: Some("agent-a"),
             },
             ts(1_715_000_000, 1),
         )
         .unwrap();
         let lines = read_lines(&changelog_path(tmp.path()));
         let value: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
-        assert_eq!(value["identity"], "plenum-agent");
+        assert_eq!(value["identity"], "agent-a");
     }
 
     #[test]

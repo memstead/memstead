@@ -363,26 +363,23 @@ mod tests {
 
         // Format 4 with title + subject parses them.
         let mut v4 = ok_config();
-        v4["title"] = serde_json::json!("Einrichtungsbezogene Impfpflicht Deutschland");
+        v4["title"] = serde_json::json!("Sample subject Übersicht");
         v4["subject"] = serde_json::json!({
-            "scope": "Die Impfpflicht in Einrichtungen",
+            "scope": "A sample scope",
             "method": "Primärquellen, händisch geprüft",
-            "exclusions": ["Länderverordnungen nach 2023", "Presseberichte"],
+            "exclusions": ["Einträge nach 2023", "Presseberichte"],
         });
         let parsed = parse(v4).expect("format 4 accepted");
-        assert_eq!(
-            parsed.title.as_deref(),
-            Some("Einrichtungsbezogene Impfpflicht Deutschland")
-        );
+        assert_eq!(parsed.title.as_deref(), Some("Sample subject Übersicht"));
         let subject = parsed.subject.expect("subject parsed");
-        assert_eq!(subject.scope, "Die Impfpflicht in Einrichtungen");
+        assert_eq!(subject.scope, "A sample scope");
         assert_eq!(
             subject.method.as_deref(),
             Some("Primärquellen, händisch geprüft")
         );
         assert_eq!(
             subject.exclusions,
-            vec!["Länderverordnungen nach 2023", "Presseberichte"]
+            vec!["Einträge nach 2023", "Presseberichte"]
         );
 
         // Formats 1 and 2 keep their current refusals.

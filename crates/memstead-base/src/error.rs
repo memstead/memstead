@@ -142,8 +142,8 @@ pub enum FullEngineError {
 
     /// `create_mem` refused a git-branch name that git's ref namespace
     /// cannot hold beside an existing mem branch: refs are files in
-    /// directories, so `refs/heads/stocks/impfpflicht` and
-    /// `refs/heads/stocks/impfpflicht/anker` cannot coexist, in either
+    /// directories, so `refs/heads/library/sample` and
+    /// `refs/heads/library/sample/notes` cannot coexist, in either
     /// order of creation. Refused before any write, so nothing lands on
     /// `__MEMSTEAD`. `suggestion` names a sibling spelling where one
     /// follows from the shape (the child case: the parent's leaf and the
@@ -481,16 +481,16 @@ mod tests {
         assert_eq!(e.code(), "CONFIG_ERROR");
 
         let e = FullEngineError::MemNameRefConflict {
-            name: "stocks/impfpflicht/anker".into(),
-            branch_ref: "refs/heads/stocks/impfpflicht/anker".into(),
-            conflicting_branches: vec!["stocks/impfpflicht".into()],
-            suggestion: Some("stocks/impfpflicht-anker".into()),
+            name: "library/sample/notes".into(),
+            branch_ref: "refs/heads/library/sample/notes".into(),
+            conflicting_branches: vec!["library/sample".into()],
+            suggestion: Some("library/sample-notes".into()),
         };
         assert_eq!(e.code(), "MEM_NAME_REF_CONFLICT");
         let text = e.to_string();
-        assert!(text.contains("`stocks/impfpflicht`"), "{text}");
-        assert!(text.contains("`stocks/impfpflicht-anker`"), "{text}");
-        assert_eq!(e.details()["suggestion"], "stocks/impfpflicht-anker");
+        assert!(text.contains("`library/sample`"), "{text}");
+        assert!(text.contains("`library/sample-notes`"), "{text}");
+        assert_eq!(e.details()["suggestion"], "library/sample-notes");
     }
 
     /// Wrapped base-engine errors delegate `code()` to the base mapping.
