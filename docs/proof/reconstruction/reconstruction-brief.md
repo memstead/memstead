@@ -1,6 +1,6 @@
 # Reconstruction Brief: `landing-page-design` mem
 
-Reconstructed exclusively from Memstead CLI reads against the workspace at `~/Projekte/expertise` (mem `landing-page-design`, schema `expertise@0.1.0`). All entity IDs below are prefixed `landing-page-design--` (dropped for readability).
+Reconstructed exclusively from Memstead CLI reads against the workspace at `~/workspace` (mem `landing-page-design`, schema `expertise@0.1.0`). All entity IDs below are prefixed `landing-page-design--` (dropped for readability).
 
 ---
 

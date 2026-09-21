@@ -14,7 +14,8 @@ conversations. Only the 22 raw authoring transcripts themselves are withheld
 — they embed bulk fetched third-party web content we do not republish; their
 sha256 hashes and per-session counts are in `authoring-sessions.json`, so the
 denominator stays auditable without them. Local filesystem paths in the
-published records are screened (the home directory is shown as `~`).
+published records are screened (the home directory is shown as `~`, the
+measured workspace as `~/workspace`).
 
 ## What was measured
 
@@ -61,7 +62,7 @@ so the reconstruction side is rerunnable byte-for-byte.
 |---|---|
 | `count_tokens.py` | The counting script (Python 3, needs `tiktoken`). Applied identically to both sides. |
 | `landing-page-design-0.1.0.mem` | The measured mem, exported as a portable archive (`memstead install ./landing-page-design-0.1.0.mem`). |
-| `reconstruction-transcript.jsonl` | The fresh agent's complete reconstruction session (JSONL), the numerator. Local paths screened (home directory shown as `~`). |
+| `reconstruction-transcript.jsonl` | The fresh agent's complete reconstruction session (JSONL), the numerator. Local paths screened (home directory shown as `~`, the measured workspace as `~/workspace`). |
 | `reconstruction-brief.md` | The domain brief the reconstruction agent produced — the demonstrated understanding. |
 | `authoring-sessions.json` | Per-session accounting for all 22 authoring conversations (sha256, time span, turn count, content tokens, API usage) — the denominator. |
 
@@ -177,7 +178,8 @@ it should land in the same order of magnitude, and that is the claim.
   identical; the 108,034 serialized-token figure was measured pre-removal.
 - **What is published, what is withheld.** The reconstruction transcript,
   the brief, and the per-session authoring accounting are in this folder
-  (local filesystem paths screened, home directory shown as `~`). Only the 22 raw
+  (local filesystem paths screened: home directory shown as `~`, the
+  measured workspace as `~/workspace`). Only the 22 raw
   authoring transcripts are withheld — they embed bulk fetched third-party
   web content we do not republish; `authoring-sessions.json` carries their
   sha256 hashes and token counts so the denominator stays auditable.
