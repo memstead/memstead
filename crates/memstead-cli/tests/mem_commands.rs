@@ -749,12 +749,7 @@ fn mem_title_and_subject_lifecycle() {
     // Set a title (non-ASCII, spaces — no slug grammar).
     memstead()
         .current_dir(tmp.path())
-        .args([
-            "mem",
-            "set-title",
-            "sender-mem",
-            "Einrichtungsbezogene Impfpflicht Deutschland",
-        ])
+        .args(["mem", "set-title", "sender-mem", "Sample subject Übersicht"])
         .assert()
         .success()
         .stdout(contains("title updated"));
@@ -771,25 +766,18 @@ fn mem_title_and_subject_lifecycle() {
     let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
     let row = &json["mems"][0];
     assert_eq!(row["name"], "sender-mem");
-    assert_eq!(row["title"], "Einrichtungsbezogene Impfpflicht Deutschland");
+    assert_eq!(row["title"], "Sample subject Übersicht");
     memstead()
         .current_dir(tmp.path())
         .args(["mem", "list"])
         .assert()
         .success()
-        .stdout(contains(
-            "Einrichtungsbezogene Impfpflicht Deutschland (`sender-mem`)",
-        ));
+        .stdout(contains("Sample subject Übersicht (`sender-mem`)"));
 
     // Identity untouched: the title does NOT address the mem…
     memstead()
         .current_dir(tmp.path())
-        .args([
-            "--json",
-            "search",
-            "--mem",
-            "Einrichtungsbezogene Impfpflicht Deutschland",
-        ])
+        .args(["--json", "search", "--mem", "Sample subject Übersicht"])
         .assert()
         .failure()
         .stdout(contains("UNKNOWN_MEM"));
@@ -808,11 +796,11 @@ fn mem_title_and_subject_lifecycle() {
             "set-subject",
             "sender-mem",
             "--scope",
-            "Die Impfpflicht in Einrichtungen",
+            "A sample scope",
             "--method",
             "Primärquellen, händisch geprüft",
             "--exclusion",
-            "Länderverordnungen nach 2023",
+            "Einträge nach 2023",
             "--exclusion",
             "Presseberichte",
         ])

@@ -158,8 +158,9 @@ fn memstead_mcp_does_not_depend_on_memstead_cli() {
 ///
 /// The rationale argues against the MCP-only **consumer profile**
 /// (`dev/handbook/agent-surfaces.md`, "Consumer profile"), not merely
-/// the agent-with-a-shell case. All three of plenum finding 18's axes
-/// were weighed: (1) *boot cost* — the MCP server stays warm, so the
+/// the agent-with-a-shell case. All three axes of the bulk-write
+/// question were weighed:
+/// (1) *boot cost* — the MCP server stays warm, so the
 /// engine-boot cost that motivates CLI batching does not apply;
 /// (2) *agent-context cost* — mass create/update payloads are
 /// file-scale, and their report-all responses would flood an agent

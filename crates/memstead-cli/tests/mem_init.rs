@@ -1062,8 +1062,8 @@ fn config_blob_present(workspace: &Path, mem_name: &str) -> bool {
     .success()
 }
 
-/// A git-branch name below an existing mem branch (`stocks/impfpflicht/anker`
-/// under the mem `stocks/impfpflicht`) refuses `MEM_NAME_REF_CONFLICT`
+/// A git-branch name below an existing mem branch (`library/sample/notes`
+/// under the mem `library/sample`) refuses `MEM_NAME_REF_CONFLICT`
 /// before anything is written: no config lands on `__MEMSTEAD`, no branch
 /// appears, and the message names the conflicting branch and a sibling
 /// spelling that then succeeds. The parent direction refuses the same way.
@@ -1074,7 +1074,7 @@ fn memstead_mem_init_refuses_a_name_git_cannot_hold_beside_an_existing_mem_branc
 
     memstead()
         .current_dir(&workspace)
-        .args(["mem", "init", "stocks/impfpflicht", "--no-gitignore"])
+        .args(["mem", "init", "library/sample", "--no-gitignore"])
         .assert()
         .success();
 
@@ -1084,7 +1084,7 @@ fn memstead_mem_init_refuses_a_name_git_cannot_hold_beside_an_existing_mem_branc
             "--json",
             "mem",
             "init",
-            "stocks/impfpflicht/anker",
+            "library/sample/notes",
             "--no-gitignore",
         ])
         .assert()
@@ -1096,24 +1096,24 @@ fn memstead_mem_init_refuses_a_name_git_cannot_hold_beside_an_existing_mem_branc
     assert_eq!(env["code"], "MEM_NAME_REF_CONFLICT", "{env}");
     assert_eq!(
         env["details"]["conflicting_branches"],
-        serde_json::json!(["stocks/impfpflicht"]),
+        serde_json::json!(["library/sample"]),
         "{env}"
     );
     assert_eq!(
-        env["details"]["suggestion"], "stocks/impfpflicht-anker",
+        env["details"]["suggestion"], "library/sample-notes",
         "{env}"
     );
     assert!(
-        !config_blob_present(&workspace, "stocks/impfpflicht/anker"),
+        !config_blob_present(&workspace, "library/sample/notes"),
         "a refused create leaves no config on __MEMSTEAD"
     );
-    assert_branch_absent(&workspace, "stocks/impfpflicht/anker");
-    assert_mem_not_in_mounts(&workspace, "stocks/impfpflicht/anker");
+    assert_branch_absent(&workspace, "library/sample/notes");
+    assert_mem_not_in_mounts(&workspace, "library/sample/notes");
 
-    // The parent direction: `stocks` would sit above the existing branch.
+    // The parent direction: `library` would sit above the existing branch.
     let output = memstead()
         .current_dir(&workspace)
-        .args(["--json", "mem", "init", "stocks", "--no-gitignore"])
+        .args(["--json", "mem", "init", "library", "--no-gitignore"])
         .assert()
         .failure()
         .get_output()
@@ -1121,16 +1121,16 @@ fn memstead_mem_init_refuses_a_name_git_cannot_hold_beside_an_existing_mem_branc
         .clone();
     let env: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(env["code"], "MEM_NAME_REF_CONFLICT", "{env}");
-    assert!(!config_blob_present(&workspace, "stocks"));
+    assert!(!config_blob_present(&workspace, "library"));
 
     // The suggested sibling is a name git can hold.
     memstead()
         .current_dir(&workspace)
-        .args(["mem", "init", "stocks/impfpflicht-anker", "--no-gitignore"])
+        .args(["mem", "init", "library/sample-notes", "--no-gitignore"])
         .assert()
         .success();
-    assert_branch_present(&workspace, "stocks/impfpflicht-anker");
-    assert_mem_in_mounts(&workspace, "stocks/impfpflicht-anker");
+    assert_branch_present(&workspace, "library/sample-notes");
+    assert_mem_in_mounts(&workspace, "library/sample-notes");
 }
 
 /// A seed commit that fails after the config was written rolls the config

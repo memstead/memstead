@@ -1106,8 +1106,8 @@ fn brief_renders_for_scaffolded_binding() {
 }
 
 /// A nested mem name is a legal binding destination: `projection init` with
-/// `--mem stocks/impfpflicht` scaffolds the record under the nested tier
-/// (`.memstead/projections/stocks/impfpflicht/anker.json`), the binding id
+/// `--mem library/sample` scaffolds the record under the nested tier
+/// (`.memstead/projections/library/sample/notes.json`), the binding id
 /// splits at its last separator, and `projection brief` finds the binding by
 /// that id.
 #[test]
@@ -1125,13 +1125,13 @@ fn init_nested_mem_scaffolds_under_the_nested_tier_and_brief_finds_it() {
             "projection",
             "init",
             "--mem",
-            "stocks/impfpflicht",
+            "library/sample",
             "--source",
             "../src",
             "--medium-type",
             "codebase",
             "--name",
-            "anker",
+            "notes",
         ])
         .assert()
         .success()
@@ -1139,19 +1139,19 @@ fn init_nested_mem_scaffolds_under_the_nested_tier_and_brief_finds_it() {
         .stdout
         .clone();
     let env: Value = serde_json::from_slice(&output).expect("--json init must emit JSON");
-    assert_eq!(env["binding"], "stocks/impfpflicht/anker");
+    assert_eq!(env["binding"], "library/sample/notes");
     assert_eq!(
         env["created"],
-        serde_json::json!([".memstead/projections/stocks/impfpflicht/anker.json"])
+        serde_json::json!([".memstead/projections/library/sample/notes.json"])
     );
-    let record = ws.join(".memstead/projections/stocks/impfpflicht/anker.json");
+    let record = ws.join(".memstead/projections/library/sample/notes.json");
     assert!(record.is_file(), "the record lands under the nested tier");
     let binding: Binding = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
-    assert_eq!(binding.destination_mem, "stocks/impfpflicht");
+    assert_eq!(binding.destination_mem, "library/sample");
 
     let out = memstead()
         .current_dir(&ws)
-        .args(["projection", "brief", "stocks/impfpflicht/anker"])
+        .args(["projection", "brief", "library/sample/notes"])
         .assert()
         .success()
         .get_output()
@@ -1159,7 +1159,7 @@ fn init_nested_mem_scaffolds_under_the_nested_tier_and_brief_finds_it() {
         .clone();
     let brief = String::from_utf8(out).unwrap();
     assert!(
-        brief.contains("stocks/impfpflicht/anker"),
+        brief.contains("library/sample/notes"),
         "brief must name the canonical binding id; got:\n{brief}"
     );
 
@@ -1172,7 +1172,7 @@ fn init_nested_mem_scaffolds_under_the_nested_tier_and_brief_finds_it() {
             "projection",
             "enable",
             "verify",
-            "stocks/../impfpflicht/anker",
+            "library/../sample/notes",
         ])
         .assert()
         .failure()

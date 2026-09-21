@@ -70,8 +70,7 @@ fn seed() -> TempDir {
             .success();
     }
     // Delta in `alpha`: a url span row and a derived entity-grain row
-    // whose artifact names a same-mem entity beside a foreign input,
-    // the trustwork case shape.
+    // whose artifact names a same-mem entity beside a foreign input.
     memstead()
         .current_dir(ws.path())
         .args([

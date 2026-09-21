@@ -805,7 +805,7 @@ fn batch_relate_rehearsal_refuses_identically_to_real() {
 // exactly as the real call would.
 // ---------------------------------------------------------------------------
 
-/// A workspace whose `plenum` mem quarantines on an unresolvable
+/// A workspace whose `sample-mem` mem quarantines on an unresolvable
 /// schema pin (same fixture shape as `repair_below_boot.rs`).
 fn quarantined_workspace(tmp: &TempDir) -> PathBuf {
     let ws = tmp.path().join("ws");
@@ -813,7 +813,7 @@ fn quarantined_workspace(tmp: &TempDir) -> PathBuf {
         .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
         .assert()
         .success();
-    fs::create_dir_all(ws.join("plenum")).unwrap();
+    fs::create_dir_all(ws.join("sample-mem")).unwrap();
     let mounts = ws.join(".memstead").join("state").join("mounts.json");
     fs::create_dir_all(mounts.parent().unwrap()).unwrap();
     fs::write(
@@ -821,7 +821,7 @@ fn quarantined_workspace(tmp: &TempDir) -> PathBuf {
         r#"{
   "format": "memstead-mounts-3",
   "mounts": [
-    { "mem": "plenum", "schema": "ghost@1.0.0", "storage": { "type": "folder", "path": "plenum" }, "capability": "write", "lifecycle": "eager", "cross_linkable": true }
+    { "mem": "sample-mem", "schema": "ghost@1.0.0", "storage": { "type": "folder", "path": "sample-mem" }, "capability": "write", "lifecycle": "eager", "cross_linkable": true }
   ]
 }"#,
     )
@@ -843,7 +843,7 @@ fn rehearsal_against_quarantined_mem_refuses_identically_to_real() {
             "--type".to_string(),
             "note".to_string(),
             "--mem".to_string(),
-            "plenum".to_string(),
+            "sample-mem".to_string(),
         ];
         if dry {
             v.push("--dry-run".to_string());

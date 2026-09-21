@@ -17,10 +17,10 @@ fn parse_envelope(stdout_bytes: &[u8]) -> serde_json::Value {
     })
 }
 
-/// A mem-repo workspace with one folder-mount mem `plenum` pinned
+/// A mem-repo workspace with one folder-mount mem `sample-mem` pinned
 /// (via the mount record — the mem is config-absent, so the mount pin
 /// is settled) to a schema no source holds. Under the plan-04
-/// quarantine posture the workspace BOOTS with `plenum` quarantined
+/// quarantine posture the workspace BOOTS with `sample-mem` quarantined
 /// (`SCHEMA_NOT_FOUND` reason) — the fixture asserts that state.
 fn quarantined_workspace(tmp: &TempDir) -> std::path::PathBuf {
     let ws = tmp.path().join("ws");
@@ -28,7 +28,7 @@ fn quarantined_workspace(tmp: &TempDir) -> std::path::PathBuf {
         .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
         .assert()
         .success();
-    std::fs::create_dir_all(ws.join("plenum")).unwrap();
+    std::fs::create_dir_all(ws.join("sample-mem")).unwrap();
     let mounts = ws.join(".memstead").join("state").join("mounts.json");
     std::fs::create_dir_all(mounts.parent().unwrap()).unwrap();
     std::fs::write(
@@ -36,12 +36,12 @@ fn quarantined_workspace(tmp: &TempDir) -> std::path::PathBuf {
         r#"{
   "format": "memstead-mounts-3",
   "mounts": [
-    { "mem": "plenum", "schema": "ghost@1.0.0", "storage": { "type": "folder", "path": "plenum" }, "capability": "write", "lifecycle": "eager", "cross_linkable": true }
+    { "mem": "sample-mem", "schema": "ghost@1.0.0", "storage": { "type": "folder", "path": "sample-mem" }, "capability": "write", "lifecycle": "eager", "cross_linkable": true }
   ]
 }"#,
     )
     .unwrap();
-    // Confirm the fixture really quarantines `plenum` for the reason
+    // Confirm the fixture really quarantines `sample-mem` for the reason
     // this plan repairs (the workspace itself boots — plan 04).
     let health = health_json(&ws);
     assert_eq!(
@@ -82,7 +82,7 @@ fn set_schema_repairs_quarantined_mem() {
 
     let out = memstead()
         .current_dir(&ws)
-        .args(["--json", "mem", "set-schema", "plenum", "default@1.0.0"])
+        .args(["--json", "mem", "set-schema", "sample-mem", "default@1.0.0"])
         .assert()
         .success()
         .get_output()
@@ -109,7 +109,8 @@ fn set_schema_repairs_quarantined_mem() {
 /// quarantined-mem workspace, `schema install <package>` seals the
 /// package onto the `__MEMSTEAD:schemas/` ref (never booting), and a
 /// subsequent `set-schema` to the installed ref returns the mem to
-/// full service — the plenum recovery path. If the resolver consulted
+/// full service: the recovery path for a mem whose pinned schema
+/// no source holds. If the resolver consulted
 /// a narrower catalogue than boot (e.g. built-ins only), the
 /// set-schema step would refuse the freshly ref-installed schema and
 /// this test would fail.
@@ -132,7 +133,7 @@ fn install_then_set_schema_recovers_end_to_end() {
 
     memstead()
         .current_dir(&ws)
-        .args(["--json", "mem", "set-schema", "plenum", "recipe@0.1.0"])
+        .args(["--json", "mem", "set-schema", "sample-mem", "recipe@0.1.0"])
         .assert()
         .success();
 
@@ -159,7 +160,7 @@ fn repair_refuses_typed_on_corrupt_store_bad_package_and_bad_ref() {
     let ws = quarantined_workspace(&tmp);
     let out = memstead()
         .current_dir(&ws)
-        .args(["--json", "mem", "set-schema", "plenum", "ghost2@1.0.0"])
+        .args(["--json", "mem", "set-schema", "sample-mem", "ghost2@1.0.0"])
         .assert()
         .failure()
         .get_output()
@@ -205,7 +206,7 @@ fn repair_refuses_typed_on_corrupt_store_bad_package_and_bad_ref() {
     std::fs::write(&mounts, "this is not json {").unwrap();
     let pkg = example_package_dir();
     for args in [
-        vec!["--json", "mem", "set-schema", "plenum", "default@1.0.0"],
+        vec!["--json", "mem", "set-schema", "sample-mem", "default@1.0.0"],
         vec!["--json", "schema", "install", pkg.as_str()],
     ] {
         let out = memstead()
@@ -249,7 +250,7 @@ fn type_names_the_quarantine_instead_of_printing_a_default_over_it() {
     );
     let detail = body["fallback"]["detail"].as_str().unwrap_or_default();
     assert!(
-        detail.contains("plenum") && detail.contains("SCHEMA_NOT_FOUND"),
+        detail.contains("sample-mem") && detail.contains("SCHEMA_NOT_FOUND"),
         "the quarantined mem and the engine's typed reason must be named; got: {detail}"
     );
     assert!(
@@ -289,7 +290,7 @@ fn type_refusal_over_a_quarantine_states_the_condition_too() {
     );
     let message = body["message"].as_str().unwrap_or_default();
     assert!(
-        message.contains("plenum") && message.contains("not this workspace's own"),
+        message.contains("sample-mem") && message.contains("not this workspace's own"),
         "the human message must name the quarantine too; got: {message}"
     );
 
@@ -397,7 +398,7 @@ fn type_mem_names_the_quarantine_instead_of_unknown_mem() {
 
     let out = memstead()
         .current_dir(&ws)
-        .args(["--json", "type", "--mem", "plenum"])
+        .args(["--json", "type", "--mem", "sample-mem"])
         .assert()
         .failure()
         .get_output()
@@ -436,7 +437,7 @@ fn status_carries_the_quarantine_roster_in_both_forms() {
     let body = parse_envelope(&out);
     let roster = body["quarantined"].as_array().expect("quarantined roster");
     assert_eq!(roster.len(), 1, "got: {body}");
-    assert_eq!(roster[0]["mem"], "plenum");
+    assert_eq!(roster[0]["mem"], "sample-mem");
     assert_eq!(roster[0]["reason_code"], "SCHEMA_NOT_FOUND");
 
     let md_bytes = memstead()
@@ -450,7 +451,7 @@ fn status_carries_the_quarantine_roster_in_both_forms() {
     let md = String::from_utf8(md_bytes).expect("stdout is UTF-8");
     assert!(
         md.contains("Quarantined mems (1)")
-            && md.contains("plenum")
+            && md.contains("sample-mem")
             && md.contains("SCHEMA_NOT_FOUND"),
         "markdown status must render the quarantine roster; got:\n{md}"
     );

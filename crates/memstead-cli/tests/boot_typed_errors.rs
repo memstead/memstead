@@ -315,7 +315,7 @@ fn workspace_pinning_restored_ingest_0_1_0_boots_green() {
         .args([
             "init",
             "--name",
-            "plenum",
+            "sample-mem",
             "--schema",
             "ingest@0.1.0",
             ws.to_str().unwrap(),

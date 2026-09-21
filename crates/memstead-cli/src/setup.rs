@@ -58,8 +58,8 @@ pub fn workspace_not_initialised_error(message: &str) -> CliError {
 /// Lift a [`memstead_base::BootError`] into the typed CLI envelope.
 /// The boot seam previously flattened these through `anyhow`, so the
 /// `main` downcast missed them and every boot failure surfaced as
-/// `code: INTERNAL` with no next step (the 2026-08-06/07 outage, expertise
-/// 2026-08-07). The typed material lives on
+/// `code: INTERNAL` with no next step (the 2026-08-06/07 outage). The
+/// typed material lives on
 /// [`memstead_base::BootError::code`]; this function only wraps it in
 /// the CLI's exit shape. The message is
 /// [`memstead_base::BootError::surface_message`] verbatim — identical

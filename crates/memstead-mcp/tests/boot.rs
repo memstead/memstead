@@ -344,11 +344,11 @@ fn full_binary_serves_partially_broken_workspace() {
     let tmp = TempDir::new().unwrap();
     seed_workspace(tmp.path());
     memstead_git_branch::test_support::init_real_mem_repo(tmp.path(), &[]);
-    std::fs::create_dir_all(tmp.path().join("plenum")).unwrap();
+    std::fs::create_dir_all(tmp.path().join("sample-mem")).unwrap();
     std::fs::write(
         tmp.path().join(".memstead").join("state").join("mounts.json"),
         r#"{ "format": "memstead-mounts-3", "mounts": [
-            { "mem": "plenum", "schema": "ghost@1.0.0", "storage": { "type": "folder", "path": "plenum" }, "capability": "write", "lifecycle": "eager", "cross_linkable": true }
+            { "mem": "sample-mem", "schema": "ghost@1.0.0", "storage": { "type": "folder", "path": "sample-mem" }, "capability": "write", "lifecycle": "eager", "cross_linkable": true }
         ] }"#,
     )
     .unwrap();
