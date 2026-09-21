@@ -66,16 +66,14 @@ pub fn canonical_bytes(
         ));
     }
 
-    // Preserve the optional sealed check records verbatim, for the same
-    // reason: a normalized archive that lost them would answer
-    // `never_checked` for entities that were checked. Validated at
-    // extract time.
-    if let Some(checks) = checks_bytes {
-        files.push((
-            memstead_schema::ARCHIVE_CHECKS_PATH.to_string(),
-            checks.to_vec(),
-        ));
-    }
+    // The entity files, re-rendered from the parsed entities. The
+    // canonical bytes are the ones a mount of this archive hashes, so a
+    // sealed check record fresh against the input bytes (each entity's
+    // `content_hash` as parsed) is re-keyed to the re-rendered bytes below;
+    // a record stale before the re-pack keeps its hash. Idempotent: a
+    // canonical archive re-packed hashes the same and moves nothing.
+    let mut rewrites: Vec<(String, String, String)> = Vec::new();
+    let mut entity_files: Vec<(String, Vec<u8>)> = Vec::with_capacity(entities.len());
 
     // Preserve the proposal record verbatim, for the same reason: a
     // normalized archive that lost it would let a rejected proposal
@@ -128,8 +126,29 @@ pub fn canonical_bytes(
         let md = generate_markdown(entity, &schema);
         let lf = normalize_lf(&md);
         let path = id_to_file_path(&entity.id);
-        files.push((path, lf.into_bytes()));
+        let post = crate::entity::parser::compute_hash(&lf);
+        if !entity.content_hash.is_empty() && entity.content_hash != post {
+            rewrites.push((
+                entity.id.path().to_string(),
+                entity.content_hash.clone(),
+                post,
+            ));
+        }
+        entity_files.push((path, lf.into_bytes()));
     }
+
+    // Preserve the optional sealed check records, re-keyed to the bytes
+    // above where the re-render moved a fresh record's hash and otherwise
+    // verbatim: a normalized archive that lost them would answer
+    // `never_checked` for entities that were checked, and one that kept
+    // stale hashes would answer `check_stale` for entities checked fresh.
+    // Validated at extract time.
+    if let Some(checks) =
+        crate::ops::export::rekey_sealed_checks(checks_bytes.map(<[u8]>::to_vec), &rewrites)
+    {
+        files.push((memstead_schema::ARCHIVE_CHECKS_PATH.to_string(), checks));
+    }
+    files.extend(entity_files);
 
     files.sort_by(|a, b| a.0.cmp(&b.0));
 

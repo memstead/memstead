@@ -468,6 +468,7 @@ mod tests {
                 evidence: None,
             }),
             renamed_from: None,
+            carried_from: None,
         }
     }
 

@@ -469,6 +469,61 @@ pub fn retarget_mem_links(bytes: Vec<u8>, mem_name: &str, archive_name: &str) ->
     }
 }
 
+/// The `content_hash` the loader will derive for an entity from these
+/// bytes, the store's one recipe ([`crate::entity::parser::compute_hash`]
+/// over the file text), so a sealed record is compared against exactly
+/// the hash the mount computes. `None` for bytes that are not UTF-8 (the
+/// validator judges those; no hash of theirs is ever keyed).
+pub fn archived_content_hash(bytes: &[u8]) -> Option<String> {
+    std::str::from_utf8(bytes)
+        .ok()
+        .map(crate::entity::parser::compute_hash)
+}
+
+/// Re-key the sealed check records to the archived entity bytes: for
+/// each `(entity path, pre-rewrite hash, post-rewrite hash)` the export
+/// changed, every record of that entity that was fresh at the
+/// pre-rewrite hash moves to the archived hash and is marked
+/// `carried_from: {hash, reason: "export"}` ([`crate::check::SealedChecks::rekey_entity`]);
+/// a record stale before the export keeps its hash and stays stale on
+/// the mount. The member bytes come back unchanged when nothing moved
+/// (or when they do not parse; the validator refuses those), so a
+/// mem whose bytes the export never rewrites exports byte-identically.
+pub fn rekey_sealed_checks(
+    checks_bytes: Option<Vec<u8>>,
+    rewrites: &[(String, String, String)],
+) -> Option<Vec<u8>> {
+    let bytes = checks_bytes?;
+    if rewrites.is_empty() {
+        return Some(bytes);
+    }
+    let Ok(mut sealed) = crate::check::SealedChecks::from_archive_bytes(&bytes) else {
+        return Some(bytes);
+    };
+    let mut moved = 0;
+    for (path, pre, post) in rewrites {
+        moved += sealed.rekey_entity(path, pre, post);
+    }
+    if moved == 0 {
+        return Some(bytes);
+    }
+    Some(sealed.to_archive_bytes().unwrap_or(bytes))
+}
+
+/// The rewrite triple [`rekey_sealed_checks`] takes, for one entity file
+/// whose bytes the export changed: `None` when the archived bytes hash
+/// the same as the source bytes (nothing to re-key) or either side is
+/// not UTF-8.
+pub fn entity_rewrite(rel: &Path, before: &[u8], after: &[u8]) -> Option<(String, String, String)> {
+    let pre = archived_content_hash(before)?;
+    let post = archived_content_hash(after)?;
+    if pre == post {
+        return None;
+    }
+    let path = entity_paths_of(std::slice::from_ref(&rel.to_path_buf())).remove(0);
+    Some((path, pre, post))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn export_entries_to_bytes(
     config: &MemConfig,
@@ -497,6 +552,25 @@ pub fn export_entries_to_bytes(
     };
 
     let entity_count = md_entries.len();
+    // A hierarchical mem publishes under its leaf, so every link that
+    // qualifies itself with the workspace path follows the name into the
+    // archive. That rewrite moves the entity's content hash, and a sealed
+    // check record fresh against the source bytes is re-keyed to the
+    // archived bytes so it stays fresh on the mount (a stale one stays
+    // stale). Retargeted before the member is placed, so the member the
+    // archive carries already speaks of the archived bytes.
+    let mut rewrites: Vec<(String, String, String)> = Vec::new();
+    let md_entries: Vec<(PathBuf, Vec<u8>)> = md_entries
+        .into_iter()
+        .map(|(rel, bytes)| {
+            let retargeted = retarget_mem_links(bytes.clone(), mem_name, &published.name);
+            if let Some(rw) = entity_rewrite(&rel, &bytes, &retargeted) {
+                rewrites.push(rw);
+            }
+            (rel, retargeted)
+        })
+        .collect();
+    let checks_bytes = rekey_sealed_checks(checks_bytes.map(<[u8]>::to_vec), &rewrites);
     let mut all_entries: Vec<(String, Vec<u8>)> =
         Vec::with_capacity(2 + schema_files.len() + md_entries.len());
     all_entries.push((ARCHIVE_CONFIG_PATH.to_string(), config_bytes));
@@ -518,7 +592,7 @@ pub fn export_entries_to_bytes(
     // `.memstead/` member like the anchors: strictly validated by the
     // archive validator, threaded verbatim through the canonical re-pack.
     if let Some(checks) = checks_bytes {
-        all_entries.push((ARCHIVE_CHECKS_PATH.to_string(), checks.to_vec()));
+        all_entries.push((ARCHIVE_CHECKS_PATH.to_string(), checks));
     }
     for sf in &schema_files {
         all_entries.push((
@@ -527,10 +601,7 @@ pub fn export_entries_to_bytes(
         ));
     }
     for (rel, bytes) in md_entries {
-        all_entries.push((
-            posix_path(&rel),
-            retarget_mem_links(bytes, mem_name, &published.name),
-        ));
+        all_entries.push((posix_path(&rel), bytes));
     }
     all_entries.sort_by(|a, b| a.0.cmp(&b.0));
 

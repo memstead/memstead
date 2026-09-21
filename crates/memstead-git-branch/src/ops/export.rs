@@ -314,16 +314,34 @@ pub fn export_mem_from_branch_to_bytes(
     // qualifies itself with the workspace path follows the name into the
     // archive (`[[planning/plan-x--slug]]` → `[[plan-x--slug]]`); the
     // base funnel applies the same rule for folder and in-memory mems.
+    // The rewrite moves the entity's content hash; a sealed check record
+    // fresh against the branch bytes is re-keyed to the archived bytes so
+    // it stays fresh on the mount, a stale one stays stale (the base
+    // funnel's rule, applied to the same member).
+    let mut rewrites: Vec<(String, String, String)> = Vec::new();
     let md_entries: Vec<(String, Vec<u8>)> = blobs
         .into_iter()
         .filter(|b| b.path.ends_with(".md"))
         .map(|b| {
-            (
-                b.path,
-                memstead_base::ops::export::retarget_mem_links(b.bytes, mem_name, &published.name),
-            )
+            let retargeted = memstead_base::ops::export::retarget_mem_links(
+                b.bytes.clone(),
+                mem_name,
+                &published.name,
+            );
+            if let Some(rw) = memstead_base::ops::export::entity_rewrite(
+                Path::new(&b.path),
+                &b.bytes,
+                &retargeted,
+            ) {
+                rewrites.push(rw);
+            }
+            (b.path, retargeted)
         })
         .collect();
+    let checks_bytes = memstead_base::ops::export::rekey_sealed_checks(
+        checks_bytes.map(<[u8]>::to_vec),
+        &rewrites,
+    );
     let entity_count = md_entries.len();
 
     let mut all_entries: Vec<(String, Vec<u8>)> =
@@ -348,10 +366,7 @@ pub fn export_mem_from_branch_to_bytes(
     // Embed the sealed check records the engine read from the workspace
     // ledger; this assembler only places the recognised member.
     if let Some(checks) = checks_bytes {
-        all_entries.push((
-            memstead_schema::ARCHIVE_CHECKS_PATH.to_string(),
-            checks.to_vec(),
-        ));
+        all_entries.push((memstead_schema::ARCHIVE_CHECKS_PATH.to_string(), checks));
     }
     // Embed the proposal record the target branch carries, verbatim: a
     // recognised member the validator parses and the re-pack threads.
@@ -1092,6 +1107,90 @@ mod tests {
             )
             .unwrap();
             assert!(entries_without.checks_bytes.is_none());
+        }
+
+        /// A hierarchical branch mem publishes under its leaf with its
+        /// self-qualified links retargeted; the sealed record of the entity
+        /// whose bytes moved is re-keyed to the archived bytes and reads
+        /// `checked_ok` on the mount, an untouched entity's record travels
+        /// verbatim, and a record stale before the export still reads stale.
+        #[test]
+        fn export_from_nested_branch_rekeys_fresh_checks_to_the_archived_bytes() {
+            use memstead_base::check::CheckState;
+            let tmp = TempDir::new().unwrap();
+            let a = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# A\n\n## Identity\n\nA.\n";
+            let g = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# G\n\n## Identity\n\nBuilds on [[planning/plan-x--a]].\n";
+            let (gitdir, mem_dir) =
+                seed_mem_branch(tmp.path(), "planning/plan-x", &[("a.md", a), ("g.md", g)]);
+            let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
+            let a_hash = memstead_base::entity::parser::compute_hash(a);
+            let g_hash = memstead_base::entity::parser::compute_hash(g);
+            let checks = format!(
+                r#"{{"version":1,"entities":{{"a":{{"verification":{{"ts":1,"verdict":"ok","entity_hash":"{a_hash}","actor":"cli","role":"checker","identity":"checker-s1"}}}},"g":{{"verification":{{"ts":1,"verdict":"ok","entity_hash":"{g_hash}","actor":"cli","role":"checker","identity":"checker-s1"}},"x-audit":{{"ts":1,"verdict":"ok","entity_hash":"stale-before-export","actor":"cli","role":"checker","identity":"auditor-m"}}}}}}}}"#
+            );
+            let bytes = export_mem_from_branch_to_bytes(
+                &gitdir,
+                "planning/plan-x",
+                &config,
+                None,
+                None,
+                None,
+                None,
+                Some(checks.as_bytes()),
+            )
+            .unwrap()
+            .bytes;
+            let entries = memstead_base::validator::archive::extract_entries(
+                &bytes,
+                &memstead_base::validator::ValidatorLimits::DEFAULT,
+            )
+            .unwrap();
+            let sealed = memstead_base::check::SealedChecks::from_archive_bytes(
+                entries.checks_bytes.as_deref().unwrap(),
+            )
+            .unwrap();
+            let g_sealed = sealed.latest("g", "verification").unwrap();
+            assert_ne!(
+                g_sealed.entity_hash, g_hash,
+                "re-keyed to the archived bytes"
+            );
+            assert_eq!(
+                g_sealed.carried_from,
+                Some(memstead_base::check::CarriedFrom::export(&g_hash))
+            );
+            let a_sealed = sealed.latest("a", "verification").unwrap();
+            assert_eq!(
+                a_sealed.entity_hash, a_hash,
+                "untouched bytes, untouched record"
+            );
+            assert!(a_sealed.carried_from.is_none());
+            assert_eq!(
+                sealed.latest("g", "x-audit").unwrap().entity_hash,
+                "stale-before-export"
+            );
+
+            let mounted = memstead_base::Engine::from_archive_bytes(bytes).unwrap();
+            assert_eq!(
+                mounted.entity_check_state("plan-x", "plan-x--g").unwrap().0,
+                CheckState::CheckedOk
+            );
+            assert_eq!(
+                mounted.entity_check_state("plan-x", "plan-x--a").unwrap().0,
+                CheckState::CheckedOk
+            );
+            let audit = mounted.latest_foreign_checks("plan-x", "plan-x--g");
+            assert_eq!(audit.len(), 1);
+            assert_eq!(
+                memstead_base::check::derive_state(
+                    audit.first(),
+                    &mounted
+                        .get_entity(&memstead_base::EntityId::new("plan-x", "g"))
+                        .unwrap()
+                        .content_hash
+                ),
+                CheckState::CheckStale,
+                "stale stays stale"
+            );
         }
 
         #[test]

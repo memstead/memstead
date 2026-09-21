@@ -89,6 +89,22 @@ pub(in crate::engine::mutation) struct PreparedUpdate {
     /// Whether the entity's content changed in this update: the anchors
     /// merge then re-baselines a restated row (a sync repair's re-pin).
     pub(in crate::engine::mutation) content_changed: bool,
+    /// The self-check gates this write passed, when it passed any: the
+    /// commit step carries their records to the post-write hash before
+    /// staging, so the gate that admitted the write still holds after it.
+    /// Boxed: the prepared write already rides inside enum variants sized
+    /// against their peers.
+    pub(in crate::engine::mutation) licensed_self_checks: Option<Box<LicensedSelfChecks>>,
+}
+
+/// The `transition_requires_self_check` gates a prepared write passed on
+/// a fresh independent record ([`Engine::licensed_self_check_kinds`]),
+/// with the hash those records are keyed to.
+pub(in crate::engine::mutation) struct LicensedSelfChecks {
+    /// The entity's `content_hash` before the write.
+    pub(in crate::engine::mutation) hash_before: String,
+    /// The passed gates' wire kinds, deduplicated.
+    pub(in crate::engine::mutation) kinds: Vec<String>,
 }
 
 impl Engine {

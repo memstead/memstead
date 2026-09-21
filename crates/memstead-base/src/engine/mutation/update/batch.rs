@@ -225,6 +225,16 @@ impl Engine {
         // per-mem pending buffer so they ride the batch commit
         // atomically.
         for p in &prepared {
+            // The self-check records each item passed its gate on follow
+            // the entity to its post-write hash, before anything is staged
+            // (the single path's order, see `commit_prepared_update`).
+            if let Err(e) = self.carry_prepared_self_checks(p) {
+                self.store = store_snapshot;
+                self.discard_all_pending();
+                return Err(e);
+            }
+        }
+        for p in &prepared {
             if let Err(e) = self.stage_prepared_update(p) {
                 self.store = store_snapshot;
                 self.discard_all_pending();

@@ -66,6 +66,12 @@ impl Engine {
             }
             crate::ops::signals::snapshot_levels(&self.store, &self.schemas, candidates.iter())
         };
+        // The records that admitted this write through a self-check gate
+        // follow the entity to its post-write hash. Workspace state, not
+        // mem content, so it cannot ride the commit; carried before the
+        // write is staged, so a ledger that refuses stops the update the
+        // way a refused check stops a record, and nothing is on disk.
+        self.carry_prepared_self_checks(&prepared)?;
         self.stage_prepared_update(&prepared)?;
         let backend = self.mounts[prepared.mount_idx].backend.as_ref();
         // Anchor-only commits carry the distinct `anchor` verb so their
@@ -139,6 +145,31 @@ impl Engine {
             relations_declared: prepared.relations_declared,
             anchors_changed: prepared.anchors_changed,
         })
+    }
+
+    /// Carry the self-check records a prepared write passed its gate on
+    /// to the hash the write produces ([`Self::carry_checks_across_transition`]).
+    /// The post-write hash is the hash of the bytes about to be staged,
+    /// the same bytes [`Self::apply_prepared_to_store`] re-parses, so the
+    /// carried line matches the store's hash exactly. Nothing to carry
+    /// when the content is unchanged or no gate was passed.
+    pub(in crate::engine::mutation) fn carry_prepared_self_checks(
+        &self,
+        prepared: &PreparedUpdate,
+    ) -> Result<usize, EngineError> {
+        let Some(licensed) = prepared.licensed_self_checks.as_deref() else {
+            return Ok(0);
+        };
+        if !prepared.content_changed {
+            return Ok(0);
+        }
+        let post_hash = crate::entity::parser::compute_hash(&prepared.markdown);
+        self.carry_checks_across_transition(
+            &prepared.id,
+            &licensed.kinds,
+            &licensed.hash_before,
+            &post_hash,
+        )
     }
 
     /// Parse the prepared markdown, push it into the in-memory store,

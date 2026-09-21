@@ -505,6 +505,18 @@ impl Engine {
                 violations: violated,
             });
         }
+        // The self-check gates this write passes: `next` still carries the
+        // pre-write hash, so the provider reads the records as they stand
+        // now. The commit step carries them to the post-write hash.
+        let licensed_self_checks = {
+            let kinds = self.licensed_self_check_kinds(&next, type_def.as_ref());
+            (!kinds.is_empty()).then(|| {
+                Box::new(super::LicensedSelfChecks {
+                    hash_before: next.content_hash.clone(),
+                    kinds,
+                })
+            })
+        };
 
         // Mirror the create-path emission shape — drive the warning from
         // the synthesised relations the alias pass just emitted, not
@@ -616,6 +628,7 @@ impl Engine {
             content_changed: !content_unchanged,
             anchors: validated_anchors,
             anchor_unsets: validated_anchor_unsets,
+            licensed_self_checks,
         };
 
         if args.dry_run {

@@ -1411,6 +1411,143 @@ compare `[[planning/plan-x--alpha]]` in code.",
     );
 }
 
+/// The defect: a hierarchical mem publishes under its leaf and the
+/// export retargets its self-qualified links, so the archived bytes hash
+/// differently from the bytes the sealed records were keyed to, and on
+/// the mount every record read `check_stale`. Now a record fresh at
+/// export is re-keyed to the archived bytes (marked `carried_from`,
+/// reason `export`) and reads `checked_ok` on the mount; a record stale
+/// before the export keeps its hash and still reads stale. The same holds
+/// through the self-contained re-pack, which re-renders every entity.
+#[test]
+fn nested_mem_export_rekeys_fresh_sealed_checks_to_the_archived_bytes() {
+    use crate::check::{CheckKind, CheckState, RecordKind, Verdict};
+    let tmp = TempDir::new().unwrap();
+    let mem_dir = tmp.path().join("planning").join("plan-x");
+    std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+    std::fs::write(
+        mem_dir.join(".memstead").join("config.json"),
+        r#"{"format": 1, "schema": "default@1.0.0", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+    let spec = |title: &str, identity: &str| {
+        format!(
+            "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-01-15\nlevel: M0\n---\n\
+# {title}\n\n## Identity\n\n{identity}\n\n## Purpose\n\nB\n\n## Specifies\n\nC\n\n\
+## Constraints\n\nD\n\n## Rationale\n\nE\n"
+        )
+    };
+    std::fs::write(mem_dir.join("alpha.md"), spec("Alpha", "A")).unwrap();
+    std::fs::write(mem_dir.join("beta.md"), spec("Beta", "B")).unwrap();
+    std::fs::write(
+        mem_dir.join("gamma.md"),
+        spec("Gamma", "Builds on [[planning/plan-x--alpha]]."),
+    )
+    .unwrap();
+    let writer = FilesystemBackend::new(mem_dir.clone());
+    let mut engine = Engine::from_mounts(vec![(
+        folder_mount("planning/plan-x", mem_dir.clone()),
+        Box::new(writer) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+    engine.set_workspace_root(tmp.path().to_path_buf());
+    let (actor, client) = cli_actor();
+    engine.set_identity(Some("checker-s1".to_string()));
+    for slug in ["gamma", "beta"] {
+        engine
+            .record_check_with(
+                "planning/plan-x",
+                &format!("planning/plan-x--{slug}"),
+                Verdict::Ok,
+                &RecordKind::Engine(CheckKind::Verification),
+                None,
+                None,
+                actor,
+                Some(&client),
+            )
+            .unwrap();
+    }
+    // Alpha's record is keyed to content the checker never saw: stale
+    // before the export, stale after it.
+    crate::check::CheckLedger::for_workspace(tmp.path())
+        .record(&crate::check::CheckRecord {
+            ts: 1,
+            entity: "planning/plan-x--alpha".to_string(),
+            verdict: "ok".to_string(),
+            method: None,
+            entity_hash: "stale-before-export".to_string(),
+            actor: "cli".to_string(),
+            client: None,
+            role: "checker".to_string(),
+            identity: Some("checker-s1".to_string()),
+            kind: None,
+            schema_ref: None,
+            finding: None,
+            renamed_from: None,
+            carried_from: None,
+        })
+        .unwrap();
+    let source_gamma_hash = engine
+        .get_entity(&crate::EntityId::new("planning/plan-x", "gamma"))
+        .unwrap()
+        .content_hash
+        .clone();
+
+    let bytes = engine.export_mem_to_bytes("planning/plan-x").unwrap();
+    let sealed = sealed_checks_of(&bytes).expect("the archive carries the checks member");
+    let gamma = sealed.latest("gamma", "verification").unwrap();
+    assert_ne!(
+        gamma.entity_hash, source_gamma_hash,
+        "re-keyed to the archived bytes"
+    );
+    assert_eq!(
+        gamma.carried_from,
+        Some(crate::check::CarriedFrom::export(&source_gamma_hash))
+    );
+    // Beta's bytes carry no self-qualified link: untouched, unmarked.
+    assert!(
+        sealed
+            .latest("beta", "verification")
+            .unwrap()
+            .carried_from
+            .is_none()
+    );
+    assert_eq!(
+        sealed.latest("alpha", "verification").unwrap().entity_hash,
+        "stale-before-export"
+    );
+
+    let assert_mount = |bytes: Vec<u8>, label: &str| {
+        let mounted = Engine::from_archive_bytes(bytes).unwrap();
+        for slug in ["gamma", "beta"] {
+            let (state, latest) = mounted
+                .entity_check_state("plan-x", &format!("plan-x--{slug}"))
+                .unwrap();
+            assert_eq!(state, CheckState::CheckedOk, "{label}: {slug}");
+            assert_eq!(
+                latest.unwrap().identity.as_deref(),
+                Some("checker-s1"),
+                "{label}: the record stays the checker's"
+            );
+        }
+        let (state, _) = mounted
+            .entity_check_state("plan-x", "plan-x--alpha")
+            .unwrap();
+        assert_eq!(state, CheckState::CheckStale, "{label}: stale stays stale");
+    };
+    assert_mount(bytes.clone(), "export");
+
+    // The self-contained re-pack re-renders every entity; the records
+    // follow those bytes too, and the pass is idempotent.
+    let self_contained = crate::validator::make_archive_self_contained(&bytes).unwrap();
+    assert_mount(self_contained.bytes.clone(), "self-contained");
+    let again = crate::validator::make_archive_self_contained(&self_contained.bytes).unwrap();
+    assert_eq!(
+        again.bytes, self_contained.bytes,
+        "canonical re-pack is idempotent"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Sealed check records (`.memstead/checks.json`)
 // ---------------------------------------------------------------------------
@@ -1552,6 +1689,7 @@ fn export_seals_latest_check_per_entity_and_kind() {
             schema_ref: None,
             finding: None,
             renamed_from: None,
+            carried_from: None,
         })
         .unwrap();
 
@@ -1648,6 +1786,7 @@ fn export_without_a_qualifying_record_embeds_no_checks_member() {
             schema_ref: None,
             finding: None,
             renamed_from: None,
+            carried_from: None,
         })
         .unwrap();
     let no_record = engine.export_mem_to_bytes("specs").unwrap();
@@ -1970,6 +2109,7 @@ fn archive_mount_never_reads_the_workspace_ledger() {
             schema_ref: None,
             finding: None,
             renamed_from: None,
+            carried_from: None,
         })
         .unwrap();
     mounted.set_workspace_root(ws.path().to_path_buf());

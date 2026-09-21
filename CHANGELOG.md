@@ -7,6 +7,37 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **A check record that licenses a status transition survives the write,
+  and a self-contained export keeps fresh sealed records fresh.** Two
+  hash-keyed check records went stale by the engine's own hand. First, a
+  write that passed a `transition_requires_self_check` gate on a fresh
+  independent record (an `x-projection` ok on a planning bundle admitting
+  `status: complete`) moved the entity's content hash and staled the very
+  record that admitted it, so `health --include constraints` reported
+  `CONSTRAINT_UNSATISFIED` (`check_stale`) the moment after the gate held.
+  The engine now carries the licensing records across the transition the
+  way a rename carries them: one appended ledger line per passed kind,
+  keyed to the post-write hash, every other field the checker's (identity
+  included, so independence still reads it as the checker's), marked
+  `carried_from: {hash, reason: "transition"}`. Only a record fresh at the
+  pre-write hash and confirming is carried; a stale or failed one is not,
+  and the write refuses as before. Second, `export --format mem` of a
+  hierarchical mem (`planning/plan-x`) publishes under its leaf and
+  retargets the mem's self-qualified links, and `--self-contained`
+  re-renders every entity, so the archived bytes hashed differently from
+  the hashes the sealed records carried and every record read
+  `check_stale` on the archive mount (a complete plan showed
+  `transition_requires_checks` unsatisfied). Every export path (folder,
+  in-memory, git-branch) and the canonical re-pack now re-key a sealed
+  record to the archived bytes if and only if its hash matched the entity's
+  pre-rewrite content, marked `carried_from: {hash, reason: "export"}`; a
+  record stale before the export keeps its hash and still reads stale. The
+  ledger line and the sealed record gain the optional `carried_from` field;
+  every existing line and member parses unchanged, and a mem whose bytes
+  the export never rewrites exports byte-identically.
+
 ### Added
 
 - **A mem forks from another mem's branch at a recorded ancestor.**

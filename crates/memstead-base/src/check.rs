@@ -238,6 +238,51 @@ impl Verdict {
     }
 }
 
+/// The reason a record was carried to a new `entity_hash` by the engine
+/// across a status transition it licensed ([`CheckLedger::carry_transition`]).
+pub const CARRY_REASON_TRANSITION: &str = "transition";
+
+/// The reason a sealed record was re-keyed to the archived entity bytes
+/// at export ([`SealedChecks::rekey_entity`]).
+pub const CARRY_REASON_EXPORT: &str = "export";
+
+/// Set on a record the engine carried to a new `entity_hash`: the hash
+/// the record was keyed to before, and why it moved. Two reasons exist.
+/// `transition`: a status write passed a `transition_requires_self_check`
+/// gate on the strength of this record, and the write itself moved the
+/// entity's hash, so the record that licensed the write is re-keyed to
+/// the content the write produced. `export`: a sealed export rewrote the
+/// entity's bytes (a hierarchical mem's self-qualified links follow the
+/// archive name, and the canonical re-pack re-renders every entity), so
+/// a record fresh at export is re-keyed to the archived bytes. In both
+/// cases only a record whose hash matched the pre-rewrite content moves;
+/// a stale record keeps its old hash and stays stale. Every other field
+/// is the original act's, identity included, so independence still reads
+/// the record as the checker's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CarriedFrom {
+    /// The `entity_hash` the record carried before it was moved.
+    pub hash: String,
+    /// [`CARRY_REASON_TRANSITION`] or [`CARRY_REASON_EXPORT`].
+    pub reason: String,
+}
+
+impl CarriedFrom {
+    pub fn transition(hash: &str) -> Self {
+        Self {
+            hash: hash.to_string(),
+            reason: CARRY_REASON_TRANSITION.to_string(),
+        }
+    }
+
+    pub fn export(hash: &str) -> Self {
+        Self {
+            hash: hash.to_string(),
+            reason: CARRY_REASON_EXPORT.to_string(),
+        }
+    }
+}
+
 /// One recorded check — the full ledger line.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckRecord {
@@ -300,6 +345,11 @@ pub struct CheckRecord {
     /// every line a checker wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub renamed_from: Option<String>,
+    /// Set on a line the engine carried to a new `entity_hash` (a
+    /// licensed transition, a sealed export): the hash it was keyed to
+    /// before and the reason. Absent on every line a checker wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carried_from: Option<CarriedFrom>,
 }
 
 impl CheckRecord {
@@ -453,6 +503,40 @@ impl CheckLedger {
         Ok(carried.len())
     }
 
+    /// Carry the record that licensed a status transition across the
+    /// write it licensed: the newest record of `entity` under the wire
+    /// `kind` is appended again with `post_hash` as its `entity_hash` and
+    /// `carried_from: {hash: pre_hash, reason: "transition"}`, if and
+    /// only if it is fresh at `pre_hash` and confirming (`ok`). A stale
+    /// or failed record is not carried (it did not license anything),
+    /// and equal hashes carry nothing. Every other field stays the
+    /// original act's, identity included. Returns whether a line was
+    /// appended.
+    pub fn carry_transition(
+        &self,
+        entity: &str,
+        kind: &str,
+        pre_hash: &str,
+        post_hash: &str,
+    ) -> std::io::Result<bool> {
+        if pre_hash == post_hash {
+            return Ok(false);
+        }
+        let Some(latest) = self.latest_for_wire_kind(entity, kind) else {
+            return Ok(false);
+        };
+        if latest.entity_hash != pre_hash || latest.verdict != Verdict::Ok.as_str() {
+            return Ok(false);
+        }
+        let carried = CheckRecord {
+            entity_hash: post_hash.to_string(),
+            carried_from: Some(CarriedFrom::transition(pre_hash)),
+            ..latest
+        };
+        self.record(&carried)?;
+        Ok(true)
+    }
+
     /// All records, oldest first. A missing ledger is an empty one;
     /// unparseable lines are skipped (a torn tail must not poison the
     /// readable history).
@@ -543,6 +627,11 @@ pub struct SealedCheck {
     /// The id the check was recorded under before a rename carried it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub renamed_from: Option<String>,
+    /// The hash the record was keyed to before the engine carried it,
+    /// and why (a licensed transition on the source mem, or the export's
+    /// own rewrite of the entity bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carried_from: Option<CarriedFrom>,
 }
 
 impl SealedCheck {
@@ -558,6 +647,7 @@ impl SealedCheck {
             identity: rec.identity.clone(),
             schema_ref: rec.schema_ref.clone(),
             renamed_from: rec.renamed_from.clone(),
+            carried_from: rec.carried_from.clone(),
         }
     }
 
@@ -581,6 +671,7 @@ impl SealedCheck {
             schema_ref: self.schema_ref.clone(),
             finding: None,
             renamed_from: self.renamed_from.clone(),
+            carried_from: self.carried_from.clone(),
         }
     }
 }
@@ -618,6 +709,33 @@ impl SealedChecks {
             .get(entity_path)
             .into_iter()
             .flat_map(|kinds| kinds.iter().map(|(k, v)| (k.as_str(), v)))
+    }
+
+    /// Re-key every record of one entity that is fresh at `pre_hash` to
+    /// `post_hash`, marking it `carried_from: {hash: pre_hash, reason:
+    /// "export"}`: the export rewrote the entity's bytes (links retargeted
+    /// to the archive name, the canonical re-render), and a record that
+    /// was fresh against the source content stays fresh against the
+    /// archived content. A record keyed to any other hash was stale
+    /// before the export and keeps its hash, so it still reads stale on
+    /// the mount. Equal hashes change nothing. Returns the number of
+    /// records moved.
+    pub fn rekey_entity(&mut self, entity_path: &str, pre_hash: &str, post_hash: &str) -> usize {
+        if pre_hash == post_hash {
+            return 0;
+        }
+        let Some(kinds) = self.entities.get_mut(entity_path) else {
+            return 0;
+        };
+        let mut moved = 0;
+        for rec in kinds.values_mut() {
+            if rec.entity_hash == pre_hash {
+                rec.entity_hash = post_hash.to_string();
+                rec.carried_from = Some(CarriedFrom::export(pre_hash));
+                moved += 1;
+            }
+        }
+        moved
     }
 
     /// Serialise to the canonical member bytes (pretty JSON, trailing
@@ -719,6 +837,7 @@ mod tests {
             schema_ref: None,
             finding: None,
             renamed_from: None,
+            carried_from: None,
         }
     }
 
@@ -802,6 +921,117 @@ mod tests {
                 .renamed_from
                 .is_none()
         );
+    }
+
+    /// A transition carry re-keys the licensing record to the post-write
+    /// hash and marks its origin; a record that is stale at the pre-write
+    /// hash, a failed one, or an unchanged hash carries nothing. The
+    /// carried line keeps the checker's identity, so independence still
+    /// reads it as the checker's, not the writer's.
+    #[test]
+    fn carry_transition_moves_only_the_fresh_confirming_record() {
+        let tmp = TempDir::new().unwrap();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        let mut ok = rec("m--plan", "ok", "h1");
+        ok.kind = Some("x-projection".into());
+        ok.identity = Some("checker-c".into());
+        ledger.record(&ok).unwrap();
+
+        assert!(
+            !ledger
+                .carry_transition("m--plan", "x-projection", "h1", "h1")
+                .unwrap()
+        );
+        assert!(
+            !ledger
+                .carry_transition("m--plan", "x-projection", "h0", "h2")
+                .unwrap()
+        );
+        assert!(
+            !ledger
+                .carry_transition("m--plan", "verification", "h1", "h2")
+                .unwrap()
+        );
+        assert_eq!(ledger.all().len(), 1, "nothing appended so far");
+
+        assert!(
+            ledger
+                .carry_transition("m--plan", "x-projection", "h1", "h2")
+                .unwrap()
+        );
+        let all = ledger.all();
+        assert_eq!(all.len(), 2, "append-only: the original stays");
+        let carried = ledger
+            .latest_for_wire_kind("m--plan", "x-projection")
+            .unwrap();
+        assert_eq!(carried.entity_hash, "h2");
+        assert_eq!(carried.identity.as_deref(), Some("checker-c"));
+        assert_eq!(carried.verdict, "ok");
+        assert_eq!(
+            carried.carried_from,
+            Some(CarriedFrom {
+                hash: "h1".into(),
+                reason: CARRY_REASON_TRANSITION.into()
+            })
+        );
+        assert_eq!(derive_state(Some(&carried), "h2"), CheckState::CheckedOk);
+        // A second transition carries the carried line onward, one step.
+        assert!(
+            ledger
+                .carry_transition("m--plan", "x-projection", "h2", "h3")
+                .unwrap()
+        );
+        let again = ledger
+            .latest_for_wire_kind("m--plan", "x-projection")
+            .unwrap();
+        assert_eq!(again.carried_from.as_ref().unwrap().hash, "h2");
+
+        // A failed record licenses nothing and is never carried.
+        let mut failed = rec("m--other", "failed", "h1");
+        failed.kind = Some("x-projection".into());
+        ledger.record(&failed).unwrap();
+        assert!(
+            !ledger
+                .carry_transition("m--other", "x-projection", "h1", "h2")
+                .unwrap()
+        );
+        // A checker's own line never carries the marker.
+        assert!(all[0].carried_from.is_none());
+    }
+
+    /// The sealed member re-keys a record fresh at the pre-rewrite hash
+    /// to the archived hash and marks it; a stale record keeps its hash.
+    #[test]
+    fn sealed_rekey_moves_fresh_records_and_leaves_stale_ones() {
+        let mut sealed = SealedChecks::new();
+        let fresh = SealedCheck::from_record(&rec("m--a", "ok", "h1"));
+        let mut stale = SealedCheck::from_record(&rec("m--a", "ok", "h0"));
+        stale.ts = 0;
+        sealed.entities.insert(
+            "a".into(),
+            BTreeMap::from([
+                ("verification".to_string(), fresh),
+                ("x-audit".to_string(), stale),
+            ]),
+        );
+        assert_eq!(sealed.rekey_entity("a", "h1", "h1"), 0);
+        assert_eq!(sealed.rekey_entity("absent", "h1", "h2"), 0);
+        assert_eq!(sealed.rekey_entity("a", "h1", "h2"), 1);
+        let v = sealed.latest("a", "verification").unwrap();
+        assert_eq!(v.entity_hash, "h2");
+        assert_eq!(v.carried_from.as_ref().unwrap().reason, CARRY_REASON_EXPORT);
+        assert_eq!(v.carried_from.as_ref().unwrap().hash, "h1");
+        let x = sealed.latest("a", "x-audit").unwrap();
+        assert_eq!(x.entity_hash, "h0", "stale stays stale");
+        assert!(x.carried_from.is_none());
+        // The round trip through the ledger form keeps the marker.
+        let back = v.to_record("m--a", "verification");
+        assert_eq!(back.carried_from, v.carried_from);
+        assert_eq!(SealedCheck::from_record(&back), *v);
+        // A pre-marker member line still parses.
+        let legacy = r#"{"ts":1,"verdict":"ok","entity_hash":"h","actor":"cli","role":"checker"}"#;
+        let parsed: SealedCheck = serde_json::from_str(legacy).unwrap();
+        assert!(parsed.carried_from.is_none());
     }
 
     #[test]

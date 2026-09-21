@@ -179,6 +179,7 @@ impl Engine {
             schema_ref,
             finding,
             renamed_from: None,
+            carried_from: None,
         };
         ledger
             .record(&record)
@@ -212,6 +213,85 @@ impl Engine {
             .map_err(|e| EngineError::CheckNotRecorded {
                 reason: format!("ledger carry across rename {old} → {new} failed: {e}"),
             })
+    }
+
+    /// The `transition_requires_self_check` kinds a prepared write passes
+    /// on the strength of a fresh, independent record: every such
+    /// constraint of `type_def` whose gated value `next` holds and whose
+    /// declared kind the provider confirms against `next.content_hash`
+    /// (the PRE-write hash: the caller hands the composed entity before
+    /// the store or disk moved). These are the records the write is
+    /// about to stale; [`Self::carry_checks_across_transition`] carries
+    /// them. Empty when the type declares no such gate or none passes.
+    pub(crate) fn licensed_self_check_kinds(
+        &self,
+        next: &crate::entity::Entity,
+        type_def: &memstead_schema::TypeDefinition,
+    ) -> Vec<String> {
+        let provider = self.check_standing_provider();
+        let mut kinds: Vec<String> = Vec::new();
+        for c in &type_def.constraints {
+            let memstead_schema::ConstraintDef::TransitionRequiresSelfCheck {
+                field,
+                to_value,
+                check_kind,
+                ..
+            } = c
+            else {
+                continue;
+            };
+            let triggered = next
+                .metadata
+                .get(field.as_str())
+                .is_some_and(|v| v.to_frontmatter_string() == *to_value);
+            if triggered && !kinds.contains(check_kind) && provider(next, check_kind).confirms() {
+                kinds.push(check_kind.clone());
+            }
+        }
+        kinds
+    }
+
+    /// Carry the records that licensed a gated transition across the
+    /// write they licensed: for each wire kind in `kinds`, the newest
+    /// record of `id` that is fresh at `pre_hash` and confirming is
+    /// appended again keyed to `post_hash`, marked
+    /// `carried_from: {hash, reason: "transition"}`
+    /// ([`CheckLedger::carry_transition`]). Without this the write that
+    /// a `transition_requires_self_check` gate admitted moves the
+    /// entity's hash and stales the very record that admitted it, so the
+    /// constraint reads unsatisfied the moment after it was satisfied.
+    /// The carried line keeps the checker's identity: the writer is not
+    /// the checker, and independence must go on reading it that way. A
+    /// stale or failed record is not carried, it licensed nothing. An
+    /// engine with no workspace root has no ledger and carries nothing.
+    /// A failed append refuses, as recording does: the caller runs this
+    /// before the write is staged. Returns the number of lines carried.
+    pub(crate) fn carry_checks_across_transition(
+        &self,
+        id: &crate::entity::EntityId,
+        kinds: &[String],
+        pre_hash: &str,
+        post_hash: &str,
+    ) -> Result<usize, EngineError> {
+        if kinds.is_empty() || pre_hash == post_hash {
+            return Ok(0);
+        }
+        let Some(root) = self.workspace_root() else {
+            return Ok(0);
+        };
+        let ledger = CheckLedger::for_workspace(root);
+        let mut carried = 0;
+        for kind in kinds {
+            let moved = ledger
+                .carry_transition(id.as_ref(), kind, pre_hash, post_hash)
+                .map_err(|e| EngineError::CheckNotRecorded {
+                    reason: format!(
+                        "ledger carry of the `{kind}` record across the transition of {id} failed: {e}"
+                    ),
+                })?;
+            carried += usize::from(moved);
+        }
+        Ok(carried)
     }
 
     /// The newest check record of one entity under one wire kind, from
@@ -331,7 +411,7 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    use crate::check::{CheckKind, Verdict};
+    use crate::check::{CheckKind, CheckLedger, CheckRecord, CheckState, Verdict};
     use crate::vcs::Actor;
     use crate::workspace::MountCapability;
 
@@ -370,6 +450,355 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(err.code(), "MEM_QUARANTINED");
+    }
+
+    // --- the licensing record carries across the transition it licensed ---
+
+    /// A workspace-rooted folder mem `bundles` whose `plan` type gates
+    /// `status: complete` on a fresh independent record of `check_kind`
+    /// on the plan itself (`transition_requires_self_check`).
+    fn self_check_gated_engine(tmp: &tempfile::TempDir, check_kind: &str) -> crate::Engine {
+        let schemas_dir = tmp.path().join("schemas");
+        let pkg = schemas_dir.join("selfgate");
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        std::fs::write(
+            pkg.join("schema.yaml"),
+            r#"name: selfgate
+version: 0.1.0
+description: self-check gate fixture
+when_to_use: tests
+types:
+  - plan
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("types").join("plan.yaml"),
+            format!(
+                r#"name: plan
+description: p
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields:
+  - key: status
+    description: s
+    field_type: string
+    default_value: draft
+    enum_values: [draft, complete]
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+updatable_fields:
+  - title
+  - body
+  - status
+health_required_fields: []
+staleness_threshold_days: 90
+constraints:
+  - kind: transition_requires_self_check
+    field: status
+    to_value: complete
+    check_kind: {check_kind}
+    severity: block
+write_rules: []
+"#
+            ),
+        )
+        .unwrap();
+        let mem_dir = tmp.path().join("bundles");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = crate::storage::FilesystemBackend::new(mem_dir.clone());
+        let mount = crate::workspace::Mount {
+            mem: "bundles".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "selfgate",
+                semver::Version::new(0, 1, 0),
+            )),
+            storage: crate::workspace::MountStorage::Folder { path: mem_dir },
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let mut engine = crate::Engine::from_mounts_with_schemas_dir(
+            vec![(
+                mount,
+                Box::new(writer) as Box<dyn crate::backend::MemBackend>,
+            )],
+            Some(&schemas_dir),
+        )
+        .unwrap();
+        engine.set_workspace_root(tmp.path().to_path_buf());
+        engine
+    }
+
+    fn create_plan(engine: &mut crate::Engine, title: &str) -> crate::entity::EntityId {
+        let (actor, client) = crate::engine::test_helpers::cli_actor();
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("body".to_string(), "the plan body.".to_string());
+        engine
+            .create_entity(
+                crate::engine::CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "bundles".to_string(),
+                    title: title.to_string(),
+                    entity_type: "plan".to_string(),
+                    sections,
+                    metadata: indexmap::IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap()
+            .id
+    }
+
+    fn set_status(
+        engine: &mut crate::Engine,
+        id: &crate::entity::EntityId,
+        value: &str,
+    ) -> Result<crate::engine::UpdateEntityOutcome, crate::engine::error::EngineError> {
+        let (actor, client) = crate::engine::test_helpers::cli_actor();
+        let current = engine.get_entity(id).unwrap().content_hash.clone();
+        let mut metadata = indexmap::IndexMap::new();
+        metadata.insert("status".to_string(), value.to_string());
+        engine.update_entity(
+            crate::engine::UpdateEntityArgs {
+                anchors: Vec::new(),
+                id: id.clone(),
+                expected_hash: Some(current),
+                sections: indexmap::IndexMap::new(),
+                append_sections: indexmap::IndexMap::new(),
+                patch_sections: indexmap::IndexMap::new(),
+                sections_unset: Vec::new(),
+                metadata,
+                metadata_unset: Vec::new(),
+                declare_relations: vec![],
+                dry_run: false,
+                relations_unset: Vec::new(),
+                anchors_unset: Vec::new(),
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+    }
+
+    fn append_body(engine: &mut crate::Engine, id: &crate::entity::EntityId) {
+        let (actor, client) = crate::engine::test_helpers::cli_actor();
+        let current = engine.get_entity(id).unwrap().content_hash.clone();
+        let mut append = indexmap::IndexMap::new();
+        append.insert("body".to_string(), "more.".to_string());
+        engine
+            .update_entity(
+                crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: id.clone(),
+                    expected_hash: Some(current),
+                    sections: indexmap::IndexMap::new(),
+                    append_sections: append,
+                    patch_sections: indexmap::IndexMap::new(),
+                    sections_unset: Vec::new(),
+                    metadata: indexmap::IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    declare_relations: vec![],
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+    }
+
+    fn check_plan(
+        engine: &mut crate::Engine,
+        identity: &str,
+        id: &crate::entity::EntityId,
+        kind: &str,
+    ) {
+        let (actor, client) = crate::engine::test_helpers::cli_actor();
+        engine.set_identity(Some(identity.to_string()));
+        engine
+            .record_check_with(
+                "bundles",
+                id.as_ref(),
+                Verdict::Ok,
+                &crate::check::RecordKind::from_wire(kind).unwrap(),
+                Some("projection walked"),
+                None,
+                actor,
+                Some(&client),
+            )
+            .unwrap();
+    }
+
+    /// The defect: a bundle carries a fresh `x-projection` ok record under
+    /// an independent identity, the author's `status: complete` passes
+    /// the gate, and the write moves the hash; before the carry, the
+    /// constraints axis reported the gate unsatisfied (`check_stale`) the
+    /// moment after it admitted the write. Now the licensing record is
+    /// carried to the post-write hash, marked, still the checker's; the
+    /// constraints axis stays clean and the gate keeps holding across a
+    /// later write to the complete plan.
+    #[test]
+    fn licensing_self_check_carries_across_the_transition_it_admitted() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "x-projection");
+        engine.set_identity(Some("author-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+        let hash_at_check = engine.get_entity(&id).unwrap().content_hash.clone();
+        check_plan(&mut engine, "checker-c", &id, "x-projection");
+
+        engine.set_identity(Some("author-a".to_string()));
+        let outcome = set_status(&mut engine, &id, "complete").expect("the gate admits the write");
+        assert_ne!(
+            outcome.content_hash, hash_at_check,
+            "the write moved the hash"
+        );
+
+        // The constraints axis reads no violation after the write.
+        let findings = engine.constraint_findings(Some("bundles"));
+        assert!(findings.is_empty(), "{findings:?}");
+
+        // The carried line: post-write hash, marked, the checker's identity.
+        let foreign = engine.latest_foreign_checks("bundles", id.as_ref());
+        assert_eq!(foreign.len(), 1);
+        let carried = &foreign[0];
+        assert_eq!(carried.entity_hash, outcome.content_hash);
+        assert_eq!(carried.identity.as_deref(), Some("checker-c"));
+        assert_eq!(carried.method.as_deref(), Some("projection walked"));
+        assert_eq!(
+            carried.carried_from,
+            Some(crate::check::CarriedFrom::transition(&hash_at_check))
+        );
+        // The gate's own reading of the carried record: fresh and independent.
+        let entity = engine.get_entity(&id).unwrap().clone();
+        let standing = (engine.check_standing_provider())(&entity, "x-projection");
+        assert!(standing.confirms(), "{standing:?}");
+        // Append-only: the checker's original line stays, unmarked.
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        let lines: Vec<CheckRecord> = ledger
+            .all()
+            .into_iter()
+            .filter(|r| r.entity == id.as_ref())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].carried_from.is_none());
+        assert_eq!(lines[0].entity_hash, hash_at_check);
+
+        // A later write to the complete plan passes on the carried record
+        // and carries it onward, so the gate keeps holding.
+        engine.set_identity(Some("author-a".to_string()));
+        append_body(&mut engine, &id);
+        assert!(engine.constraint_findings(Some("bundles")).is_empty());
+        let onward = &engine.latest_foreign_checks("bundles", id.as_ref())[0];
+        assert_eq!(
+            onward.entity_hash,
+            engine.get_entity(&id).unwrap().content_hash
+        );
+        assert_eq!(
+            onward.carried_from.as_ref().unwrap().hash,
+            outcome.content_hash
+        );
+        // A write that leaves the gate unentered carries nothing: back to
+        // draft, then an append, and the record is not moved again.
+        set_status(&mut engine, &id, "draft").unwrap();
+        let before = ledger.all().len();
+        append_body(&mut engine, &id);
+        assert_eq!(
+            ledger.all().len(),
+            before,
+            "no gate passed, nothing carried"
+        );
+    }
+
+    /// The `verification` kind through the same gate: after the write the
+    /// entity's check state reads `checked_ok` and the health checks axis
+    /// lists it `confirmed_independent`: the carried record stays the
+    /// checker's, never the writer's.
+    #[test]
+    fn carried_verification_record_reads_checked_ok_and_independent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "verification");
+        engine.set_identity(Some("author-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+        check_plan(&mut engine, "checker-c", &id, "verification");
+        engine.set_identity(Some("author-a".to_string()));
+        set_status(&mut engine, &id, "complete").expect("the gate admits the write");
+
+        let (state, latest) = engine.entity_check_state("bundles", id.as_ref()).unwrap();
+        assert_eq!(state, CheckState::CheckedOk);
+        let latest = latest.unwrap();
+        assert_eq!(latest.identity.as_deref(), Some("checker-c"));
+        assert!(latest.carried_from.is_some());
+        let axis = crate::ops::health::health_checks_axis(&engine, Some("bundles"));
+        let independence = &axis["bundles"]["independence"];
+        assert_eq!(
+            independence["confirmed_independent"]["items"],
+            serde_json::json!([id.as_ref()]),
+            "{axis}"
+        );
+        assert_eq!(
+            axis["bundles"]["checked_ok"],
+            serde_json::json!(1),
+            "{axis}"
+        );
+        assert!(engine.constraint_findings(Some("bundles")).is_empty());
+    }
+
+    /// A record already stale before the write licenses nothing: the
+    /// write refuses as before, and the ledger gains no carried line.
+    #[test]
+    fn stale_self_check_is_not_carried_and_the_write_refuses() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "x-projection");
+        engine.set_identity(Some("author-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+        check_plan(&mut engine, "checker-c", &id, "x-projection");
+        // The author edits after the check: the record goes stale.
+        engine.set_identity(Some("author-a".to_string()));
+        append_body(&mut engine, &id);
+        let before = CheckLedger::for_workspace(tmp.path()).all().len();
+        let err = set_status(&mut engine, &id, "complete").unwrap_err();
+        assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED");
+        assert!(err.to_string().contains("check_stale"), "{err}");
+        assert_eq!(CheckLedger::for_workspace(tmp.path()).all().len(), before);
+        assert_ne!(
+            engine
+                .get_entity(&id)
+                .unwrap()
+                .metadata
+                .get("status")
+                .map(|v| v.to_frontmatter_string())
+                .as_deref(),
+            Some("complete"),
+            "the refused write left the entity as it was"
+        );
     }
 
     /// Criterion 5 complement: a read-only mount refuses a check
