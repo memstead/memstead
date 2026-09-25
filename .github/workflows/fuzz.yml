@@ -39,7 +39,7 @@ jobs:
         with:
           workspaces: fuzz -> fuzz/target
       - name: Install cargo-fuzz
-        uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2
+        uses: taiki-e/install-action@dfae9bf3d6f6c6f20ef4ebb3486c01a51341ff12 # v2
         with:
           tool: cargo-fuzz
       - name: fmt + clippy over the excluded fuzz crate
