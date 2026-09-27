@@ -408,6 +408,32 @@ impl Engine {
         }
     }
 
+    /// Everything the export seals beside one ledger record, derived over
+    /// the live mem so the archive carries exactly what the source engine
+    /// would have answered at export time: the independence reading
+    /// ([`Self::sealed_independence_reader`]) and the trust class of the
+    /// row's own prose ([`Self::check_row_origin_class`]) — who wrote the
+    /// `method` note and the finding message, which in a workspace that
+    /// points a foreign model or a transcribed outside finding at its
+    /// ledger is not the workspace itself.
+    ///
+    /// The class is `None` for every record while the deployment declares
+    /// no owner identities, so an export stays byte-identical until it
+    /// does.
+    pub fn sealed_row_reader(
+        &self,
+        mem: &str,
+    ) -> impl Fn(&CheckRecord) -> crate::ops::export::SealedRowFacts + '_ {
+        let independence = self.sealed_independence_reader(mem);
+        let mem = mem.to_string();
+        move |rec: &CheckRecord| crate::ops::export::SealedRowFacts {
+            independence: independence(rec),
+            origin: self
+                .declares_owner_identities()
+                .then(|| self.check_row_origin_class(&mem, rec.identity.as_deref())),
+        }
+    }
+
     /// The gate's window into the ledger: derived state plus, for an
     /// ok-checked entity, the independence of that check — with each
     /// mem's touches gathered once per provider.

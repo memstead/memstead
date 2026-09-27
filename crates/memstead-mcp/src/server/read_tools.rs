@@ -95,11 +95,16 @@ impl McpServer {
         // declaring none keeps both channels byte-identical.
         let computed_signals = engine.computed_signals(&entity);
         let computed_labelling = engine.computed_labelling(&entity);
+        // The entity's own trust class, not its mem's: a body merged from
+        // a fork is a stranger's prose inside a first-party mem, and this
+        // is the channel the reading agent takes as the document's voice.
+        let origin = engine.entity_origin_class(&id);
         let mut md = render::render_entity_markdown_with_signals(
             &entity,
             sections_filter,
             computed_signals.as_deref(),
             computed_labelling.as_ref(),
+            Some(origin),
         );
 
         if p.include_relations.unwrap_or(false) {
@@ -164,7 +169,7 @@ impl McpServer {
             full_tokens,
             sections_filter,
             schema_anchor.as_deref(),
-            engine.mem_origin_class(id.mem()),
+            origin,
             engine.store().outgoing(&id),
             incoming_for_envelope.as_deref(),
             computed_signals.as_deref(),
@@ -243,6 +248,26 @@ impl McpServer {
                 md.push_str(&format!(
                     "\n\n> **ANCHORS_SIDECAR_UNREADABLE** — mem `{}`: {why}. This entity's \
                      provenance anchors are unknown, not absent.\n",
+                    id.mem()
+                ));
+            }
+            // A mem whose proposal record cannot be read serves every entity
+            // as third-party. Stated, because a conservative label with no
+            // cause reads as the engine calling the operator's own mem a
+            // stranger's.
+            if let Some(why) = engine.proposal_record_error(id.mem()) {
+                obj.insert(
+                    "proposal_record_error".into(),
+                    serde_json::json!({
+                        "code": "PROPOSAL_RECORD_UNREADABLE",
+                        "mem": id.mem(),
+                        "reason": &why,
+                    }),
+                );
+                md.push_str(&format!(
+                    "\n\n> **PROPOSAL_RECORD_UNREADABLE** — mem `{}`: {why}. Which bodies came \
+                     from a contributor is therefore unknown, so every entity of this mem is \
+                     served as third-party until the record is repaired.\n",
                     id.mem()
                 ));
             }
@@ -357,7 +382,8 @@ impl McpServer {
             }
         };
 
-        let md = render::render_search_markdown(&result, offset);
+        let md =
+            render::render_search_markdown(&result, offset, &|id| engine.entity_origin_class(id));
         // Structured envelope
         // on `structured_content`, rendered markdown on the text
         // channel. Search results have a useful human-readable
@@ -367,7 +393,7 @@ impl McpServer {
         // by the shared envelope builder so the CLI's `--json` and this
         // `structured_content` agree key for key.
         let envelope =
-            render::build_search_envelope(&result, offset, &|m| engine.mem_origin_class(m));
+            render::build_search_envelope(&result, offset, &|id| engine.entity_origin_class(id));
         let structured = serde_json::to_value(&envelope).unwrap_or(serde_json::Value::Null);
         attach_mem_changed_to_result(
             md_with_structured(prepend_drift_warnings_md(md, &drift_warnings), structured),

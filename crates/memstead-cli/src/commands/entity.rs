@@ -125,6 +125,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         signals,
         labelling,
         sidecar_error,
+        record_error,
     ) = match engine_handle {
         CliEngine::MemRepo(engine) => {
             let entity = engine
@@ -133,6 +134,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .ok_or_else(|| miss(&engine))?;
             let signals = engine.computed_signals(&entity);
             let labelling = engine.computed_labelling(&entity);
+            // Entity grain, not mem grain: a body merged from a fork is a
+            // stranger's prose inside a first-party mem.
+            let origin = engine.entity_origin_class(&id);
             let md = render_with_optional_relations(
                 &entity,
                 &id,
@@ -140,19 +144,21 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 &args,
                 signals.as_deref(),
                 labelling.as_ref(),
+                origin,
             );
             let outgoing = engine.store().outgoing(&id).to_vec();
             let incoming = args
                 .include_relations
                 .then(|| engine.store().incoming(&id).to_vec());
-            let origin = engine.mem_origin_class(id.mem());
             let prov = provenance_block(&engine);
             // The provenance layer's readability rides every entity read:
             // an unreadable sidecar means this entity's anchors are unknown,
             // and a read that stayed silent would pass for "none".
             let sidecar = engine.anchors_sidecar_error(id.mem());
+            let record_err = engine.proposal_record_error(id.mem());
             (
                 entity, md, outgoing, incoming, origin, prov, signals, labelling, sidecar,
+                record_err,
             )
         }
         CliEngine::Filesystem(engine) => {
@@ -162,6 +168,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .ok_or_else(|| miss(&engine))?;
             let signals = engine.computed_signals(&entity);
             let labelling = engine.computed_labelling(&entity);
+            // Entity grain, not mem grain: a body merged from a fork is a
+            // stranger's prose inside a first-party mem.
+            let origin = engine.entity_origin_class(&id);
             let md = render_with_optional_relations(
                 &entity,
                 &id,
@@ -169,19 +178,21 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 &args,
                 signals.as_deref(),
                 labelling.as_ref(),
+                origin,
             );
             let outgoing = engine.store().outgoing(&id).to_vec();
             let incoming = args
                 .include_relations
                 .then(|| engine.store().incoming(&id).to_vec());
-            let origin = engine.mem_origin_class(id.mem());
             let prov = provenance_block(&engine);
             // The provenance layer's readability rides every entity read:
             // an unreadable sidecar means this entity's anchors are unknown,
             // and a read that stayed silent would pass for "none".
             let sidecar = engine.anchors_sidecar_error(id.mem());
+            let record_err = engine.proposal_record_error(id.mem());
             (
                 entity, md, outgoing, incoming, origin, prov, signals, labelling, sidecar,
+                record_err,
             )
         }
     };
@@ -242,6 +253,18 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 }),
             );
         }
+        // Same contract for the proposal record: a mem whose record cannot be
+        // read serves every entity as third-party, and the label says why.
+        if let (Some(why), Some(obj)) = (&record_error, envelope.as_object_mut()) {
+            obj.insert(
+                "proposal_record_error".into(),
+                serde_json::json!({
+                    "code": "PROPOSAL_RECORD_UNREADABLE",
+                    "mem": id.mem(),
+                    "reason": why,
+                }),
+            );
+        }
         crate::output::print_json(&envelope)?;
     } else {
         let mut text = chunked.clone();
@@ -249,6 +272,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             text.push_str(&format!(
                 "\n\n> **ANCHORS_SIDECAR_UNREADABLE** — mem `{}`: {why}. This entity's provenance \
                  anchors are unknown, not absent.\n",
+                id.mem()
+            ));
+        }
+        if let Some(why) = &record_error {
+            text.push_str(&format!(
+                "\n\n> **PROPOSAL_RECORD_UNREADABLE** — mem `{}`: {why}. Which bodies came from a \
+                 contributor is therefore unknown, so every entity of this mem is served as \
+                 third-party until the record is repaired.\n",
                 id.mem()
             ));
         }
@@ -340,7 +371,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             // The newest verification record behind the state: who
             // recorded what, and whether the engine carried it across a
             // rename (the JSON form carries the whole record).
-            let render_check = |rec: &serde_json::Value| -> Option<String> {
+            // Whether the check prose on this entity was written by a party
+            // other than this workspace, as the engine reports it.
+            let foreign_prose = |prov: &serde_json::Value| -> bool {
+                prov.get("check_prose_origin").and_then(|v| v.as_str()) == Some("third-party")
+            };
+            let render_check = |rec: &serde_json::Value, foreign_prose: bool| -> Option<String> {
                 let verdict = rec.get("verdict")?.as_str()?;
                 let who = rec
                     .get("identity")
@@ -348,7 +384,19 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     .or_else(|| rec.get("actor").and_then(|v| v.as_str()))
                     .unwrap_or("unknown");
                 let mut line = format!("- last check: {verdict} by {who}");
+                if foreign_prose {
+                    line.push_str(memstead_base::render::QUOTE_LABEL);
+                }
+                // The method note is the checker's own sentence, and on an
+                // installed archive the publisher's. Contained where it is
+                // not this workspace's, so it cannot read as the report's
+                // own voice.
                 if let Some(m) = rec.get("method").and_then(|v| v.as_str()) {
+                    let m = if foreign_prose {
+                        memstead_base::render::quote_inline(m)
+                    } else {
+                        m.to_string()
+                    };
                     line.push_str(&format!(" ({m})"));
                 }
                 if let Some(from) = rec.get("renamed_from").and_then(|v| v.as_str()) {
@@ -366,14 +414,16 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     && state != "never_checked"
                 {
                     out.push_str(&format!("- conformance state: {state}\n"));
-                    if let Some(l) = render_check(&prov["last_conformance_check"]) {
+                    if let Some(l) =
+                        render_check(&prov["last_conformance_check"], foreign_prose(prov))
+                    {
                         out.push_str(&l.replacen("- last check:", "- last conformance check:", 1));
                     }
                 }
                 if let Some(foreign) = prov.get("foreign_checks").and_then(|v| v.as_array()) {
                     for rec in foreign {
                         let kind = rec.get("kind").and_then(|v| v.as_str()).unwrap_or("x-");
-                        if let Some(l) = render_check(rec) {
+                        if let Some(l) = render_check(rec, foreign_prose(prov)) {
                             out.push_str(&l.replacen(
                                 "- last check:",
                                 &format!("- last {kind} check:"),
@@ -402,7 +452,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     if let Some(state) = prov.get("check_state").and_then(|v| v.as_str()) {
                         text.push_str(&format!("- check state: {state}\n"));
                     }
-                    if let Some(l) = render_check(&prov["last_check"]) {
+                    if let Some(l) = render_check(&prov["last_check"], foreign_prose(prov)) {
                         text.push_str(&l);
                     }
                     text.push_str(&render_more_checks(prov));
@@ -424,7 +474,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     if let Some(state) = prov.get("check_state").and_then(|v| v.as_str()) {
                         text.push_str(&format!("- check state: {state}\n"));
                     }
-                    if let Some(l) = render_check(&prov["last_check"]) {
+                    if let Some(l) = render_check(&prov["last_check"], foreign_prose(prov)) {
                         text.push_str(&l);
                     }
                     text.push_str(&render_more_checks(prov));
@@ -446,14 +496,20 @@ fn render_with_optional_relations(
     args: &Args,
     signals: Option<&[memstead_base::ops::signals::ComputedSignal]>,
     labelling: Option<&memstead_base::ops::labelling::LabellingView>,
+    origin: memstead_base::render::OriginClass,
 ) -> String {
     let sections_filter = if args.sections.is_empty() {
         None
     } else {
         Some(args.sections.as_slice())
     };
-    let mut md =
-        render::render_entity_markdown_with_signals(entity, sections_filter, signals, labelling);
+    let mut md = render::render_entity_markdown_with_signals(
+        entity,
+        sections_filter,
+        signals,
+        labelling,
+        Some(origin),
+    );
     if args.include_relations {
         let outgoing = store.outgoing(id).to_vec();
         let incoming = store.incoming(id).to_vec();

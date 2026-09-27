@@ -173,13 +173,27 @@ pub(crate) fn rewrite_cross_mem_slug(
 /// mem sweep rewrites files in place — so it masks via
 /// [`mask_file_for_link_scan`].
 pub(crate) fn rewrite_mem_prefix(text: &str, old_mem: &str, new_mem: &str) -> (String, usize) {
-    let masked = mask_file_for_link_scan(text);
+    rewrite_mem_prefix_masked(text, old_mem, new_mem, &mask_file_for_link_scan(text))
+}
+
+/// [`rewrite_mem_prefix`] with the mask supplied, so a caller that holds a
+/// SECTION body rather than a whole file can pass the section-safe mask. The
+/// two masks differ in one way that matters here: the file form trims a
+/// leading `---…---` block as frontmatter and leaves it unmasked, which a
+/// section body must never have done to it, because a section may legitimately
+/// open with a `---` thematic break.
+fn rewrite_mem_prefix_masked(
+    text: &str,
+    old_mem: &str,
+    new_mem: &str,
+    masked: &str,
+) -> (String, usize) {
     let link_re = Regex::new(r"\[\[([^\]]*)\]\]").unwrap();
     let mut out = String::with_capacity(text.len());
     let mut last_end = 0usize;
     let mut rewritten = 0usize;
 
-    for cap in link_re.captures_iter(&masked) {
+    for cap in link_re.captures_iter(masked) {
         let whole = cap.get(0).unwrap();
         let inner = cap.get(1).unwrap();
         let inner_str = &text[inner.start()..inner.end()];
@@ -215,6 +229,21 @@ pub(crate) fn rewrite_mem_prefix(text: &str, old_mem: &str, new_mem: &str) -> (S
     }
     out.push_str(&text[last_end..]);
     (out, rewritten)
+}
+/// [`rewrite_mem_prefix`] for a SECTION body rather than a whole file.
+///
+/// The difference is the mask: the file form trims a leading `---…---` block
+/// as frontmatter and leaves it unmasked, which a section body must never
+/// have done to it, because a section may legitimately open with a `---`
+/// thematic break. Called where a mark's own bytes are rewritten, so the
+/// section-level pass and the file-level pass cannot disagree about what was
+/// masked and leave a mark hashing bytes the file does not hold.
+pub(crate) fn rewrite_mem_prefix_in_section(
+    body: &str,
+    old_mem: &str,
+    new_mem: &str,
+) -> (String, usize) {
+    rewrite_mem_prefix_masked(body, old_mem, new_mem, &mask_for_link_scan(body))
 }
 
 /// Split a target that names `mem` outright as its qualifier into
@@ -448,5 +477,30 @@ See [[planning/plan-x--alpha]] and [[planning/plan-x:beta|the beta]], not
         let (out, n) = rewrite_cross_mem_slug(input, "specs", "old-name", "new-name");
         assert!(out.contains("```\n[[specs:old-name]]\n```"));
         assert_eq!(n, 2);
+    }
+
+    /// A section body may open with a `---` thematic break, and the SECTION
+    /// form must not mistake that for frontmatter and leave the region
+    /// unmasked. The file form does trim it, which is right for a file and
+    /// wrong for a body: used on a section it rewrites a link inside a fence
+    /// the file-level pass masked, and a mark then hashes bytes the file does
+    /// not hold.
+    #[test]
+    fn the_section_form_masks_a_body_that_opens_with_a_thematic_break() {
+        // The fence sits INSIDE what the file form mistakes for frontmatter,
+        // which is the region it leaves unmasked.
+        let body = "---\n\n```\n[[old:slug]]\n```\n\n---\n\nA break, not frontmatter.\n";
+        let (file_form, file_count) = rewrite_mem_prefix(body, "old", "new");
+        let (section_form, section_count) = rewrite_mem_prefix_in_section(body, "old", "new");
+        assert_eq!(
+            section_count, 0,
+            "the fenced link is masked for a section body: {section_form}"
+        );
+        assert_eq!(section_form, body, "so the body comes back untouched");
+        assert!(
+            file_count > 0,
+            "while the file form takes the leading block for frontmatter and rewrites it, \
+             which is the divergence this exists to avoid: {file_form}"
+        );
     }
 }

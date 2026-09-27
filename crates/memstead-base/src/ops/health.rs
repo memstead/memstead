@@ -530,6 +530,12 @@ pub fn health_checks_axis(
                         "kind": rec.kind.as_deref().unwrap_or("verification"),
                         "ts": rec.ts,
                         "identity": rec.identity,
+                        // The trust class of the prose on this row: the
+                        // message is whatever agent recorded the check
+                        // wrote, which in a workspace that points a foreign
+                        // model or a transcribed outside finding at its
+                        // ledger is not the workspace itself.
+                        "origin": engine.check_row_prose_origin(&mem, &id, rec).as_wire(),
                         "finding": f,
                     }),
                 );

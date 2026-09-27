@@ -16,6 +16,14 @@ use crate::workspace::MountCapability;
 use super::super::{Engine, EngineError, RenameEntityArgs, RenameEntityOutcome};
 use super::{make_stub, unknown_type_error};
 
+/// One entity whose marked sections a rename's wiki-link rewrite moves: its
+/// id, its sections before the rewrite, and after.
+type MarkRehash = (
+    EntityId,
+    indexmap::IndexMap<String, String>,
+    indexmap::IndexMap<String, String>,
+);
+
 impl Engine {
     /// Positional + CommitContext wrapper around
     /// [`Self::rename_entity`].
@@ -337,6 +345,12 @@ impl Engine {
             String,
             std::sync::Arc<memstead_schema::TypeDefinition>,
         )> = Vec::with_capacity(same_mem_ids.len());
+        // Whose marked sections this rename rewrites, before and after. A
+        // wiki-link retarget moves marked bytes without being an authorship
+        // event, so the marks are recomputed over the new bytes in the same
+        // commit; unfollowed, ordinary housekeeping would serve a
+        // contributor's untouched sentences as the workspace's own.
+        let mut same_mem_rehash: Vec<MarkRehash> = Vec::new();
         for from_id in &same_mem_ids {
             let Some(referrer) = self.store.get(from_id) else {
                 continue;
@@ -387,6 +401,11 @@ impl Engine {
             // timestamp through from the cloned referrer. (Pre-fix this
             // stamped the shared `today` for cross-entity consistency.)
             let ref_markdown = super::render_for_write(&next_ref, referrer_type_def.as_ref())?;
+            same_mem_rehash.push((
+                from_id.clone(),
+                referrer.sections.clone(),
+                next_ref.sections.clone(),
+            ));
             same_mem_writes.push((ref_markdown, next_ref.file_path.clone(), referrer_type_def));
         }
 
@@ -403,6 +422,9 @@ impl Engine {
                 String,
                 std::sync::Arc<memstead_schema::TypeDefinition>,
             )>,
+            /// Whose marked sections this rewrite moves, before and after —
+            /// the peer mem's own record is the one that holds its marks.
+            rehash: Vec<MarkRehash>,
         }
         let mut peer_plans: std::collections::BTreeMap<String, PeerMemPlan> =
             std::collections::BTreeMap::new();
@@ -427,6 +449,7 @@ impl Engine {
             let referrer_type_def = peer_schema
                 .get_type(&referrer.entity_type)
                 .ok_or_else(|| unknown_type_error(peer_schema, &referrer.entity_type))?;
+            let before_sections = referrer.sections.clone();
             let mut next_ref = referrer.clone();
             for rel in next_ref.relationships.iter_mut() {
                 if rel.target == *id {
@@ -456,15 +479,20 @@ impl Engine {
             // does not reset.
             let ref_markdown = super::render_for_write(&next_ref, referrer_type_def.as_ref())?;
 
-            peer_plans
+            let plan_entry = peer_plans
                 .entry(peer_mem.clone())
                 .or_insert_with(|| PeerMemPlan {
                     mount_idx: peer_mount_idx,
                     mem: peer_mem.clone(),
                     writes: Vec::new(),
-                })
+                    rehash: Vec::new(),
+                });
+            plan_entry
                 .writes
                 .push((ref_markdown, next_ref.file_path.clone(), referrer_type_def));
+            plan_entry
+                .rehash
+                .push((from_id.clone(), before_sections, next_ref.sections.clone()));
         }
 
         // ----- Apply: renaming entity's own mem first -----
@@ -487,6 +515,18 @@ impl Engine {
         // resolution finds every anchor under the new id (zero under the
         // old). A no-op when the entity had no anchors (byte-identical).
         super::stage_anchors_rename(backend, id, &new_id)?;
+        // An adopted body's origin marks follow the slug in the same commit,
+        // for the same reason the anchors do: the marks are keyed by slug and
+        // a rename moves the id while leaving the contributor's bytes alone.
+        // Following the key here is what lets the read path be exact instead
+        // of inferring a rename from matching content across slugs.
+        super::stage_proposal_marks_rename(backend, id, &new_id)?;
+        // The self-link rewrite moves the renamed entity's own marked bytes,
+        // under its NEW slug now that the marks have followed the key.
+        super::stage_proposal_marks_rehash(backend, &new_id, &entity.sections, &next.sections)?;
+        for (ref_id, before, after) in &same_mem_rehash {
+            super::stage_proposal_marks_rehash(backend, ref_id, before, after)?;
+        }
         // The check ledger follows the id too. It is workspace state, not
         // mem content, so it cannot ride the commit; it is carried before
         // the commit so a ledger that refuses stops the rename the way a
@@ -552,6 +592,11 @@ impl Engine {
             let peer_backend = self.mounts[plan.mount_idx].backend.as_ref();
             for (ref_markdown, ref_file_path, _) in &plan.writes {
                 peer_backend.write_entity(Path::new(ref_file_path), ref_markdown.as_bytes())?;
+            }
+            // Each peer mem holds its own record, so its marks are carried
+            // into its own commit.
+            for (ref_id, before, after) in &plan.rehash {
+                super::stage_proposal_marks_rehash(peer_backend, ref_id, before, after)?;
             }
             let peer_commit_subject = format!(
                 "memstead: rename {} → {new_id} (cross-mem rewrite in `{}`)",

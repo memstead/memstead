@@ -982,6 +982,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
     match tool_name {
         "memstead_entity" => &[
             "_hash",
+            // The entity's trust class on both channels, and the delimiter
+            // that contains a third-party body on the text one.
+            "_origin",
+            "_quote",
             // The opt-in provenance block and its archive-side sub-block:
             // on a source mem the recorded touches, on an installed
             // archive the rationale the archive seals for the entity.

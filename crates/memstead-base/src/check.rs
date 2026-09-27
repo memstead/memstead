@@ -642,6 +642,22 @@ pub struct SealedCheck {
     /// older writer sealed: the mount then reads `unconfirmable`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub independence: Option<String>,
+    /// The trust class of the TEXT this row carries — its `method` note and
+    /// its finding message ([`crate::render::OriginClass`], wire form
+    /// `first-party` / `third-party`), as the exporting workspace
+    /// classified it ([`crate::Engine::check_row_origin_class`]).
+    ///
+    /// A check row's prose is written by whatever agent recorded the check,
+    /// which in a workspace that points a foreign model or a transcribed
+    /// outside finding at its ledger is not the workspace itself. Sealed
+    /// here for the same reason `independence` is: the mount records no
+    /// identity roster, so the reading cannot be re-derived on it.
+    ///
+    /// Absent when the exporting deployment declared no owner identities
+    /// (the row then inherits its mem's class, which is what every reader
+    /// did before this field) and on every member an older writer sealed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 impl SealedCheck {
@@ -661,6 +677,7 @@ impl SealedCheck {
             renamed_from: rec.renamed_from.clone(),
             carried_from: rec.carried_from.clone(),
             independence: None,
+            origin: None,
         }
     }
 
@@ -670,6 +687,25 @@ impl SealedCheck {
         self.independence
             .as_deref()
             .and_then(crate::engine::independence::Independence::from_wire)
+    }
+
+    /// The sealed trust class of the row's prose, parsed; `None` when the
+    /// member seals none, which is every member an older writer sealed and
+    /// every export from a deployment that declared no owner identities.
+    /// The reader falls back to the mem's class then, as it did before the
+    /// field existed.
+    ///
+    /// This is the one reader that makes the sealed field load-bearing, and
+    /// it matters exactly where the mem grain cannot answer: a deployment
+    /// that vouches for an installed archive as first-party
+    /// ([`crate::Engine::declare_mem_origin`]) still must not serve a row
+    /// the publisher's own foreign checker wrote as its own prose.
+    pub fn sealed_origin(&self) -> Option<crate::render::OriginClass> {
+        match self.origin.as_deref()? {
+            "first-party" => Some(crate::render::OriginClass::FirstParty),
+            "third-party" => Some(crate::render::OriginClass::ThirdParty),
+            _ => None,
+        }
     }
 
     /// The ledger form under `entity_id` and the wire `kind` the record
@@ -823,6 +859,18 @@ impl SealedChecks {
                     return Err(format!(
                         "{at}: independence `{reading}` is not one of {}",
                         crate::engine::independence::Independence::vocabulary_hint()
+                    ));
+                }
+                // The trust class is publisher-supplied bytes on an
+                // installed archive, so the vocabulary is closed here as
+                // the independence reading's is: an unknown token is
+                // refused with a typed error rather than parsed into
+                // something a reader would treat as a class.
+                if let Some(origin) = rec.origin.as_deref()
+                    && rec.sealed_origin().is_none()
+                {
+                    return Err(format!(
+                        "{at}: origin `{origin}` is not one of first-party | third-party"
                     ));
                 }
             }
@@ -1064,6 +1112,54 @@ mod tests {
         assert!(parsed.carried_from.is_none());
         assert!(parsed.independence.is_none());
         assert!(parsed.sealed_independence().is_none());
+    }
+
+    /// The sealed trust class of a row's prose parses only from the two
+    /// origin tokens and fails the validator outside them. The bytes come
+    /// from a publisher's archive, so the vocabulary is closed here exactly
+    /// as the independence reading's is: a member claiming `first-party` in
+    /// a spelling no reader recognises must be refused with a typed error,
+    /// not parsed into something a reader treats as a class.
+    #[test]
+    fn sealed_row_origin_parses_only_from_the_closed_vocabulary() {
+        let mut sealed = SealedChecks::new();
+        let mut row = SealedCheck::from_record(&rec("m--a", "ok", "h1"));
+        row.origin = Some("third-party".to_string());
+        sealed.entities.insert(
+            "a".into(),
+            BTreeMap::from([("verification".to_string(), row)]),
+        );
+        assert_eq!(
+            sealed.latest("a", "verification").unwrap().sealed_origin(),
+            Some(crate::render::OriginClass::ThirdParty)
+        );
+        let carried: std::collections::BTreeSet<String> = ["a".to_string()].into();
+        assert!(sealed.validate(&carried).is_ok());
+
+        // A member an older writer sealed carries none and reads none.
+        let legacy = r#"{"ts":1,"verdict":"ok","entity_hash":"h","actor":"cli","role":"checker"}"#;
+        let parsed: SealedCheck = serde_json::from_str(legacy).unwrap();
+        assert!(parsed.origin.is_none());
+        assert!(parsed.sealed_origin().is_none());
+
+        // A token outside the vocabulary is refused, and reads as no class
+        // rather than as a guess.
+        sealed
+            .entities
+            .get_mut("a")
+            .unwrap()
+            .get_mut("verification")
+            .unwrap()
+            .origin = Some("trusted".into());
+        assert!(
+            sealed
+                .latest("a", "verification")
+                .unwrap()
+                .sealed_origin()
+                .is_none()
+        );
+        let err = sealed.validate(&carried).unwrap_err();
+        assert!(err.contains("origin `trusted`"), "{err}");
     }
 
     /// The sealed independence reading survives the export re-key, is

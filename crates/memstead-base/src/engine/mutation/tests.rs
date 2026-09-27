@@ -533,3 +533,432 @@ fn boot_skew_warning_fires_only_on_disagreeing_stamp() {
         "a stamp-less (pre-plan) mem boots without warning noise"
     );
 }
+
+/// A chained `section_map` carries every mark. Retype refuses only
+/// collisions, so `{a: b, b: c}` and `{a: b, b: a}` are legal, and a loop
+/// that mutated the marks in place read its own write for `b` as `b`'s
+/// original hash: it destroyed the real one and left the content at the end
+/// of the chain unmarked. Nothing looked wrong at the time, because the
+/// entity still read third-party on the surviving mark; it broke the moment
+/// the owner rewrote that one section.
+#[test]
+fn a_chained_section_map_carries_every_mark() {
+    use crate::preparation::entity_section_prepared_hash;
+
+    let a_content = "the proposer's first claim";
+    let b_content = "the proposer's second claim";
+    let marks = std::collections::BTreeMap::from([
+        (
+            "a".to_string(),
+            entity_section_prepared_hash("a", a_content),
+        ),
+        (
+            "b".to_string(),
+            entity_section_prepared_hash("b", b_content),
+        ),
+    ]);
+    // After the retype the content has moved a→b and b→c, unchanged.
+    let sections = indexmap::IndexMap::from([
+        ("b".to_string(), a_content.to_string()),
+        ("c".to_string(), b_content.to_string()),
+    ]);
+    let section_map = indexmap::IndexMap::from([
+        ("a".to_string(), "b".to_string()),
+        ("b".to_string(), "c".to_string()),
+    ]);
+
+    let carried = super::rekey_marks_for_retype(&marks, &section_map, &sections);
+    assert_eq!(
+        carried.get("b").cloned(),
+        Some(entity_section_prepared_hash("b", a_content)),
+        "the first section's mark follows to its new key"
+    );
+    assert_eq!(
+        carried.get("c").cloned(),
+        Some(entity_section_prepared_hash("c", b_content)),
+        "and the second's is not eaten by the first: reading its own write dropped this one"
+    );
+    assert_eq!(carried.len(), 2, "both marks survive: {carried:?}");
+}
+
+/// A retype where nothing holds any more RETIRES the mark instead of writing
+/// an empty map. An empty map is a record defect the read path fails the whole
+/// mem closed on, so the engine's own retype must not manufacture one: adopt a
+/// contribution, rewrite every load-bearing section in your own words, then
+/// decide it is really another type is an ordinary owner sequence, and it
+/// would have bricked the mem's origin labelling.
+#[test]
+fn a_retype_after_a_full_rewrite_retires_the_mark_rather_than_emptying_it() {
+    use crate::preparation::entity_section_prepared_hash;
+
+    let marks = std::collections::BTreeMap::from([(
+        "identity".to_string(),
+        entity_section_prepared_hash("identity", "the proposer's claim"),
+    )]);
+    // The owner has since rewritten the section, so nothing holds.
+    let sections =
+        indexmap::IndexMap::from([("claim".to_string(), "the owner's own account".to_string())]);
+    let section_map = indexmap::IndexMap::from([("identity".to_string(), "claim".to_string())]);
+
+    let carried = super::rekey_marks_for_retype(&marks, &section_map, &sections);
+    assert!(
+        carried.is_empty(),
+        "nothing holds, so nothing is carried: {carried:?}"
+    );
+    // The caller must turn that into a retirement, never an empty map; the
+    // end-to-end assertion is `a_retype_leaves_the_record_readable` on the
+    // git-branch side.
+}
+
+/// Every engine write that MOVES a marked section's bytes must carry the
+/// adopted body's origin marks with it, and that list has now been wrong three
+/// times: a rename's referrer rewrite, a mem rename's sweep, and an export's
+/// retarget were each found serving a contributor's untouched sentences as the
+/// workspace's own after the fact.
+///
+/// The cause cannot be removed: the rewrite helpers are pure text functions
+/// with no backend in hand, so the carry has to live at each call site. So this
+/// enumerates them. A new call site fails this test, which is the prompt to
+/// carry the marks there or to record why the site cannot move marked bytes.
+///
+/// Owner: whoever adds the call site. Sunset: the day the rewrite helpers take
+/// the record along themselves, at which point the enumeration is dead.
+#[test]
+fn every_wikilink_rewrite_call_site_is_accounted_for() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found: Vec<String> = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("readable source dir") {
+            let path = entry.expect("readable entry").path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(&root)
+                .expect("under src")
+                .to_string_lossy()
+                .replace('\\', "/");
+            // The helpers' own module, and test modules, are not write paths.
+            if rel.contains("wikilink_rewrite") || rel.contains("tests") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("utf-8 source");
+            for (n, line) in text.lines().enumerate() {
+                let calls = [
+                    "rewrite_mem_prefix(",
+                    "rewrite_cross_mem_slug(",
+                    "rewrite_bare_slug(",
+                ];
+                if calls.iter().any(|c| line.contains(c)) {
+                    found.push(format!("{rel}:{}", n + 1));
+                }
+            }
+        }
+    }
+    found.sort();
+    // Each of these sites carries the marks: the rename's self-link and
+    // referrer rewrites through `stage_proposal_marks_rehash`, the sweep
+    // through the same, and the export through `rekey_proposal_marks`.
+    let accounted = [
+        "engine/mutation/mem_sweep.rs",
+        "engine/mutation/rename.rs",
+        "ops/export.rs",
+    ];
+    let unaccounted: Vec<&String> = found
+        .iter()
+        .filter(|site| !accounted.iter().any(|a| site.starts_with(a)))
+        .collect();
+    assert!(
+        unaccounted.is_empty(),
+        "a wiki-link rewrite call site appeared in a file that does not carry an adopted \
+         body's origin marks: {unaccounted:?}. Carry them (see `stage_proposal_marks_rehash`) \
+         or add the file here with the reason it cannot move marked bytes."
+    );
+    assert!(
+        found.len() >= 6,
+        "the enumeration found {} sites, fewer than the known set: the grep or the helpers \
+         were renamed, and this guard has stopped guarding",
+        found.len()
+    );
+}
+
+/// Renaming onto a slug the record already mentions moves the marks and
+/// leaves the audit trail alone. The target entry's disposition, reason and
+/// content hash document the entity that WAS there; only its marks move,
+/// because only they describe the bytes that are there now. The source's
+/// marks are cleared, so the label moves rather than being copied.
+#[test]
+fn a_rename_onto_a_recorded_slug_moves_the_marks_and_keeps_the_audit_trail() {
+    let source_marks = std::collections::BTreeMap::from([(
+        "identity".to_string(),
+        crate::preparation::entity_section_prepared_hash("identity", "the proposer's claim"),
+    )]);
+    let stale_marks = std::collections::BTreeMap::from([(
+        "identity".to_string(),
+        "the deleted entity's hash".to_string(),
+    )]);
+    let record = record_of(vec![vec![
+        (
+            "x",
+            "adopt",
+            Some("x's reason"),
+            Some("hx"),
+            Some(source_marks.clone()),
+        ),
+        (
+            "y",
+            "adopt",
+            Some("y's reason"),
+            Some("hy"),
+            Some(stale_marks),
+        ),
+    ]]);
+
+    let (carried, moved) = super::move_marks_on_rename(record, "x", "y");
+    assert!(moved, "the marks moved, so the record is written");
+    let entry = &carried.proposals[0].entities["y"];
+    assert_eq!(
+        entry.landed_sections.as_ref(),
+        Some(&source_marks),
+        "the marks describe the body that is now at this slug"
+    );
+    assert_eq!(
+        entry.reason.as_deref(),
+        Some("y's reason"),
+        "the audit trail of the entity that was here is untouched"
+    );
+    assert_eq!(
+        entry.content_hash.as_deref(),
+        Some("hy"),
+        "and so is its hash"
+    );
+    assert!(
+        carried.proposals[0].entities["x"].landed_sections.is_none(),
+        "and the source no longer claims the label: this is a move, not a copy"
+    );
+}
+
+/// A LATER proposal's mark-less entry on the rename target does not retire
+/// the marks the rename just moved there. The read flattens every proposal in
+/// order, so deciding the rename per proposal left the last word to an
+/// unrelated merge: adopt `beta`, later land an `adopt_with_changes` on
+/// `alpha`, delete `alpha`, rename `beta` onto the freed slug, and the
+/// contributor's untouched body read first-party.
+#[test]
+fn a_later_proposals_entry_cannot_retire_marks_a_rename_moved() {
+    let marks = std::collections::BTreeMap::from([(
+        "identity".to_string(),
+        crate::preparation::entity_section_prepared_hash("identity", "the proposer's claim"),
+    )]);
+    let record = record_of(vec![
+        vec![("beta", "adopt", None, None, Some(marks.clone()))],
+        // Two later merges whose own bodies the owner typed: no marks, and
+        // each read as a retirement of whatever sits at that slug. Two, so
+        // that writing the moved marks onto the FIRST entry mentioning the
+        // target is not enough: the second would retire them again.
+        vec![(
+            "alpha",
+            "adopt_with_changes",
+            Some("merged by hand"),
+            None,
+            None,
+        )],
+        vec![("alpha", "adopt_with_changes", Some("and again"), None, None)],
+    ]);
+
+    let (carried, moved) = super::move_marks_on_rename(record, "beta", "alpha");
+    assert!(moved);
+    assert_eq!(
+        carried.effective_marks("alpha").as_ref(),
+        Some(&marks),
+        "the flattened outcome for the target is the moved marks, whatever the order"
+    );
+    assert!(
+        carried.effective_marks("beta").is_none(),
+        "and the source flattens to nothing"
+    );
+}
+
+/// A rename of an entity the record marks nothing about changes nothing: no
+/// write, so a mark-less entry's slug does not move by accident, which it did
+/// whenever some unrelated proposal in the same record happened to carry a
+/// mark.
+#[test]
+fn a_rename_without_marks_leaves_the_record_alone() {
+    let record = record_of(vec![vec![
+        ("x", "reject", Some("not this time"), Some("hx"), None),
+        (
+            "z",
+            "adopt",
+            None,
+            None,
+            Some(std::collections::BTreeMap::from([(
+                "identity".to_string(),
+                "zzz".to_string(),
+            )])),
+        ),
+    ]]);
+    let (carried, moved) = super::move_marks_on_rename(record.clone(), "x", "y");
+    assert!(
+        !moved,
+        "nothing effective at the source, so nothing is written"
+    );
+    assert_eq!(carried, record, "and the record is untouched");
+}
+
+/// One entry of a test record: slug, disposition, reason, content hash, marks.
+type RecordedEntry<'a> = (
+    &'a str,
+    &'a str,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<std::collections::BTreeMap<String, String>>,
+);
+
+/// Build a record from a list of proposals, each a list of entries.
+fn record_of(proposals: Vec<Vec<RecordedEntry<'_>>>) -> crate::ops::proposal::ProposalRecord {
+    use crate::ops::proposal::{ProposalRecord, ProposalRecordEntry, RecordedDisposition};
+    ProposalRecord {
+        proposals: proposals
+            .into_iter()
+            .enumerate()
+            .map(|(i, entries)| ProposalRecordEntry {
+                id: format!("fork@{i}"),
+                entities: entries
+                    .into_iter()
+                    .map(|(slug, disposition, reason, hash, marks)| {
+                        (
+                            slug.to_string(),
+                            RecordedDisposition {
+                                disposition: disposition.to_string(),
+                                reason: reason.map(str::to_string),
+                                content_hash: hash.map(str::to_string),
+                                landed_sections: marks,
+                            },
+                        )
+                    })
+                    .collect(),
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    }
+}
+
+/// A rename refuses a record the READER cannot make sense of, instead of
+/// repairing it. An entry with a structurally empty mark map makes the read
+/// serve every entity of the mem third-party on purpose; a rename that cleared
+/// or overwrote that entry lifted the quarantine and the mem's own entities
+/// went back to first-party, with the evidence gone from the file.
+#[test]
+fn a_rename_refuses_a_record_the_reader_calls_defective() {
+    let record = record_of(vec![
+        vec![(
+            "beta",
+            "adopt",
+            None,
+            None,
+            Some(std::collections::BTreeMap::new()),
+        )],
+        vec![(
+            "beta",
+            "adopt",
+            None,
+            None,
+            Some(std::collections::BTreeMap::from([(
+                "identity".to_string(),
+                "real".to_string(),
+            )])),
+        )],
+    ]);
+    assert!(
+        record.structural_defect().is_some(),
+        "the fixture is the defect the read fails closed on"
+    );
+    let (carried, moved) = super::move_marks_on_rename(record.clone(), "beta", "delta");
+    assert!(!moved, "nothing is written");
+    assert_eq!(
+        carried, record,
+        "and the evidence of the defect is left exactly as it was"
+    );
+}
+
+/// The relocated row is the one whose marks were EFFECTIVE, not the first row
+/// that happens to name the slug. Moving the first moved a `reject`'s reason
+/// and content hash onto another slug, which takes the re-proposal gate with
+/// it: a reworded resubmission at the rejected slug would then land with no
+/// mark on the brief, and a slug nothing was ever rejected at would carry one.
+#[test]
+fn the_relocated_row_is_the_one_that_carried_the_marks() {
+    let marks = std::collections::BTreeMap::from([(
+        "identity".to_string(),
+        crate::preparation::entity_section_prepared_hash("identity", "the proposer's claim"),
+    )]);
+    let record = record_of(vec![
+        vec![("beta", "reject", Some("not this time"), Some("h1"), None)],
+        vec![("beta", "adopt", None, None, Some(marks.clone()))],
+    ]);
+
+    let (carried, moved) = super::move_marks_on_rename(record, "beta", "gamma");
+    assert!(moved);
+    assert_eq!(
+        carried.proposals[0].entities["beta"].reason.as_deref(),
+        Some("not this time"),
+        "the rejection stays on the slug it was recorded for"
+    );
+    assert!(
+        !carried.proposals[0].entities.contains_key("gamma"),
+        "and no rejection is invented for the new slug"
+    );
+    assert_eq!(
+        carried.effective_marks("gamma").as_ref(),
+        Some(&marks),
+        "while the adopted marks did move"
+    );
+}
+
+/// Every write that follows a mark refuses a record the reader calls
+/// defective, not only the rename. The doc on `structural_defect` states that
+/// as a property of the design, and a doc comment standing in for a guarantee
+/// is what produced five rounds of one-position-over defects.
+#[test]
+fn every_mark_following_writer_refuses_a_defective_record() {
+    let defective = record_of(vec![vec![(
+        "beta",
+        "adopt",
+        None,
+        None,
+        Some(std::collections::BTreeMap::new()),
+    )]]);
+    assert!(defective.structural_defect().is_some());
+
+    // The rename.
+    let (out, moved) = super::move_marks_on_rename(defective.clone(), "beta", "delta");
+    assert!(!moved && out == defective, "rename refuses");
+
+    // The retype re-key, at the level it decides: an empty map carries
+    // nothing, so the caller's guard is what keeps it from writing.
+    let carried = super::rekey_marks_for_retype(
+        &std::collections::BTreeMap::new(),
+        &indexmap::IndexMap::from([("a".to_string(), "b".to_string())]),
+        &indexmap::IndexMap::from([("b".to_string(), "x".to_string())]),
+    );
+    assert!(carried.is_empty());
+
+    // The export's carry.
+    let bytes = defective.to_bytes();
+    let out = crate::ops::export::rekey_proposal_marks(
+        Some(bytes.clone()),
+        &[(
+            "beta".to_string(),
+            indexmap::IndexMap::from([("identity".to_string(), "a".to_string())]),
+            indexmap::IndexMap::from([("identity".to_string(), "b".to_string())]),
+        )],
+    );
+    assert_eq!(out, Some(bytes), "export refuses");
+}

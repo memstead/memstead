@@ -146,6 +146,301 @@ impl Engine {
         }
     }
 
+    /// Classify ONE ENTITY's data trust origin — the grain a read surface
+    /// labels, and the grain a host quarantines at.
+    ///
+    /// [`Self::mem_origin_class`] answers for the whole mem, which is the
+    /// answer for every entity of a read-only mount. It is not the answer
+    /// inside a WRITABLE mem that accepts contributions: a body merged
+    /// from a fork is a stranger's prose sitting in a mem classified
+    /// first-party, and served undifferentiated it reads to an agent as
+    /// part of the document it was told to trust. This narrows that case
+    /// and nothing else:
+    ///
+    /// - the mem is third-party → third-party (unchanged);
+    /// - the mem's proposal record does not parse → third-party for every
+    ///   entity of that mem, because the record is the only evidence of
+    ///   which bodies are a contributor's, and a trust label may not fail
+    ///   open on a file it could not read;
+    /// - the entity's slug carries marks and any marked section still
+    ///   hashes to its recorded value → third-party, because that section
+    ///   is still the proposer's bytes;
+    /// - anything else → the mem's class.
+    ///
+    /// The lookup is by slug and nothing else. A rename or a re-keying
+    /// retype follows the marks in the mutation's own commit
+    /// ([`crate::engine::mutation::stage_proposal_marks_rename`],
+    /// [`crate::engine::mutation::stage_proposal_marks_retype`]), so this
+    /// path never has to guess. Inferring a moved body from matching
+    /// content across slugs was tried and removed: a type whose
+    /// load-bearing set is one section (many are) turns the guess into a
+    /// one-line coincidence, so an owner's own entity sharing a single
+    /// section with an adopted body was branded a stranger's, and a
+    /// contributor could aim that by adopting a copy of it.
+    ///
+    /// Per marked section rather than one hash over the whole body, so an
+    /// owner who rewrites one of three load-bearing sections does not
+    /// launder the two the contributor wrote, and so the comparison needs
+    /// neither the schema pin nor the entity type: a repin or a retype
+    /// changes which sections a type calls load-bearing, and a comparison
+    /// that depended on the current declaration would report a rewrite
+    /// that never happened.
+    ///
+    /// The classification stays decided-at-write-time: the deciding act is
+    /// the merge, which records the marks under the owner's own identity on
+    /// the target branch, and the read only checks whether what was decided
+    /// still describes the bytes. Content is read to see whether a mark
+    /// still holds, never to award a class: all the content can do is DROP
+    /// the third-party label by no longer matching, and only the owner can
+    /// write it. The caller-declared `Identity:` trailer is never consulted
+    /// — a contributor who wrote the body also chooses that string, so
+    /// trust derived from it would be trust they grant themselves.
+    ///
+    /// The relation to [`Self::mem_origin_class`] is one-directional: this
+    /// only ever tightens. Nothing a mem serves as third-party becomes
+    /// first-party here, so a host that already quarantines on
+    /// `third-party` quarantines the merged entity with no change on its
+    /// side.
+    pub fn entity_origin_class(&self, id: &crate::entity::EntityId) -> crate::render::OriginClass {
+        let mem_class = self.mem_origin_class(id.mem());
+        if mem_class.is_third_party() {
+            return mem_class;
+        }
+        let Some(marks) = self.foreign_entities().get(id.mem()) else {
+            return mem_class;
+        };
+        if marks.record_unreadable.is_some() {
+            return crate::render::OriginClass::ThirdParty;
+        }
+        let Some(entity) = self.store.get(id).filter(|e| !e.stub) else {
+            return mem_class;
+        };
+        let holds = |key: &String, hash: &String| -> bool {
+            entity.sections.get(key).is_some_and(|content| {
+                !content.trim().is_empty()
+                    && &crate::preparation::entity_section_prepared_hash(key, content) == hash
+            })
+        };
+        let foreign = marks
+            .by_slug
+            .get(id.path())
+            .is_some_and(|sections| sections.iter().any(|(key, hash)| holds(key, hash)));
+        if foreign {
+            crate::render::OriginClass::ThirdParty
+        } else {
+            mem_class
+        }
+    }
+
+    /// The per-mem foreign-section marks, read once from each writable
+    /// mem's proposal record and memoised on the derived key (a merge's
+    /// own [`Self::invalidate_communities`] refreshes it).
+    ///
+    /// Read-only mounts are skipped: every entity of one is already
+    /// third-party at the mem grain, so a mark would change no answer.
+    fn foreign_entities(&self) -> &crate::engine::ForeignMarks {
+        if let Some((memo_key, _)) = self.foreign_entities_memo.get() {
+            debug_assert_eq!(
+                *memo_key,
+                self.derived_key(),
+                "foreign-entity memo key lags the engine — a mutation path missed \
+                 invalidate_communities"
+            );
+        }
+        &self
+            .foreign_entities_memo
+            .get_or_init(|| (self.derived_key(), self.compute_foreign_entities()))
+            .1
+    }
+
+    fn compute_foreign_entities(&self) -> crate::engine::ForeignMarks {
+        let mut out: crate::engine::ForeignMarks = HashMap::new();
+        for mounted in &self.mounts {
+            let mem = mounted.mount.mem.as_str();
+            // By CLASS, not by writability. Every entity of a third-party
+            // mem is already third-party, so a mark would change no answer
+            // there; but a deployment may vouch for an installed archive as
+            // first-party, and that archive carries its own record of the
+            // bodies ITS owner adopted from contributors. Skipping by
+            // writability served those as the vouching deployment's own.
+            if self.mem_origin_class(mem).is_third_party() {
+                continue;
+            }
+            let record = match self.read_proposal_record(mem) {
+                Ok(Some(record)) => record,
+                Ok(None) => continue,
+                // The record is the only evidence of which bodies came from
+                // a fork. Unreadable, the honest answer is that this mem's
+                // entities are unconfirmable, and the conservative side of
+                // unconfirmable is the stranger's: a corrupt file must not
+                // relabel every adopted body as the workspace's own.
+                Err(e) => {
+                    out.insert(
+                        mem.to_string(),
+                        crate::engine::MemForeignMarks::unreadable(e.prose_render()),
+                    );
+                    continue;
+                }
+            };
+            // One owner for the rules ([`crate::ops::proposal::ProposalRecord`]):
+            // the write paths that have to follow a mark read them through the
+            // same two methods, because four rounds of review found the same
+            // defect one position over while the write path kept its own copy.
+            if let Some(reason) = record.structural_defect() {
+                out.insert(
+                    mem.to_string(),
+                    crate::engine::MemForeignMarks::unreadable(reason),
+                );
+                continue;
+            }
+            let marks = crate::engine::MemForeignMarks {
+                by_slug: record.effective_marks_by_slug(),
+                record_unreadable: None,
+            };
+            if !marks.by_slug.is_empty() {
+                out.insert(mem.to_string(), marks);
+            }
+        }
+        out
+    }
+
+    /// Why a mem's proposal record could not be read, when it could not.
+    ///
+    /// The origin read fails closed on such a mem: every entity of it serves
+    /// `third-party`. Read surfaces pair the label with this reason for the
+    /// same purpose the unreadable-anchors-sidecar condition is stated: a
+    /// conservative label with no cause tells an operator that the engine
+    /// calls their own mem a stranger's, and tells them nothing about why or
+    /// what to repair.
+    pub fn proposal_record_error(&self, mem: &str) -> Option<String> {
+        self.foreign_entities()
+            .get(mem)
+            .and_then(|m| m.record_unreadable.clone())
+    }
+
+    /// Declare the workspace's own writing identities — a deployment fact
+    /// on the same terms as [`Self::declare_mem_origin`]: set by the
+    /// process that owns the engine, never persisted with a mem, never
+    /// reachable over MCP.
+    ///
+    /// It classifies text that a party other than the workspace authored
+    /// into WORKSPACE state, which is the check ledger: a row's `method`
+    /// note and finding message are whatever agent the owner pointed at the
+    /// ledger wrote, under an identity the launching side assigned. The
+    /// assignment is the point — the identity is the deployer's declaration
+    /// about who ran, not the authoring party's claim about itself, so
+    /// unlike a mem-repo trailer it is a lever the authored bytes cannot
+    /// move.
+    ///
+    /// Undeclared (the default) means every ledger identity inherits its
+    /// mem's class, so an existing deployment is byte-identical.
+    pub fn declare_owner_identities<I, S>(&mut self, identities: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.owner_identities
+            .extend(identities.into_iter().map(Into::into));
+        self.foreign_entities_memo = OnceCell::new();
+    }
+
+    /// The trust class of the prose one check row carries — its `method`
+    /// note and finding message, which every surface renders verbatim.
+    ///
+    /// Two sources, and the STRICTER of the two wins. This deployment's own
+    /// reading comes from its declared identities
+    /// ([`Self::check_row_origin_class`]). An archive mount may additionally
+    /// carry the class the exporting workspace sealed beside the row
+    /// ([`crate::check::SealedCheck::origin`]), which is the only party that
+    /// knew which identities were its own, and which matters where the mem
+    /// grain cannot answer: a deployment may vouch for an installed archive
+    /// as first-party, and a row the publisher's foreign checker wrote inside
+    /// it is still a stranger's sentence.
+    ///
+    /// The sealed value may only tighten. It is publisher-supplied bytes, so
+    /// honouring a sealed `first-party` would admit a caller-supplied
+    /// first-party claim on a mem nobody vouched for, which is the one thing
+    /// no read path may do; the closed vocabulary at validation stops an
+    /// unrecognised token, not a well-formed lie.
+    pub fn check_row_prose_origin(
+        &self,
+        mem: &str,
+        entity_id: &str,
+        rec: &crate::check::CheckRecord,
+    ) -> crate::render::OriginClass {
+        let derived = self.check_row_origin_class(mem, rec.identity.as_deref());
+        if derived.is_third_party() {
+            return derived;
+        }
+        match self.sealed_check_row_origin(mem, entity_id, rec) {
+            Some(sealed) if sealed.is_third_party() => sealed,
+            _ => derived,
+        }
+    }
+
+    /// The class an ARCHIVE mount's sealed row carries, verbatim. `None` for
+    /// every other mount and for a member sealed without the field.
+    ///
+    /// Callers go through [`Self::check_row_prose_origin`], which takes the
+    /// stricter of this and the local reading; used raw, this is a
+    /// publisher's claim.
+    fn sealed_check_row_origin(
+        &self,
+        mem: &str,
+        entity_id: &str,
+        rec: &crate::check::CheckRecord,
+    ) -> Option<crate::render::OriginClass> {
+        if !self.is_archive_mount(mem) {
+            return None;
+        }
+        let sealed = self.archive_checks_for(mem)?;
+        let path = crate::EntityId(entity_id.to_string()).path().to_string();
+        sealed
+            .entities
+            .get(&path)?
+            .get(&crate::check::sealed_kind_of(rec))
+            .and_then(|sc| sc.sealed_origin())
+    }
+
+    /// Whether the deployment declared any owner identity. Undeclared is
+    /// the default and means every ledger row inherits its mem's class.
+    pub fn declares_owner_identities(&self) -> bool {
+        !self.owner_identities.is_empty()
+    }
+
+    /// Classify the origin of text a check row carries (its `method` note,
+    /// its finding message) for a row recorded under `identity` against an
+    /// entity of `mem`.
+    ///
+    /// Third-party when owner identities are declared and this row's
+    /// identity is not one of them. An absent identity is unconfirmable,
+    /// not foreign: it inherits the mem's class, the same reading the
+    /// independence gate takes for a row that names nobody. With nothing
+    /// declared every row inherits, which is what the engine served
+    /// before.
+    pub fn check_row_origin_class(
+        &self,
+        mem: &str,
+        identity: Option<&str>,
+    ) -> crate::render::OriginClass {
+        let mem_class = self.mem_origin_class(mem);
+        // Tighten-only, like `entity_origin_class`: this may make a row
+        // third-party, never first-party. On a third-party mem the identity
+        // on a row is the PUBLISHER's bytes, carried verbatim from the
+        // archive, so honouring it here would admit a caller-supplied
+        // first-party claim, which is the one thing no read path may do.
+        if mem_class.is_third_party() || self.owner_identities.is_empty() {
+            return mem_class;
+        }
+        match identity {
+            // Absence is unconfirmable, never guessed foreign: the reading
+            // the independence gate takes for a row that names nobody.
+            None => mem_class,
+            Some(id) if self.owner_identities.contains(id) => mem_class,
+            Some(_) => crate::render::OriginClass::ThirdParty,
+        }
+    }
+
     /// Declare a mem's data-trust origin as a deployment fact — the
     /// embedding process (a curated hosted read tier, an app that vouches
     /// for a bundled mem) overrides the writability inference for one mem.
@@ -162,6 +457,13 @@ impl Engine {
         origin: crate::render::OriginClass,
     ) {
         self.declared_origins.insert(mem.into(), origin);
+        // The foreign-mark map skips mems that are third-party at the mem
+        // grain, so a declaration changes which mems it covers. Its validity
+        // key is the store generation, which a declaration does not move, so
+        // the memo has to be dropped here or a read taken before this call
+        // would keep serving a vouched archive's adopted bodies as the
+        // vouching deployment's own.
+        self.foreign_entities_memo = OnceCell::new();
     }
 
     /// Per-file errors collected during load. Non-fatal: the engine

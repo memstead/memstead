@@ -268,6 +268,29 @@ pub struct Engine {
     /// first-party. Empty by default; [`Self::mem_origin_class`] falls back
     /// to the writability inference for undeclared mems.
     declared_origins: HashMap<String, crate::render::OriginClass>,
+    /// The workspace's own writing identities, declared by the embedding
+    /// deployment through [`Self::declare_owner_identities`]. A
+    /// composition fact on the same terms as `declared_origins`: set by
+    /// the process that owns the engine, never persisted with a mem,
+    /// never reachable over MCP, so nothing that can write a mem-repo can
+    /// add itself. It classifies text a party OTHER than the workspace
+    /// authored into workspace state — a check row's method note and
+    /// finding message, written by whatever agent the owner pointed at
+    /// the ledger, under an identity the launching side assigned.
+    ///
+    /// Empty by default, and empty means undeclared: every ledger
+    /// identity then inherits its mem's class, which is what the engine
+    /// did before this field, so an existing deployment is byte-identical.
+    /// A declared set makes an identity outside it third-party; a row with
+    /// no identity at all stays unconfirmable and inherits, never guessed
+    /// third-party (the same reading the independence gate takes).
+    owner_identities: std::collections::BTreeSet<String>,
+    /// Lazy per-mem map of entities whose claim-carrying sections are a
+    /// contributor's bytes, read from each writable mem's proposal record:
+    /// slug → the mark the merge recorded. Generation-keyed and
+    /// invalidated exactly like `community_memo`, so a merge's own
+    /// invalidation refreshes it. See [`Self::entity_origin_class`].
+    foreign_entities_memo: OnceCell<(DerivedKey, ForeignMarks)>,
     /// Workspace root path — set when the engine boots from a
     /// workspace store ([`Self::from_workspace_root`] or the full
     /// counterpart). `None` for tests + ad-hoc consumers that build
@@ -441,6 +464,53 @@ pub type MutationClock = Arc<dyn Fn() -> std::time::SystemTime + Send + Sync>;
 pub type BackendFactory =
     fn(&Mount) -> Result<Box<dyn MemBackend>, crate::workspace_store::InstantiateError>;
 
+/// Per mem, what the merges recorded about the bodies adopted into it, as
+/// the origin read consults them.
+pub(crate) type ForeignMarks = HashMap<String, MemForeignMarks>;
+
+/// One mem's foreign-content marks: per slug, one prepared hash per
+/// load-bearing section of the body a merge adopted there, as no later
+/// disposition retired it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct MemForeignMarks {
+    /// Slug → (section key → prepared hash).
+    pub(crate) by_slug:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    /// Why the mem's proposal record could not be read, when it could not.
+    /// The marks are then unknown rather than absent, so every entity of the
+    /// mem reads third-party: a trust label may not fail open on a file it
+    /// could not read. The reason is kept so the label can say why
+    /// ([`Engine::proposal_record_error`]); a conservative label with no
+    /// stated cause is indistinguishable from the engine calling the
+    /// operator's own mem a stranger's.
+    pub(crate) record_unreadable: Option<String>,
+}
+
+impl MemForeignMarks {
+    pub(crate) fn unreadable(reason: String) -> Self {
+        Self {
+            by_slug: std::collections::BTreeMap::new(),
+            record_unreadable: Some(reason),
+        }
+    }
+}
+
+/// The validity key for derived-structure memos (flywheel W8/01):
+/// the store generation (bumped by every store mutation, carried by
+/// `Store::clone` so batch rollback restores it) plus the schemas
+/// epoch (bumped by every change to the engine's schema map). A memo
+/// is current exactly while both halves still match.
+///
+/// The foreign-mark memo additionally reads a mem's proposal record,
+/// which is in neither half; every act that changes a mark also mutates
+/// the store, so the key still covers it, and a writer outside the
+/// engine is the one case it would not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivedKey {
+    pub store_generation: u64,
+    pub schemas_epoch: u64,
+}
+
 /// Discovered storage for a mem that has NO mount record — the
 /// unmounted half of flywheel W7/02's write-time cross-mem target
 /// verification. The workspace layer owns the discovery convention
@@ -449,17 +519,6 @@ pub type BackendFactory =
 /// backend to ask plus the mem's schema pin when its config declares
 /// one, so the cross-schema edge routing can keep its authority
 /// without a mount.
-/// The validity key for derived-structure memos (flywheel W8/01):
-/// the store generation (bumped by every store mutation, carried by
-/// `Store::clone` so batch rollback restores it) plus the schemas
-/// epoch (bumped by every change to the engine's schema map). A memo
-/// is current exactly while both halves still match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DerivedKey {
-    pub store_generation: u64,
-    pub schemas_epoch: u64,
-}
-
 pub struct UnmountedMemStorage {
     /// Transient backend over the discovered storage. Used for the
     /// cheap [`MemBackend::entity_exists`] probe and the one-blob

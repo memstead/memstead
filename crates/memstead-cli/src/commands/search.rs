@@ -260,10 +260,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if ctx.json {
         let engine = cli_engine.base();
         let envelope =
-            render::build_search_envelope(&result, offset, &|m| engine.mem_origin_class(m));
+            render::build_search_envelope(&result, offset, &|id| engine.entity_origin_class(id));
         print_json(&envelope)?;
     } else {
-        print_markdown(&render::render_search_markdown(&result, offset));
+        let engine = cli_engine.base();
+        print_markdown(&render::render_search_markdown(&result, offset, &|id| {
+            engine.entity_origin_class(id)
+        }));
     }
     Ok(())
 }

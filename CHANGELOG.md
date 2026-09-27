@@ -51,6 +51,135 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Trust origin reaches entity and check-row grain, and the text channel
+  says it out loud.** The first-party / third-party class was decided per
+  mem: a writable mount is first-party, a read-only mount third-party. That
+  answers for a whole installed mem and misses the mem that accepts
+  contributions, where a body merged in from a fork is a stranger's prose
+  inside a mem classified first-party, served in the same undifferentiated
+  document as the owner's. `Engine::entity_origin_class` now answers per
+  entity, and `memstead_entity` / `memstead_search` / `memstead list` /
+  `memstead search` / `memstead export --json` report it in place of the
+  mem-level label, on the text channel as well as the JSON one: a search or
+  list hit carries `_origin`, and a hit from a merged contribution has its
+  lead-section summary and its snippet contained, since those are the
+  contributor's own sentences and a hit list is where a host decides what to
+  quarantine. The deciding act stays the write, never a read-time
+  re-derivation of content: a `proposal_merge` records, per adopted slug,
+  one prepared hash per load-bearing section of the body it landed
+  (`landed_sections` on the proposal record's per-slug entry, additive and
+  serde-default, so every existing record parses), and a read checks whether
+  those marks still hold. While a marked section still hashes to its
+  recorded value that section is the proposer's bytes and the entity serves
+  `third-party`; once the owner has rewritten every marked section it
+  returns to the mem's class.
+  Per section, and prepared rather than the file hash, because the coarser
+  forms each get something wrong: the file hash moves on a metadata stamp or
+  a notes-only edit, so a stranger's claim would promote itself on the
+  owner's next unrelated edit; one hash over the whole body collapses a
+  type's load-bearing sections to one bit, so rewriting one of three would
+  launder the two the contributor wrote; and a per-section hash carries its
+  own section key, so the comparison needs neither the schema pin nor the
+  entity type, and a repin or a retype cannot report a rewrite that never
+  happened. A write that MOVES a marked body carries its marks: a rename
+  moves the label onto the target slug as the read flattens the record (last
+  word wins, so no later proposal entry can retire it), a re-keying retype
+  carries the section key, and the bytes themselves are followed at the three
+  wiki-link retargets that rewrite a marked section (a rename of a
+  linked entity, a mem rename workspace-wide, and a published archive's
+  retarget to its leaf name), each carried where that write happens, the way
+  the anchors sidecar already follows a rename. A write that COPIES a body
+  into another mem does not: `mem fork` copies the source's entities and
+  deliberately leaves the proposal record behind (the record is the target
+  branch's), so an adopted body reads third-party in the source and
+  first-party in a fork of it. A fork is scaffolding for one proposal round,
+  not a knowledge surface, but publishing one would publish a contributor's
+  prose unlabelled. One type owns how the record is read: the flattening rules
+  (last write wins, a non-reject entry without marks retires, a reject retires
+  nothing, an empty map is a defect) live on `ProposalRecord`, and every write
+  that follows a mark asks it rather than modelling it again. That duplication
+  was the cause of four review rounds finding the same defect one position
+  over. A test enumerates the rewrite call sites inside `memstead-base` and
+  fails when one appears in a file that carries no marks;
+  it does not see a new call in a file already on the list, an indirect caller
+  through `retarget_mem_links`, or another crate, so it narrows the search
+  rather than closing it.
+  That last one matters most: the engine classifies a link retarget as a
+  foreign-key change and not a semantic edit, and leaves `last_modified`
+  alone for that reason, so a mark that did not follow it would have let
+  ordinary owner housekeeping serve a contributor's untouched sentences as
+  the workspace's own, planted for free by one wiki-link in the proposed
+  body. Because the marks are carried, the read stays an exact lookup by slug
+  rather than inferring a moved body from matching content: 23 type and schema
+  pairs in the shipped catalogue declare exactly one load-bearing section, so
+  content inference would brand an owner's own entity that happens to share
+  one line, and a contributor could aim that by having a copy of it adopted. An
+  `adopt_with_changes` records no mark (the owner typed that body) and
+  retires an earlier one; a deletion does the same; a `reject` lands nothing
+  and therefore retires nothing, so a later rejected proposal touching an
+  adopted slug cannot relabel a standing contribution. A proposal record
+  that does not parse fails closed: every entity of that mem reads
+  `third-party`, because the record is the only evidence of which bodies
+  came from a fork and a trust label may not fail open on a file it could
+  not read. The caller-declared `Identity:` trailer is deliberately not
+  consulted: the party that writes a body also chooses that string. Absence
+  of foreign-arrival evidence inherits the mem's class, so a workspace that
+  takes no contributions reads exactly as before.
+  On markdown surfaces the class is now stated at all: the entity
+  frontmatter carries `_origin`, which the text channel previously omitted
+  at every grain while the JSON envelope had it, so the channel a cold
+  agent actually reads was the silent one. A third-party body is also
+  contained, in the entity render and in the whole-mem `llms-full.txt`
+  document: the body is wrapped in a delimiter whose nonce is derived from
+  the body and lengthened until the body cannot contain it, preceded by one
+  sentence saying the bytes are quoted data and not instructions. Every
+  chunk that carries part of that body re-establishes the frame, so the agent
+  reading chunk three is not handed a contributor's prose bare; a chunk past
+  the closing marker carries the engine's own computed appends and is
+  deliberately left unframed, because telling a reader that the engine's own
+  relation graph is a stranger's text is the same defect in reverse. The delimiter is
+  derived rather than random, so sealed archives and the reconstruction
+  measurement stay reproducible. The canonical form every hashing path uses is
+  untouched, and a mem holding no adopted body exports its `llms-full.txt`
+  byte-identically; the serving entity render does change, by the `_origin`
+  line it now carries on every read. `render_entity_markdown` (the canonical form
+  every hashing path uses) is unchanged and carries no label.
+  Check rows carry the same class where the prose on them is not the
+  workspace's own: a deployment declares its writing identities through
+  `Engine::declare_owner_identities`, a composition-layer lever on the same
+  terms as `declare_mem_origin` (not persisted with a mem, not reachable
+  over MCP, so nothing that can write a mem-repo can add itself), and a row
+  recorded under an identity outside that set serves `third-party` on its
+  `method` note and finding message. Undeclared means every row inherits
+  its mem's class, and a row naming no identity stays unconfirmable rather
+  than guessed foreign. The classification only ever
+  tightens, and that holds for both of its inputs: on a third-party mem
+  neither the identity on a row nor the class the archive sealed beside it can
+  win first-party, because both are the publisher's own bytes. The sealed
+  class tightens a vouched archive, which is the case a consumer cannot
+  answer alone (only the exporting workspace knew which identities were its
+  own), and its vocabulary is closed at validation so an unrecognised token
+  is refused rather than parsed into a class.
+  Two surfaces now state it. `memstead_health`'s `checks` finding line names
+  the recording identity on every finding and contains a third-party message
+  inline, where before a checker's sentence reached a reading agent as the
+  report's own voice with no author at all; the CLI and MCP render that line
+  from one function, because the copy that had drifted was the reason only
+  one of them said it. And the entity read's provenance block carries
+  `check_prose_origin`, so the `method` note it prints verbatim (on an
+  installed archive, the publisher's) is labelled and contained rather than
+  read as the report's own voice.
+  Where a mem's proposal record cannot be read, or carries a
+  structurally empty mark map that no engine write produces (a retype that
+  carries nothing retires the mark rather than emptying it, and a rename
+  refuses such a record rather than repairing it, which would lift a
+  quarantine the read installed on purpose), the mem fails closed and the
+  label says so:
+  `PROPOSAL_RECORD_UNREADABLE` rides the entity read on both channels beside
+  the conservative third-party class, because a conservative label with no
+  stated cause reads as the engine calling the operator's own mem a
+  stranger's.
+
 - **A mem forks from another mem's branch at a recorded ancestor.**
   `memstead mem fork <source>[@<sha>] <new-name> [--remote <name>]` creates
   a writable git-branch mem whose branch starts at the source's commit (the

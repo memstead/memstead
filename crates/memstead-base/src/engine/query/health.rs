@@ -95,6 +95,13 @@ impl Engine {
         if !matches!(self.labelling_memo.get(), Some((k, _)) if *k == key) {
             self.labelling_memo = OnceCell::new();
         }
+        // The foreign-entity marks ride here for the same reason the
+        // labelling does: a proposal merge lands entities and calls this,
+        // so the map a read consults can never outlive the merge that
+        // changed it.
+        if !matches!(self.foreign_entities_memo.get(), Some((k, _)) if *k == key) {
+            self.foreign_entities_memo = OnceCell::new();
+        }
     }
 
     /// The grounded labelling of one mem — `None` when its pinned

@@ -139,6 +139,96 @@ fn mem_origin_class_writable_first_party_readonly_third_party() {
     );
 }
 
+/// Without a proposal record every entity of a writable mem inherits its
+/// mem's class. The narrowing is opt-in by evidence, so a workspace that
+/// takes no contributions reads exactly as it did before the grain
+/// existed — a token that said third-party everywhere would carry no
+/// information at all.
+#[test]
+fn entity_origin_inherits_the_mem_class_without_foreign_evidence() {
+    use crate::render::OriginClass;
+
+    let tmp = TempDir::new().unwrap();
+    let writable_dir = tmp.path().join("writable");
+    std::fs::create_dir_all(&writable_dir).unwrap();
+    std::fs::write(
+        writable_dir.join("own.md"),
+        "---\ntype: spec\n---\n# Own\n\n## Identity\n\nAuthored here.\n",
+    )
+    .unwrap();
+    let writer = FilesystemBackend::new(writable_dir.clone());
+
+    let body = "---\ntype: spec\n---\n# Ext\n\n## Identity\n\nFrom an archive.\n";
+    let archive_path = build_archive(tmp.path(), "ext", &[("ext.md", body.as_bytes())]);
+
+    let engine = Engine::from_mounts(vec![
+        (
+            folder_mount("local", writable_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        ),
+        (
+            archive_mount("external", archive_path.clone()),
+            Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
+        ),
+    ])
+    .unwrap();
+
+    assert_eq!(
+        engine.entity_origin_class(&crate::EntityId::new("local", "own")),
+        OriginClass::FirstParty,
+        "an entity of a writable mem with no merge mark is first-party"
+    );
+    assert_eq!(
+        engine.entity_origin_class(&crate::EntityId::new("external", "ext")),
+        OriginClass::ThirdParty,
+        "every entity of a read-only mount stays third-party"
+    );
+}
+
+/// A check row's prose is classified by WHO recorded it, and only once
+/// the deployment has said who it is. Undeclared inherits the mem's class
+/// (so an existing deployment is unchanged), a declared foreign identity
+/// is third-party, and a row naming nobody is unconfirmable rather than
+/// guessed foreign — the reading the independence gate takes.
+#[test]
+fn check_row_origin_follows_the_declared_owner_identities() {
+    use crate::render::OriginClass;
+
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("writable");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut engine = Engine::from_mounts(vec![(
+        folder_mount("local", dir.clone()),
+        Box::new(FilesystemBackend::new(dir)) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+
+    assert!(!engine.declares_owner_identities());
+    assert_eq!(
+        engine.check_row_origin_class("local", Some("some-other-model")),
+        OriginClass::FirstParty,
+        "undeclared: every ledger identity inherits the mem's class"
+    );
+
+    engine.declare_owner_identities(["ops-session"]);
+    assert!(engine.declares_owner_identities());
+    assert_eq!(
+        engine.check_row_origin_class("local", Some("ops-session")),
+        OriginClass::FirstParty,
+        "a declared owner identity writes first-party prose"
+    );
+    assert_eq!(
+        engine.check_row_origin_class("local", Some("some-other-model")),
+        OriginClass::ThirdParty,
+        "an identity outside the declared set authored foreign prose"
+    );
+    assert_eq!(
+        engine.check_row_origin_class("local", None),
+        OriginClass::FirstParty,
+        "no identity is unconfirmable, never a guessed third-party"
+    );
+}
+
 /// `declare_mem_origin` lets the embedding deployment vouch for one
 /// read-only mount as first-party (the curated hosted read tier),
 /// overriding the writability inference for that mem only — sibling
@@ -2064,3 +2154,266 @@ fn search_returns_results_against_built_index() {
 }
 
 // ---- Engine::from_workspace_root (folder boot path) ------------
+
+/// An unreadable proposal record fails CLOSED. The record is the only
+/// evidence of which bodies came from a contributor's fork, so a corrupt or
+/// truncated file must not silently relabel every adopted body as the
+/// workspace's own prose. Unconfirmable resolves to the stranger's side,
+/// which is the same rule the mem grain follows for an unlabelled origin.
+#[test]
+fn an_unreadable_proposal_record_makes_every_entity_third_party() {
+    use crate::render::OriginClass;
+
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("writable");
+    std::fs::create_dir_all(dir.join(".memstead")).unwrap();
+    std::fs::write(
+        dir.join("own.md"),
+        "---\ntype: spec\n---\n# Own\n\n## Identity\n\nAuthored here.\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join(".memstead/proposals.json"), b"{ this is not json").unwrap();
+
+    let engine = Engine::from_mounts(vec![(
+        folder_mount("local", dir.clone()),
+        Box::new(FilesystemBackend::new(dir)) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+
+    assert_eq!(
+        engine.mem_origin_class("local"),
+        OriginClass::FirstParty,
+        "the mem itself is still writable"
+    );
+    assert_eq!(
+        engine.entity_origin_class(&crate::EntityId::new("local", "own")),
+        OriginClass::ThirdParty,
+        "with the evidence unreadable, the entity is unconfirmable and reads third-party"
+    );
+}
+
+/// The reader the export seals with carries the row's trust class exactly
+/// when the deployment has declared its own identities, so an export is
+/// byte-identical until it does and the class is the exporting workspace's
+/// answer once it is. Nothing else knows which identities were the
+/// workspace's own, so a mount cannot re-derive this.
+#[test]
+fn the_sealed_row_reader_carries_the_class_only_once_identities_are_declared() {
+    use crate::render::OriginClass;
+
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("writable");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut engine = Engine::from_mounts(vec![(
+        folder_mount("local", dir.clone()),
+        Box::new(FilesystemBackend::new(dir)) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+
+    let row = |identity: &str| crate::check::CheckRecord {
+        ts: 1,
+        entity: "local--own".to_string(),
+        verdict: "ok".to_string(),
+        method: Some("read the source".to_string()),
+        entity_hash: "h1".to_string(),
+        actor: "agent".to_string(),
+        client: None,
+        role: "checker".to_string(),
+        identity: Some(identity.to_string()),
+        kind: None,
+        schema_ref: None,
+        finding: None,
+        renamed_from: None,
+        carried_from: None,
+    };
+
+    assert!(
+        engine.sealed_row_reader("local")(&row("some-other-model"))
+            .origin
+            .is_none(),
+        "undeclared seals no class, so an export stays byte-identical"
+    );
+
+    engine.declare_owner_identities(["ops-session"]);
+    assert_eq!(
+        engine.sealed_row_reader("local")(&row("some-other-model")).origin,
+        Some(OriginClass::ThirdParty),
+        "a row an outside party wrote seals third-party"
+    );
+    assert_eq!(
+        engine.sealed_row_reader("local")(&row("ops-session")).origin,
+        Some(OriginClass::FirstParty),
+        "the workspace's own row seals first-party"
+    );
+}
+
+/// A structurally empty mark map is a record defect, and the mem fails
+/// closed on it.
+///
+/// Read as a retirement it cleared one entity's label and failed open; read
+/// with `all()` over an empty map (vacuously true) it inverted the mem, making
+/// every UNMARKED entity third-party while the marked slug read first-party.
+/// No merge writes an empty map, so the record has been hand-edited or
+/// half-written, and the honest reading is the one the unparseable branch
+/// beside it takes: which bodies came from a contributor is unknown, and
+/// unknown resolves to the stranger's side.
+#[test]
+fn an_empty_mark_map_fails_the_mem_closed() {
+    use crate::render::OriginClass;
+
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("writable");
+    std::fs::create_dir_all(dir.join(".memstead")).unwrap();
+    std::fs::write(
+        dir.join("own.md"),
+        "---\ntype: spec\n---\n# Own\n\n## Identity\n\nAuthored here.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("adopted.md"),
+        "---\ntype: spec\n---\n# Adopted\n\n## Identity\n\nA contribution.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(".memstead/proposals.json"),
+        br#"{"version":1,"proposals":[{"id":"f@0","ancestor":"","base":"","target_tip":"","at":"",
+             "entities":{"adopted":{"disposition":"adopt","landed_sections":{}}}}]}"#,
+    )
+    .unwrap();
+
+    let engine = Engine::from_mounts(vec![(
+        folder_mount("local", dir.clone()),
+        Box::new(FilesystemBackend::new(dir)) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+
+    assert_eq!(
+        engine.entity_origin_class(&crate::EntityId::new("local", "own")),
+        OriginClass::ThirdParty,
+        "the marks cannot be read, so no entity of the mem is confirmable"
+    );
+    assert!(
+        engine
+            .proposal_record_error("local")
+            .is_some_and(|why| why.contains("landed_sections")),
+        "and the label says why, naming the defect"
+    );
+}
+
+/// The check-row class only ever TIGHTENS. On a third-party mem the identity
+/// on a row is the publisher's bytes, carried verbatim out of the archive, so
+/// honouring it would admit a caller-supplied first-party claim, which is the
+/// one thing the governing principle forbids on any read path.
+#[test]
+fn a_publisher_supplied_identity_cannot_win_first_party() {
+    use crate::render::OriginClass;
+
+    let tmp = TempDir::new().unwrap();
+    let body = "---\ntype: spec\n---\n# Ext\n\n## Identity\n\nFrom an archive.\n";
+    let archive_path = build_archive(tmp.path(), "ext", &[("ext.md", body.as_bytes())]);
+    let mut engine = Engine::from_mounts(vec![(
+        archive_mount("external", archive_path.clone()),
+        Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+    engine.declare_owner_identities(["ops-session"]);
+
+    assert_eq!(
+        engine.check_row_origin_class("external", Some("ops-session")),
+        OriginClass::ThirdParty,
+        "a guessed owner identity on a third-party mem stays third-party"
+    );
+}
+
+/// A mem the deployment VOUCHED for is first-party at the mem grain, and it
+/// carries its own record of the bodies its owner adopted from contributors.
+/// Skipping non-writable mounts served those as the vouching deployment's own
+/// prose, which is the exact case the sealed check-row class exists to
+/// prevent one channel over.
+#[test]
+fn a_vouched_archive_still_reports_its_adopted_bodies() {
+    use crate::render::OriginClass;
+
+    let tmp = TempDir::new().unwrap();
+    let body = "---\ntype: spec\n---\n# Adopted\n\n## Identity\n\nA contribution.\n";
+    let record = br#"{"version":1,"proposals":[{"id":"f@0","ancestor":"","base":"","target_tip":"","at":"",
+         "entities":{"adopted":{"disposition":"adopt","landed_sections":{"identity":"PLACEHOLDER"}}}}]}"#;
+    let marks = crate::preparation::entity_section_prepared_hash("identity", "A contribution.");
+    let record = String::from_utf8_lossy(record).replace("PLACEHOLDER", &marks);
+    let archive_path = build_archive(
+        tmp.path(),
+        "vouched",
+        &[
+            ("adopted.md", body.as_bytes()),
+            (".memstead/proposals.json", record.as_bytes()),
+        ],
+    );
+    let mut engine = Engine::from_mounts(vec![(
+        archive_mount("vouched", archive_path.clone()),
+        Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+    engine.declare_mem_origin("vouched", OriginClass::FirstParty);
+
+    assert_eq!(
+        engine.mem_origin_class("vouched"),
+        OriginClass::FirstParty,
+        "the deployment vouches for the mem"
+    );
+    assert_eq!(
+        engine.entity_origin_class(&crate::EntityId::new("vouched", "adopted")),
+        OriginClass::ThirdParty,
+        "but not for a body its owner adopted from a contributor"
+    );
+}
+
+/// A publisher cannot seal itself first-party. The sealed class is bytes from
+/// the archive, so it may only TIGHTEN: honoured raw it would admit a
+/// caller-supplied first-party claim on a mem nobody vouched for, which the
+/// governing principle forbids on every read path. The closed vocabulary at
+/// validation stops an unrecognised token, not a well-formed lie.
+#[test]
+fn a_sealed_first_party_claim_cannot_loosen_a_third_party_mem() {
+    use crate::render::OriginClass;
+
+    let tmp = TempDir::new().unwrap();
+    let body = "---\ntype: spec\n---\n# Ext\n\n## Identity\n\nFrom an archive.\n";
+    let checks = br#"{"version":1,"entities":{"ext":{"verification":{"ts":1,"verdict":"ok",
+         "method":"trust me","entity_hash":"h1","actor":"agent","role":"checker",
+         "identity":"the-publisher","origin":"first-party"}}}}"#;
+    let archive_path = build_archive(
+        tmp.path(),
+        "ext",
+        &[
+            ("ext.md", body.as_bytes()),
+            (".memstead/checks.json", checks),
+        ],
+    );
+    let engine = Engine::from_mounts(vec![(
+        archive_mount("external", archive_path.clone()),
+        Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+
+    let rec = crate::check::CheckRecord {
+        ts: 1,
+        entity: "external--ext".to_string(),
+        verdict: "ok".to_string(),
+        method: Some("trust me".to_string()),
+        entity_hash: "h1".to_string(),
+        actor: "agent".to_string(),
+        client: None,
+        role: "checker".to_string(),
+        identity: Some("the-publisher".to_string()),
+        kind: None,
+        schema_ref: None,
+        finding: None,
+        renamed_from: None,
+        carried_from: None,
+    };
+    assert_eq!(
+        engine.check_row_prose_origin("external", "external--ext", &rec),
+        OriginClass::ThirdParty,
+        "a sealed first-party claim does not loosen the mem's own class"
+    );
+}

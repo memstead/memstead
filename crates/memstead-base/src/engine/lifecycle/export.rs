@@ -226,7 +226,7 @@ impl Engine {
                 workspace_root,
                 workspace_schemas_dir,
                 self.ref_schema_source_for(config),
-                Some(&self.sealed_independence_reader(mem_name)),
+                Some(&self.sealed_row_reader(mem_name)),
             )
             .map_err(|e| EngineError::Backend(BackendError::Other(format!("export_mem: {e}")))),
             MountStorage::GitBranch { gitdir, branch } => {
@@ -259,7 +259,7 @@ impl Engine {
                     workspace_root,
                     mem_name,
                     &entity_paths,
-                    Some(&self.sealed_independence_reader(mem_name)),
+                    Some(&self.sealed_row_reader(mem_name)),
                 );
                 (hook.export)(
                     gitdir,

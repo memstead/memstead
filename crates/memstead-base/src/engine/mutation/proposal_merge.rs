@@ -114,6 +114,34 @@ struct Adopted {
 }
 
 impl Engine {
+    /// The origin marks for a body the merge has just landed in `target`:
+    /// one prepared hash per load-bearing section the landed entity
+    /// carries. `None` when the slug holds no real entity (a stub) or the
+    /// landed body has no non-empty load-bearing section, so the record
+    /// carries no mark and the entity inherits its mem's class.
+    ///
+    /// Per section, and the prepared form rather than the file hash, so the
+    /// marks survive the owner's bookkeeping edits, a repin and a retype,
+    /// and expire per claim-carrying section; see
+    /// [`crate::ops::proposal::RecordedDisposition::landed_sections`]. The
+    /// read path compares with the same primitive
+    /// ([`crate::preparation::entity_section_prepared_hash`]), so the two
+    /// sides cannot drift into computing different things.
+    fn landed_section_marks(
+        &self,
+        target: &str,
+        slug: &str,
+    ) -> Option<std::collections::BTreeMap<String, String>> {
+        let id = EntityId::new(target, slug);
+        let entity = self.store.get(&id).filter(|e| !e.stub)?;
+        let type_def = self
+            .schema_for(target)
+            .and_then(|schema| schema.get_type(&entity.entity_type));
+        let marks =
+            crate::preparation::entity_load_bearing_section_marks(entity, type_def.as_deref());
+        (!marks.is_empty()).then_some(marks)
+    }
+
     /// Apply `file` (the brief's JSON with `dispositions` filled) onto
     /// the mem `fork` was forked from. The merger is the session's
     /// identity ([`Engine::set_identity`]) and is required. The file's
@@ -550,14 +578,44 @@ impl Engine {
             entities: slots
                 .iter()
                 .map(|s| {
-                    (
-                        s.entry.slug.clone(),
+                    (s.entry.slug.clone(), {
+                        // The adopt-time origin decision. An `adopt`
+                        // lands the proposer's bytes verbatim (the
+                        // landing commit carries the proposer's
+                        // identity), so the entity's claim-carrying
+                        // sections are a stranger's until the owner
+                        // rewrites them; an `adopt_with_changes` lands
+                        // the owner's own body in the amend commit and
+                        // is first-party, so it records no mark. The
+                        // store already holds the landed body here
+                        // (`apply_prepared_to_store` ran above), and
+                        // the hash is a pure function of those bytes,
+                        // so the value matches what the re-read serves.
+                        // Only where the adoption actually LANDS a body.
+                        // A fork's deletion is an `adopt` too, and the
+                        // store still holds the owner's pre-delete
+                        // entity at this point, so marking on the
+                        // disposition alone would stamp the owner's own
+                        // body as a stranger's.
+                        let lands_a_body = adopted
+                            .iter()
+                            .find(|a| a.slug == s.entry.slug)
+                            .is_some_and(|a| {
+                                a.landings.iter().any(|l| {
+                                    !matches!(l, Landing::Delete { .. })
+                                        && l.id() == &EntityId::new(&target, &s.entry.slug)
+                                })
+                            });
+                        let landed_sections = (s.disposition == DISPOSITION_ADOPT && lands_a_body)
+                            .then(|| self.landed_section_marks(&target, &s.entry.slug))
+                            .flatten();
                         RecordedDisposition {
                             disposition: s.disposition.to_string(),
                             reason: s.reason.clone(),
                             content_hash: s.entry.content_hash.clone(),
-                        },
-                    )
+                            landed_sections,
+                        }
+                    })
                 })
                 .collect(),
         });

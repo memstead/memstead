@@ -806,17 +806,12 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
             }
             if let Some(findings) = c.get("findings").and_then(Value::as_object) {
                 for (entity, f) in findings {
-                    let code = f["finding"]["code"].as_str().unwrap_or("?");
-                    let section = f["finding"]["section"]
-                        .as_str()
-                        .map(|sec| format!(" [{sec}]"))
-                        .unwrap_or_default();
-                    let message = f["finding"]["message"].as_str().unwrap_or("");
-                    lines.push(format!(
-                        "  - finding on `{entity}` ({} {}): {code}{section} — {message}",
-                        f["kind"].as_str().unwrap_or("verification"),
-                        f["verdict"].as_str().unwrap_or("?"),
-                    ));
+                    // The engine's own renderer, not a second copy: the line
+                    // carries a checker's prose, so its author and its
+                    // containment must not depend on which surface prints it.
+                    lines.push(
+                        memstead_base::ops::health_compose::render_check_finding_line(entity, f),
+                    );
                 }
             }
         }

@@ -461,6 +461,146 @@ pub struct RecordedDisposition {
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
+    /// For an `adopt`: one prepared hash per LOAD-BEARING section of the
+    /// body the merge landed, keyed by section key
+    /// ([`crate::preparation::entity_load_bearing_section_marks`]).
+    ///
+    /// This is the adopt-time decision that
+    /// [`crate::engine::Engine::entity_origin_class`] reports at read
+    /// time: while any recorded section still hashes to the value here,
+    /// that section is the proposer's bytes, so the entity serves
+    /// `third-party`.
+    ///
+    /// Per section, and prepared rather than the file hash, for three
+    /// reasons the coarser forms each get wrong. The file hash moves on a
+    /// metadata stamp or a notes-only edit, so a stranger's claim would
+    /// promote itself to first-party on the owner's next unrelated edit.
+    /// One hash over the whole load-bearing form collapses a type's
+    /// sections to one bit, so rewriting one of three would clear a mark
+    /// still covering the other two. And a per-section hash carries its
+    /// own section key, so the comparison needs neither the schema pin nor
+    /// the entity type: a repin or a retype changes which sections a type
+    /// calls load-bearing, and a comparison that depended on the current
+    /// declaration would report a rewrite that never happened.
+    ///
+    /// A MERGE writes it only for an `adopt`: absent on an
+    /// `adopt_with_changes` (the owner typed those bytes, so they are
+    /// first-party), on a `reject` (nothing landed), on a deletion, and on
+    /// every entry written before this field existed. A later rename may
+    /// carry marks onto an entry of any disposition
+    /// ([`crate::engine::mutation::move_marks_on_rename`]), because the
+    /// entry then describes the body that is at that slug NOW rather than
+    /// the one the proposal landed there; the other fields keep documenting
+    /// the proposal. A
+    /// legacy entry cannot confirm the comparison and inherits the mem's
+    /// class, which is what the engine did before the field. A contributor
+    /// cannot cause the absence: the record is written by the owner's
+    /// merge, on the target branch, never by the fork.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landed_sections: Option<BTreeMap<String, String>>,
+}
+
+/// The origin marks a record makes effective for one slug, and the one
+/// structural verdict it can raise about itself.
+///
+/// These two methods are the ONLY reading of `landed_sections`. Both the read
+/// path ([`crate::Engine::entity_origin_class`]) and every write that has to
+/// follow a mark (rename, retype, the wiki-link retargets) go through them,
+/// because four review rounds in a row found the same defect one position
+/// over while the write path kept its own copy of these rules: it modelled
+/// last-write-wins and retirement by hand and got one arm wrong each time.
+/// One owner, so the arms cannot disagree.
+impl ProposalRecord {
+    /// The marks effective for `slug`: every proposal in record order, last
+    /// write wins, a non-reject entry without marks retires the slug, and a
+    /// `reject` retires nothing (it landed no bytes, so a later rejected
+    /// proposal must not relabel a standing contribution).
+    ///
+    /// Only meaningful on a record with no [`Self::structural_defect`]; a
+    /// caller that has not checked that is reading a record it does not
+    /// understand.
+    pub fn effective_marks(&self, slug: &str) -> Option<BTreeMap<String, String>> {
+        let mut effective = None;
+        for proposal in &self.proposals {
+            let Some(entry) = proposal.entities.get(slug) else {
+                continue;
+            };
+            match entry.landed_sections.as_ref() {
+                Some(sections) if !sections.is_empty() => effective = Some(sections.clone()),
+                // A structurally empty map is a defect, never a retirement;
+                // `structural_defect` is what a caller acts on.
+                Some(_) => {}
+                None if entry.disposition == DISPOSITION_REJECT => {}
+                None => effective = None,
+            }
+        }
+        effective
+    }
+
+    /// The index of the proposal whose entry currently makes `slug`'s marks
+    /// effective, when one does. The row a write must move or replace, rather
+    /// than the first row that happens to name the slug: moving the first
+    /// relocated a `reject`'s reason and content hash onto another slug and
+    /// took the re-proposal gate with it.
+    pub fn effective_marks_at(&self, slug: &str) -> Option<usize> {
+        let mut at = None;
+        for (idx, proposal) in self.proposals.iter().enumerate() {
+            let Some(entry) = proposal.entities.get(slug) else {
+                continue;
+            };
+            match entry.landed_sections.as_ref() {
+                Some(sections) if !sections.is_empty() => at = Some(idx),
+                Some(_) => {}
+                None if entry.disposition == DISPOSITION_REJECT => {}
+                None => at = None,
+            }
+        }
+        at
+    }
+
+    /// Every slug the record makes marks effective for, in one pass.
+    pub fn effective_marks_by_slug(&self) -> BTreeMap<String, BTreeMap<String, String>> {
+        let mut out: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        for proposal in &self.proposals {
+            for (slug, entry) in &proposal.entities {
+                match entry.landed_sections.as_ref() {
+                    Some(sections) if !sections.is_empty() => {
+                        out.insert(slug.clone(), sections.clone());
+                    }
+                    Some(_) => {}
+                    None if entry.disposition == DISPOSITION_REJECT => {}
+                    None => {
+                        out.remove(slug);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Why the record cannot be read as evidence of anything, when it cannot:
+    /// an entry recording a structurally empty `landed_sections` map, which no
+    /// engine write produces. Such a record has been hand-edited or
+    /// half-written, so which bodies came from a contributor is unknown, and
+    /// unknown resolves to the stranger's side: the read serves every entity
+    /// of the mem third-party, and every write that follows a mark (the
+    /// rename, the retype re-key, the rehash after a link retarget, the
+    /// export's carry) refuses to touch the record at all, because repairing
+    /// it would lift a quarantine the read installed on purpose.
+    pub fn structural_defect(&self) -> Option<String> {
+        let defective = self.proposals.iter().any(|p| {
+            p.entities
+                .values()
+                .any(|e| e.landed_sections.as_ref().is_some_and(|s| s.is_empty()))
+        });
+        defective.then(|| {
+            format!(
+                "an entry in {PROPOSAL_RECORD_PATH} records an empty `landed_sections` map, \
+                 which no engine write produces: which bodies came from a contributor cannot \
+                 be read from it"
+            )
+        })
+    }
 }
 
 impl ProposalRecord {

@@ -303,3 +303,103 @@ fn envelope_shape_is_code_message_details() {
         "envelope has exactly 3 top-level keys"
     );
 }
+
+/// An export's link retarget carries an adopted body's origin marks. A
+/// hierarchical mem publishes under its leaf, so the export rewrites every
+/// self-qualified wiki-link, which moves the bytes a mark hashes. Unfollowed,
+/// the archive forgets which of its bodies came from a contributor, and the
+/// first deployment that vouches for the mem serves that contributor's
+/// sentences as its owner's own.
+///
+/// The section maps come from the caller, which is what makes the comparison
+/// exact: they are the store's schema-shaped map, the one the marks were
+/// computed over, not a schema-free re-parse that disagrees on a catch-all.
+#[test]
+fn an_export_retarget_carries_an_adopted_bodys_marks() {
+    use crate::preparation::entity_section_prepared_hash;
+
+    let was = "beta, see [[planning/plan-x:other]]";
+    let now = "beta, see [[plan-x:other]]";
+    let mark = entity_section_prepared_hash("identity", was);
+    // Nested, because the record keys by the whole slug and the export's
+    // retarget only fires for a hierarchical mem in the first place.
+    let record = format!(
+        r#"{{"version":1,"proposals":[{{"id":"f@0","ancestor":"","base":"","target_tip":"","at":"",
+           "entities":{{"architecture/beta":{{"disposition":"adopt","landed_sections":{{"identity":"{mark}"}}}}}}}}]}}"#
+    );
+    let sections =
+        |body: &str| indexmap::IndexMap::from([("identity".to_string(), body.to_string())]);
+
+    let carried = crate::ops::export::rekey_proposal_marks(
+        Some(record.into_bytes()),
+        &[(
+            "architecture/beta".to_string(),
+            sections(was),
+            sections(now),
+        )],
+    )
+    .expect("a record went in");
+
+    let parsed = crate::ops::proposal::ProposalRecord::from_bytes(&carried).expect("parses");
+    let marks = parsed.proposals[0].entities["architecture/beta"]
+        .landed_sections
+        .as_ref()
+        .expect("the mark survived");
+    assert_eq!(
+        marks.get("identity").cloned(),
+        Some(entity_section_prepared_hash("identity", now)),
+        "the mark hashes the ARCHIVED bytes, so it still holds on the mount"
+    );
+}
+
+/// A mark the owner had already expired is not resurrected by the retarget,
+/// and the guard that decides it is the hash comparison, not an early return.
+#[test]
+fn an_export_retarget_does_not_resurrect_an_expired_mark() {
+    use crate::preparation::entity_section_prepared_hash;
+
+    let was = "the owner's words, see [[planning/plan-x:other]]";
+    let now = "the owner's words, see [[plan-x:other]]";
+    let stale = entity_section_prepared_hash("identity", "what the proposer wrote");
+    let record = format!(
+        r#"{{"version":1,"proposals":[{{"id":"f@0","ancestor":"","base":"","target_tip":"","at":"",
+           "entities":{{"beta":{{"disposition":"adopt","landed_sections":{{"identity":"{stale}"}}}}}}}}]}}"#
+    );
+    let sections =
+        |body: &str| indexmap::IndexMap::from([("identity".to_string(), body.to_string())]);
+
+    let carried = crate::ops::export::rekey_proposal_marks(
+        Some(record.into_bytes()),
+        &[("beta".to_string(), sections(was), sections(now))],
+    )
+    .expect("a record went in");
+
+    let parsed = crate::ops::proposal::ProposalRecord::from_bytes(&carried).expect("parses");
+    assert_eq!(
+        parsed.proposals[0].entities["beta"]
+            .landed_sections
+            .as_ref()
+            .and_then(|m| m.get("identity"))
+            .cloned(),
+        Some(stale),
+        "an expired mark stays expired: the carry follows bytes it still matched, nothing else"
+    );
+}
+
+/// An export refuses a record the reader calls defective, the same stance the
+/// rename takes: the mem is quarantined on purpose, and an archive claiming a
+/// readable record would ship the quarantine away.
+#[test]
+fn an_export_leaves_a_defective_record_exactly_as_it_is() {
+    let record =
+        br#"{"version":1,"proposals":[{"id":"f@0","ancestor":"","base":"","target_tip":"","at":"",
+         "entities":{"beta":{"disposition":"adopt","landed_sections":{}}}}]}"#;
+    let sections =
+        |body: &str| indexmap::IndexMap::from([("identity".to_string(), body.to_string())]);
+    let out = crate::ops::export::rekey_proposal_marks(
+        Some(record.to_vec()),
+        &[("beta".to_string(), sections("a"), sections("b"))],
+    )
+    .expect("a record went in");
+    assert_eq!(out, record.to_vec(), "byte-identical, evidence intact");
+}

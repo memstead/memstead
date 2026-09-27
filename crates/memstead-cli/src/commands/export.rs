@@ -378,7 +378,10 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     None,
                     None,
                     None,
-                    engine.mem_origin_class(entity.id.mem()),
+                    // Entity grain: a body merged in from a contributor's
+                    // fork is third-party inside a first-party mem, and a
+                    // script branching on this key must see that.
+                    engine.entity_origin_class(&entity.id),
                     outgoing,
                     None,
                     None,

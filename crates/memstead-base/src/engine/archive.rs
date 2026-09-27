@@ -203,7 +203,7 @@ impl Engine {
                 workspace_schemas_dir,
                 mem_name,
                 self.ref_schema_source_for(config),
-                Some(&self.sealed_independence_reader(mem_name)),
+                Some(&self.sealed_row_reader(mem_name)),
             )
             .map_err(|e| {
                 EngineError::Backend(crate::backend::BackendError::Other(format!(
@@ -244,7 +244,7 @@ impl Engine {
                     workspace_root,
                     mem_name,
                     &entity_paths,
-                    Some(&self.sealed_independence_reader(mem_name)),
+                    Some(&self.sealed_row_reader(mem_name)),
                 );
                 (hook.export_to_bytes)(
                     gitdir,
@@ -298,7 +298,7 @@ impl Engine {
                     workspace_root,
                     mem_name,
                     &entity_paths,
-                    Some(&self.sealed_independence_reader(mem_name)),
+                    Some(&self.sealed_row_reader(mem_name)),
                 );
                 crate::ops::export::export_entries_to_bytes(
                     config,

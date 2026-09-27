@@ -1131,18 +1131,7 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
             }
             if let Some(findings) = c.get("findings").and_then(|f| f.as_object()) {
                 for (entity, f) in findings {
-                    let code = f["finding"]["code"].as_str().unwrap_or("?");
-                    let section = f["finding"]["section"]
-                        .as_str()
-                        .map(|x| format!(" [{x}]"))
-                        .unwrap_or_default();
-                    let message = f["finding"]["message"].as_str().unwrap_or("");
-                    let _ = writeln!(
-                        s,
-                        "  - finding on `{entity}` ({} {}): {code}{section} — {message}",
-                        f["kind"].as_str().unwrap_or("verification"),
-                        f["verdict"].as_str().unwrap_or("?"),
-                    );
+                    let _ = writeln!(s, "{}", render_check_finding_line(entity, f));
                 }
             }
         }
@@ -1269,6 +1258,51 @@ fn stale_row(e: &crate::ops::StaleEntity) -> serde_json::Value {
         obj.insert("anchor_state".into(), serde_json::json!(state));
     }
     row
+}
+
+/// One `checks` finding line, for every surface that renders the checks
+/// axis as markdown.
+///
+/// Shared rather than copied because the line carries a checker's own
+/// prose: the message is whatever agent recorded the check wrote, which in
+/// a workspace that points a foreign model or a transcribed outside finding
+/// at its ledger is not the workspace itself. A second copy of this
+/// rendering is a second place for the identity and the containment to go
+/// missing, and it already had: the CLI's markdown path printed a
+/// stranger's sentence with no author while the MCP path named one.
+///
+/// `f` is one entry of the checks axis's `findings` map, as
+/// `crate::ops::health` builds it.
+pub fn render_check_finding_line(entity: &str, f: &serde_json::Value) -> String {
+    let code = f["finding"]["code"].as_str().unwrap_or("?");
+    let section = f["finding"]["section"]
+        .as_str()
+        .map(|x| format!(" [{x}]"))
+        .unwrap_or_default();
+    let message = f["finding"]["message"].as_str().unwrap_or("");
+    // Who wrote the sentence, and whether they are this workspace. Without
+    // the identity a reading agent takes a checker's prose for the report's
+    // own voice; a third-party row is additionally contained, because this
+    // line is read by the same agent that reads the entities.
+    let third_party =
+        f["origin"].as_str() == Some(crate::render::OriginClass::ThirdParty.as_wire());
+    let by = f["identity"]
+        .as_str()
+        .map(|i| format!(" by `{i}`"))
+        .unwrap_or_default();
+    let (mark, message) = if third_party {
+        (
+            crate::render::QUOTE_LABEL,
+            crate::render::quote_inline(message),
+        )
+    } else {
+        ("", message.to_string())
+    };
+    format!(
+        "  - finding on `{entity}` ({} {}){by}{mark}: {code}{section} — {message}",
+        f["kind"].as_str().unwrap_or("verification"),
+        f["verdict"].as_str().unwrap_or("?"),
+    )
 }
 
 #[cfg(test)]

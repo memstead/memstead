@@ -269,6 +269,46 @@ fn archive_identity(mem_name: &str) -> &str {
     memstead_base::ops::export::archive_identity(mem_name)
 }
 
+/// One entity's section maps before and after the export's link retarget, as
+/// [`memstead_base::ops::export::rekey_proposal_marks`] takes them: derived
+/// with the mem's own schema, so they are the same shape the marks were
+/// computed over.
+///
+/// `None` when nothing moved, when either side is not UTF-8, or when the
+/// schema or the entity's type cannot be resolved. The carry then does not
+/// happen, which is the pre-change behaviour; the archive's marks stay as
+/// written and a consuming mount reads them as expired.
+fn mark_rewrite(
+    schema: Option<&memstead_schema::Schema>,
+    mem_name: &str,
+    rel: &str,
+    before: &[u8],
+    after: &[u8],
+) -> Option<(
+    String,
+    memstead_base::ops::export::ProposalMarkSections,
+    memstead_base::ops::export::ProposalMarkSections,
+)> {
+    let before = std::str::from_utf8(before).ok()?;
+    let after = std::str::from_utf8(after).ok()?;
+    if before == after {
+        return None;
+    }
+    let schema = schema?;
+    let type_name = memstead_base::entity::parser::peek_type_from_frontmatter(before)?;
+    let type_def = schema.get_type(&type_name)?;
+    let sections = |text: &str| {
+        memstead_base::entity::parser::parse_markdown(text, rel, type_def.as_ref(), mem_name)
+            .ok()
+            .map(|parsed| parsed.entity.sections)
+    };
+    let slug = memstead_base::ops::export::entity_paths_of(std::slice::from_ref(
+        &std::path::PathBuf::from(rel),
+    ))
+    .remove(0);
+    Some((slug, sections(before)?, sections(after)?))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn export_mem_from_branch_to_bytes(
     mem_repo_gitdir: &Path,
@@ -318,7 +358,28 @@ pub fn export_mem_from_branch_to_bytes(
     // fresh against the branch bytes is re-keyed to the archived bytes so
     // it stays fresh on the mount, a stale one stays stale (the base
     // funnel's rule, applied to the same member).
+    // The marks were computed over the STORE's section map, which is
+    // schema-shaped, so carrying them needs the schema. The export embeds it
+    // already; loading it here is what keeps the comparison exact instead of
+    // re-deriving a map that disagrees on a catch-all section.
+    let schema = memstead_schema::loader::load_sealed_package(
+        &schema_files
+            .iter()
+            .map(|sf| (sf.archive_path.clone(), sf.bytes.clone()))
+            .collect::<Vec<_>>(),
+    )
+    .ok();
     let mut rewrites: Vec<(String, String, String)> = Vec::new();
+    // The same rewrite moves the bytes an adopted body's origin marks hash, so
+    // the proposal record riding beside the entities follows it too. Without
+    // this the archive forgets which of its bodies came from a contributor,
+    // and any consuming deployment that vouches for the mem serves that
+    // contributor's prose as the mem owner's own.
+    let mut mark_rewrites: Vec<(
+        String,
+        memstead_base::ops::export::ProposalMarkSections,
+        memstead_base::ops::export::ProposalMarkSections,
+    )> = Vec::new();
     let md_entries: Vec<(String, Vec<u8>)> = blobs
         .into_iter()
         .filter(|b| b.path.ends_with(".md"))
@@ -335,6 +396,11 @@ pub fn export_mem_from_branch_to_bytes(
             ) {
                 rewrites.push(rw);
             }
+            if let Some(rw) =
+                mark_rewrite(schema.as_ref(), mem_name, &b.path, &b.bytes, &retargeted)
+            {
+                mark_rewrites.push(rw);
+            }
             (b.path, retargeted)
         })
         .collect();
@@ -342,6 +408,8 @@ pub fn export_mem_from_branch_to_bytes(
         checks_bytes.map(<[u8]>::to_vec),
         &rewrites,
     );
+    let proposals_bytes =
+        memstead_base::ops::export::rekey_proposal_marks(proposals_bytes, &mark_rewrites);
     let entity_count = md_entries.len();
 
     let mut all_entries: Vec<(String, Vec<u8>)> =

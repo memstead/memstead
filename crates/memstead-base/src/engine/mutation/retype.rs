@@ -452,6 +452,12 @@ impl Engine {
 
         let backend = self.mounts[mount_idx].backend.as_ref();
         backend.write_entity(Path::new(&entity.file_path), markdown.as_bytes())?;
+        // An adopted body's origin marks follow a re-keyed section in the
+        // same commit. A `section_map` moves content to another key without
+        // changing it, and a mark's hash covers its key, so an unfollowed
+        // mark would stop matching and serve a contributor's untouched
+        // sentences as the workspace's own prose.
+        super::stage_proposal_marks_retype(backend, id, &args.section_map, &next.sections)?;
         // `memstead: <verb> <id>` — the subject grammar the history reader
         // attributes touches by; the type change rides the outcome and the
         // provenance verb, not the subject.

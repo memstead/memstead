@@ -133,7 +133,31 @@ pub fn apply_chunking(
         format!("---\n{merged_fm}\n---\n\n{}", chunks[idx])
     };
 
-    Ok(result)
+    // A contained body is cut on newlines like any other, so every chunk
+    // but the first would otherwise carry a stranger's prose with no
+    // opener and no notice, and the last a closer with no opener. The
+    // frontmatter's `_quote` names the delimiter, so re-frame each chunk's
+    // slice inside it: a label the agent reading chunk three never sees
+    // protects nothing, which is the whole reason the delimiter exists.
+    // Whether the contributor's quote already closed in an EARLIER chunk:
+    // this chunk then holds the engine's own computed appends, not the
+    // contributor's body, and framing those would teach a reading agent that
+    // the engine's own values are a stranger's text. Read off the chunk list
+    // rather than guessed from the slice's shape, so a bullet list that
+    // continues past a heading is classified correctly.
+    let closer_seen_before = original_fm
+        .iter()
+        .find(|(k, _)| k == "_quote")
+        .map(|(_, marker)| {
+            let closer = format!(">>> {}", marker.trim());
+            chunks[..idx].iter().any(|c| c.contains(&closer))
+        })
+        .unwrap_or(false);
+    Ok(reframe_quoted_chunk(
+        result,
+        &original_fm,
+        closer_seen_before,
+    ))
 }
 
 /// Parse the frontmatter inner block of `markdown` into ordered
@@ -243,6 +267,70 @@ fn inject_chunk_frontmatter(markdown: &str, idx: usize, total: usize, truncated:
 /// `scripts/frontmatter-sites.json` documents); the core owns both
 /// delimiter flavours in one place.
 use crate::entity::parser::frontmatter_parts;
+
+/// Re-establish the containment frame on one chunk of a third-party body.
+///
+/// `_quote` in the entity's own frontmatter names the delimiter
+/// ([`crate::render::quote_marker`]). Any part of the frame the slice
+/// already carries is left alone, and the missing half is added, so a
+/// reader of any single chunk sees opener, notice and closer around exactly
+/// the contributor's bytes. A chunk of an unmarked entity is returned
+/// untouched, so nothing but a third-party read changes shape.
+fn reframe_quoted_chunk(
+    chunk: String,
+    original_fm: &[(String, String)],
+    past_quote: bool,
+) -> String {
+    if past_quote {
+        return chunk;
+    }
+    let Some(marker) = original_fm
+        .iter()
+        .find(|(k, _)| k == "_quote")
+        .map(|(_, v)| v.trim().to_string())
+    else {
+        return chunk;
+    };
+    let opener = format!("<<< {marker}");
+    let closer = format!(">>> {marker}");
+    let Some((fm, body)) = frontmatter_parts(&chunk) else {
+        return chunk;
+    };
+    let body = body.trim_start_matches('\n').trim_end_matches('\n');
+    let carries_opener = body.contains(&opener);
+    let carries_closer = body.contains(&closer);
+    if carries_opener && carries_closer {
+        return chunk;
+    }
+    if carries_closer {
+        // The closer sits in this chunk: the contributor's tail is above it
+        // and the engine's appends, if any, below. Frame only the tail.
+        let (inside, after) = body.split_once(closer.as_str()).unwrap_or((body, ""));
+        let framed = format!(
+            "{opener}\n{}\n\n{}\n\n{closer}",
+            crate::render::QUOTE_NOTICE,
+            inside.trim_end_matches('\n')
+        );
+        let after = after.trim_start_matches('\n');
+        let tail = if after.is_empty() {
+            String::new()
+        } else {
+            format!("\n\n{after}")
+        };
+        return format!("---\n{fm}\n---\n\n{framed}{tail}\n");
+    }
+    let mut framed = String::new();
+    if !carries_opener {
+        framed.push_str(&opener);
+        framed.push('\n');
+        framed.push_str(crate::render::QUOTE_NOTICE);
+        framed.push_str("\n\n");
+    }
+    framed.push_str(body);
+    framed.push_str("\n\n");
+    framed.push_str(&closer);
+    format!("---\n{fm}\n---\n\n{framed}\n")
+}
 
 #[cfg(test)]
 mod tests {
@@ -578,6 +666,101 @@ mod tests {
         assert!(
             out.contains("type: spec") && out.contains("_chunk: 1 of 1"),
             "entity keys and chunk-walk keys share the one block:\n{out}"
+        );
+    }
+
+    /// Every chunk of a contained body carries the frame. A body is cut on
+    /// newlines like any other, so without re-framing chunk two onward would
+    /// deliver a contributor's prose with no opener and no notice, and the
+    /// last chunk a closer with no opener: precisely the case the delimiter
+    /// exists to prevent, since the agent reading chunk three is the one
+    /// being addressed.
+    #[test]
+    fn every_chunk_of_a_contained_body_carries_the_frame() {
+        let body: String = (0..80)
+            .map(|i| format!("Line {i} of a contributor's adopted body.\n"))
+            .collect();
+        let marker = crate::render::quote_marker(&body);
+        let md = format!(
+            "---\n_hash: abc\n_origin: third-party\n_quote: {marker}\n---\n\n{}",
+            crate::render::quote_wrap(&body, &marker)
+        );
+        let total_probe = apply_chunking(&md, 120, Some(1), &[]).unwrap();
+        let total: usize = total_probe
+            .lines()
+            .find_map(|l| l.strip_prefix("_total_chunks: "))
+            .and_then(|v| v.trim().parse().ok())
+            .expect("a multi-chunk read");
+        assert!(total >= 3, "the fixture must actually split: {total}");
+        for n in 1..=total {
+            let chunk = apply_chunking(&md, 120, Some(n), &[]).unwrap();
+            assert!(
+                chunk.contains(&format!("_quote: {marker}")),
+                "chunk {n} names the delimiter"
+            );
+            assert!(
+                chunk.contains(&format!("<<< {marker}")),
+                "chunk {n} carries the opener"
+            );
+            assert!(
+                chunk.contains(crate::render::QUOTE_NOTICE),
+                "chunk {n} carries the notice"
+            );
+            assert!(
+                chunk.contains(&format!(">>> {marker}")),
+                "chunk {n} carries the closer"
+            );
+        }
+    }
+
+    /// A chunk of an unmarked entity is untouched: the re-framing triggers on
+    /// `_quote` alone, so every existing read is byte-identical.
+    #[test]
+    fn chunks_of_an_unmarked_body_are_unchanged() {
+        let body: String = (0..40).map(|i| format!("Line {i}.\n")).collect();
+        let md = format!("---\n_hash: abc\n---\n\n{body}");
+        let chunk = apply_chunking(&md, 80, Some(2), &[]).unwrap();
+        assert!(!chunk.contains("<<< memstead-quote-"));
+        assert!(!chunk.contains(crate::render::QUOTE_NOTICE));
+    }
+
+    /// A chunk that lies past the closer carries the engine's own computed
+    /// appends, not the contributor's body, so it is not framed. Framing it
+    /// would tell the reading agent that the engine's own relation graph is a
+    /// stranger's text, which is the opposite of the label's purpose.
+    #[test]
+    fn a_chunk_past_the_closer_is_not_framed() {
+        let body = "Short adopted body.\n";
+        let marker = crate::render::quote_marker(body);
+        let appends: String = (0..60)
+            .map(|i| format!("- relates_to: local--target-{i} (engine-computed)\n"))
+            .collect();
+        let md = format!(
+            "---\n_hash: abc\n_origin: third-party\n_quote: {marker}\n---\n\n{}\n\n## Relations\n\n{appends}",
+            crate::render::quote_wrap(body, &marker)
+        );
+        let probe = apply_chunking(&md, 60, Some(1), &[]).unwrap();
+        let total: usize = probe
+            .lines()
+            .find_map(|l| l.strip_prefix("_total_chunks: "))
+            .and_then(|v| v.trim().parse().ok())
+            .expect("a multi-chunk read");
+        assert!(
+            total >= 3,
+            "the fixture must split past the closer: {total}"
+        );
+        let last = apply_chunking(&md, 60, Some(total), &[]).unwrap();
+        assert!(
+            last.contains("relates_to"),
+            "the last chunk holds engine appends: {last}"
+        );
+        assert!(
+            !last.contains(&format!("<<< {marker}")),
+            "an engine-computed chunk is not wrapped in the stranger's frame: {last}"
+        );
+        assert!(
+            !last.contains(crate::render::QUOTE_NOTICE),
+            "and carries no quoted-data notice: {last}"
         );
     }
 }

@@ -154,6 +154,46 @@ impl Engine {
             for (rel_path, text) in &changed {
                 backend.write_entity(Path::new(rel_path), text.as_bytes())?;
             }
+            // An adopted body's origin marks follow the same rewrite. The mem
+            // rename retargets cross-mem wiki-links inside section bodies, and
+            // a mark is a hash over those bytes, so an unfollowed mark stops
+            // matching and this mem's contributed bodies would be served as the
+            // workspace's own prose. Only entities the record marks are
+            // touched, and the after-sections come from the same rewrite
+            // function applied to the store's own section bodies, so nothing
+            // here re-parses a file the sweep deliberately treats as text.
+            let candidates: Vec<crate::entity::EntityId> = self
+                .store
+                .all_entities()
+                .filter(|e| e.mem == mem_name && !e.stub)
+                .map(|e| e.id.clone())
+                .collect();
+            for id in candidates {
+                let Some(entity) = self.store.get(&id) else {
+                    continue;
+                };
+                let mut after = entity.sections.clone();
+                let mut moved = false;
+                for body in after.values_mut() {
+                    // The SECTION form: the file form trims a leading
+                    // `---…---` block as frontmatter and leaves it unmasked,
+                    // which a section body must not have done to it. The two
+                    // passes have to mask alike, or this one rewrites a link
+                    // the file pass masked and the mark ends up hashing bytes
+                    // the file does not hold.
+                    let (rewritten, count) =
+                        crate::entity::wikilink_rewrite::rewrite_mem_prefix_in_section(
+                            body, old_mem, new_mem,
+                        );
+                    if count > 0 {
+                        *body = rewritten;
+                        moved = true;
+                    }
+                }
+                if moved {
+                    super::stage_proposal_marks_rehash(backend, &id, &entity.sections, &after)?;
+                }
+            }
             if let Some(bytes) = sidecar_bytes {
                 backend.write_anchors_sidecar(&bytes)?;
             }

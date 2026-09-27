@@ -1701,19 +1701,45 @@ fn a_failure_after_the_last_commit_is_a_warning_on_a_landed_merge() {
 /// The record entry the merge writes for `file` at `at`, byte for byte:
 /// what the test occupies in the object store so the commit that
 /// carries it fails.
-fn predicted_record(file: &ProposalBrief, proposer: &str, at: &str) -> Vec<u8> {
+fn predicted_record(
+    file: &ProposalBrief,
+    proposer: &str,
+    at: &str,
+    engine: &memstead_base::Engine,
+) -> Vec<u8> {
     let entities = file
         .entries
         .iter()
         .map(|e| {
             let slot = &file.dispositions[&e.slug];
             let reason = slot.reason.trim();
+            // The origin marks the merge records for an adopted body: one
+            // prepared hash per load-bearing section of the fork's version,
+            // which is what lands in the target (normalisation touches
+            // self-links, and the stamps are outside the prepared form).
+            // Predicting the record's bytes means predicting these too.
+            let landed_sections = (slot.disposition == "adopt")
+                .then(|| {
+                    let id = memstead_base::EntityId::canonical(&e.fork_id);
+                    let entity = engine.get_entity(&id)?;
+                    let type_def = engine
+                        .schemas()
+                        .get(id.mem())
+                        .and_then(|schema| schema.get_type(&entity.entity_type));
+                    let marks = memstead_base::preparation::entity_load_bearing_section_marks(
+                        entity,
+                        type_def.as_deref(),
+                    );
+                    (!marks.is_empty()).then_some(marks)
+                })
+                .flatten();
             (
                 e.slug.clone(),
                 memstead_base::ops::proposal::RecordedDisposition {
                     disposition: slot.disposition.clone(),
                     reason: (!reason.is_empty()).then(|| reason.to_string()),
                     content_hash: e.content_hash.clone(),
+                    landed_sections,
                 },
             )
         })
@@ -1765,7 +1791,12 @@ fn a_failure_after_the_first_proposer_commit_lands_nothing() {
     engine.set_mutation_clock(std::sync::Arc::new(|| {
         std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000)
     }));
-    let record = predicted_record(&file, "proposer-p2, proposer-p1", "2027-01-15T08:00:00Z");
+    let record = predicted_record(
+        &file,
+        "proposer-p2, proposer-p1",
+        "2027-01-15T08:00:00Z",
+        &engine,
+    );
     let oid = gix::objs::compute_hash(gix::hash::Kind::Sha1, gix::objs::Kind::Blob, &record)
         .unwrap()
         .to_string();
@@ -1843,4 +1874,558 @@ fn a_failure_after_the_first_proposer_commit_lands_nothing() {
             .sections["identity"],
         "alpha as the second proposer has it"
     );
+}
+
+// ---------------------------------------------------------------------
+// Entity-grain origin: a merged contribution is a stranger's prose
+// inside a first-party mem
+// ---------------------------------------------------------------------
+
+/// The case the mem grain cannot answer. `specs` is writable, so every
+/// read called it first-party; after a merge some of its entities are a
+/// contributor's bytes. The adopted ones read third-party, the owner's own
+/// stay first-party, and the entity the owner rewrote while adopting
+/// (`adopt_with_changes`, whose body the owner typed) is first-party too.
+#[test]
+fn an_adopted_body_reads_third_party_while_the_owner_has_not_rewritten_it() {
+    let (tmp, mut engine) = staged();
+    let file = filled(&mut engine);
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+
+    let origin = |engine: &memstead_base::Engine, slug: &str| {
+        engine.entity_origin_class(&EntityId::new("specs", slug))
+    };
+    assert_eq!(
+        engine.mem_origin_class("specs"),
+        memstead_base::render::OriginClass::FirstParty,
+        "the mem itself stays first-party: this is the case the mem grain misses"
+    );
+    assert_eq!(
+        origin(&engine, "beta"),
+        memstead_base::render::OriginClass::ThirdParty,
+        "an adopted body is the proposer's prose"
+    );
+    assert_eq!(
+        origin(&engine, "alpha"),
+        memstead_base::render::OriginClass::FirstParty,
+        "an entity the owner wrote and no proposal touched is the owner's"
+    );
+    assert_eq!(
+        origin(&engine, "epsilon"),
+        memstead_base::render::OriginClass::FirstParty,
+        "adopt_with_changes lands the owner's own body, so it is first-party"
+    );
+
+    // The text channel says so, and contains the body: this is the channel
+    // the reading agent takes as the document's voice.
+    let entity = engine
+        .get_entity(&EntityId::new("specs", "beta"))
+        .cloned()
+        .unwrap();
+    let md = memstead_base::render::render_entity_markdown_with_signals(
+        &entity,
+        None,
+        None,
+        None,
+        Some(origin(&engine, "beta")),
+    );
+    assert!(md.contains("_origin: third-party"), "{md}");
+    assert!(md.contains("_quote: memstead-quote-"), "{md}");
+    drop(tmp);
+}
+
+/// The staleness comparison is the LOAD-BEARING form, not the file hash.
+/// A notes-only edit by the owner (here `rationale`, which the `spec`
+/// type does not require) leaves the contributor's claim standing, so the
+/// mark holds; rewriting a load-bearing section is the owner taking the
+/// claim over, and the mark expires. Keyed on the file hash, the first
+/// edit would have promoted a stranger's sentences to first-party.
+#[test]
+fn a_notes_edit_keeps_the_mark_and_a_load_bearing_rewrite_clears_it() {
+    let (tmp, mut engine) = staged();
+    let file = filled(&mut engine);
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+    engine.set_identity(Some(MERGER.to_string()));
+
+    let id = EntityId::new("specs", "beta");
+    assert_eq!(
+        engine.entity_origin_class(&id),
+        memstead_base::render::OriginClass::ThirdParty
+    );
+
+    update_sections(
+        &mut engine,
+        ("specs", "beta"),
+        &[("rationale", "the owner's own filing note, beside the claim")],
+        &[],
+    );
+    assert_eq!(
+        engine.entity_origin_class(&id),
+        memstead_base::render::OriginClass::ThirdParty,
+        "a notes-only edit is bookkeeping: the contributor's claim still stands"
+    );
+
+    update_sections(
+        &mut engine,
+        ("specs", "beta"),
+        &[
+            ("identity", "the owner's own account of what beta is"),
+            ("purpose", "the owner's own account of what beta is for"),
+        ],
+        &[],
+    );
+    assert_eq!(
+        engine.entity_origin_class(&id),
+        memstead_base::render::OriginClass::FirstParty,
+        "rewriting every load-bearing section is the owner taking the claim over"
+    );
+    drop(tmp);
+}
+
+/// The whole-mem document is the surface read whole and believed, so a
+/// merged contribution is contained inside it: the header's one provenance
+/// line speaks for the mem, and it would be false about the adopted body.
+/// The owner's own entities are untouched, so the document a mem with no
+/// adopted body exports stays what it was.
+#[test]
+fn the_llms_document_contains_an_adopted_body_and_leaves_the_owners_alone() {
+    let (tmp, mut engine) = staged();
+    let file = filled(&mut engine);
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+
+    let doc = engine
+        .render_llms_txt(
+            "specs",
+            &memstead_base::engine::export_llms_txt::LlmsTxtContext::default(),
+        )
+        .expect("the document renders");
+    assert!(
+        doc.contains("Provenance: first-party"),
+        "the header still vouches for the mem: {doc}"
+    );
+    let markers: Vec<&str> = doc
+        .lines()
+        .filter(|l| l.starts_with("<<< memstead-quote-"))
+        .collect();
+    assert_eq!(
+        markers.len(),
+        engine
+            .store()
+            .all_entities()
+            .filter(|e| e.mem == "specs"
+                && !e.stub
+                && engine.entity_origin_class(&e.id).is_third_party())
+            .count(),
+        "one contained block per third-party entity, and no others: {doc}"
+    );
+    assert!(!markers.is_empty(), "the fixture adopted at least one body");
+    for marker in &markers {
+        let m = marker.trim_start_matches("<<< ");
+        assert_eq!(
+            doc.matches(&format!(">>> {m}")).count(),
+            1,
+            "each block closes exactly once"
+        );
+    }
+    drop(tmp);
+}
+
+/// A rejection retires nothing, proved on a MIXED merge: the brief adopts
+/// one slug and rejects the marked one, so the merge really does write a
+/// `reject` entry with no marks beside the standing mark. An all-reject
+/// merge would not: it lands nothing and writes no record at all, so it
+/// passes whether the guard exists or not.
+///
+/// Read as a retirement, a contributor could clear a standing mark at will:
+/// they choose which slugs a brief covers, and a rejection is the owner
+/// declining a change, never evidence that they rewrote the claim.
+#[test]
+fn a_later_rejected_proposal_does_not_retire_a_standing_mark() {
+    let (tmp, mut engine) = staged();
+    let file = filled(&mut engine);
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the first merge lands");
+    let id = EntityId::new("specs", "beta");
+    assert_eq!(
+        engine.entity_origin_class(&id),
+        memstead_base::render::OriginClass::ThirdParty
+    );
+
+    // The contributor touches the marked slug and one more; the owner adopts
+    // the other and rejects the marked one, so the record gains a `reject`
+    // entry for `beta` in a merge that does land.
+    engine.set_identity(Some(PROPOSER.to_string()));
+    update_sections(
+        &mut engine,
+        ("specs-fork", "beta"),
+        &[("purpose", "the proposer's second attempt at beta")],
+        &[],
+    );
+    create(
+        &mut engine,
+        "specs-fork",
+        "Mu Second Contribution",
+        sections("mu as the proposer wrote it", "a second contribution"),
+        Vec::new(),
+    );
+    engine.set_identity(Some(MERGER.to_string()));
+    let mut second = engine.proposal_brief("specs-fork").unwrap();
+    for (slug, slot) in second.dispositions.iter_mut() {
+        if slug == "mu-second-contribution" {
+            slot.disposition = "adopt".to_string();
+            slot.reason = String::new();
+        } else {
+            slot.disposition = "reject".to_string();
+            slot.reason = "not this time".to_string();
+        }
+    }
+    engine
+        .proposal_merge("specs-fork", &second, Actor::Cli, None, None)
+        .expect("the mixed merge lands");
+
+    let record = engine.proposal_list("specs").unwrap();
+    let rejected_entry = record
+        .proposals
+        .last()
+        .and_then(|p| p.entities.get("beta"))
+        .expect("the second merge recorded a disposition for beta");
+    assert_eq!(rejected_entry.disposition, "reject");
+    assert!(
+        rejected_entry.landed_sections.is_none(),
+        "a reject carries no marks, which is exactly what must not read as a retirement"
+    );
+    assert_eq!(
+        engine.entity_origin_class(&id),
+        memstead_base::render::OriginClass::ThirdParty,
+        "the first proposer's bytes are still in beta, so it is still their prose"
+    );
+    drop(tmp);
+}
+
+/// The mark is per load-bearing section, so rewriting one of them does not
+/// launder the others. With one hash over the whole load-bearing form, an
+/// owner who tightened `purpose` would have had the contributor's
+/// `identity` served as the workspace's own claim.
+#[test]
+fn rewriting_one_load_bearing_section_leaves_the_others_marked() {
+    let (tmp, mut engine) = staged();
+    let file = filled(&mut engine);
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+    engine.set_identity(Some(MERGER.to_string()));
+    let id = EntityId::new("specs", "beta");
+
+    update_sections(
+        &mut engine,
+        ("specs", "beta"),
+        &[("purpose", "the owner's own account of what beta is for")],
+        &[],
+    );
+    assert_eq!(
+        engine.entity_origin_class(&id),
+        memstead_base::render::OriginClass::ThirdParty,
+        "identity is still the contributor's sentence"
+    );
+
+    update_sections(
+        &mut engine,
+        ("specs", "beta"),
+        &[("identity", "the owner's own account of what beta is")],
+        &[],
+    );
+    assert_eq!(
+        engine.entity_origin_class(&id),
+        memstead_base::render::OriginClass::FirstParty,
+        "with every load-bearing section rewritten, the entity is the owner's"
+    );
+    drop(tmp);
+}
+
+/// A rename does not launder an adopted body. The mark is matched by
+/// section content and the load-bearing form excludes the title, so the
+/// renamed entity still carries the contributor's bytes and still says so.
+#[test]
+fn renaming_an_adopted_entity_keeps_its_origin() {
+    let (tmp, mut engine) = staged();
+    let file = filled(&mut engine);
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+    engine.set_identity(Some(MERGER.to_string()));
+
+    engine
+        .rename_entity(
+            RenameEntityArgs {
+                id: EntityId::new("specs", "beta"),
+                expected_hash: None,
+                new_title: "Beta Renamed By The Owner".to_string(),
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .expect("the rename lands");
+
+    let renamed = EntityId::new("specs", "beta-renamed-by-the-owner");
+    assert!(engine.get_entity(&renamed).is_some(), "the rename landed");
+    assert_eq!(
+        engine.entity_origin_class(&renamed),
+        memstead_base::render::OriginClass::ThirdParty,
+        "a rename moves the id, not the authorship"
+    );
+    drop(tmp);
+}
+
+/// A retype that RE-KEYS sections does not launder a contributor's prose. A
+/// `section_map` moves content to another key without changing it, and a
+/// mark's hash covers its key, so an unfollowed mark would stop matching
+/// while the stranger's sentences sit there byte-identical. The marks follow
+/// the re-key in the retype's own commit.
+#[test]
+fn a_retype_that_rekeys_sections_keeps_the_origin() {
+    let (tmp, mut engine) = staged();
+    let file = filled(&mut engine);
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+    engine.set_identity(Some(MERGER.to_string()));
+    let id = EntityId::new("specs", "beta");
+    assert_eq!(
+        engine.entity_origin_class(&id),
+        memstead_base::render::OriginClass::ThirdParty
+    );
+
+    // `memo` declares `claim`/`context`, so the spec's `identity`/`purpose`
+    // must be re-keyed to land at all.
+    engine
+        .retype_entity(
+            memstead_base::RetypeEntityArgs {
+                id: id.clone(),
+                target_type: "memo".to_string(),
+                expected_hash: None,
+                section_map: indexmap::IndexMap::from_iter([
+                    ("identity".to_string(), "claim".to_string()),
+                    ("purpose".to_string(), "context".to_string()),
+                ]),
+                drop_metadata: vec!["level".to_string(), "stability".to_string()],
+                dry_run: false,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .expect("the retype lands");
+
+    assert_eq!(
+        engine.entity_origin_class(&id),
+        memstead_base::render::OriginClass::ThirdParty,
+        "a retype moves the section keys, not the authorship"
+    );
+    drop(tmp);
+}
+
+/// A schema repin does not flip an adopted entity. The read consults no
+/// schema and no type, so the marks cannot move under it; this asserts that
+/// the independence is real rather than incidental.
+#[test]
+fn a_schema_repin_keeps_the_origin() {
+    let (tmp, mut engine) = staged();
+    let file = filled(&mut engine);
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+    engine.set_identity(Some(MERGER.to_string()));
+    let id = EntityId::new("specs", "beta");
+
+    let target: memstead_schema::SchemaRef = "default@1.1.0".parse().expect("a valid pin");
+    engine
+        .set_mem_schema("specs", &target)
+        .expect("the repin lands");
+    assert_eq!(
+        engine.entity_origin_class(&id),
+        memstead_base::render::OriginClass::ThirdParty,
+        "the comparison does not depend on the pin, so a repin cannot clear a mark"
+    );
+    drop(tmp);
+}
+
+/// An owner entity that shares one section's bytes with an adopted body is
+/// NOT branded a stranger's. The lookup is by slug, so nothing infers a
+/// moved body from matching content: a type whose load-bearing set is one
+/// section makes that inference a one-line coincidence, and a contributor
+/// could aim it by getting a copy of an owner entity adopted.
+#[test]
+fn an_owner_entity_sharing_a_section_with_an_adopted_body_stays_first_party() {
+    let (tmp, mut engine) = staged();
+    let file = filled(&mut engine);
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+    engine.set_identity(Some(MERGER.to_string()));
+
+    let adopted = engine
+        .get_entity(&EntityId::new("specs", "beta"))
+        .cloned()
+        .expect("beta landed");
+    let shared: Vec<(&str, &str)> = adopted
+        .sections
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    create(
+        &mut engine,
+        "specs",
+        "Owner Twin",
+        shared
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        Vec::new(),
+    );
+
+    assert_eq!(
+        engine.entity_origin_class(&EntityId::new("specs", "owner-twin")),
+        memstead_base::render::OriginClass::FirstParty,
+        "the owner's own entity is theirs, however much text it shares"
+    );
+    assert_eq!(
+        engine.entity_origin_class(&EntityId::new("specs", "beta")),
+        memstead_base::render::OriginClass::ThirdParty,
+        "and the adopted body is still the contributor's"
+    );
+    drop(tmp);
+}
+
+/// Renaming an entity that an ADOPTED body links to does not launder that
+/// body. The rename retargets the referrer's wiki-link, which moves the
+/// marked bytes without being an authorship event (the engine says so itself
+/// by not bumping `last_modified`), so the marks are recomputed over the new
+/// bytes in the same commit. Unfollowed, ordinary owner housekeeping served a
+/// contributor's untouched sentences as the workspace's own, and the
+/// contributor plants it for free by writing one wiki-link.
+#[test]
+fn renaming_a_linked_entity_keeps_the_linking_adopted_body_third_party() {
+    let (tmp, mut engine) = staged();
+    // The contributor's body points at an entity of the target mem.
+    engine.set_identity(Some(PROPOSER.to_string()));
+    update_sections(
+        &mut engine,
+        ("specs-fork", "beta"),
+        &[
+            ("identity", "beta as the proposer has it, see [[alpha]]"),
+            ("purpose", "why beta matters, see [[alpha]] again"),
+        ],
+        &[],
+    );
+    engine.set_identity(Some(MERGER.to_string()));
+    let file = filled(&mut engine);
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+    let beta = EntityId::new("specs", "beta");
+    assert_eq!(
+        engine.entity_origin_class(&beta),
+        memstead_base::render::OriginClass::ThirdParty
+    );
+
+    engine
+        .rename_entity(
+            RenameEntityArgs {
+                id: EntityId::new("specs", "alpha"),
+                expected_hash: None,
+                new_title: "Alpha Renamed".to_string(),
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .expect("the rename lands");
+
+    let rewritten = engine
+        .get_entity(&beta)
+        .expect("beta still exists")
+        .sections
+        .get("identity")
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        rewritten.contains("alpha-renamed"),
+        "the rename really did rewrite the adopted body: {rewritten}"
+    );
+    assert_eq!(
+        engine.entity_origin_class(&beta),
+        memstead_base::render::OriginClass::ThirdParty,
+        "a link retarget is a foreign-key change, not the owner taking the claim over"
+    );
+    drop(tmp);
+}
+
+/// The record stays READABLE after a retype that carries nothing. Writing a
+/// structurally empty mark map instead would fail the whole mem closed: every
+/// entity served third-party with `PROPOSAL_RECORD_UNREADABLE`, from three
+/// ordinary owner actions in a row.
+#[test]
+fn a_retype_after_a_full_rewrite_leaves_the_record_readable() {
+    let (tmp, mut engine) = staged();
+    let file = filled(&mut engine);
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+    engine.set_identity(Some(MERGER.to_string()));
+    let id = EntityId::new("specs", "beta");
+
+    // The owner takes the claim over in their own words.
+    update_sections(
+        &mut engine,
+        ("specs", "beta"),
+        &[
+            ("identity", "the owner's own account of what beta is"),
+            ("purpose", "the owner's own account of what beta is for"),
+        ],
+        &[],
+    );
+    assert_eq!(
+        engine.entity_origin_class(&id),
+        memstead_base::render::OriginClass::FirstParty
+    );
+
+    // And then decides it is really a memo.
+    engine
+        .retype_entity(
+            memstead_base::RetypeEntityArgs {
+                id: id.clone(),
+                target_type: "memo".to_string(),
+                expected_hash: None,
+                section_map: indexmap::IndexMap::from_iter([
+                    ("identity".to_string(), "claim".to_string()),
+                    ("purpose".to_string(), "context".to_string()),
+                ]),
+                drop_metadata: vec!["level".to_string(), "stability".to_string()],
+                dry_run: false,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .expect("the retype lands");
+
+    assert!(
+        engine.proposal_record_error("specs").is_none(),
+        "the record is still readable: {:?}",
+        engine.proposal_record_error("specs")
+    );
+    assert_eq!(
+        engine.entity_origin_class(&EntityId::new("specs", "alpha")),
+        memstead_base::render::OriginClass::FirstParty,
+        "and a sibling entity is not relabelled by a defect that never happened"
+    );
+    drop(tmp);
 }

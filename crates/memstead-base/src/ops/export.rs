@@ -132,12 +132,23 @@ pub fn build_redacted_archive_provenance(
     )
 }
 
-/// The export's source of the independence reading to seal beside one
-/// ledger record: the engine's derivation over the live mem
-/// ([`crate::Engine::sealed_independence_reader`]). `None` from the
-/// reader seals no reading for that record.
-pub type IndependenceReader<'a> =
-    &'a dyn Fn(&crate::check::CheckRecord) -> Option<crate::engine::independence::Independence>;
+/// What the source engine derives for one ledger record at export time,
+/// for the archive to carry: facts the mount cannot re-derive because it
+/// holds neither the mem's history nor the deployment's identity roster.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SealedRowFacts {
+    /// The author≠checker reading
+    /// ([`crate::Engine::independence_of`]). `None` seals none.
+    pub independence: Option<crate::engine::independence::Independence>,
+    /// The trust class of the row's prose
+    /// ([`crate::Engine::check_row_origin_class`]). `None` seals none,
+    /// which is the undeclared case: every reader then inherits the mem's
+    /// class, as it did before the field existed.
+    pub origin: Option<crate::render::OriginClass>,
+}
+
+/// The export's one source for both ([`crate::Engine::sealed_row_reader`]).
+pub type SealedRowReader<'a> = &'a dyn Fn(&crate::check::CheckRecord) -> SealedRowFacts;
 
 /// Build the sealed check-records member from a workspace ledger: for
 /// every entity the archive carries (`entity_paths`, the mem-relative
@@ -155,7 +166,7 @@ pub fn build_redacted_sealed_checks(
     records: &[crate::check::CheckRecord],
     mem_name: &str,
     entity_paths: &[String],
-    independence: Option<IndependenceReader<'_>>,
+    rows: Option<SealedRowReader<'_>>,
 ) -> (
     Option<crate::check::SealedChecks>,
     Vec<crate::ops::redaction::RedactionCount>,
@@ -191,9 +202,9 @@ pub fn build_redacted_sealed_checks(
         let mut out = BTreeMap::new();
         for (kind, rec) in kinds {
             let mut sc = crate::check::SealedCheck::from_record(&rec);
-            sc.independence = independence
-                .and_then(|read| read(&rec))
-                .map(|r| r.as_str().to_string());
+            let facts = rows.map(|read| read(&rec)).unwrap_or_default();
+            sc.independence = facts.independence.map(|r| r.as_str().to_string());
+            sc.origin = facts.origin.map(|c| c.as_wire().to_string());
             if let Some(m) = sc.method.take() {
                 let (m, counts) = crate::ops::redaction::redact(&m);
                 crate::ops::redaction::tally(&mut redacted_total, counts);
@@ -220,14 +231,13 @@ pub fn sealed_checks_bytes_for(
     workspace_root: Option<&Path>,
     mem_name: &str,
     entity_paths: &[String],
-    independence: Option<IndependenceReader<'_>>,
+    rows: Option<SealedRowReader<'_>>,
 ) -> (Option<Vec<u8>>, Vec<crate::ops::redaction::RedactionCount>) {
     let Some(root) = workspace_root else {
         return (None, Vec::new());
     };
     let records = crate::check::CheckLedger::for_workspace(root).all();
-    let (sealed, redactions) =
-        build_redacted_sealed_checks(&records, mem_name, entity_paths, independence);
+    let (sealed, redactions) = build_redacted_sealed_checks(&records, mem_name, entity_paths, rows);
     (sealed.and_then(|s| s.to_archive_bytes().ok()), redactions)
 }
 
@@ -323,7 +333,7 @@ pub fn export_mem(
     workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
     ref_schema_source: Option<Vec<SchemaSourceFile>>,
-    independence: Option<IndependenceReader<'_>>,
+    rows: Option<SealedRowReader<'_>>,
 ) -> Result<MemExportResult, MemExportError> {
     let basename = mem_dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let explicit_name = config.name.as_deref().unwrap_or(basename);
@@ -334,7 +344,7 @@ pub fn export_mem(
         workspace_schemas_dir,
         explicit_name,
         ref_schema_source,
-        independence,
+        rows,
     )?;
 
     if let Some(parent) = output_path.parent()
@@ -386,7 +396,7 @@ pub fn export_mem_to_bytes(
     workspace_schemas_dir: Option<&Path>,
     explicit_name: &str,
     ref_schema_source: Option<Vec<SchemaSourceFile>>,
-    independence: Option<IndependenceReader<'_>>,
+    rows: Option<SealedRowReader<'_>>,
 ) -> Result<MemExportBytes, MemExportError> {
     if !mem_dir.is_dir() {
         return Err(MemExportError::DirNotFound(mem_dir.display().to_string()));
@@ -430,7 +440,7 @@ pub fn export_mem_to_bytes(
     // for the entities this archive carries. No root, no ledger, no
     // record: no member.
     let (checks_bytes, check_redactions) =
-        sealed_checks_bytes_for(workspace_root, explicit_name, &entity_paths, independence);
+        sealed_checks_bytes_for(workspace_root, explicit_name, &entity_paths, rows);
 
     export_entries_to_bytes(
         config,
@@ -535,10 +545,82 @@ pub fn rekey_sealed_checks(
     Some(sealed.to_archive_bytes().unwrap_or(bytes))
 }
 
+/// Carry an adopted body's origin marks across the link retarget an export
+/// applies, so a published archive keeps saying which of its bodies came
+/// from a contributor.
+///
+/// A hierarchical mem publishes under its leaf, so the export rewrites every
+/// self-qualified wiki-link in every entity, which moves the bytes a mark
+/// hashes. Unfollowed, the archive serves a contributor's untouched sentences
+/// as its owner's own the moment a consuming deployment vouches for the mem
+/// ([`crate::Engine::declare_mem_origin`]) — the third place this same
+/// rewrite had to be taught to carry the mark, after a rename and a mem
+/// rename.
+///
+/// Only a mark that still held over the pre-rewrite bytes is carried, and
+/// only for the keys the record names, so no schema and no load-bearing set
+/// enters here. Returns the bytes unchanged when there is nothing to carry.
+pub fn rekey_proposal_marks(
+    record_bytes: Option<Vec<u8>>,
+    rewrites: &[(String, ProposalMarkSections, ProposalMarkSections)],
+) -> Option<Vec<u8>> {
+    let bytes = record_bytes?;
+    if rewrites.is_empty() {
+        return Some(bytes);
+    }
+    let Ok(mut record) = crate::ops::proposal::ProposalRecord::from_bytes(&bytes) else {
+        return Some(bytes);
+    };
+    if record.structural_defect().is_some() {
+        // A record the reader calls defective is left exactly as it is, the
+        // stance every write that follows a mark takes: the mem is quarantined
+        // on purpose, and an export that repaired the file would ship an
+        // archive claiming a record it can trust.
+        return Some(bytes);
+    }
+    let mut moved = false;
+    for (slug, was, now) in rewrites {
+        for proposal in &mut record.proposals {
+            let Some(entry) = proposal.entities.get_mut(slug) else {
+                continue;
+            };
+            let Some(marks) = entry.landed_sections.as_mut() else {
+                continue;
+            };
+            for (key, hash) in marks.iter_mut() {
+                let (Some(was), Some(now)) = (was.get(key), now.get(key)) else {
+                    continue;
+                };
+                if was == now || &crate::preparation::entity_section_prepared_hash(key, was) != hash
+                {
+                    continue;
+                }
+                *hash = crate::preparation::entity_section_prepared_hash(key, now);
+                moved = true;
+            }
+        }
+    }
+    if !moved {
+        return Some(bytes);
+    }
+    Some(record.to_bytes())
+}
+
+/// An entity's sections as the STORE holds them, which is the map the marks
+/// were computed over
+/// ([`crate::preparation::entity_load_bearing_section_marks`]).
+///
+/// The caller derives it, because only the caller has the schema: the store's
+/// map is schema-shaped (a catch-all section's value is the join of its own
+/// content and every undeclared heading re-emitted under it), so a
+/// schema-free re-parse disagrees on exactly those keys and would silently
+/// carry no mark for them, publishing an archive whose marks no longer hold
+/// over its own bytes.
+pub type ProposalMarkSections = indexmap::IndexMap<String, String>;
+
 /// The rewrite triple [`rekey_sealed_checks`] takes, for one entity file
-/// whose bytes the export changed: `None` when the archived bytes hash
-/// the same as the source bytes (nothing to re-key) or either side is
-/// not UTF-8.
+/// whose bytes the export changed: `None` when the archived bytes hash the
+/// same as the source bytes (nothing to re-key) or either side is not UTF-8.
 pub fn entity_rewrite(rel: &Path, before: &[u8], after: &[u8]) -> Option<(String, String, String)> {
     let pre = archived_content_hash(before)?;
     let post = archived_content_hash(after)?;

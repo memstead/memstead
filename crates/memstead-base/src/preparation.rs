@@ -1367,6 +1367,55 @@ pub fn entity_load_bearing_form(
     out
 }
 
+/// The prepared hash of ONE load-bearing section, in the same unit form
+/// [`entity_load_bearing_form`] serializes it into (`## <key>`, a blank
+/// line, the trimmed content). The key rides inside the hashed bytes, so
+/// the same prose moved to another section key is a different mark.
+///
+/// The per-section grain exists because the whole-form hash collapses a
+/// type's load-bearing sections to one bit: an owner who rewrites one of
+/// three sections would clear a mark that still covers the other two, and
+/// a contributor's remaining claims would be served as the workspace's own
+/// prose.
+pub fn entity_section_prepared_hash(key: &str, content: &str) -> String {
+    prepared_content_hash(format!("## {key}\n\n{}\n\n", content.trim()).as_bytes())
+}
+
+/// One prepared hash per load-bearing section the entity carries, keyed by
+/// section key. The section set is the type's
+/// ([`load_bearing_sections`]), or every section the entity carries when
+/// the type is unknown, matching [`entity_load_bearing_form`].
+///
+/// Empty sections are skipped deliberately. A mark over an empty section
+/// would match every entity whose same section is empty, which is the one
+/// way this comparison could brand unrelated content.
+pub fn entity_load_bearing_section_marks(
+    entity: &Entity,
+    type_def: Option<&memstead_schema::types::TypeDefinition>,
+) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut add = |key: &String, content: &String| {
+        if !content.trim().is_empty() {
+            out.insert(key.clone(), entity_section_prepared_hash(key, content));
+        }
+    };
+    match type_def {
+        Some(td) => {
+            for section in load_bearing_sections(td) {
+                if let Some(content) = entity.sections.get(&section.key) {
+                    add(&section.key, content);
+                }
+            }
+        }
+        None => {
+            for (key, content) in &entity.sections {
+                add(key, content);
+            }
+        }
+    }
+    out
+}
+
 /// Touchpoint A for the `entity` grain: the prepared-content hash of an
 /// entity under the source's declared preparation. `None` declares
 /// nothing — the canonical rendered markdown, byte-for-byte today's form.

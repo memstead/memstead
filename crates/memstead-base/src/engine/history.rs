@@ -239,6 +239,31 @@ pub struct EntityProvenance {
     /// The newest `verification` record, when one exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_check: Option<crate::check::CheckRecord>,
+    /// The trust class of the CHECK PROSE on this entity: the `method`
+    /// notes that every surface renders verbatim, across the verification
+    /// record, the conformance record and each foreign kind.
+    /// `Some("third-party")` when ANY of them was written by a party other
+    /// than this workspace.
+    ///
+    /// The note is written by whatever agent recorded the check, which in a
+    /// workspace that points a foreign model at its ledger, or that
+    /// transcribes an outside finding under the outsider's handle, is not
+    /// the workspace itself. On an archive mount the value is the one the
+    /// exporting workspace SEALED ([`crate::check::SealedCheck::origin`]),
+    /// because only that workspace knew which identities were its own; on
+    /// every other mount it is derived from this deployment's declared
+    /// identities ([`crate::Engine::check_row_origin_class`]).
+    ///
+    /// One field for all of them, and set if any one is foreign, so a
+    /// renderer contains every note it prints rather than guessing per
+    /// line. That over-contains the owner's own note on an entity that also
+    /// carries a stranger's, which is the safe direction: the alternative
+    /// is a stranger's sentence printed as the report's own voice.
+    ///
+    /// Absent when nothing foreign was recorded, so every response that has
+    /// nothing to warn about is byte-unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check_prose_origin: Option<String>,
     /// Derived `conformance` state — the same four values, computed
     /// against the newest conformance record with pin-awareness (a
     /// schema re-pin stales it). `never_checked` when no conformance
@@ -378,6 +403,11 @@ impl Engine {
             last_modified_by: newest.as_ref().map(with_disposition),
             story_truncated: truncated,
             check_state: check_state.as_str().to_string(),
+            check_prose_origin: self.foreign_check_prose_marker(
+                mem,
+                entity_id,
+                [last_check.as_ref(), last_conformance_check.as_ref()],
+            ),
             last_check,
             conformance_state: conformance_state.as_str().to_string(),
             last_conformance_check,
@@ -476,12 +506,61 @@ impl Engine {
             last_modified_by: None,
             story_truncated: false,
             check_state: check_state.as_str().to_string(),
+            check_prose_origin: self.foreign_check_prose_marker(
+                mem,
+                entity_id,
+                [last_check.as_ref(), last_conformance_check.as_ref()],
+            ),
             last_check,
             conformance_state: conformance_state.as_str().to_string(),
             last_conformance_check,
             foreign_checks: self.latest_foreign_checks(mem, entity_id),
             sealed: Some(sealed),
         })
+    }
+
+    /// The trust class to report for a check record's own prose, and only
+    /// when it is the foreign one: `Some("third-party")` where the note was
+    /// written by a party other than this workspace, `None` otherwise, so
+    /// the field appears exactly where it warns and every other response is
+    /// byte-unchanged.
+    ///
+    /// On an archive mount the answer is the one the exporting workspace
+    /// sealed beside the row, because that workspace is the only party that
+    /// knew which identities were its own; a member sealed without the field
+    /// falls through to this deployment's reading, as it did before the
+    /// field existed. This is the reader that makes
+    /// [`crate::check::SealedCheck::origin`] load-bearing: the sealed
+    /// `method` note is carried into the record every surface renders, so
+    /// without it a publisher's checker prose reaches a reading agent as the
+    /// consumer's own.
+    fn foreign_check_prose_marker(
+        &self,
+        mem: &str,
+        entity_id: &str,
+        records: [Option<&crate::check::CheckRecord>; 2],
+    ) -> Option<String> {
+        // Nothing can be foreign in the default deployment: with no declared
+        // owner identities on a first-party mem every row reads as the
+        // workspace's own, and only an archive mount can carry a sealed class.
+        // Leaving early keeps the marker from re-reading and re-parsing the
+        // whole check ledger once more per provenance read.
+        if !self.declares_owner_identities()
+            && !self.is_archive_mount(mem)
+            && !self.mem_origin_class(mem).is_third_party()
+        {
+            return None;
+        }
+        let foreign = |rec: &crate::check::CheckRecord| {
+            self.check_row_prose_origin(mem, entity_id, rec)
+                .is_third_party()
+        };
+        let any_foreign = records.into_iter().flatten().any(foreign)
+            || self
+                .latest_foreign_checks(mem, entity_id)
+                .iter()
+                .any(foreign);
+        any_foreign.then(|| crate::render::OriginClass::ThirdParty.as_wire().to_string())
     }
 
     /// An entity's recorded history: every touch, newest-first, with

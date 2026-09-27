@@ -835,6 +835,302 @@ pub(crate) fn stage_anchors_rename(
     Ok(true)
 }
 
+/// Follow an adopted body's origin marks across a rename, staged into the
+/// same commit as the file move, exactly as the anchors sidecar is.
+///
+/// The marks live in the proposal record keyed by slug
+/// ([`crate::ops::proposal::RecordedDisposition::landed_sections`]), and a
+/// rename moves the slug while leaving the contributor's bytes in place. The
+/// engine maintains the key rather than inferring the move from content at
+/// read time: content inference across slugs cannot tell a renamed body from
+/// an unrelated entity that happens to share a section, and a type whose
+/// load-bearing set is a single section (there are many) makes that
+/// collision a one-line coincidence a contributor can aim.
+///
+/// `Ok(false)` when the record holds no mark for `from`, in which case
+/// nothing is written and the commit is byte-identical.
+pub(crate) fn stage_proposal_marks_rename(
+    backend: &dyn crate::backend::MemBackend,
+    from: &EntityId,
+    to: &EntityId,
+) -> Result<bool, EngineError> {
+    let Some(bytes) = backend
+        .read_proposal_record()
+        .map_err(EngineError::Backend)?
+    else {
+        return Ok(false);
+    };
+    let Ok(record) = crate::ops::proposal::ProposalRecord::from_bytes(&bytes) else {
+        // A record this path cannot parse is left exactly as it is: the read
+        // path fails closed on it, which is the safe reading, and a rename is
+        // not the place to rewrite a file it does not understand.
+        return Ok(false);
+    };
+    let (record, moved) = move_marks_on_rename(record, from.path(), to.path());
+    if !moved {
+        return Ok(false);
+    }
+    backend
+        .write_entity(
+            std::path::Path::new(crate::ops::proposal::PROPOSAL_RECORD_PATH),
+            &record.to_bytes(),
+        )
+        .map_err(EngineError::Backend)?;
+    Ok(true)
+}
+
+/// Re-key one entity's marks for a retype's `section_map`: each mark whose
+/// content moved unchanged follows to its new key, recomputed under it, and a
+/// mark whose content the owner has since rewritten stays expired.
+///
+/// Built from an immutable snapshot rather than mutated in place. A
+/// `section_map` may swap (`{a: b, b: a}`) or chain (`{a: b, b: c}`) — retype
+/// refuses only collisions — and a loop that read its own writes would take
+/// the hash it just wrote for `b` as `b`'s original, drop the real one, and
+/// leave the contributor's content at the end of the chain unmarked.
+pub(crate) fn rekey_marks_for_retype(
+    before: &std::collections::BTreeMap<String, String>,
+    section_map: &indexmap::IndexMap<String, String>,
+    sections: &indexmap::IndexMap<String, String>,
+) -> std::collections::BTreeMap<String, String> {
+    let mut after = std::collections::BTreeMap::new();
+    for (key, hash) in before {
+        let target = section_map.get(key).unwrap_or(key);
+        let carried = sections.get(target).filter(|content| {
+            &crate::preparation::entity_section_prepared_hash(key, content) == hash
+        });
+        if let Some(content) = carried {
+            after.insert(
+                target.clone(),
+                crate::preparation::entity_section_prepared_hash(target, content),
+            );
+        }
+    }
+    after
+}
+
+/// Carry an adopted body's origin marks across a rewrite the ENGINE made to
+/// its sections, staged into the same commit as that rewrite.
+///
+/// A rename retargets the wiki-links of every entity that pointed at the
+/// renamed one, and a mem rename does the same workspace-wide. The engine
+/// itself classifies that as a foreign-key change and not a semantic edit:
+/// it deliberately leaves `last_modified` alone for exactly this reason. The
+/// trust mark has to follow the same reasoning, because a mark is bytes and
+/// the rewrite moves bytes. Unfollowed, ordinary owner housekeeping serves a
+/// contributor's untouched sentences as the workspace's own, and a
+/// contributor plants that for free by writing one wiki-link into the body
+/// they propose.
+///
+/// Only a mark that still held over the PRE-rewrite content is carried,
+/// recomputed over the post-rewrite content; a mark the owner had already
+/// expired by rewriting the section stays expired. `Ok(false)` when nothing
+/// moved, in which case nothing is written and the commit is byte-identical.
+pub(crate) fn stage_proposal_marks_rehash(
+    backend: &dyn crate::backend::MemBackend,
+    id: &EntityId,
+    before: &indexmap::IndexMap<String, String>,
+    after: &indexmap::IndexMap<String, String>,
+) -> Result<bool, EngineError> {
+    let Some(bytes) = backend
+        .read_proposal_record()
+        .map_err(EngineError::Backend)?
+    else {
+        return Ok(false);
+    };
+    let Ok(mut record) = crate::ops::proposal::ProposalRecord::from_bytes(&bytes) else {
+        return Ok(false);
+    };
+    if record.structural_defect().is_some() {
+        // The reader calls this record defective and quarantines the whole
+        // mem on it. A write that repaired it would lift a quarantine the
+        // read installed on purpose, so every mark-following write refuses
+        // it untouched.
+        return Ok(false);
+    }
+    let mut changed = false;
+    for proposal in &mut record.proposals {
+        let Some(entry) = proposal.entities.get_mut(id.path()) else {
+            continue;
+        };
+        let Some(marks) = entry.landed_sections.as_mut() else {
+            continue;
+        };
+        for (key, hash) in marks.iter_mut() {
+            let Some(was) = before.get(key) else { continue };
+            let Some(now) = after.get(key) else { continue };
+            if was == now {
+                continue;
+            }
+            if &crate::preparation::entity_section_prepared_hash(key, was) != hash {
+                continue;
+            }
+            *hash = crate::preparation::entity_section_prepared_hash(key, now);
+            changed = true;
+        }
+    }
+    if !changed {
+        return Ok(false);
+    }
+    backend
+        .write_entity(
+            std::path::Path::new(crate::ops::proposal::PROPOSAL_RECORD_PATH),
+            &record.to_bytes(),
+        )
+        .map_err(EngineError::Backend)?;
+    Ok(true)
+}
+
+/// Move one entity's origin marks from `from` to `to` inside a proposal
+/// record, returning the record and whether anything changed.
+///
+/// Every rule this needs is the record's own
+/// ([`crate::ops::proposal::ProposalRecord::effective_marks`],
+/// `effective_marks_at`, `structural_defect`), which is the point: four review
+/// rounds in a row found the same defect one position over while this function
+/// kept its own copy of the read's flattening, modelling last-write-wins and
+/// retirement by hand and getting one arm wrong each time.
+///
+/// What it does. A record the reader cannot make sense of is refused
+/// untouched, the stance the unparseable case already takes: a rename that
+/// repaired such a record would lift a quarantine the read installed on
+/// purpose. Otherwise the marks effective for `from` move to `to`: cleared
+/// wherever they stand at the source, and written onto the row that makes
+/// `to`'s marks effective, or onto the last row naming `to`, so nothing later
+/// in the record can retire them. Only when no row names `to` at all does the
+/// source's own row relocate, and then the row that carried the effective
+/// marks, never merely the first row naming the slug: relocating a `reject`'s
+/// reason and content hash would move the re-proposal gate to a slug nothing
+/// was ever rejected at.
+///
+/// Audit fields (disposition, reason, content hash) of an existing target row
+/// are never touched: they document what happened to the entity that WAS at
+/// that slug. Only the marks move, because only they describe the bytes that
+/// are there now.
+pub(crate) fn move_marks_on_rename(
+    mut record: crate::ops::proposal::ProposalRecord,
+    from: &str,
+    to: &str,
+) -> (crate::ops::proposal::ProposalRecord, bool) {
+    if record.structural_defect().is_some() {
+        return (record, false);
+    }
+    let before = (record.effective_marks(from), record.effective_marks(to));
+    let Some(marks) = before.0.clone() else {
+        // Nothing effective at the source: no label to move, and relocating a
+        // mark-less row would make the record's slug keys depend on an
+        // unrelated proposal's marks.
+        return (record, false);
+    };
+    let source_row = record.effective_marks_at(from);
+    let target_row = record.effective_marks_at(to).or_else(|| {
+        record
+            .proposals
+            .iter()
+            .rposition(|p| p.entities.contains_key(to))
+    });
+
+    // The source no longer holds the body, so it no longer holds the label.
+    for proposal in &mut record.proposals {
+        if let Some(entry) = proposal.entities.get_mut(from) {
+            entry.landed_sections = None;
+        }
+    }
+    match target_row {
+        Some(idx) => {
+            if let Some(entry) = record.proposals[idx].entities.get_mut(to) {
+                entry.landed_sections = Some(marks);
+            }
+        }
+        None => {
+            // No row names the target at all: relocate the source's own row,
+            // audit fields and all, and only the row whose marks were the
+            // effective ones.
+            if let Some(idx) = source_row
+                && let Some(mut entry) = record.proposals[idx].entities.remove(from)
+            {
+                entry.landed_sections = Some(marks);
+                record.proposals[idx].entities.insert(to.to_string(), entry);
+            }
+        }
+    }
+    let after = (record.effective_marks(from), record.effective_marks(to));
+    (record, after != before)
+}
+
+/// Follow an adopted body's origin marks across a retype that re-keys
+/// sections, staged into the same commit as the entity write.
+///
+/// A `section_map` moves a section's content to another key without
+/// changing it, and a mark's hash covers its key, so an unfollowed mark
+/// would stop matching and serve a contributor's untouched sentences as the
+/// workspace's own prose. Only a mark whose content is still the bytes it
+/// landed with is carried, recomputed under the new key; a mark whose
+/// content the owner has since rewritten stays expired.
+///
+/// `sections` is the entity's post-retype section map. `Ok(false)` when
+/// nothing was carried, in which case nothing is written.
+pub(crate) fn stage_proposal_marks_retype(
+    backend: &dyn crate::backend::MemBackend,
+    id: &EntityId,
+    section_map: &indexmap::IndexMap<String, String>,
+    sections: &indexmap::IndexMap<String, String>,
+) -> Result<bool, EngineError> {
+    if section_map.is_empty() {
+        return Ok(false);
+    }
+    let Some(bytes) = backend
+        .read_proposal_record()
+        .map_err(EngineError::Backend)?
+    else {
+        return Ok(false);
+    };
+    let Ok(mut record) = crate::ops::proposal::ProposalRecord::from_bytes(&bytes) else {
+        return Ok(false);
+    };
+    if record.structural_defect().is_some() {
+        // The reader calls this record defective and quarantines the whole
+        // mem on it. A write that repaired it would lift a quarantine the
+        // read installed on purpose, so every mark-following write refuses
+        // it untouched.
+        return Ok(false);
+    }
+    let mut rekeyed = false;
+    for proposal in &mut record.proposals {
+        let Some(entry) = proposal.entities.get_mut(id.path()) else {
+            continue;
+        };
+        let Some(before) = entry.landed_sections.clone() else {
+            continue;
+        };
+        let after = rekey_marks_for_retype(&before, section_map, sections);
+        if after == before {
+            continue;
+        }
+        if after.is_empty() {
+            // Nothing held, so the mark is retired rather than written as an
+            // empty map. An empty map is a record defect the read path fails
+            // the whole mem closed on, and the engine's own retype must not
+            // manufacture one: the owner rewriting every section and then
+            // retyping is an ordinary sequence.
+            entry.landed_sections = None;
+        } else {
+            entry.landed_sections = Some(after);
+        }
+        rekeyed = true;
+    }
+    if !rekeyed {
+        return Ok(false);
+    }
+    backend
+        .write_entity(
+            std::path::Path::new(crate::ops::proposal::PROPOSAL_RECORD_PATH),
+            &record.to_bytes(),
+        )
+        .map_err(EngineError::Backend)?;
+    Ok(true)
+}
+
 // A `today_iso()` wall-clock convenience used to live here, for tests
 // comparing an auto-stamp against "roughly now". It is deliberately
 // gone: the stamp is second-resolution, so every such comparison races

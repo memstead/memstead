@@ -269,7 +269,8 @@ impl crate::Engine {
         // deployment; without one it is the workspace the export came from.
         // Printing "this deployment vouches" into a file exported from a
         // laptop would make the header's one load-bearing sentence false.
-        let provenance = match (self.mem_origin_class(mem), ctx.authority.is_some()) {
+        let mem_class = self.mem_origin_class(mem);
+        let provenance = match (mem_class, ctx.authority.is_some()) {
             (crate::render::OriginClass::FirstParty, true) => {
                 "first-party (this deployment vouches for the content as its own)"
             }
@@ -370,7 +371,22 @@ Provenance: {provenance}\n\n\
                 ),
                 None => format!("{md}\n\n_Type: {}_", entity.entity_type),
             };
-            out.push_str(&linkify_wikilinks(typed, &id_titles, &ctx.href_prefix, mem));
+            let linked = linkify_wikilinks(typed, &id_titles, &ctx.href_prefix, mem);
+            // The header's `Provenance:` line vouches for the document as a
+            // whole, which is the wrong grain for one merged contribution:
+            // this document is read whole and believed, so a body adopted
+            // from a fork is contained inline. Only where the entity's class
+            // differs from the mem's — in a mem the header already declares
+            // third-party, wrapping every entity would repeat the header
+            // once per entity and tell a reader nothing new, and a mem with
+            // no adopted body exports byte-identically to before.
+            let entity_class = self.entity_origin_class(&entity.id);
+            let contained = entity_class.is_third_party() && !mem_class.is_third_party();
+            out.push_str(&if contained {
+                crate::render::quote_wrap(&linked, &crate::render::quote_marker(&linked))
+            } else {
+                linked
+            });
             if !out.ends_with('\n') {
                 out.push('\n');
             }

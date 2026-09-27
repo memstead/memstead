@@ -593,6 +593,8 @@ impl Engine {
             settings: WorkspaceSettings::default(),
             create_rule_set_memo: OnceCell::new(),
             declared_origins: HashMap::new(),
+            owner_identities: std::collections::BTreeSet::new(),
+            foreign_entities_memo: OnceCell::new(),
             workspace_root: None,
             load_warnings,
             quarantined,

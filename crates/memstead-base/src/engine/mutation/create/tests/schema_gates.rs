@@ -1361,8 +1361,13 @@ fn labelling_support_blindness_shape_and_cross_mem() {
         .unwrap()
         .clone();
     let view = engine.computed_labelling(&inference).unwrap();
-    let md =
-        crate::render::render_entity_markdown_with_signals(&inference, None, None, Some(&view));
+    let md = crate::render::render_entity_markdown_with_signals(
+        &inference,
+        None,
+        None,
+        Some(&view),
+        None,
+    );
     assert!(md.contains("_label: defeated"), "{md}");
     assert!(md.contains("## Labelling"), "{md}");
     assert!(md.contains("defeated_by: arg--undercutter"), "{md}");
@@ -1435,7 +1440,8 @@ fn labelling_without_support_serves_no_shape() {
     assert_eq!(view.label.wire(), "accepted");
     assert!(view.shape.is_none(), "no support declaration, no shape");
     assert!(view.to_json().get("shape").is_none());
-    let md = crate::render::render_entity_markdown_with_signals(&entity, None, None, Some(&view));
+    let md =
+        crate::render::render_entity_markdown_with_signals(&entity, None, None, Some(&view), None);
     assert!(!md.contains("- shape:"), "{md}");
 }
 
@@ -1658,8 +1664,13 @@ fn signals_reads_thresholds_neighbour_filter_and_determinism() {
     // contributors on the text channel; `_signals` on the envelope.
     let entity = engine.get_entity(&claim_id).unwrap().clone();
     let signals = engine.computed_signals(&entity).unwrap();
-    let md =
-        crate::render::render_entity_markdown_with_signals(&entity, None, Some(&signals), None);
+    let md = crate::render::render_entity_markdown_with_signals(
+        &entity,
+        None,
+        Some(&signals),
+        None,
+        None,
+    );
     assert!(
         md.contains("_signals: [attack_load: 3 (warn), open_objections: 1 (notice)]"),
         "frontmatter headline: {md}"
