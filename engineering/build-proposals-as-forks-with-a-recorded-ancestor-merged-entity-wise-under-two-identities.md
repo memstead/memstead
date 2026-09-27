@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-20T02:54:30Z
-last_modified: 2026-09-21T11:30:22Z
+last_modified: 2026-09-27T17:01:15Z
 status: accepted
 decided_on: 2026-09-20
 deciders: operator (in-session, following the briefing of 2026-09-20), memstead-71
@@ -48,3 +48,10 @@ A project that publishes reviewed claim collections on the engine walked a propo
 - Section-level dispositions: rejected, the diff carries whole bodies, and section verdicts let cross-section constraints slip; the brief names differing sections as comfort.
 - Proposal record as workspace state (like the findings store) or as entities in a process mem: rejected as the record of truth, the first does not travel with the mem and the second needs a new entity type; a project may keep prose beside it.
 - Four extensions of existing mechanisms, CLI-only except the brief, which is also an MCP read tool (chosen).
+
+## Notes
+
+2026-09-27 amendment: a merge is a decision record before it is a content change, so the record entry lands even when nothing is adopted. Implementation defect found by a project that uses the engine and reproduced on the engine's own fixtures: the record sidecar was written inside the commit loop that lands one commit per adopted proposer, so a disposition file rejecting every entry landed no commit and no record entry, the target branch kept no trace of the refusal, the brief could not mark a re-proposal of the rejected content, and a reader of the branch could not learn the fork was disposed. Fixed the same day: with nothing adopted the merge lands one commit on the target branch under the merger's identity carrying the record alone, parent-pinned like every merge commit, with the proposal trailers and no entity ids; the record entry names the proposer read off the fork commits for every entry it can attribute, rejected ones included, and only an adopted entry's missing identity refuses. The fork stays untouched, as the decision states. Deciders: memstead-e9 under the engine-changes rule; the reporting side confirmed the merger as the commit's identity.
+
+
+2026-09-27 amendment, the owner's side of a hosted proposal path: `mem fork <source> <name> --remote <r> --adopt`. The remote form of the fork verb means the source lives on the remote and makes an empty fork at its tip, so it could not take in a proposal branch a contributor had pushed, and a plain git remote without a registry ref was refused; the reporting project's workaround (local fork, fetch, branch-reset) puts a retargeted base against an un-retargeted tip and only held because the sample tree carried no anchor rows. The adopt form fetches the branch of the fork's own name, takes its merge-base with the local source branch as the ancestor (refused when there is none), validates the fetched tree against the local pin as pull does, derives the config from the local source, and creates the branch at the fetched tip with no commit of its own: an adopted tree is the proposer's. Its base is the engine's fork commit when the branch carries one, absent otherwise (the brief already reads such a fork against its ancestor). The remote needs no registry ref, in keeping with the consequence above that server-side concerns stay outside the engine: a server that writes proposal commits itself must write the engine's commit shape (the engine subject or an Entities trailer, plus Identity and Role trailers), which the changelog states verbatim. Options: (a) the flag on the fork verb, chosen, the result is a fork in every respect; (b) a separate verb, rejected as one more verb against the surface freeze's spirit; (c) no engine change, rejected on the anchor fragility. An explicit ancestor override was not built: merge-base is the ancestor until a case shows otherwise. Deciders: operator (in-session, 2026-09-27), memstead-e9.
