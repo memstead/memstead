@@ -13,7 +13,10 @@
 //! parent-pinned to the tip before it) carrying every adopted entity as
 //! the fork has it, under the proposer's identity and the role the fork
 //! commit of the group's first entity in slug order named, the record
-//! sidecar in the last of them; a second commit under the
+//! sidecar in the last of them (or, when every entry is rejected and
+//! there is no proposer to land under, one commit under the merger's
+//! identity carrying the record alone: a merge is a decision record
+//! before it is a content change); a second commit under the
 //! merger's identity with the owner's final bodies for
 //! `adopt_with_changes`; a verification check record per entity the
 //! merge created or updated, under the merger's identity; and a
@@ -327,10 +330,14 @@ impl Engine {
             .map_err(EngineError::Backend)?
             .notes
         };
-        // Per adopted slug: the proposer's identity and the role the
-        // same commit named (absence recorded as `Unspecified`).
+        // Per slug: the proposer's identity and the role the same
+        // commit named (absence recorded as `Unspecified`). An adopted
+        // entity must be attributed, because its landing commit carries
+        // that identity; a rejected one is attributed where the fork's
+        // commits allow it, so the record still names who proposed, and
+        // is silently unattributed otherwise (nothing lands under it).
         let mut proposers: BTreeMap<String, (String, Role)> = BTreeMap::new();
-        for slot in slots.iter().filter(|s| s.disposition != DISPOSITION_REJECT) {
+        for slot in &slots {
             let fork_id = EntityId::new(fork, &slot.entry.slug);
             let touch = filter_notes_for_entity(fork_id.as_ref(), &notes)
                 .into_iter()
@@ -344,6 +351,7 @@ impl Engine {
                         .unwrap_or_default();
                     proposers.insert(slot.entry.slug.clone(), (identity, role));
                 }
+                None if slot.disposition == DISPOSITION_REJECT => {}
                 None => {
                     return Err(EngineError::ProposalUnattributed {
                         fork: fork.to_string(),
@@ -560,15 +568,27 @@ impl Engine {
         let description = crate::vcs::normalise_identity(Some(&file.description))
             .or_else(|| crate::vcs::normalise_identity(note));
         let mut record = self.read_proposal_record(&target)?.unwrap_or_default();
+        // The identities the merge commits land under: one per adopted
+        // proposer, in slug order.
         let mut distinct_proposers: Vec<String> = Vec::new();
         for a in &adopted {
             if !distinct_proposers.contains(&a.proposer) {
                 distinct_proposers.push(a.proposer.clone());
             }
         }
+        // The identities the record names as the proposal's: every
+        // attributed entry, adopted or rejected, in slug order.
+        let mut recorded_proposers: Vec<String> = Vec::new();
+        for slot in &slots {
+            if let Some((identity, _)) = proposers.get(&slot.entry.slug)
+                && !recorded_proposers.contains(identity)
+            {
+                recorded_proposers.push(identity.clone());
+            }
+        }
         record.proposals.push(ProposalRecordEntry {
             id: brief.proposal_id.clone(),
-            proposer: (!distinct_proposers.is_empty()).then(|| distinct_proposers.join(", ")),
+            proposer: (!recorded_proposers.is_empty()).then(|| recorded_proposers.join(", ")),
             ancestor: brief.ancestor.clone(),
             base: brief.base.clone(),
             target_tip: brief.target_tip.clone(),
@@ -745,6 +765,77 @@ impl Engine {
             });
         }
 
+        // ---- Nothing adopted: the record still lands ----
+        // A merge is a decision record before it is a content change.
+        // With every entry rejected there is no proposer to land under,
+        // so one commit under the merger carries the record alone,
+        // parent-pinned like the others: a refused proposal is as
+        // visible on the target branch as an accepted one, the brief
+        // marks a re-proposal of it, and a reader of the branch learns
+        // the fork is disposed.
+        if distinct_proposers.is_empty() {
+            let staged: Result<(), EngineError> = (|| {
+                let backend = self.mounts[target_mount].backend.as_ref();
+                backend.write_entity(Path::new(PROPOSAL_RECORD_PATH), &record_bytes)?;
+                Ok(())
+            })();
+            if let Err(e) = staged {
+                return Err(self.unwind_merge(
+                    &target,
+                    &brief.target_tip,
+                    None,
+                    &store_snapshot,
+                    e,
+                ));
+            }
+            let mut ctx = self.commit_context(
+                Some(MERGE_TOOL),
+                actor,
+                client.cloned(),
+                note.map(String::from),
+            );
+            ctx.entity_ids = Some(Vec::new());
+            ctx.proposal = Some(ProposalTrailers {
+                proposal: brief.proposal_id.clone(),
+                merged_by: merger.clone(),
+                created: Vec::new(),
+            });
+            let subject = format!("memstead: proposal-merge {}", brief.proposal_id);
+            let sha = match self.mounts[target_mount]
+                .backend
+                .commit_with_expected_parent(&subject, &ctx, Some(&parent))
+            {
+                Ok(sha) => sha,
+                Err(e) => {
+                    let e = match e {
+                        crate::backend::BackendError::ParentMismatch { expected, actual } => {
+                            EngineError::ProposalStale {
+                                fork: fork.to_string(),
+                                side: "target".to_string(),
+                                recorded: expected,
+                                current: actual,
+                            }
+                        }
+                        other => other.into(),
+                    };
+                    return Err(self.unwind_merge(
+                        &target,
+                        &brief.target_tip,
+                        None,
+                        &store_snapshot,
+                        e,
+                    ));
+                }
+            };
+            self.record_self_write(target_mount, &sha);
+            parent = sha.clone();
+            merge_commits.push(MergeCommit {
+                sha,
+                identity: merger.clone(),
+                entities: Vec::new(),
+            });
+        }
+
         // ---- The store after the commits: deletions, stubs, indexes ----
         for (id, readonly_referrers) in &deleted_ids {
             if readonly_referrers.is_empty() {
@@ -865,7 +956,10 @@ impl Engine {
             let plan = adopted.iter().find(|a| a.slug == slug);
             let amended = amends.iter().any(|p| p.id == target_id);
             let (action, proposer) = match plan {
-                None => ("none", None),
+                None => (
+                    "none",
+                    proposers.get(slug).map(|(identity, _)| identity.clone()),
+                ),
                 Some(a) => {
                     let action = if a.landings.iter().any(|l| l.is_create()) {
                         "created"

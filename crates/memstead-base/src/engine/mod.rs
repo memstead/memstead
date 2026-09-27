@@ -675,6 +675,13 @@ pub type GitBranchResolveRefFn =
 pub type GitBranchIsAncestorFn =
     fn(gitdir: &Path, ancestor: &str, descendant: &str) -> Result<bool, BackendError>;
 
+/// The nearest common ancestor of two commits (`git merge-base`);
+/// `None` when they share no history. Read-only. The adopt form of
+/// `mem fork` reads the ancestor of a fork branch that arrived on a
+/// remote off it.
+pub type GitBranchMergeBaseFn =
+    fn(gitdir: &Path, a: &str, b: &str) -> Result<Option<String>, BackendError>;
+
 /// `Engine::remote_add` dispatch — configures a named remote on the
 /// mem-repo gitdir (upsert: add, or set-url when it already exists).
 pub type GitBranchRemoteAddFn =
@@ -817,6 +824,7 @@ pub struct GitBranchOps {
     pub ls_remote: GitBranchLsRemoteFn,
     pub resolve_ref: GitBranchResolveRefFn,
     pub is_ancestor: GitBranchIsAncestorFn,
+    pub merge_base: GitBranchMergeBaseFn,
     pub remote_add: GitBranchRemoteAddFn,
     pub read_tree: GitBranchReadTreeFn,
     pub export: GitBranchExportFn,

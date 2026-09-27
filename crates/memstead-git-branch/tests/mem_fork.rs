@@ -171,6 +171,7 @@ fn params(source: &str, name: &str) -> MemForkParams {
         sha: None,
         name: name.to_string(),
         remote: None,
+        adopt: false,
         note: None,
         operator_mode: true,
         actor: Actor::Cli,
@@ -1531,4 +1532,256 @@ fn fork_refuses_a_folder_only_workspace() {
     let err = mem_management::fork_mem(&mut engine, params("notes", "notes-fork")).unwrap_err();
     assert_eq!(code_of(&err), "INVALID_INPUT", "{err}");
     assert!(err.to_string().contains("mem-repo"), "{err}");
+}
+
+// ---------------------------------------------------------------------
+// AC3: the adopt form
+// ---------------------------------------------------------------------
+
+/// A source with two entities and a self-link, pushed to a PLAIN bare
+/// remote (`hub`, no `__MEMSTEAD` ref). Returns the workspace, the
+/// remote and the source tip.
+fn adopt_fixture() -> (TempDir, TempDir, String) {
+    let a = TempDir::new().unwrap();
+    init_real_mem_repo(a.path(), &[("specs", "default@1.0.0")]);
+    let gitdir = gitdir_of(a.path());
+    commit_config_at_gitdir(
+        &gitdir,
+        "specs",
+        br#"{"schema": "default@1.0.0", "version": "0.4.0", "description": "the owner's"}"#,
+        &CommitContext::internal(),
+        "seed",
+    )
+    .unwrap();
+    let mut engine = engine_from_workspace_root(a.path()).expect("boots");
+    create_entity_in(&mut engine, "specs", "Alpha");
+    create_entity_with(
+        &mut engine,
+        "specs",
+        "Beta",
+        "Beta follows [[specs--alpha]].",
+        Vec::new(),
+    );
+    relate(&mut engine, ("specs", "beta"), ("specs", "alpha"));
+    drop(engine);
+    let tip = sha_of(&gitdir, "refs/heads/specs").unwrap();
+    let remote = TempDir::new().unwrap();
+    gix::init_bare(remote.path()).unwrap();
+    remote_add_in_gitdir(&gitdir, "hub", remote.path().to_str().unwrap()).unwrap();
+    push_in_gitdir(&gitdir, "hub", "specs", "specs", false).unwrap();
+    (a, remote, tip)
+}
+
+fn git(gitdir: &Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(gitdir)
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+fn adopt_params(source: &str, name: &str) -> MemForkParams {
+    let mut p = params(source, name);
+    p.remote = Some("hub".to_string());
+    p.adopt = true;
+    p
+}
+
+/// A fork the engine made (fork commit, one proposal commit under an
+/// identity), pushed to a plain remote and retired locally, is adopted
+/// back: the branch is the pushed tip with no commit of its own, the
+/// config derives from the local source with the ancestor, the remote
+/// and the branch's own fork commit as `base`, no registry ref is
+/// fetched, the brief reads exactly the proposal, and the merge lands
+/// it under the proposer's identity.
+#[test]
+fn adopt_mounts_an_engine_made_fork_pushed_to_a_plain_remote() {
+    let (a, _remote, source_tip) = adopt_fixture();
+    let gitdir = gitdir_of(a.path());
+    let mut engine = engine_from_workspace_root(a.path()).expect("boots");
+    let made = mem_management::fork_mem(&mut engine, params("specs", "specs-proposal"))
+        .expect("the local fork lands");
+    let fork_commit = made.forked_from.base.clone().expect("a fork commit");
+    engine.set_identity(Some("proposer-p1".to_string()));
+    create_entity_in(&mut engine, "specs-proposal", "Gamma");
+    engine.set_identity(None);
+    let proposal_tip = sha_of(&gitdir, "refs/heads/specs-proposal").unwrap();
+    push_in_gitdir(&gitdir, "hub", "specs-proposal", "specs-proposal", false).unwrap();
+    mem_management::delete_mem(
+        &mut engine,
+        mem_management::MemDeleteParams {
+            name: "specs-proposal".to_string(),
+            delete_files: true,
+            note: None,
+            actor: Actor::Cli,
+            client: None,
+            operator_mode: true,
+            detach_incoming: false,
+        },
+    )
+    .expect("the local fork is retired");
+    assert_eq!(sha_of(&gitdir, "refs/heads/specs-proposal"), None);
+    let toml_before = workspace_toml(a.path());
+
+    let response = mem_management::fork_mem(&mut engine, adopt_params("specs", "specs-proposal"))
+        .expect("the adopt lands");
+    assert_eq!(response.forked_from.mem, "specs");
+    assert_eq!(response.forked_from.sha, source_tip);
+    assert_eq!(response.forked_from.remote.as_deref(), Some("hub"));
+    assert_eq!(
+        response.forked_from.base.as_deref(),
+        Some(fork_commit.as_str())
+    );
+    assert_eq!(response.inherited_grants, None);
+    // The branch is the pushed tip: nothing was written on it.
+    assert_eq!(
+        sha_of(&gitdir, "refs/heads/specs-proposal").unwrap(),
+        proposal_tip
+    );
+    let cfg = read_config_at_gitdir(&gitdir, "specs-proposal").unwrap();
+    assert_eq!(cfg.description.as_deref(), Some("the owner's"));
+    let origin = cfg.forked_from.unwrap();
+    assert_eq!(origin.sha, source_tip);
+    assert_eq!(origin.remote.as_deref(), Some("hub"));
+    assert_eq!(origin.base.as_deref(), Some(fork_commit.as_str()));
+    // The fork branch was fetched to its tracking ref; no registry ref
+    // exists on the remote and none was asked for.
+    assert!(sha_of(&gitdir, "refs/remotes/hub/specs-proposal").is_some());
+    assert!(sha_of(&gitdir, "refs/remotes/hub/__MEMSTEAD").is_none());
+    assert_eq!(workspace_toml(a.path()), toml_before);
+    assert_eq!(shapes(&engine, "specs-proposal").len(), 3);
+
+    // The brief reads the proposal against the branch's own fork commit.
+    let brief = engine.proposal_brief("specs-proposal").unwrap();
+    assert_eq!(brief.ancestor, source_tip);
+    assert_eq!(brief.base, fork_commit);
+    assert_eq!(brief.entries.len(), 1, "{:?}", brief.entries);
+    assert_eq!(brief.entries[0].slug, "gamma");
+    assert_eq!(
+        brief.entries[0].status,
+        memstead_base::ops::proposal::ProposalChange::Added
+    );
+
+    // The merge lands it under the proposer the fork commit names.
+    let mut file = brief;
+    file.dispositions.get_mut("gamma").unwrap().disposition = "adopt".to_string();
+    engine.set_identity(Some("owner-o1".to_string()));
+    let outcome = engine
+        .proposal_merge("specs-proposal", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+    assert_eq!(outcome.merge_commits.len(), 1);
+    assert_eq!(outcome.merge_commits[0].identity, "proposer-p1");
+    assert!(
+        engine
+            .store()
+            .get(&EntityId::new("specs", "gamma"))
+            .is_some()
+    );
+    drop(engine);
+
+    let engine = engine_from_workspace_root(a.path()).expect("reboot");
+    assert_eq!(shapes(&engine, "specs-proposal").len(), 3);
+}
+
+/// A branch a server wrote with plain git from the source tip (no fork
+/// commit, one entity commit with the engine's subject and an
+/// `Identity:` trailer) is adopted as based on its ancestor: `base` is
+/// absent, the brief reads the added entity against the ancestor, and
+/// the merge attributes it to the trailer's identity.
+#[test]
+fn adopt_mounts_a_raw_branch_as_based_on_its_ancestor() {
+    let (a, _remote, source_tip) = adopt_fixture();
+    let gitdir = gitdir_of(a.path());
+    git(
+        &gitdir,
+        &["update-ref", "refs/heads/specs-raw", &source_tip],
+    );
+    let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs-raw".to_string());
+    writer
+        .write_entity(
+            Path::new("kappa.md"),
+            b"---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Kappa\n\n## Identity\n\nkappa claims\n\n## Purpose\n\nseed\n",
+        )
+        .unwrap();
+    let mut ctx = CommitContext::internal();
+    ctx.identity = Some("proposer-p2".to_string());
+    let raw_tip = writer
+        .commit("memstead: create specs-raw--kappa", &ctx)
+        .unwrap();
+    push_in_gitdir(&gitdir, "hub", "specs-raw", "specs-raw", false).unwrap();
+    git(&gitdir, &["update-ref", "-d", "refs/heads/specs-raw"]);
+
+    let mut engine = engine_from_workspace_root(a.path()).expect("boots");
+    let response = mem_management::fork_mem(&mut engine, adopt_params("specs", "specs-raw"))
+        .expect("the adopt lands");
+    assert_eq!(response.forked_from.sha, source_tip);
+    assert_eq!(response.forked_from.base, None);
+    assert_eq!(sha_of(&gitdir, "refs/heads/specs-raw").unwrap(), raw_tip);
+    assert_eq!(shapes(&engine, "specs-raw").len(), 3);
+
+    let brief = engine.proposal_brief("specs-raw").unwrap();
+    assert_eq!(brief.ancestor, source_tip);
+    assert_eq!(brief.base, source_tip);
+    assert_eq!(brief.entries.len(), 1, "{:?}", brief.entries);
+    assert_eq!(brief.entries[0].slug, "kappa");
+    let mut file = brief;
+    file.dispositions.get_mut("kappa").unwrap().disposition = "adopt".to_string();
+    engine.set_identity(Some("owner-o1".to_string()));
+    let outcome = engine
+        .proposal_merge("specs-raw", &file, Actor::Cli, None, None)
+        .expect("the merge lands");
+    assert_eq!(outcome.merge_commits[0].identity, "proposer-p2");
+    assert!(
+        engine
+            .store()
+            .get(&EntityId::new("specs", "kappa"))
+            .is_some()
+    );
+}
+
+/// Every adopt refusal lands nothing: no remote, a sha beside adopt, a
+/// branch the remote lacks, and a branch that shares no history with
+/// the local source.
+#[test]
+fn adopt_refusals_land_nothing() {
+    let (a, remote, _source_tip) = adopt_fixture();
+    let gitdir = gitdir_of(a.path());
+    // A branch with a history of its own, pushed from another workspace.
+    let b = TempDir::new().unwrap();
+    init_real_mem_repo(b.path(), &[("stray", "default@1.0.0")]);
+    let b_gitdir = gitdir_of(b.path());
+    remote_add_in_gitdir(&b_gitdir, "hub", remote.path().to_str().unwrap()).unwrap();
+    push_in_gitdir(&b_gitdir, "hub", "stray", "stray", false).unwrap();
+
+    let mut engine = engine_from_workspace_root(a.path()).expect("boots");
+
+    let mut p = params("specs", "specs-proposal");
+    p.adopt = true;
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "INVALID_INPUT", "{err}");
+    assert_nothing_landed(&engine, a.path(), "specs-proposal");
+
+    let mut p = adopt_params("specs", "specs-proposal");
+    p.sha = Some("HEAD".to_string());
+    let err = mem_management::fork_mem(&mut engine, p).unwrap_err();
+    assert_eq!(code_of(&err), "INVALID_INPUT", "{err}");
+    assert_nothing_landed(&engine, a.path(), "specs-proposal");
+
+    let err =
+        mem_management::fork_mem(&mut engine, adopt_params("specs", "specs-proposal")).unwrap_err();
+    assert_eq!(code_of(&err), "UNKNOWN_REF", "{err}");
+    assert!(
+        err.to_string()
+            .contains("no branch refs/heads/specs-proposal"),
+        "{err}"
+    );
+    assert_nothing_landed(&engine, a.path(), "specs-proposal");
+    assert!(sha_of(&gitdir, "refs/remotes/hub/specs-proposal").is_none());
+
+    let err = mem_management::fork_mem(&mut engine, adopt_params("specs", "stray")).unwrap_err();
+    assert_eq!(code_of(&err), "UNKNOWN_REF", "{err}");
+    assert!(err.to_string().contains("shares no history"), "{err}");
+    assert_nothing_landed(&engine, a.path(), "stray");
 }

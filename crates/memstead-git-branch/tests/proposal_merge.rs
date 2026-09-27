@@ -311,6 +311,7 @@ fn staged() -> (TempDir, memstead_base::Engine) {
             sha: None,
             name: "specs-fork".to_string(),
             remote: None,
+            adopt: false,
             note: None,
             operator_mode: true,
             actor: Actor::Cli,
@@ -514,22 +515,31 @@ fn merge_lands_the_six_shapes_under_two_identities_with_checks_and_the_record() 
         .iter()
         .map(|e| (e.slug.as_str(), e))
         .collect();
-    for (slug, disposition, action, checked) in [
-        ("beta", "adopt", "updated", true),
-        ("eta", "adopt", "created", true),
-        ("gamma", "adopt", "deleted", false),
-        ("delta-prime", "adopt", "created", true),
-        ("epsilon", "adopt_with_changes", "updated", true),
-        ("theta", "reject", "none", false),
-        ("lambda", "reject", "none", false),
-        ("zeta", "reject", "none", false),
-        ("iota", "reject", "none", false),
+    // The proposer is read off the fork commit for every entry it
+    // attributes, rejected ones included; theta's sibling writer left
+    // no identity, so theta alone has none.
+    for (slug, disposition, action, checked, proposer) in [
+        ("beta", "adopt", "updated", true, Some(PROPOSER)),
+        ("eta", "adopt", "created", true, Some(PROPOSER)),
+        ("gamma", "adopt", "deleted", false, Some(PROPOSER)),
+        ("delta-prime", "adopt", "created", true, Some(PROPOSER)),
+        (
+            "epsilon",
+            "adopt_with_changes",
+            "updated",
+            true,
+            Some(PROPOSER),
+        ),
+        ("theta", "reject", "none", false, None),
+        ("lambda", "reject", "none", false, Some(PROPOSER)),
+        ("zeta", "reject", "none", false, Some(PROPOSER)),
+        ("iota", "reject", "none", false, Some(PROPOSER)),
     ] {
         let e = by_slug[slug];
         assert_eq!(e.disposition, disposition, "{slug}");
         assert_eq!(e.action, action, "{slug}");
         assert_eq!(e.check_recorded, checked, "{slug}");
-        assert_eq!(e.proposer.is_some(), disposition != "reject", "{slug}");
+        assert_eq!(e.proposer.as_deref(), proposer, "{slug}");
     }
 
     // The target as the fork has it: created, updated, deleted, renamed,
@@ -1183,6 +1193,7 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
             sha: None,
             name: "specs-fork2".to_string(),
             remote: None,
+            adopt: false,
             note: None,
             operator_mode: true,
             actor: Actor::Cli,
@@ -1313,6 +1324,7 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
             sha: None,
             name: "specs-fork3".to_string(),
             remote: None,
+            adopt: false,
             note: None,
             operator_mode: true,
             actor: Actor::Cli,
@@ -2037,10 +2049,10 @@ fn the_llms_document_contains_an_adopted_body_and_leaves_the_owners_alone() {
 }
 
 /// A rejection retires nothing, proved on a MIXED merge: the brief adopts
-/// one slug and rejects the marked one, so the merge really does write a
-/// `reject` entry with no marks beside the standing mark. An all-reject
-/// merge would not: it lands nothing and writes no record at all, so it
-/// passes whether the guard exists or not.
+/// one slug and rejects the marked one, so the merge writes a `reject`
+/// entry with no marks beside the standing mark in the same entry that
+/// lands a body (an all-reject merge writes its entry in a commit of its
+/// own; `an_all_reject_merge_lands_the_record_alone_under_the_merger`).
 ///
 /// Read as a retirement, a contributor could clear a standing mark at will:
 /// they choose which slugs a brief covers, and a rejection is the owner
@@ -2426,6 +2438,142 @@ fn a_retype_after_a_full_rewrite_leaves_the_record_readable() {
         engine.entity_origin_class(&EntityId::new("specs", "alpha")),
         memstead_base::render::OriginClass::FirstParty,
         "and a sibling entity is not relabelled by a defect that never happened"
+    );
+    drop(tmp);
+}
+
+// ---------------------------------------------------------------------
+// An all-reject merge lands the record alone
+// ---------------------------------------------------------------------
+
+/// A merge is a decision record before it is a content change. With
+/// every entry rejected there is no proposer to land under, so the
+/// merge lands one commit on the target branch under the merger's
+/// identity carrying the record alone, parent-pinned like every merge
+/// commit: `proposal list` shows the proposal with every rejection and
+/// its reason and the proposer the fork's commits name, a second brief
+/// of the same fork marks the re-proposal, and the fork is untouched.
+#[test]
+fn an_all_reject_merge_lands_the_record_alone_under_the_merger() {
+    let (tmp, mut engine) = staged();
+    let gitdir = gitdir_of(tmp.path());
+    let mut file = engine.proposal_brief("specs-fork").unwrap();
+    for slot in file.dispositions.values_mut() {
+        slot.disposition = "reject".to_string();
+        slot.reason = "not this round".to_string();
+    }
+    file.description = "the whole round declined".to_string();
+    let target_before = sha_of(&gitdir, "refs/heads/specs").unwrap();
+    let fork_before = sha_of(&gitdir, "refs/heads/specs-fork").unwrap();
+
+    let outcome = engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("an all-reject merge lands");
+
+    // One commit, under the merger, touching no entity.
+    assert_eq!(outcome.merge_commits.len(), 1, "{outcome:?}");
+    let commit = &outcome.merge_commits[0];
+    assert_eq!(commit.identity, MERGER);
+    assert!(commit.entities.is_empty());
+    assert!(outcome.amend_commit.is_none());
+    assert_eq!(outcome.target_tip_before, target_before);
+    assert_eq!(outcome.target_tip_after, commit.sha);
+    assert_ne!(outcome.target_tip_after, target_before);
+    assert_eq!(
+        sha_of(&gitdir, "refs/heads/specs").as_deref(),
+        Some(commit.sha.as_str())
+    );
+    assert_eq!(
+        sha_of(&gitdir, "refs/heads/specs-fork").unwrap(),
+        fork_before,
+        "nothing is written to the fork"
+    );
+    assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
+    assert!(
+        outcome
+            .entities
+            .iter()
+            .all(|e| e.disposition == "reject" && e.action == "none" && !e.check_recorded),
+        "{:?}",
+        outcome.entities
+    );
+    // The rejected entries the fork's commits attribute name their
+    // proposer on the outcome too.
+    assert_eq!(
+        outcome
+            .entities
+            .iter()
+            .find(|e| e.slug == "beta")
+            .and_then(|e| e.proposer.as_deref()),
+        Some(PROPOSER)
+    );
+
+    // The commit's trailers: the merger's identity, and the proposal
+    // trailers beside it.
+    let message = std::process::Command::new("git")
+        .args([
+            "--git-dir",
+            gitdir.to_str().unwrap(),
+            "log",
+            "-1",
+            "--format=%B",
+        ])
+        .arg(&commit.sha)
+        .output()
+        .unwrap();
+    let message = String::from_utf8(message.stdout).unwrap();
+    assert!(
+        message.starts_with(&format!("memstead: proposal-merge {}", outcome.proposal_id)),
+        "{message}"
+    );
+    assert!(
+        message.contains(&format!("Identity: {MERGER}")),
+        "{message}"
+    );
+    assert!(
+        message.contains(&format!("Merged-By: {MERGER}")),
+        "{message}"
+    );
+    assert!(
+        message.contains(&format!("Proposal: {}", outcome.proposal_id)),
+        "{message}"
+    );
+
+    // The record on the target branch: one entry, every disposition a
+    // reject with its reason, the proposer named, the description kept.
+    let record = record_on(&gitdir, "specs").expect("the record is on the target branch");
+    assert_eq!(record.proposals.len(), 1);
+    let entry = &record.proposals[0];
+    assert_eq!(entry.id, outcome.proposal_id);
+    assert_eq!(entry.merged_by.as_deref(), Some(MERGER));
+    assert_eq!(
+        entry.description.as_deref(),
+        Some("the whole round declined")
+    );
+    assert_eq!(entry.proposer.as_deref(), Some(PROPOSER));
+    assert_eq!(entry.entities.len(), file.dispositions.len());
+    for (slug, d) in &entry.entities {
+        assert_eq!(d.disposition, "reject", "{slug}");
+        assert_eq!(d.reason.as_deref(), Some("not this round"), "{slug}");
+        assert!(d.landed_sections.is_none(), "{slug}");
+    }
+    assert_eq!(engine.proposal_list("specs").unwrap(), record);
+
+    // A second brief of the same fork marks every entry a re-proposal
+    // against the rejection just recorded.
+    let again = engine.proposal_brief("specs-fork").unwrap();
+    assert_eq!(again.target_tip, commit.sha);
+    let beta = again
+        .entries
+        .iter()
+        .find(|e| e.slug == "beta")
+        .expect("beta is still proposed");
+    assert!(
+        beta.re_proposal
+            .iter()
+            .any(|m| m.reason.as_deref() == Some("not this round")),
+        "{:?}",
+        beta.re_proposal
     );
     drop(tmp);
 }

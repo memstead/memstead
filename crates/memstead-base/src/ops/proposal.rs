@@ -738,9 +738,11 @@ pub struct ProposalMergeOutcome {
 pub struct MergeCommit {
     pub sha: String,
     /// The commit's `Identity:` trailer: the proposer on a merge commit,
-    /// the merger on the amend commit.
+    /// the merger on the amend commit and on the record-only commit an
+    /// all-reject merge lands.
     pub identity: String,
-    /// The target ids the commit touched, in slug order.
+    /// The target ids the commit touched, in slug order; empty on the
+    /// record-only commit.
     pub entities: Vec<String>,
 }
 
@@ -753,8 +755,10 @@ pub struct MergedEntity {
     /// `created`, `updated`, `deleted`, `noop` (the fork's version
     /// equals the target's), or `none` (rejected: nothing landed).
     pub action: String,
-    /// The proposer whose identity the merge commit carries for this
-    /// entity; absent on a rejected entity.
+    /// The proposer read off the fork commit that last touched this
+    /// entity: the identity the merge commit carries for an adopted
+    /// entity, the identity recorded for a rejected one; absent on a
+    /// rejected entity whose fork commit carries none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposer: Option<String>,
     /// The content hash of the entity as it stands in the target after
@@ -812,6 +816,13 @@ pub fn render_proposal_merge(o: &ProposalMergeOutcome) -> String {
         o.target_tip_before, o.target_tip_after
     ));
     for c in &o.merge_commits {
+        if c.entities.is_empty() {
+            out.push_str(&format!(
+                "- Record commit `{}` under merger `{}`: nothing adopted\n",
+                c.sha, c.identity
+            ));
+            continue;
+        }
         out.push_str(&format!(
             "- Merge commit `{}` under proposer `{}`: {}\n",
             c.sha,

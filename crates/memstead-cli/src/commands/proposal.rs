@@ -34,7 +34,9 @@ pub enum ProposalAction {
     /// parent-pinned to the tip the file recorded, all landing or none;
     /// `adopt_with_changes` lands the fork's version there and your
     /// final body in a second commit under your identity; `reject`
-    /// lands nothing. The merge commit carries the proposer's identity
+    /// lands nothing (a merge that rejects everything still lands one
+    /// commit under your identity carrying the record alone, so the
+    /// refusal is on the target branch). The merge commit carries the proposer's identity
     /// (read from the fork's own commits, never from you) with
     /// `Merged-By:` and `Proposal:` beside it, writes the proposal
     /// record (`.memstead/proposals.json`) on the target branch with the

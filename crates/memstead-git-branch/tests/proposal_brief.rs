@@ -280,6 +280,7 @@ fn staged() -> (TempDir, memstead_base::Engine) {
             sha: None,
             name: "specs-fork".to_string(),
             remote: None,
+            adopt: false,
             note: None,
             operator_mode: true,
             actor: Actor::Cli,

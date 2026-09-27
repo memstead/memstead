@@ -13,6 +13,19 @@
 //! `__MEMSTEAD` is never moved), the fetched tree is validated against
 //! the source's schema pin exactly as `pull` validates before it moves a
 //! pointer, and the fork's branch is created at the fetched commit.
+//! **Adopt** (`remote: Some`, `adopt: true`): the fork branch already
+//! exists on the remote, made elsewhere from a mem this workspace
+//! mounts (by the engine on another machine and pushed, or by a server
+//! that accepts proposal branches); the branch of the fork's own name
+//! is fetched, its ancestor is the nearest commit it shares with the
+//! local source branch, the fetched tree is validated against the local
+//! source's pin, the fork's config is derived from the local source
+//! (the remote needs no `__MEMSTEAD`), and the branch is created at the
+//! fetched tip with no commit of its own: an adopted tree is the
+//! proposer's, and the fork writes nothing on it. Its `base` is the
+//! engine's fork commit when the branch carries one above the ancestor,
+//! absent otherwise (the brief then reads the fork against its
+//! ancestor, as for a fork made before fork commits existed).
 //!
 //! The fork is an engine act end to end: the branch through the
 //! engine's git layer ([`crate::GitBranchOps`]), the fork commit through
@@ -77,6 +90,10 @@ pub struct MemForkParams {
     /// The mem-repo remote to fetch the source from; `None` is the
     /// local form.
     pub remote: Option<String>,
+    /// Adopt form: the branch `refs/heads/<name>` already exists on
+    /// `remote` as a fork of the locally mounted `source`; fetch it and
+    /// mount it as that fork. Requires `remote`; excludes `sha`.
+    pub adopt: bool,
     /// Agent-authored provenance note (≤[`NOTE_MAX_LEN`] chars).
     pub note: Option<String>,
     /// Operator posture: skips the `[[mem_management.create]]`
@@ -124,8 +141,11 @@ pub struct MemForkResponse {
 /// does not resolve in this workspace; the message names `memstead
 /// schema install`), `MEM_PATH_NOT_ALLOWED`, `MEM_SCHEMA_NOT_ALLOWED`,
 /// `MEM_NAME_COLLISION`, `MEM_NAME_REF_CONFLICT`,
-/// `MEM_STORAGE_RESIDUE_DETECTED`, and for the remote form
-/// `SCHEMA_VIOLATION_IN_FETCH` over the fetched tree.
+/// `MEM_STORAGE_RESIDUE_DETECTED`, and for the remote and adopt forms
+/// `SCHEMA_VIOLATION_IN_FETCH` over the fetched tree. The adopt form
+/// also refuses `INVALID_INPUT` (no remote, or a `sha` beside it) and
+/// `UNKNOWN_REF` (the remote lacks the fork branch, or the branch
+/// shares no history with the local source).
 pub fn fork_mem(
     engine: &mut crate::Engine,
     params: MemForkParams,
@@ -168,6 +188,22 @@ pub fn fork_mem(
         ))
         .into());
     }
+    if params.adopt {
+        if params.remote.is_none() {
+            return Err(crate::EngineError::InvalidInput(
+                "adopt names a fork branch on a remote: pass the remote it lives on".to_string(),
+            )
+            .into());
+        }
+        if params.sha.is_some() {
+            return Err(crate::EngineError::InvalidInput(format!(
+                "an adopted fork starts at the remote branch's tip: `{}@<sha>` and adopt exclude \
+                 each other",
+                params.source
+            ))
+            .into());
+        }
+    }
 
     // ---- Step 0b: workspace shape ----
     // A fork is a branch at an ancestor: it needs the mem-repo gitdir
@@ -202,10 +238,24 @@ pub fn fork_mem(
         params.note.clone(),
     );
 
-    // ---- Step 1: the source's config bytes and the ref its tip is read from ----
-    let (config_bytes, tip_ref) = match params.remote.as_deref() {
-        None => resolve_local_source(engine, &gitdir, &params.source)?,
-        Some(remote) => resolve_remote_source(&ops, &gitdir, remote, &params.source)?,
+    // ---- Step 1: the source's config bytes and the ref the fork starts from ----
+    // Local and remote forms: the ref is the source's tip. Adopt: the
+    // config is the local source's, the ref is the fetched fork branch,
+    // and the local source's ref rides along for the ancestor.
+    let (config_bytes, tip_ref, adopted_source_ref) = match params.remote.as_deref() {
+        None => {
+            let (bytes, tip_ref) = resolve_local_source(engine, &gitdir, &params.source)?;
+            (bytes, tip_ref, None)
+        }
+        Some(remote) if params.adopt => {
+            let (bytes, source_ref) = resolve_local_source(engine, &gitdir, &params.source)?;
+            let tracking = fetch_adopted_fork(&ops, &gitdir, remote, &params.source, &params.name)?;
+            (bytes, tracking, Some(source_ref))
+        }
+        Some(remote) => {
+            let (bytes, tip_ref) = resolve_remote_source(&ops, &gitdir, remote, &params.source)?;
+            (bytes, tip_ref, None)
+        }
     };
     let source_value: serde_json::Value = serde_json::from_slice(&config_bytes).map_err(|e| {
         crate::EngineError::InvalidInput(format!(
@@ -251,6 +301,26 @@ pub fn fork_mem(
                 .into());
             }
             full
+        }
+    };
+    // The ancestor on the source: the commit the fork starts at in the
+    // local and remote forms; for an adopted branch, the nearest commit
+    // it shares with the local source branch.
+    let ancestor = match &adopted_source_ref {
+        None => sha.clone(),
+        Some(source_ref) => {
+            let source_tip = (ops.resolve_ref)(&gitdir, source_ref)
+                .map_err(crate::EngineError::Backend)?
+                .ok_or_else(|| crate::EngineError::UnknownRef(source_ref.clone()))?;
+            (ops.merge_base)(&gitdir, &sha, &source_tip)
+                .map_err(crate::EngineError::Backend)?
+                .ok_or_else(|| {
+                    crate::EngineError::UnknownRef(format!(
+                        "remote branch {} at {sha} shares no history with the local source {:?} \
+                         at {source_tip}: it is not a fork of this mem",
+                        tip_ref, params.source
+                    ))
+                })?
         }
     };
 
@@ -412,20 +482,45 @@ pub fn fork_mem(
     // The fork commit: sidecar ids and self-links move to the fork's
     // name in one commit on the fork's branch, right above the
     // ancestor. The branch rollback covers it (the prune drops the ref,
-    // and the commit with it).
-    let base = match retarget_fork_tree(backend.as_ref(), &params.source, &params.name, &sha, &ctx)
-    {
-        Ok(base) => base,
-        Err(e) => {
-            roll_back(&ops, &gitdir, &root, &params.name, &ctx, "fork commit");
-            return Err(e.into());
+    // and the commit with it). An adopted branch gets none: its tree is
+    // the proposer's and the fork writes nothing on it; its base is the
+    // fork commit the branch already carries, when it carries one.
+    let base = if params.adopt {
+        match adopted_fork_base(
+            &ops,
+            &gitdir,
+            &branch_ref,
+            &params.name,
+            &params.source,
+            &ancestor,
+        ) {
+            Ok(base) => base,
+            Err(e) => {
+                roll_back(
+                    &ops,
+                    &gitdir,
+                    &root,
+                    &params.name,
+                    &ctx,
+                    "fork commit lookup",
+                );
+                return Err(e.into());
+            }
+        }
+    } else {
+        match retarget_fork_tree(backend.as_ref(), &params.source, &params.name, &sha, &ctx) {
+            Ok(base) => Some(base),
+            Err(e) => {
+                roll_back(&ops, &gitdir, &root, &params.name, &ctx, "fork commit");
+                return Err(e.into());
+            }
         }
     };
     let forked_from = memstead_schema::ForkedFrom {
         mem: params.source.clone(),
-        sha: sha.clone(),
+        sha: ancestor.clone(),
         remote: params.remote.clone(),
-        base: Some(base),
+        base,
     };
     config.forked_from = Some(forked_from.clone());
     let config_bytes = match serde_json::to_vec_pretty(&config) {
@@ -734,7 +829,9 @@ fn resolve_remote_source(
     {
         return Err(crate::EngineError::InvalidInput(format!(
             "remote {remote:?} carries no __MEMSTEAD ref: it is not a mem-repo, so there is no \
-             config to fork"
+             config to fork from it; a fork branch of a mem this workspace mounts that already \
+             lives on the remote is adopted instead (`memstead mem fork <source> <name> --remote \
+             {remote} --adopt`), which derives the config from the local source"
         ))
         .into());
     }
@@ -758,6 +855,64 @@ fn resolve_remote_source(
             ))
         })?;
     Ok((bytes, tracking_source))
+}
+
+/// Adopt form: the fork branch of the fork's own name must be on the
+/// remote (typed `UNKNOWN_REMOTE`; a branch the remote lacks refuses
+/// before a fetch, naming the source a fresh fork would be made from),
+/// then one fetch of that branch into its remote-tracking ref. Neither
+/// the remote's nor the local `__MEMSTEAD` is touched. Returns the
+/// tracking ref of the fork branch.
+fn fetch_adopted_fork(
+    ops: &GitBranchOps,
+    gitdir: &Path,
+    remote: &str,
+    source: &str,
+    name: &str,
+) -> Result<String, FullEngineError> {
+    let heads = (ops.ls_remote)(gitdir, remote).map_err(lift_remote_marker)?;
+    let fork_ref = format!("refs/heads/{name}");
+    if !heads.iter().any(|(head, _)| head == &fork_ref) {
+        return Err(crate::EngineError::UnknownRef(format!(
+            "remote {remote:?} has no branch {fork_ref}: nothing to adopt as {name:?} (a fork \
+             that does not exist yet is made with `memstead mem fork {source} {name}`)"
+        ))
+        .into());
+    }
+    let tracking = format!("refs/remotes/{remote}/{name}");
+    (ops.fetch)(gitdir, remote, &[format!("+{fork_ref}:{tracking}")])
+        .map_err(lift_remote_marker)?;
+    Ok(tracking)
+}
+
+/// The base of an adopted fork: the engine's fork commit on the branch
+/// above `ancestor`, when the branch carries one (made by `mem fork`
+/// elsewhere under the same name and source: subject `memstead: fork
+/// mem <name> from <source>@…`, the oldest such commit when several),
+/// `None` otherwise.
+fn adopted_fork_base(
+    ops: &GitBranchOps,
+    gitdir: &Path,
+    branch_ref: &str,
+    name: &str,
+    source: &str,
+    ancestor: &str,
+) -> Result<Option<String>, crate::EngineError> {
+    let changes = (ops.changes_since)(
+        gitdir,
+        branch_ref,
+        name,
+        ancestor,
+        crate::ops::RENAME_SIMILARITY_DEFAULT,
+    )
+    .map_err(crate::EngineError::Backend)?;
+    let prefix = format!("memstead: fork mem {name} from {source}@");
+    Ok(changes
+        .notes
+        .iter()
+        .filter(|n| n.tool_verb.as_deref() == Some("fork") && n.subject.starts_with(&prefix))
+        .map(|n| n.sha.clone())
+        .next_back())
 }
 
 /// The transport's in-band remote marker, lifted to the typed code the

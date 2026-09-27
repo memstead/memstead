@@ -55,8 +55,13 @@ pub enum MemAction {
     /// and config are fetched from that mem-repo remote instead; the
     /// fetched tree is validated as `pull` validates, no grant is
     /// inherited, and a schema pin this workspace cannot resolve refuses
-    /// naming `memstead schema install`. The name obeys the create rules
-    /// like `mem init`; every refusal lands nothing.
+    /// naming `memstead schema install`. With `--remote <NAME> --adopt`
+    /// the fork branch already exists on the remote (a fork of a mounted
+    /// mem made elsewhere and pushed): it is fetched and mounted as a
+    /// fork of the local source at their nearest common commit, with no
+    /// commit of its own and no `__MEMSTEAD` ref needed on the remote.
+    /// The name obeys the create rules like `mem init`; every refusal
+    /// lands nothing.
     Fork(ForkArgs),
     /// Router-only removal — unregisters the mem from the workspace
     /// but leaves its stored content in place for archive workflows.
@@ -180,6 +185,27 @@ pub struct ForkArgs {
     /// remote: `UNKNOWN_REMOTE`; a branch the remote lacks: `UNKNOWN_REF`.
     #[arg(long)]
     pub remote: Option<String>,
+
+    /// The fork branch already exists on the remote: adopt it. With
+    /// `--remote <NAME> --adopt`, `<SOURCE>` is a mounted mem of this
+    /// workspace and the remote carries a branch named `<NAME>` (a fork
+    /// of it made elsewhere: by the engine on another machine and
+    /// pushed, or by a server that accepts proposal branches). The
+    /// branch is fetched, its ancestor is the nearest commit it shares
+    /// with the local source branch (`UNKNOWN_REF` when there is none:
+    /// not a fork of this mem), the fetched tree is validated against
+    /// the local source's schema pin as `pull` validates, and the new
+    /// mem's branch is created at the fetched tip with no commit of its
+    /// own: its config is derived from the local source (`forkedFrom`
+    /// names the source, the ancestor, the remote and, when the branch
+    /// carries the engine's fork commit, that commit as `base`; a
+    /// branch made without one reads as based on its ancestor). The
+    /// remote needs no `__MEMSTEAD` ref in this form. A remote branch
+    /// `<NAME>` that does not exist refuses `UNKNOWN_REF`;
+    /// `<SOURCE>@<sha>` is refused beside it (the fork starts at the
+    /// remote tip).
+    #[arg(long, requires = "remote")]
+    pub adopt: bool,
 
     /// Optional provenance note (≤280 chars) recorded on the fork's
     /// config commit. Under `require_notes` a missing note warns
@@ -963,6 +989,7 @@ pub fn run_fork(ctx: &CliContext, args: ForkArgs) -> anyhow::Result<()> {
         sha,
         name: args.name.clone(),
         remote: args.remote.clone(),
+        adopt: args.adopt,
         note: args.note.clone(),
         operator_mode: resolve_operator_mode(args.operator_mode),
         actor: memstead_base::vcs::Actor::Cli,

@@ -299,6 +299,41 @@ pub fn is_ancestor_in_gitdir(
     }
 }
 
+/// The nearest common ancestor of `a` and `b` (`git merge-base`):
+/// `None` when the two share no history (exit status 1), an error for
+/// anything else. Read-only.
+pub fn merge_base_in_gitdir(
+    gitdir: &Path,
+    a: &str,
+    b: &str,
+) -> Result<Option<String>, BackendError> {
+    if !gitdir.is_dir() {
+        return Err(BackendError::Other(format!(
+            "gitdir not found: {}",
+            gitdir.display()
+        )));
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(gitdir)
+        .args(["merge-base", a, b])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| BackendError::Other(format!("git merge-base failed to start: {e}")))?;
+    match output.status.code() {
+        Some(0) => {
+            let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Ok((!sha.is_empty()).then_some(sha))
+        }
+        Some(1) => Ok(None),
+        _ => Err(BackendError::Other(format!(
+            "git merge-base {a} {b} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod remote_status_verbs {
     /// The two helpers `Engine::remote_status` reaches run read-only git
@@ -310,6 +345,7 @@ mod remote_status_verbs {
         for name in [
             "pub fn ls_remote_in_gitdir(",
             "pub fn is_ancestor_in_gitdir(",
+            "pub fn merge_base_in_gitdir(",
         ] {
             let start = src
                 .find(name)

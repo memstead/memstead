@@ -145,7 +145,9 @@ What lands, per disposition:
   omits keeps the landed value), its `relations`, when given, replace
   the landed ones; a `title` that differs refuses, since a title change
   is a rename;
-- `reject`: nothing.
+- `reject`: nothing. A file that rejects every entry still lands one
+  commit under your identity carrying the record alone, so the refusal
+  is on the target branch and a later brief marks a re-proposal of it.
 
 The merge commit sits on the target branch, parent-pinned to the tip
 the file recorded, and carries the proposer's identity as the mutation's

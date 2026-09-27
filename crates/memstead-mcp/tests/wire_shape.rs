@@ -4059,6 +4059,7 @@ fn full_memstead_proposal_brief_serves_markdown_and_the_json_skeleton() {
                 sha: None,
                 name: "alpha-fork".to_string(),
                 remote: None,
+                adopt: false,
                 note: None,
                 operator_mode: true,
                 actor: memstead_base::vcs::Actor::Cli,

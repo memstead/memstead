@@ -7,8 +7,62 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **`memstead mem fork <source> <name> --remote <r> --adopt` mounts a
+  fork branch that arrived on a remote.** The remote form of `mem fork`
+  means the source lives on the remote: it fetches the remote's source
+  branch and its config and makes an empty fork at that tip, so it could
+  not take in a proposal branch a contributor had pushed, and a plain
+  git remote without a `__MEMSTEAD` ref was refused outright. The adopt
+  form is the owner's side of a hosted proposal path: `<source>` is a
+  mounted mem, the remote carries a branch named `<name>` forked from
+  it elsewhere (by the engine on another machine and pushed, or by a
+  server that accepts proposal branches), and the engine fetches that
+  branch, takes the nearest commit it shares with the local source
+  branch as the ancestor (`UNKNOWN_REF` when there is none: not a fork
+  of this mem), validates the fetched tree against the local source's
+  schema pin as `pull` does, and creates the mem's branch at the fetched
+  tip with no commit of its own, the config derived from the local
+  source: `forkedFrom` names the source, the ancestor, the remote and,
+  when the branch carries the engine's fork commit, that commit as
+  `base` (a branch made without one reads as based on its ancestor).
+  The remote needs no `__MEMSTEAD` ref in this form and no grant is
+  inherited. `<source>@<sha>` is refused beside `--adopt`, and the
+  source-on-remote form's refusal for a remote without a `__MEMSTEAD`
+  ref now names the adopt form. The git-branch hook bundle gains a
+  read-only `merge_base`. For a server that writes proposal commits
+  itself: the merge attributes an entity to the newest fork commit that
+  names it, either by the engine's subject (`memstead: create
+  <fork>--<slug>`, or `update`) or by an `Entities: <fork>--<slug>, …`
+  trailer, and reads the proposer off that commit's `Identity: <value>`
+  trailer (`Role: author|checker|verifier` beside it, optional); the
+  git author is not read, and an adopted entity whose commit carries
+  none refuses `PROPOSAL_UNATTRIBUTED`.
+
 ### Fixed
 
+- **A proposal merge that rejects every entry still lands its record.**
+  `memstead proposal merge` wrote the proposal record inside the commit
+  loop that lands one commit per adopted proposer, so a disposition file
+  with every entry on `reject` landed no commit and no record entry: the
+  target branch kept no trace of the refusal, `proposal list` did not
+  list the proposal, the brief could not mark a re-proposal of the
+  rejected content, and a reader of the branch (a server showing pending
+  forks) could not learn the fork was disposed. A merge is a decision
+  record before it is a content change: with nothing adopted it now lands
+  one commit on the target branch under the merger's identity carrying
+  the record alone, parent-pinned to the recorded target tip like every
+  merge commit, with `Merged-By:` and `Proposal:` beside it and no
+  entity ids; the outcome lists it under `merge_commits` with the
+  merger as `identity` and an empty `entities` list, and the markdown
+  names it a record commit. The record entry's `proposer` now names the
+  identity read off the fork commits for every entry the merge could
+  attribute, rejected entries included, so a wholly refused proposal
+  still says who proposed it; only an adopted entry's missing identity
+  refuses `PROPOSAL_UNATTRIBUTED`, a rejected one's is recorded as
+  absent. The outcome's per-entity `proposer` follows the same rule.
+  Nothing is written to the fork, as before.
 - **A check record that licenses a status transition survives the write,
   and a self-contained export keeps fresh sealed records fresh.** Two
   hash-keyed check records went stale by the engine's own hand. First, a

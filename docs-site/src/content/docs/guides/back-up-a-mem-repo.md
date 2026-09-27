@@ -125,6 +125,7 @@ it, and the diff between the two later has a common ancestor to stand on.
 memstead mem fork knowledge knowledge-proposal            # at the source's tip
 memstead mem fork knowledge@<sha> knowledge-proposal      # at a commit the source reaches
 memstead mem fork knowledge knowledge-proposal --remote origin   # source fetched from the remote
+memstead mem fork knowledge knowledge-proposal --remote origin --adopt   # the fork branch already on the remote, mounted as a fork of the local source
 ```
 
 The fork's branch starts at the source's commit and makes one commit of
