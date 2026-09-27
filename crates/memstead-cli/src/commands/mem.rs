@@ -59,7 +59,7 @@ pub enum MemAction {
     /// the fork branch already exists on the remote (a fork of a mounted
     /// mem made elsewhere and pushed): it is fetched and mounted as a
     /// fork of the local source at their nearest common commit, with no
-    /// commit of its own and no `__MEMSTEAD` ref needed on the remote.
+    /// commit of its own and no engine registry ref needed on the remote.
     /// The name obeys the create rules like `mem init`; every refusal
     /// lands nothing.
     Fork(ForkArgs),
@@ -200,7 +200,7 @@ pub struct ForkArgs {
     /// names the source, the ancestor, the remote and, when the branch
     /// carries the engine's fork commit, that commit as `base`; a
     /// branch made without one reads as based on its ancestor). The
-    /// remote needs no `__MEMSTEAD` ref in this form. A remote branch
+    /// remote needs no engine registry ref in this form. A remote branch
     /// `<NAME>` that does not exist refuses `UNKNOWN_REF`;
     /// `<SOURCE>@<sha>` is refused beside it (the fork starts at the
     /// remote tip).

@@ -83,6 +83,12 @@ pub fn registry_host(base: &str) -> String {
 /// unreachable from here" class every other transport failure on this
 /// path reports.
 pub fn build_http() -> Result<reqwest::blocking::Client> {
+    // The TLS crypto provider: ring, installed once per process. reqwest
+    // is built with `rustls-no-provider` (the alternative, aws-lc, is a C
+    // build behind cmake the musl release targets cannot rely on), so
+    // the process has to name its provider before the first client is
+    // built; a second install is a no-op.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
         .user_agent(concat!("memstead/", env!("CARGO_PKG_VERSION")))
