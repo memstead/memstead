@@ -52,16 +52,25 @@ pub struct ReleaseArgs {
     /// limit (`MAX_RELEASE_BODY_BYTES`). cargo-dist lifts the section
     /// verbatim into the GitHub Release body and hands it to the
     /// Homebrew publish job through the environment; 0.6.0's 81 KB body
-    /// killed that job with `Argument list too long`.
+    /// and 0.21.0's 58 KB body each killed that job with `Argument list
+    /// too long`, leaving the tap on the previous version.
     #[arg(long)]
     allow_large_body: bool,
 }
 
 /// The largest `[Unreleased]` section a release may cut without
-/// `--allow-large-body`. The 0.6.0 body (81 KB) broke the Homebrew job;
-/// the 0.10.0 body (34 KB) passed. 64 KB sits between them with room
-/// for the environment the publish job also carries.
-pub const MAX_RELEASE_BODY_BYTES: usize = 64 * 1024;
+/// `--allow-large-body`.
+///
+/// Measured, one point per release that told us something: 81 KB broke
+/// the Homebrew publish job (0.6.0), 34 KB passed (0.10.0), 31 KB passed
+/// (0.19.0) — and 58 KB broke it again (0.21.0, `Argument list too long`
+/// starting the job's node process), which is why this constant is no
+/// longer 64 KB. The guard now sits below every body that has ever
+/// passed rather than between the two nearest points: the cost of
+/// refusing is one shortened section or one explicit flag, and the cost
+/// of allowing is a channel that serves the previous version while the
+/// release reports green.
+pub const MAX_RELEASE_BODY_BYTES: usize = 32 * 1024;
 
 pub fn run(args: ReleaseArgs) -> Result<()> {
     let root = workspace_root();
@@ -615,9 +624,18 @@ memstead-base = { path = "crates/memstead-base", version = "0.2.0" }
             .expect("one byte over the limit refuses");
         assert!(refused.contains(&format!("{} bytes", MAX_RELEASE_BODY_BYTES + 1)));
         assert!(refused.contains("--allow-large-body"));
-        // 0.6.0's body (81 KB) refuses; 0.10.0's (34 KB) passes.
+        // Every body measured to break the Homebrew publish job refuses:
+        // 0.6.0's 81 KB and 0.21.0's 58 KB.
         assert!(release_body_refusal(81 * 1024, false).is_some());
-        assert!(release_body_refusal(34 * 1024, false).is_none());
+        assert!(release_body_refusal(58 * 1024, false).is_some());
+        // The guard sits below the largest body measured to pass (34 KB,
+        // 0.10.0), so that one refuses too — deliberately, since the
+        // true threshold is only bounded, not known, and a refusal costs
+        // one flag while an overrun costs a silent channel.
+        assert!(release_body_refusal(34 * 1024, false).is_some());
+        // The ordinary sizes pass untouched: 0.19.0's 31 KB, 0.20.0's 4 KB.
+        assert!(release_body_refusal(31 * 1024, false).is_none());
+        assert!(release_body_refusal(4 * 1024, false).is_none());
         // The override admits any size and names nothing.
         assert!(release_body_refusal(10 * MAX_RELEASE_BODY_BYTES, true).is_none());
     }

@@ -7,6 +7,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **The release-body guard sits below every size measured to work.**
+  `xtask release` refused an `[Unreleased]` section above 64 KB, because
+  81 KB had once killed the Homebrew publish job (`Argument list too
+  long`, the body travels to that job through the environment) while
+  34 KB had passed. 0.21.0's 58 KB body was under the guard and killed
+  the job anyway, so the tap served 0.20.0 while the release reported
+  green until the formulas were pushed by hand. The threshold is now
+  32 KB, below the largest body known to pass rather than between the
+  two nearest points: refusing costs one shortened section or one
+  explicit `--allow-large-body`, and allowing costs a channel that
+  serves the previous version.
+
 ## [0.21.0] - 2026-09-27
 
 ### Changed
