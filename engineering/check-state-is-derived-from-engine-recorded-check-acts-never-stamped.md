@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-08T23:47:36Z
-last_modified: 2026-09-08T21:08:40Z
+last_modified: 2026-09-27T20:10:54Z
 status: accepted
 decided_on: 2026-08-09
 deciders: operator (agent-trust plan 14, bundle README decision 4)
@@ -31,3 +31,6 @@ Check state as schema fields with engine blessing — rejected: the bundle's cor
 ## Notes
 
 Amended 2026-08-27 by [[record-semantic-conformance-as-a-kinded-schema-bound-check]]: checks now carry a closed kind vocabulary (`verification`, the default, and `conformance`), and supersession is per (entity, kind) rather than per entity — a newer check supersedes older ones OF THE SAME KIND for state derivation. A `conformance` record additionally carries the mem's engine-stamped schema pin and derives stale on a pin move as well as a hash move. Everything else in this decision (non-mutation, derived state, closed verdicts, never-best-effort recording) is unchanged and now holds per kind.
+
+
+2026-09-27 amendment: the ledger gains a transport, not a new home. A project that uses the engine found that a server which pulls a released branch and exports it seals no check records, because the ledger is a workspace file and a check is never a commit. The mem-repo now carries one more engine-owned ref beside the registry ref, `__MEMSTEAD_CHECKS`, a tree with `mems/<mem>/checks.jsonl` per mem holding the mem's ledger rows in a transport form (one JSON line per record, ordered by timestamp then bytes). `push <mem>` publishes the mem's rows on top of the remote's tip and pushes the ref beside the branch, `fetch` and `pull` fetch it and union the mem's rows into the local ledger, `push --all` carries it like the registry ref. A row is a fact whose identity is its bytes: machines merge by set union, nothing is rewritten, a round trip adds nothing, and a race between publishers is a non-fast-forward retried once after importing what landed. The local ref is a vehicle pointed at the remote's tip before every publish, so `status --remote` never classifies it. The check verb stays a non-git act and this decision's non-mutation property holds unchanged. Trust rule: rows arrive only through fetch, pull and push of a mem this workspace mounts, and only that mem's rows; a fork's ref is never imported (both fork forms fetch the branch they name and nothing else), so a contributor cannot ship checker-role rows that close the owner's gates; imported rows keep identity and role and read as local rows do. Rejected: the ledger on the mem branch (every check becomes a mutation: the tip moves, proposal pins go stale, cursors and review marks shift); git notes (keyed by commit, records key by entity and hash); shipping sealed archives instead of branches (works, but not the branch path asked for). Deciders: operator (in-session, 2026-09-27), memstead-e9.

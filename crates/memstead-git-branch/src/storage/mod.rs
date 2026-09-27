@@ -50,6 +50,7 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     resolve_ref: resolve_ref_dispatch,
     is_ancestor: is_ancestor_dispatch,
     merge_base: merge_base_dispatch,
+    update_ref: update_ref_dispatch,
     remote_add: remote_add_dispatch,
     read_tree: read_tree_dispatch,
     export: export_dispatch,
@@ -393,6 +394,29 @@ fn merge_base_dispatch(
     b: &str,
 ) -> Result<Option<String>, memstead_base::backend::BackendError> {
     crate::ops::transport::merge_base_in_gitdir(gitdir, a, b)
+}
+
+/// Point an engine-owned ref at a commit, created or moved: the
+/// check-ledger transport ref is re-derived before every publish, so
+/// its history is a vehicle, never state to protect.
+fn update_ref_dispatch(
+    gitdir: &std::path::Path,
+    ref_name: &str,
+    sha: &str,
+) -> Result<(), memstead_base::backend::BackendError> {
+    use memstead_base::backend::BackendError;
+    let oid = gix::ObjectId::from_hex(sha.as_bytes())
+        .map_err(|e| BackendError::Other(format!("{sha:?} is not a full object id: {e}")))?;
+    crate::mem_repo_config::commit_refs_at_gitdir(
+        gitdir,
+        &[crate::mem_repo_config::RefSpec {
+            ref_name: ref_name.to_string(),
+            new_oid: oid,
+            expected: gix::refs::transaction::PreviousValue::Any,
+            log_message: format!("memstead: point {ref_name} at {sha}"),
+        }],
+    )
+    .map_err(|e| BackendError::Other(format!("update {ref_name} to {sha}: {e}")))
 }
 
 fn remote_add_dispatch(

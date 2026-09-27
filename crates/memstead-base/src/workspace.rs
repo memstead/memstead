@@ -115,6 +115,20 @@ impl Mount {
 /// name.
 pub const MEMSTEAD_REF_BRANCH: &str = "__MEMSTEAD";
 
+/// Branch name of the mem-repo's check-ledger transport ref: one tree
+/// with `mems/<mem>/checks.jsonl` per mem, the mem's rows of the
+/// workspace check ledger as last published. Not a mem and not the
+/// ledger's home: the ledger stays the workspace file, and this ref
+/// is how its rows travel between machines with `push`, `fetch` and
+/// `pull` (the engine unions rows, never rewrites them). Never
+/// mounted; `status --remote` does not classify it.
+pub const MEMSTEAD_CHECKS_REF_BRANCH: &str = "__MEMSTEAD_CHECKS";
+
+/// The path of one mem's ledger rows on the checks transport ref.
+pub fn checks_ref_member_path(mem: &str) -> String {
+    format!("mems/{mem}/checks.jsonl")
+}
+
 /// A mount's declared branch as a fully-qualified local ref. The
 /// `branch` field tolerates both `refs/heads/<path>` (used verbatim,
 /// any `refs/` value is) and bare `<path>` (prefixed) — the same

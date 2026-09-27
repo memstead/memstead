@@ -92,6 +92,7 @@ pub fn fetch_in_gitdir(
         remote: remote.to_string(),
         refspecs: refspecs.to_vec(),
         updated_refs,
+        checks_imported: 0,
     })
 }
 
@@ -156,6 +157,7 @@ pub fn pull_in_gitdir(
         previous_sha,
         new_sha: remote_sha,
         updated_refs: fetched.updated_refs,
+        checks_imported: 0,
     })
 }
 
@@ -219,6 +221,7 @@ pub fn push_in_gitdir(
         branch_ref,
         new_sha: local_sha,
         forced: force,
+        checks_published: None,
     })
 }
 

@@ -96,8 +96,22 @@ fetch-inspect-pull:
 memstead fetch knowledge     # see what moved (updated refs print per ref)
 memstead pull knowledge      # fast-forward + reload, refuses on divergence
 memstead push knowledge      # send your own commits
-memstead push --all          # every mem branch plus __MEMSTEAD, fast-forward only
+memstead push --all          # every mem branch plus __MEMSTEAD and __MEMSTEAD_CHECKS, fast-forward only
 ```
+
+A mem's check records travel with it. The check ledger lives in the
+workspace, not on the mem's branch (a check is never a commit, which is
+what keeps staleness derivable by hash), so the mem-repo carries one
+more engine-owned ref, `__MEMSTEAD_CHECKS`, with the mem's ledger rows
+as last published. `push` publishes the mem's rows there and pushes the
+ref beside the branch; `fetch` and `pull` fetch it and add the mem's
+rows to the local ledger. A row is a fact whose identity is its bytes:
+two machines checking the same mem merge by union, nothing is rewritten,
+a round trip adds nothing, and an export made on the other machine
+seals the checks recorded here. Only the rows of a mem this workspace
+mounts are ever imported, and only through its own `fetch`, `pull` and
+`push`; a fork's ref is never read, so a contributor cannot ship check
+rows that close your gates.
 
 `push --all` is the whole-workspace form: it lists the remote once, skips
 every ref already in sync (a run with nothing to send prints nothing),

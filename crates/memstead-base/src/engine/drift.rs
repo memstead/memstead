@@ -568,14 +568,22 @@ impl Engine {
                 )))
             }
             MountStorage::GitBranch { gitdir, .. } => match self.git_branch_ops.as_ref() {
-                Some(hook) => (hook.fetch)(gitdir, remote, refspecs).map_err(|e| match e {
-                    BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
-                        EngineError::UnknownRemote(
-                            msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
-                        )
-                    }
-                    other => EngineError::Backend(other),
-                }),
+                Some(hook) => {
+                    let mut outcome =
+                        (hook.fetch)(gitdir, remote, refspecs).map_err(|e| match e {
+                            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
+                                EngineError::UnknownRemote(
+                                    msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
+                                )
+                            }
+                            other => EngineError::Backend(other),
+                        })?;
+                    // The mem's check-ledger rows travel with it: the
+                    // remote's transport ref, unioned into the local
+                    // ledger (engine::checks_transport).
+                    outcome.checks_imported = self.import_checks(hook, gitdir, remote, &[mem])?;
+                    Ok(outcome)
+                }
                 None => Err(EngineError::Backend(BackendError::Other(
                     "git-branch fetch hook not installed (git-branch ops not wired)".to_string(),
                 ))),
@@ -647,7 +655,7 @@ impl Engine {
         // Run the underlying pull (re-runs the fetch via git CLI, but
         // that's a no-op cache-wise and keeps the fast-forward logic
         // co-located with the rest of the transport implementation).
-        let outcome = (hook.pull)(&gitdir, remote, &branch, mem).map_err(|e| match e {
+        let mut outcome = (hook.pull)(&gitdir, remote, &branch, mem).map_err(|e| match e {
             BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
                 EngineError::UnknownRemote(
                     msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
@@ -662,6 +670,8 @@ impl Engine {
             }
             other => EngineError::Backend(other),
         })?;
+        // The mem's check-ledger rows travel with it (engine::checks_transport).
+        outcome.checks_imported = self.import_checks(&hook, &gitdir, remote, &[mem])?;
 
         // Rewind cached head + emit change event.
         if outcome.previous_sha != outcome.new_sha {
@@ -743,24 +753,41 @@ impl Engine {
             }
         }
 
-        (hook.push)(&gitdir, remote, &branch, mem, force).map_err(|e| match e {
-            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
-                EngineError::UnknownRemote(
-                    msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
-                )
-            }
-            BackendError::Other(msg) if msg.starts_with("NON_FAST_FORWARD:") => {
-                let payload = msg.trim_start_matches("NON_FAST_FORWARD:");
-                let mut parts = payload.splitn(2, ':');
-                let v = parts.next().unwrap_or(mem).to_string();
-                let r = parts.next().unwrap_or(remote).to_string();
-                EngineError::NonFastForward { mem: v, remote: r }
-            }
-            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
-                EngineError::UnknownRef(msg.trim_start_matches("UNKNOWN_REF:").trim().to_string())
-            }
-            other => EngineError::Backend(other),
-        })
+        let mut outcome =
+            (hook.push)(&gitdir, remote, &branch, mem, force).map_err(|e| match e {
+                BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
+                    EngineError::UnknownRemote(
+                        msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
+                    )
+                }
+                BackendError::Other(msg) if msg.starts_with("NON_FAST_FORWARD:") => {
+                    let payload = msg.trim_start_matches("NON_FAST_FORWARD:");
+                    let mut parts = payload.splitn(2, ':');
+                    let v = parts.next().unwrap_or(mem).to_string();
+                    let r = parts.next().unwrap_or(remote).to_string();
+                    EngineError::NonFastForward { mem: v, remote: r }
+                }
+                BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
+                    EngineError::UnknownRef(
+                        msg.trim_start_matches("UNKNOWN_REF:").trim().to_string(),
+                    )
+                }
+                other => EngineError::Backend(other),
+            })?;
+        // The mem's check-ledger rows follow its branch: published on
+        // the transport ref and pushed beside it (engine::checks_transport).
+        // The branch is on the remote by now, so a failure here names
+        // that, and a rerun publishes the rows alone.
+        outcome.checks_published = self
+            .publish_checks(&hook, &gitdir, remote, &[mem])
+            .map_err(|e| {
+                EngineError::Mem(format!(
+                    "the branch of mem '{mem}' was pushed; its check-ledger rows were not \
+                     ({}); run the push again to publish them",
+                    e.prose_render()
+                ))
+            })?;
+        Ok(outcome)
     }
 
     /// `memstead status --remote`: every mounted git-branch mem and the
@@ -808,6 +835,7 @@ impl Engine {
         };
 
         let memstead_ref = crate::workspace::branch_full_ref(crate::MEMSTEAD_REF_BRANCH);
+        let checks_ref = crate::workspace::branch_full_ref(crate::MEMSTEAD_CHECKS_REF_BRANCH);
         for gitdir in &gitdirs {
             let remote_refs: std::collections::BTreeMap<String, String> =
                 match (hook.ls_remote)(gitdir, remote) {
@@ -862,6 +890,12 @@ impl Engine {
             };
 
             for (ref_name, remote_sha) in &remote_refs {
+                // The check-ledger transport ref is derived from the
+                // workspace ledger before every publish and unioned on
+                // every fetch: it has no ahead or behind to report.
+                if *ref_name == checks_ref {
+                    continue;
+                }
                 let schemas_ref = *ref_name == memstead_ref;
                 let mem = mounted.get(ref_name).cloned();
                 let tracked = schemas_ref || mem.is_some();
@@ -1069,6 +1103,41 @@ impl Engine {
                         })
                     }
                 }
+            }
+            // The check-ledger rows of every mem mounted from this
+            // gitdir ride the transport ref, published once per gitdir
+            // after the branches (engine::checks_transport).
+            let mems: Vec<String> = self
+                .mounts
+                .iter()
+                .filter_map(|m| match &m.mount.storage {
+                    MountStorage::GitBranch { gitdir: g, .. } if g == gitdir => {
+                        Some(m.mount.mem.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            let mem_refs: Vec<&str> = mems.iter().map(String::as_str).collect();
+            let checks_ref = crate::workspace::branch_full_ref(crate::MEMSTEAD_CHECKS_REF_BRANCH);
+            let previous_sha = remote_refs.get(&checks_ref).cloned().unwrap_or_default();
+            match self.publish_checks(&hook, gitdir, remote, &mem_refs) {
+                Ok(Some(new_sha)) => outcome.pushed.push(PushedRef {
+                    ref_name: checks_ref,
+                    mem: None,
+                    previous_sha,
+                    new_sha,
+                }),
+                Ok(None) => {
+                    if !previous_sha.is_empty() {
+                        outcome.in_sync.push(checks_ref);
+                    }
+                }
+                Err(e) => outcome.refused.push(RefusedRef {
+                    ref_name: checks_ref,
+                    mem: None,
+                    code: e.code().to_string(),
+                    message: e.prose_render(),
+                }),
             }
         }
 

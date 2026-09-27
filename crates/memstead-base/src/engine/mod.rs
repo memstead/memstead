@@ -33,6 +33,7 @@ pub mod apply_commit;
 pub mod archive;
 pub mod boot;
 pub mod check_ops;
+pub mod checks_transport;
 pub mod conflicts;
 pub mod drift;
 pub mod due;
@@ -682,6 +683,14 @@ pub type GitBranchIsAncestorFn =
 pub type GitBranchMergeBaseFn =
     fn(gitdir: &Path, a: &str, b: &str) -> Result<Option<String>, BackendError>;
 
+/// Point `ref_name` at `sha`, creating the ref when absent and
+/// moving it unconditionally when present. Engine-internal, for refs
+/// the engine derives and owns outright (the check-ledger transport
+/// ref, whose content is re-derived from the workspace ledger before
+/// every publish); never a mem's branch.
+pub type GitBranchUpdateRefFn =
+    fn(gitdir: &Path, ref_name: &str, sha: &str) -> Result<(), BackendError>;
+
 /// `Engine::remote_add` dispatch — configures a named remote on the
 /// mem-repo gitdir (upsert: add, or set-url when it already exists).
 pub type GitBranchRemoteAddFn =
@@ -825,6 +834,7 @@ pub struct GitBranchOps {
     pub resolve_ref: GitBranchResolveRefFn,
     pub is_ancestor: GitBranchIsAncestorFn,
     pub merge_base: GitBranchMergeBaseFn,
+    pub update_ref: GitBranchUpdateRefFn,
     pub remote_add: GitBranchRemoteAddFn,
     pub read_tree: GitBranchReadTreeFn,
     pub export: GitBranchExportFn,

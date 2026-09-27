@@ -32,6 +32,33 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **A mem's check records travel with its branch.** The check ledger
+  lives in the workspace (`.memstead/state/checks/checks.jsonl`) and a
+  check writes no commit, so a clone that pulled a mem's branch had no
+  check records: an export made there sealed none. The mem-repo now
+  carries one more engine-owned ref beside `__MEMSTEAD`,
+  `__MEMSTEAD_CHECKS`, a tree with `mems/<mem>/checks.jsonl` per mem
+  holding the mem's ledger rows as last published. `memstead push
+  <mem>` publishes the mem's rows there (on top of what the remote
+  holds, unioned with it) and pushes the ref beside the branch;
+  `memstead fetch` and `pull <mem>` fetch the ref and add the mem's
+  rows to the local ledger; `push --all` carries the ref like the
+  schema ref. A row is a fact whose identity is its bytes: two
+  machines checking the same mem merge by set union, a row already
+  present is skipped, nothing is rewritten, and a race between two
+  publishers is a non-fast-forward the publish retries once after
+  importing what landed. The ledger stays the workspace file and
+  `memstead check` stays a non-git act. The outcomes carry the
+  transfer: `checks_imported` on fetch and pull, `checks_published`
+  (the ref's commit, or null) on push, and the ref's line in `push
+  --all`. `status --remote` never classifies the ref. The trust rule:
+  rows arrive only through `fetch`, `pull` and `push` of a mem this
+  workspace mounts, and only that mem's rows; a fork's ref is never
+  imported, so a contributor cannot push checker-role rows that close
+  the owner's gates; imported rows keep their identity and role and
+  read exactly as local rows do. The git-branch hook bundle gains an
+  engine-internal `update_ref`. A project that uses the engine, whose
+  server pulls a released branch and exports it, asked for it.
 - **Statically linked Linux release binaries.** Every release now also
   ships `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`
   archives of both binaries, with the same per-file checksums,

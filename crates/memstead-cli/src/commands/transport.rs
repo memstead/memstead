@@ -11,6 +11,11 @@ use crate::setup::{CliContext, CliEngine};
 /// `memstead fetch <mem> [--remote <name>] [<refspec>...]` arguments.
 #[derive(Args, Debug)]
 pub struct FetchArgs {
+    /// The mem whose remote to fetch. The mem's check records travel
+    /// with it: the remote's check-ledger ref is fetched too and the
+    /// mem's rows are added to this workspace's ledger (rows already
+    /// present are skipped; nothing is rewritten). Only a mounted mem's
+    /// own rows are ever imported.
     pub mem: String,
     #[arg(long, default_value = "origin")]
     pub remote: String,
@@ -23,6 +28,10 @@ pub struct FetchArgs {
 /// `memstead pull <mem> [--remote <name>]` arguments.
 #[derive(Args, Debug)]
 pub struct PullArgs {
+    /// The mem whose branch to fast-forward. Its check records come
+    /// with it: the remote's check-ledger ref is fetched and the mem's
+    /// rows are added to this workspace's ledger, so an export made
+    /// here seals the checks recorded elsewhere.
     pub mem: String,
     #[arg(long, default_value = "origin")]
     pub remote: String,
@@ -32,7 +41,11 @@ pub struct PullArgs {
 /// `memstead push --all [--remote <name>]` arguments.
 #[derive(Args, Debug)]
 pub struct PushArgs {
-    /// Mem whose branch to push. Omitted with `--all`.
+    /// Mem whose branch to push. Omitted with `--all`. The mem's check
+    /// records go with the branch: its rows of this workspace's ledger
+    /// are published on the mem-repo's check-ledger ref, unioned with
+    /// what the remote already holds, and the ref is pushed beside the
+    /// branch.
     #[arg(required_unless_present = "all", conflicts_with = "all")]
     pub mem: Option<String>,
     #[arg(long, default_value = "origin")]
@@ -44,7 +57,7 @@ pub struct PushArgs {
     #[arg(long, default_value_t = false, conflicts_with = "all")]
     pub force: bool,
     /// Push every mounted git-branch mem's branch plus the workspace's
-    /// schema-and-config ref, fast-forward only. Refs already at the
+    /// schema-and-config ref and its check-ledger ref, fast-forward only. Refs already at the
     /// remote's SHA are skipped silently; one line per ref moved; a
     /// ref that cannot fast-forward is refused by name
     /// (`NON_FAST_FORWARD`) while the other refs still go, and the
@@ -82,7 +95,7 @@ pub fn run_fetch(ctx: &CliContext, args: FetchArgs) -> anyhow::Result<()> {
                 .join("\n")
         };
         crate::output::print_markdown(&format!(
-            "# Fetched from `{}`\n\n- Refspecs: {}\n- Updated refs:\n{}",
+            "# Fetched from `{}`\n\n- Refspecs: {}\n- Updated refs:\n{}\n- Check records imported: {}",
             outcome.remote,
             if outcome.refspecs.is_empty() {
                 "<defaults>".to_string()
@@ -90,6 +103,7 @@ pub fn run_fetch(ctx: &CliContext, args: FetchArgs) -> anyhow::Result<()> {
                 outcome.refspecs.join(", ")
             },
             updated,
+            outcome.checks_imported,
         ));
     }
     Ok(())
@@ -111,8 +125,12 @@ pub fn run_pull(ctx: &CliContext, args: PullArgs) -> anyhow::Result<()> {
             outcome.previous_sha.clone()
         };
         crate::output::print_markdown(&format!(
-            "# Pulled `{}`\n\n- Branch ref: `{}`\n- Source ref: `{}`\n- Previous: `{prev}`\n- New: `{}`",
-            outcome.mem, outcome.branch_ref, outcome.source_ref, outcome.new_sha,
+            "# Pulled `{}`\n\n- Branch ref: `{}`\n- Source ref: `{}`\n- Previous: `{prev}`\n- New: `{}`\n- Check records imported: {}",
+            outcome.mem,
+            outcome.branch_ref,
+            outcome.source_ref,
+            outcome.new_sha,
+            outcome.checks_imported,
         ));
     }
     Ok(())
@@ -134,8 +152,12 @@ pub fn run_push(ctx: &CliContext, args: PushArgs) -> anyhow::Result<()> {
         crate::output::print_json(&outcome)?;
     } else {
         let force_note = if outcome.forced { " (forced)" } else { "" };
+        let checks = match &outcome.checks_published {
+            Some(sha) => format!("published at `{sha}`"),
+            None => "already on the remote".to_string(),
+        };
         crate::output::print_markdown(&format!(
-            "# Pushed `{}` to `{}`{force_note}\n\n- Branch ref: `{}`\n- New SHA at remote: `{}`",
+            "# Pushed `{}` to `{}`{force_note}\n\n- Branch ref: `{}`\n- New SHA at remote: `{}`\n- Check records: {checks}",
             outcome.mem, outcome.remote, outcome.branch_ref, outcome.new_sha,
         ));
     }

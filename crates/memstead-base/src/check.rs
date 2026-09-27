@@ -537,6 +537,66 @@ impl CheckLedger {
         Ok(true)
     }
 
+    /// The records of one mem's entities, oldest first: every record
+    /// whose entity id is qualified by `mem`.
+    pub fn records_for_mem(&self, mem: &str) -> Vec<CheckRecord> {
+        let prefix = format!("{mem}--");
+        self.all()
+            .into_iter()
+            .filter(|r| r.entity.starts_with(&prefix))
+            .collect()
+    }
+
+    /// The transport form of a set of records: one JSON line per
+    /// record, ordered by timestamp then by the line's bytes, exact
+    /// duplicates dropped, a trailing newline. The same records give
+    /// the same bytes on every machine, so a publish that changed
+    /// nothing writes nothing.
+    pub fn transport_lines(records: &[CheckRecord]) -> Vec<u8> {
+        let mut lines: Vec<(u64, String)> = records
+            .iter()
+            .filter_map(|r| serde_json::to_string(r).ok().map(|s| (r.ts, s)))
+            .collect();
+        lines.sort();
+        lines.dedup();
+        let mut out = Vec::new();
+        for (_, line) in lines {
+            out.extend_from_slice(line.as_bytes());
+            out.push(b'\n');
+        }
+        out
+    }
+
+    /// Union `lines` (the transport form, from another machine) into
+    /// this ledger: every record not already present is appended, in
+    /// the order the lines carry; a record already present (the same
+    /// bytes) is skipped, so a round trip adds nothing. Unparseable
+    /// lines are skipped. Returns the number of records appended.
+    /// Rows keep every field they arrived with: identity, role, hash,
+    /// timestamp; nothing is rewritten on import.
+    pub fn merge_transport_lines(&self, lines: &[u8]) -> std::io::Result<usize> {
+        let present: std::collections::HashSet<String> = self
+            .all()
+            .iter()
+            .filter_map(|r| serde_json::to_string(r).ok())
+            .collect();
+        let mut appended = 0;
+        for line in String::from_utf8_lossy(lines).lines() {
+            let Ok(rec) = serde_json::from_str::<CheckRecord>(line) else {
+                continue;
+            };
+            let Ok(canonical) = serde_json::to_string(&rec) else {
+                continue;
+            };
+            if present.contains(&canonical) {
+                continue;
+            }
+            self.record(&rec)?;
+            appended += 1;
+        }
+        Ok(appended)
+    }
+
     /// All records, oldest first. A missing ledger is an empty one;
     /// unparseable lines are skipped (a torn tail must not poison the
     /// readable history).
