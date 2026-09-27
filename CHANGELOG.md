@@ -32,6 +32,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Statically linked Linux release binaries.** Every release now also
+  ships `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`
+  archives of both binaries, with the same per-file checksums,
+  attestations and the combined `sha256.sum` as the other targets, for
+  containers without glibc (Alpine, a scratch image); a musl binary runs
+  on a glibc base too. To make the musl builds routine the CLI's TLS
+  crypto provider moved from aws-lc (a C build behind cmake) to ring;
+  nothing on the wire changes. The transport verbs still shell out to
+  `git`, so a container needs it on `PATH`. A project that uses the
+  engine from a scheduled Alpine job asked for it.
 - **`memstead mem fork <source> <name> --remote <r> --adopt` mounts a
   fork branch that arrived on a remote.** The remote form of `mem fork`
   means the source lives on the remote: it fetches the remote's source

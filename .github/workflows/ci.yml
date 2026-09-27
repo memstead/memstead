@@ -94,3 +94,12 @@ jobs:
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # RUSTSEC-2026-0253: `lru` 0.16 (an unsound `pop()` when a stored
+          # key's `Drop` panics under `catch_unwind`). It reaches the engine
+          # only through tantivy's index cache, whose keys are plain
+          # integers and file ids with no `Drop` of their own, and the engine
+          # wraps no index read in `catch_unwind`, so the condition cannot
+          # arise here. The patched line (0.18) is a major bump tantivy has
+          # not taken (0.26.2 still pins 0.16). Retire this line the release
+          # tantivy moves; owner: the engine maintainer.
+          ignore: RUSTSEC-2026-0253

@@ -30,8 +30,12 @@ the script is convenience, not a requirement). From the
 [latest release](https://github.com/memstead/memstead/releases/latest)
 fetch `memstead-cli-<target>.tar.xz` and `memstead-mcp-<target>.tar.xz`
 plus their `.sha256` companions; targets follow Rust naming, e.g.
-`aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`. Then verify, unpack,
-and place both binaries anywhere on your `PATH`:
+`aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`. For a container
+without glibc (Alpine, a scratch image) take the statically linked
+`x86_64-unknown-linux-musl` or `aarch64-unknown-linux-musl` archive; it
+runs on a glibc base too. The transport verbs (`fetch`, `pull`, `push`,
+`status --remote`) shell out to `git`, so the image needs it on `PATH`.
+Then verify, unpack, and place both binaries anywhere on your `PATH`:
 
 ```bash
 sha256sum -c memstead-cli-<target>.tar.xz.sha256   # → OK

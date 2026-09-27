@@ -29,7 +29,13 @@ serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 dirs.workspace = true
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "form", "rustls", "webpki-roots"] }
+# TLS through rustls with the ring provider: `rustls-no-provider` leaves the
+# crypto provider to us, and enabling exactly `ring` on rustls makes it the
+# process default. The alternative provider, aws-lc, is a C build behind
+# cmake that the musl release targets cannot rely on; ring cross-builds
+# for every target the release ships.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "form", "rustls-no-provider", "webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tempfile.workspace = true
 toml = "1.1"
 toml_edit.workspace = true
