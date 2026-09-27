@@ -7,6 +7,29 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **A gated transition closes only on a record declared in a checking
+  role.** The `transition_requires_checks` and
+  `transition_requires_self_check` gates asked two things of a
+  confirming record, a fresh `checked_ok` state and a
+  `confirmed_independent` reading, and never looked at the role it was
+  declared in: a check by an identity that had never touched the plan,
+  recorded with `--role author`, closed a plan's completion gate. The
+  role is now the gate's third condition, orthogonal to the reading:
+  the record must be declared `checker` or `verifier`. A record in role
+  `author` refuses under the new label `role_author` (the caller said
+  they acted as the author), and a record with no declared role refuses
+  under `role_unspecified` (absence is cannot-confirm, as the 2026-08-09
+  role decision states; a setup whose checkers never declared `--role`
+  must start doing so). The independence reading is unchanged and its
+  vocabulary stays closed: the two labels are the gate's, reported in
+  the refusal, the constraints finding and the gates brief beside the
+  existing states and readings. Every row of the health checks axis'
+  `independence.readings` now carries `role` and `role_confirms`.
+  A project that uses the engine reported the gap, reproduced on the
+  engine's own fixtures.
+
 ### Added
 
 - **`memstead mem fork <source> <name> --remote <r> --adopt` mounts a

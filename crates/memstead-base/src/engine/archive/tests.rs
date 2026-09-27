@@ -1563,6 +1563,9 @@ fn check_as(
 ) {
     let (actor, client) = cli_actor();
     engine.set_identity(Some(identity.to_string()));
+    // The checker's role, as the walker declares it: a gate closes only
+    // on a record declared `checker` or `verifier`.
+    engine.set_role(crate::vcs::Role::Checker);
     engine
         .record_check_with(
             "specs",
@@ -1575,6 +1578,7 @@ fn check_as(
             Some(&client),
         )
         .unwrap();
+    engine.set_role(crate::vcs::Role::Unspecified);
 }
 
 fn sealed_checks_of(bytes: &[u8]) -> Option<crate::check::SealedChecks> {
@@ -1703,7 +1707,7 @@ fn export_seals_latest_check_per_entity_and_kind() {
     let v = &alpha["verification"];
     assert_eq!(v.verdict, "failed", "the later record per kind wins");
     assert_eq!(v.identity.as_deref(), Some("checker-s2"));
-    assert_eq!(v.role, "unspecified");
+    assert_eq!(v.role, "checker");
     assert_eq!(
         v.method.as_deref(),
         Some("diffed against [redacted:absolute-user-paths]/notes.md"),

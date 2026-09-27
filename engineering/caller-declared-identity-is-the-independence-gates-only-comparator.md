@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-28T11:27:24Z
-last_modified: 2026-09-21T11:30:39Z
+last_modified: 2026-09-27T18:52:54Z
 status: accepted
 decided_on: 2026-08-28
 deciders: operator (agent-trust plan 15)
@@ -32,3 +32,6 @@ The gate [[check-state-is-derived-from-engine-recorded-check-acts-never-stamped]
 ## Notes
 
 2026-09-02 amendment (backlog-engine bundle A, plan 5; decision basket line 9, option a): the comparator is no longer the criterion's own author. A check on a criterion reads `confirmed_independent` only when its identity differs from every identity that mutated the verified plan, its criteria or its session-log notes since the criterion was written; a check under one of those identities reads `self_checked`; a check or a record without an identity stays `unconfirmable`. Nothing is stamped: the reading is computed at read time from the append-only provenance record, so every existing ledger keeps parsing and derives under the new rule, and the `transition_requires_checks` gate consumes the same reading, so a plan cannot complete on the executor's own checks. The checks axis names the comparator and the executors per record.
+
+
+2026-09-27 amendment: the reading stays identity-only, and the gate gains the role as a third, orthogonal condition. A project that uses the engine found that a check recorded with role author by an identity that had never touched the plan read confirmed_independent (true: the identities differ) and closed a transition_requires_checks gate before any checker-role record existed. The gate had asked only for a fresh checked_ok state and a confirmed_independent reading and never read the role. Now a record closes transition_requires_checks and transition_requires_self_check only when it is also declared in a checking capacity, checker or verifier; a record in role author refuses under the label role_author (the caller said they acted as the author), and a record with no declared role refuses under role_unspecified, which is what the 2026-08-09 role decision already promised of downstream gates. The independence vocabulary is untouched and stays sealed into archives; the two labels are the gate's own, reported in the refusal, the constraints finding and the gates brief, and every reading row on the health checks axis carries the role and whether it confirms. The self-check form takes the same rule: its decision of 2026-09-11 gates on the entity's own record under an identity other than the author, so "self" is the entity, not the author, and the strict variant applies to both. Rejected: folding the role into the reading (self_checked would then mean two things), a fourth reading (reopens a sealed wire vocabulary for a condition that belongs to the gate), and the lenient variant in which only an explicit author disqualifies (makes no role stronger than author, inverting the recorded posture). Cost accepted: a setup whose checkers never declared a role stops satisfying gates until it does; the plan walker here declares checker on every check. Deciders: operator (in-session, 2026-09-27), memstead-e9.

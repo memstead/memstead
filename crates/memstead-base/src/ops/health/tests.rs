@@ -2089,6 +2089,7 @@ fn transition_requires_self_check_reads_the_declared_kind() {
     let self_checked = |_e: &crate::entity::Entity, _k: &str| CheckStanding {
         state: CheckState::CheckedOk,
         independence: Some(Independence::SelfChecked),
+        role: crate::vcs::Role::Checker,
     };
     let v = unsatisfied_constraints(&store, &bundle, &td, None, Some(&self_checked));
     assert_eq!(v.len(), 1, "{v:?}");
@@ -2101,6 +2102,33 @@ fn transition_requires_self_check_reads_the_declared_kind() {
         }
         other => panic!("unexpected {other:?}"),
     }
+
+    // Independent, fresh, but declared in the author's role or in none:
+    // the role is the third condition and gets its own label.
+    for (role, label) in [
+        (crate::vcs::Role::Author, "role_author"),
+        (crate::vcs::Role::Unspecified, "role_unspecified"),
+    ] {
+        let by_role = |_e: &crate::entity::Entity, _k: &str| CheckStanding {
+            state: CheckState::CheckedOk,
+            independence: Some(Independence::ConfirmedIndependent),
+            role,
+        };
+        let v = unsatisfied_constraints(&store, &bundle, &td, None, Some(&by_role));
+        assert_eq!(v.len(), 1, "{role:?}: {v:?}");
+        match &v[0] {
+            UnsatisfiedConstraint::TransitionRequiresSelfCheck { state, .. } => {
+                assert_eq!(state, label);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    let verifier = |_e: &crate::entity::Entity, _k: &str| CheckStanding {
+        state: CheckState::CheckedOk,
+        independence: Some(Independence::ConfirmedIndependent),
+        role: crate::vcs::Role::Verifier,
+    };
+    assert!(unsatisfied_constraints(&store, &bundle, &td, None, Some(&verifier)).is_empty());
 
     let stale = |_e: &crate::entity::Entity, _k: &str| {
         CheckStanding::assumed_independent(CheckState::CheckStale)

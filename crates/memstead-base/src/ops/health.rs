@@ -551,11 +551,21 @@ pub fn health_checks_axis(
                         } else {
                             "failed"
                         };
+                        // The declared role rides every row, and whether
+                        // it is a checking capacity: a gate closes only
+                        // on a row that is fresh, independent AND
+                        // declared `checker` or `verifier`.
+                        let role_confirms = matches!(
+                            crate::vcs::Role::from_wire(&rec.role).unwrap_or_default(),
+                            crate::vcs::Role::Checker | crate::vcs::Role::Verifier
+                        );
                         serde_json::json!({
                             "ts": rec.ts,
                             "identity": rec.identity,
                             "verdict": rec.verdict,
                             "reading": reading,
+                            "role": rec.role,
+                            "role_confirms": role_confirms,
                         })
                     })
                     .collect();
@@ -2100,6 +2110,7 @@ pub fn unsatisfied_constraints(
                     None => crate::engine::independence::CheckStanding {
                         state: crate::check::CheckState::NeverChecked,
                         independence: None,
+                        role: crate::vcs::Role::Unspecified,
                     },
                 };
                 if standing.confirms() {
@@ -2168,6 +2179,7 @@ pub fn transition_gate_standing(
                 None => crate::engine::independence::CheckStanding {
                     state: crate::check::CheckState::NeverChecked,
                     independence: None,
+                    role: crate::vcs::Role::Unspecified,
                 },
             };
             if standing.confirms() {

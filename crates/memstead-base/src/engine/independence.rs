@@ -18,7 +18,15 @@
 //! every existing ledger keeps parsing and derives under the new rule.
 //!
 //! The `transition_requires_checks` gate consumes the same reading: a
-//! plan cannot complete on the executor's own checks.
+//! plan cannot complete on the executor's own checks. The gate adds one
+//! orthogonal condition the reading never carries (2026-09-27): the
+//! confirming record must be declared in a checking capacity, role
+//! `checker` or `verifier`. A record in role `author` is the caller
+//! saying they act as the author, and a record with no role is
+//! cannot-confirm (the 2026-08-09 role decision); neither closes a
+//! gate, and each is reported under its own label
+//! ([`LABEL_ROLE_AUTHOR`], [`LABEL_ROLE_UNSPECIFIED`]) beside the
+//! readings, which stay a closed vocabulary.
 //!
 //! An archive mount records no history at the engine seam, so nothing
 //! on the mount can derive the reading; the export derives it once per
@@ -82,38 +90,77 @@ impl Independence {
     }
 }
 
-/// One entity's standing before the gate: its derived check state, and
-/// for an ok-checked entity the independence of that check.
+/// The gate's label for a confirming record declared in the author's
+/// role: the caller said they acted as the author, and an author's
+/// record does not close a gate on someone else's check.
+pub const LABEL_ROLE_AUTHOR: &str = "role_author";
+/// The gate's label for a confirming record that declares no role:
+/// absence is cannot-confirm, never a guessed capacity.
+pub const LABEL_ROLE_UNSPECIFIED: &str = "role_unspecified";
+
+/// One entity's standing before the gate: its derived check state, for
+/// an ok-checked entity the independence of that check, and the role
+/// the record was declared in.
+///
+/// Three orthogonal conditions close a gate, and each is reported on
+/// its own: the state is `checked_ok` (fresh against the entity's
+/// bytes), the reading is `confirmed_independent` (the identity is none
+/// of the executors), and the role is a checking capacity, `checker` or
+/// `verifier`. A record in role `author` reads [`LABEL_ROLE_AUTHOR`],
+/// one with no role [`LABEL_ROLE_UNSPECIFIED`]; neither confirms. The
+/// role never enters the independence reading, which compares
+/// identities and nothing else.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckStanding {
     pub state: CheckState,
     /// `Some` only for `CheckedOk`.
     pub independence: Option<Independence>,
+    /// The role the newest record was declared in; `Unspecified` when
+    /// it carries none, and for every state but `CheckedOk`.
+    pub role: crate::vcs::Role,
 }
 
 impl CheckStanding {
     /// A standing that confirms when the state is `checked_ok` — the
     /// form store-only callers (and tests) build when no provenance is
-    /// in play.
+    /// in play: independent, and declared in the checker's role.
     pub fn assumed_independent(state: CheckState) -> Self {
         Self {
             state,
             independence: (state == CheckState::CheckedOk)
                 .then_some(Independence::ConfirmedIndependent),
+            role: crate::vcs::Role::Checker,
         }
+    }
+
+    /// Whether the declared role is a checking capacity.
+    pub fn role_confirms(&self) -> bool {
+        matches!(
+            self.role,
+            crate::vcs::Role::Checker | crate::vcs::Role::Verifier
+        )
     }
 
     /// Whether this standing satisfies the transition gate.
     pub fn confirms(&self) -> bool {
         self.state == CheckState::CheckedOk
             && self.independence == Some(Independence::ConfirmedIndependent)
+            && self.role_confirms()
     }
 
     /// The label the gate reports for an entity that does not confirm:
-    /// the check state, or the independence reading when the state is
-    /// `checked_ok` but not independent.
+    /// the check state; the independence reading when the state is
+    /// `checked_ok` but not independent; the role label when the record
+    /// is independent but not declared in a checking capacity.
     pub fn label(&self) -> &'static str {
         match (self.state, self.independence) {
+            (CheckState::CheckedOk, Some(Independence::ConfirmedIndependent)) => match self.role {
+                crate::vcs::Role::Checker | crate::vcs::Role::Verifier => {
+                    Independence::ConfirmedIndependent.as_str()
+                }
+                crate::vcs::Role::Author => LABEL_ROLE_AUTHOR,
+                crate::vcs::Role::Unspecified => LABEL_ROLE_UNSPECIFIED,
+            },
             (CheckState::CheckedOk, Some(i)) => i.as_str(),
             (CheckState::CheckedOk, None) => Independence::Unconfirmable.as_str(),
             (s, _) => s.as_str(),
@@ -451,6 +498,7 @@ impl Engine {
                 return CheckStanding {
                     state,
                     independence: None,
+                    role: crate::vcs::Role::Unspecified,
                 };
             }
             let check = latest.expect("checked_ok implies a record");
@@ -462,6 +510,7 @@ impl Engine {
             CheckStanding {
                 state,
                 independence: Some(independence),
+                role: crate::vcs::Role::from_wire(&check.role).unwrap_or_default(),
             }
         }
     }

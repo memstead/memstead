@@ -648,8 +648,22 @@ write_rules: []
         id: &crate::entity::EntityId,
         kind: &str,
     ) {
+        check_plan_as(engine, identity, crate::vcs::Role::Checker, id, kind);
+    }
+
+    /// A check under `identity` declared in `role`: the walker's shape
+    /// is `checker`; `author` and `unspecified` are the roles a gate
+    /// refuses.
+    fn check_plan_as(
+        engine: &mut crate::Engine,
+        identity: &str,
+        role: crate::vcs::Role,
+        id: &crate::entity::EntityId,
+        kind: &str,
+    ) {
         let (actor, client) = crate::engine::test_helpers::cli_actor();
         engine.set_identity(Some(identity.to_string()));
+        engine.set_role(role);
         engine
             .record_check_with(
                 "bundles",
@@ -662,6 +676,7 @@ write_rules: []
                 Some(&client),
             )
             .unwrap();
+        engine.set_role(crate::vcs::Role::Unspecified);
     }
 
     /// The defect: a bundle carries a fresh `x-projection` ok record under
@@ -776,6 +791,91 @@ write_rules: []
             "{axis}"
         );
         assert!(engine.constraint_findings(Some("bundles")).is_empty());
+    }
+
+    /// The role is the gate's third condition, orthogonal to the reading.
+    /// An independent identity's ok record declared in role `author`
+    /// reads `confirmed_independent` on the checks axis (the identities
+    /// differ, and the axis says so) and still refuses the gate under
+    /// the label `role_author`; a record with no role refuses under
+    /// `role_unspecified`; a `verifier` record confirms like a
+    /// `checker`'s. The axis row carries the role and whether it
+    /// confirms.
+    #[test]
+    fn a_record_in_role_author_or_without_a_role_does_not_close_the_gate() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "verification");
+        engine.set_identity(Some("author-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+
+        // An independent identity, declared as the author.
+        check_plan_as(
+            &mut engine,
+            "checker-c",
+            crate::vcs::Role::Author,
+            &id,
+            "verification",
+        );
+        let standing =
+            (engine.check_standing_provider())(engine.get_entity(&id).unwrap(), "verification");
+        assert_eq!(standing.state, CheckState::CheckedOk);
+        assert_eq!(
+            standing.independence,
+            Some(crate::engine::independence::Independence::ConfirmedIndependent)
+        );
+        assert!(!standing.confirms(), "{standing:?}");
+        assert_eq!(standing.label(), "role_author");
+        engine.set_identity(Some("author-a".to_string()));
+        let err = set_status(&mut engine, &id, "complete").unwrap_err();
+        assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED", "{err}");
+        assert!(err.to_string().contains("role_author"), "{err}");
+        let axis = crate::ops::health::health_checks_axis(&engine, Some("bundles"));
+        let row = axis["bundles"]["independence"]["readings"][id.as_ref()]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap();
+        assert_eq!(row["reading"], "confirmed_independent", "{axis}");
+        assert_eq!(row["role"], "author", "{axis}");
+        assert_eq!(row["role_confirms"], false, "{axis}");
+
+        // The same identity, no role declared.
+        check_plan_as(
+            &mut engine,
+            "checker-c",
+            crate::vcs::Role::Unspecified,
+            &id,
+            "verification",
+        );
+        let standing =
+            (engine.check_standing_provider())(engine.get_entity(&id).unwrap(), "verification");
+        assert!(!standing.confirms(), "{standing:?}");
+        assert_eq!(standing.label(), "role_unspecified");
+        engine.set_identity(Some("author-a".to_string()));
+        let err = set_status(&mut engine, &id, "complete").unwrap_err();
+        assert!(err.to_string().contains("role_unspecified"), "{err}");
+
+        // A verifier's record confirms like a checker's.
+        check_plan_as(
+            &mut engine,
+            "verifier-v",
+            crate::vcs::Role::Verifier,
+            &id,
+            "verification",
+        );
+        let standing =
+            (engine.check_standing_provider())(engine.get_entity(&id).unwrap(), "verification");
+        assert!(standing.confirms(), "{standing:?}");
+        engine.set_identity(Some("author-a".to_string()));
+        set_status(&mut engine, &id, "complete").expect("a verifier's record closes the gate");
+        let axis = crate::ops::health::health_checks_axis(&engine, Some("bundles"));
+        let row = axis["bundles"]["independence"]["readings"][id.as_ref()]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap();
+        assert_eq!(row["role"], "verifier", "{axis}");
+        assert_eq!(row["role_confirms"], true, "{axis}");
     }
 
     /// The gate on the archive mount. A complete plan exported to a
