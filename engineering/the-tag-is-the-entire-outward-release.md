@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-15T08:41:56Z
-last_modified: 2026-09-05T09:45:17Z
+last_modified: 2026-09-27T21:52:37Z
 status: accepted
 decided_on: 2026-08-15
 deciders: operator, implementing agent
@@ -51,4 +51,6 @@ The secrets are the one part a machine cannot own: `CARGO_REGISTRY_TOKEN` lives 
 
 ## Notes
 
+2026-09-27 amendment, from the 0.21.0 cut: the tag performed every outward act except one, and the one it missed was silent inside the run. The Homebrew publish job died with `Argument list too long` on a 58 KB release body, which the 64 KB guard had let through (the guard's two data points were 81 KB breaking and 34 KB passing; 58 KB is a third that narrows the bound, so the guard now sits at 32 KB, below every size measured to work). The tap served 0.20.0 until the formulas were pushed by hand from the release's own v0.21.0 assets, unmodified.
 
+The structural finding matters more than the threshold: the in-release verification cannot see this class. `custom-release-verify` is a post-announce job, and cargo-dist skips `announce` when any publish job fails, so the run whose channel is stale is exactly the run that skips its own verification (0.21.0: `announce` skipped, `custom-release-verify` skipped, while the release page still showed Latest). The decision's claim that a publish job FAILS rather than skips holds and did its work here, but a loud job inside a run nobody verifies is only half a gate. Until the `post-announce-jobs` position changes, the hand-run `scripts/release-verify.sh` is the only thing that catches it, and reading the release run's job list is part of calling a release done. Recorded by memstead-e9; the operator was informed in-session.
