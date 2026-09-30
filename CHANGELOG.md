@@ -42,9 +42,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (load linear in the entity count, no non-linear penalty above the
   advertised range); LICENSING and CONTRIBUTING describe the registry
   server as a separate, private project that is not operated publicly, and
-  SECURITY no longer lists a registry service among what it covers; and
+  SECURITY no longer lists a registry service among what it covers;
   VISION and PRIOR_ART place Memstead next to the agent-memory systems
-  rather than among them.
+  rather than among them; and the README's opening describes the engine
+  and the `quickstart --repo .` path without implying automatic capture or
+  cited answers, and says which of the project's own mems are public.
 
 ## [0.22.0] - 2026-09-30
 
