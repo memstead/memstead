@@ -52,9 +52,9 @@ use memstead_projection::report::{
 };
 use memstead_projection::resolve::{ResolveError, resolve_binding_run};
 use memstead_projection::{
-    OperationFilter, OperationKind, RenderBriefError, not_loop_declared, render_ingest_brief,
-    render_sync_brief_budgeted, render_sync_brief_for, render_verify_brief_for,
-    select_next_due_operation,
+    OperationFilter, OperationKind, RenderBriefError, UnservedDestination, not_loop_declared,
+    render_ingest_brief, render_sync_brief_budgeted, render_sync_brief_for,
+    render_verify_brief_for, select_next_due_operation,
 };
 
 use crate::CliError;
@@ -94,7 +94,11 @@ pub enum ProjectionCommand {
     /// open verify findings in one brief with the absorbed reconcile
     /// conservatism. Both are read-only on the mem; the sync brief's repairs
     /// reach the mem only when an agent acts on it through the MCP mutation
-    /// surface.
+    /// surface. Both refuse a destination mem this workspace does not serve
+    /// (`UNKNOWN_MEM` for one that does not exist, `MEM_QUARANTINED` for a
+    /// quarantined one), as `projection verify` does. The build brief is the
+    /// exception: it renders for a binding whose mem does not exist yet and
+    /// names the command that creates it in its Destination block.
     Brief(BriefArgs),
     /// Scaffold a fresh v2 binding non-interactively: ONE record with one
     /// inline source, at `.memstead/projections/<mem>/<stem>.json`.
@@ -218,22 +222,27 @@ pub enum ProjectionCommand {
     /// recording no producing binding are included by the pre-provenance
     /// fallback.
     ///
-    /// A destination mem that is QUARANTINED (its schema pin unresolved, its
-    /// mount unbacked) refuses the run outright with `MEM_QUARANTINED` and its
-    /// boot reason, on both `verify` and `brief --verify`: a mem serving no
-    /// entities would read as every artifact uncovered and every anchor
-    /// absent, which is a measurement neither can honestly make. The refusal
-    /// is placed above every store the run would otherwise write, so the
-    /// findings store, the `#verified` token and the authored exclusions in
-    /// the advance file all come through byte-identical.
+    /// A destination mem this workspace does not serve refuses the run
+    /// outright, typed, whatever the flags, and so do `brief --verify` and
+    /// `brief --sync`: a mem that does not exist (a binding `projection init`
+    /// declared before its mem) with `UNKNOWN_MEM` (exit 3) and the command
+    /// that creates it, or re-declares the binding, in this workspace's
+    /// shape; a QUARANTINED mem (its schema pin unresolved, its mount
+    /// unbacked) with `MEM_QUARANTINED` (exit 5) and its boot reason. A mem
+    /// that is not served would read as every artifact uncovered and every
+    /// anchor absent, which is a measurement none of them can honestly make,
+    /// and it is never reported as onboarding. The refusal is placed above
+    /// every store the run would otherwise write, so the findings store, the
+    /// `#verified` token and the authored exclusions in the advance file all
+    /// come through byte-identical.
     ///
     /// A sidecar row whose ENTITY the mem no longer holds is reported as
     /// dangling and named, in no figure and never as resolving: it is a
     /// sidecar integrity condition, not an anchor state, and nothing repairs
     /// it, because the row is the trace of a writer that went around the
     /// engine. Where the entity end could not be reconciled at all (an
-    /// unloaded, quarantined or partly unparsed mem), the report says so
-    /// rather than reporting a clean anchor axis.
+    /// unloaded or partly unparsed mem), the report says so rather than
+    /// reporting a clean anchor axis.
     Verify(VerifyArgs),
     /// Answer deny verdicts: is a path (or Glob/Grep pattern) hidden by a
     /// binding's `deny_paths`? Evaluates each candidate against the named
@@ -671,6 +680,45 @@ fn absent_sync_error(binding_id: &str, binding: &memstead_base::binding::Binding
     }))
 }
 
+/// The typed refusal for a binding whose destination mem this workspace does
+/// not serve, shared by `verify` and by the verify and sync briefs, so the
+/// three refuse a given mem with one code and one exit status. The engine
+/// decides the refusal and writes the message
+/// ([`memstead_projection::unserved_destination`]); this maps it. The code is
+/// the engine's own lookup code for the mem, so the refusal reads like every
+/// other lookup of it: `UNKNOWN_MEM` and `MEM_UNMOUNTED` exit `NotFound`, the
+/// category those codes carry on every command (and on `verify-anchors --mem`,
+/// the other verify surface), while `MEM_QUARANTINED` keeps the `Validation`
+/// exit these commands have always given it. Each code is spelled as a
+/// literal at its construction site so the generated error index keeps
+/// finding it.
+fn unserved_destination_error(
+    binding_id: &str,
+    message: String,
+    unserved: &UnservedDestination,
+) -> CliError {
+    match &unserved.error {
+        memstead_base::EngineError::MemQuarantined {
+            reason_code,
+            reason_message,
+            ..
+        } => CliError::new(ExitKind::Validation, "MEM_QUARANTINED", message).with_details(json!({
+            "binding": binding_id,
+            "mem": unserved.mem,
+            // The same vocabulary every other surface reports for this
+            // condition: code plus the boot reason.
+            "reason_code": reason_code,
+            "reason": reason_message,
+        })),
+        memstead_base::EngineError::MemUnmounted { .. } => {
+            CliError::new(ExitKind::NotFound, "MEM_UNMOUNTED", message)
+                .with_details(json!({ "binding": binding_id, "mem": unserved.mem }))
+        }
+        _ => CliError::new(ExitKind::NotFound, "UNKNOWN_MEM", message)
+            .with_details(json!({ "binding": binding_id, "mem": unserved.mem })),
+    }
+}
+
 /// Map a [`RenderBriefError`] to a typed CLI error (D12). Not-found bindings /
 /// facets / mediums exit `NotFound`; a malformed id is a `Validation` name
 /// error; config-load and mode-unsupported failures are generic. Codes are
@@ -679,6 +727,11 @@ fn absent_sync_error(binding_id: &str, binding: &memstead_base::binding::Binding
 fn map_brief_err(binding_id: &str, err: RenderBriefError) -> CliError {
     let message = err.to_string();
     let mapped = match &err {
+        // Carries its own details (the mem, and the boot reason for a
+        // quarantine), so it returns before the generic details below.
+        RenderBriefError::DestinationUnserved { unserved, .. } => {
+            return unserved_destination_error(binding_id, message, unserved);
+        }
         RenderBriefError::ConfigLoad(_) => {
             CliError::new(ExitKind::Generic, "PROJECTION_LOAD_FAILED", message)
         }
@@ -777,60 +830,13 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
                 return Err(absent_sync_error(&binding_id, &record.config).into());
             }
         }
-        // Same consult verify makes, for the same reason: a quarantined
-        // destination serves no entities, so the rendered brief would describe
-        // a mem that is not there. `render_*_brief_for` also reaches
-        // `reconcile_exclusions`, which prunes authored exclusions whose
-        // sources appear to hold nothing — the 181 lost dispositions in the
-        // filed incident. Refuse above it, not after.
-        // Deliberately NOT an `if let … && let …` chain: an `Err` anywhere in
-        // the resolution would fall through to the unguarded render, which is
-        // the very path that reaches `reconcile_exclusions`. A guard that can
-        // silently skip is not a guard. Each step propagates its own typed
-        // failure instead, exactly as the render below would have.
-        let configs = load_pipeline_configs(&root).map_err(|e| {
-            CliError::new(
-                ExitKind::Generic,
-                "PROJECTION_LOAD_FAILED",
-                format!("could not load binding store: {e}"),
-            )
-            .with_details(json!({ "error": e.to_string() }))
-        })?;
-        let quarantine = match configs
-            .bindings
-            .iter()
-            .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
-        {
-            Some(record) => {
-                let resolved = resolve_binding_run(&binding_id, &record.config)
-                    .map_err(|e| map_resolve_err(&binding_id, e))?;
-                engine
-                    .quarantine_reason(&resolved.destination_mem)
-                    .map(|q| (resolved.destination_mem.clone(), q.clone()))
-            }
-            // An unknown binding is the render's own refusal to make, with
-            // its nearest-name help; not this guard's.
-            None => None,
-        };
-        if let Some((destination_mem, q)) = quarantine {
-            return Err(CliError::new(
-                ExitKind::Validation,
-                "MEM_QUARANTINED",
-                format!(
-                    "brief refused for `{binding_id}`: the destination mem `{}` is \
-quarantined ({}) — it serves no entities, so the brief would describe a mem \
-that is not there. Repair the mem, then re-run",
-                    destination_mem, q.reason_message
-                ),
-            )
-            .with_details(json!({
-                "binding": binding_id,
-                "mem": destination_mem,
-                "reason_code": q.reason_code,
-                "reason": q.reason_message,
-            }))
-            .into());
-        }
+        // A destination mem this workspace does not serve (absent,
+        // unmounted, quarantined) is refused by the engine renderers
+        // themselves, before they read anything: above `reconcile_exclusions`,
+        // which prunes authored exclusions whose sources appear to hold nothing
+        // (the 181 lost dispositions in the filed quarantine incident). The
+        // refusal maps through `map_brief_err`, so a named brief and a rotation
+        // pick of the same binding refuse alike.
         let (rendered, operation) = if args.verify {
             (
                 render_verify_brief_for(engine, &root, &binding_id),
@@ -2189,41 +2195,15 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     let mut cli_engine = ctx.cli_engine_at(&root)?;
     let engine = cli_engine.base_mut();
 
-    // A quarantined destination serves NO entities, so a pass over it reads
-    // every artifact as uncovered and every anchor as absent: the same
-    // fiction the sidecar refusal below exists to prevent, one cause over.
-    // Filed 2026-09-02 after a tick under a binary missing a schema version
-    // loaded `engine` quarantined, then recorded 583 bogus uncovered
-    // findings and a baseline, and pruned 181 authored dispositions.
+    // A destination this workspace does not serve (a mem that does not exist,
+    // left the roster, or is quarantined) is refused by the verify pass itself
+    // (`FindingsError::DestinationUnserved`, mapped below), above every store
+    // the pass touches; nothing here needs to precede it. The quarantine case
+    // was filed 2026-09-02, after a tick under a binary missing a schema
+    // version loaded `engine` quarantined, recorded 583 bogus uncovered
+    // findings and a baseline, and pruned 181 authored dispositions; the
+    // missing-mem case completed as onboarding with exit 0 until 2026-09-30.
     //
-    // Placed HERE deliberately: above the measurement and above all three
-    // stores it would otherwise touch (the findings store, the `#verified`
-    // token, and the advance file whose exclusions `reconcile_exclusions`
-    // prunes when the sources appear to hold nothing). A refusal further
-    // down would leave whichever store sits above it already dirtied.
-    if let Some(q) = engine.quarantine_reason(&resolved.destination_mem) {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "MEM_QUARANTINED",
-            format!(
-                "verify refused for `{binding_id}`: the destination mem `{}` is \
-quarantined ({}) — it serves no entities, so every artifact would read as \
-uncovered and every anchor as absent, which is a measurement this run cannot \
-honestly make. Repair the mem, then re-run",
-                resolved.destination_mem, q.reason_message
-            ),
-        )
-        .with_details(json!({
-            "binding": binding_id,
-            "mem": resolved.destination_mem,
-            // The same vocabulary every other surface reports for this
-            // condition, not a new one: code plus the boot reason.
-            "reason_code": q.reason_code,
-            "reason": q.reason_message,
-        }))
-        .into());
-    }
-
     // A malformed anchors sidecar reads as "no anchors", which a fidelity
     // pass would faithfully report as every artifact uncovered — findings,
     // and under `--fail-on-findings` a red build blaming the mem for a file
@@ -2258,6 +2238,12 @@ remove the sidecar and re-run",
         verify_binding
     };
     let outcome = run(engine, &root, &record.config, &resolved).map_err(|e| match &e {
+        // No mem to measure: the engine's typed lookup code for the
+        // destination, never a findings exit and never the onboarding
+        // verdict. Nothing was observed or recorded.
+        FindingsError::DestinationUnserved { unserved, .. } => {
+            unserved_destination_error(&binding_id, e.to_string(), unserved)
+        }
         // A vanished/unmounted source is a typed refusal, not a failed
         // measurement: nothing was observed, no findings were recorded,
         // and the `#verified` baseline is deliberately left untouched

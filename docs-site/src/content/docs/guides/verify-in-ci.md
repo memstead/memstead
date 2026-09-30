@@ -53,7 +53,11 @@ being unable to adjudicate it is the measurement's answer. An input the
 pass could not read at all is not: an unreadable anchors sidecar refuses
 with `ANCHORS_SIDECAR_UNREADABLE` (exit 5) rather than reporting every
 artifact uncovered, because "no anchors parsed" and "no anchors exist"
-are different facts and only one of them is the mem's fault.
+are different facts and only one of them is the mem's fault. The same
+holds for the mem itself. A binding whose destination mem does not exist in
+the checkout refuses with `UNKNOWN_MEM` (exit 3), and one whose mem is
+quarantined with `MEM_QUARANTINED` (exit 5), before anything is recorded:
+the job fails as a broken job, never passes as a clean or onboarding one.
 
 Without `--fail-on-findings`, verify exits 0 whether it found anything
 or not — unchanged, so adding the flag breaks no existing script.
@@ -271,9 +275,10 @@ gap.
 wrote the mem from outside the engine and removed an entity, the sidecar row
 naming it is reported as dangling and excluded from every anchor figure. It is
 not repaired: the row is the evidence. If the mem could not be reconciled at all
-(not mounted, quarantined, lazily unloaded, or carrying a file that failed to
-parse) the report says so instead of showing a clean anchor axis, so a gate
-reading the anchor figures should treat that statement as a blind spot.
+(lazily unloaded, or carrying a file that failed to parse) the report says so
+instead of showing a clean anchor axis, so a gate reading the anchor figures
+should treat that statement as a blind spot. A mem that is not mounted or is
+quarantined never reaches a report: verify refuses it, as above.
 
 **A medium with no change signal cannot show drift.** If a facet's
 capability row reports `change_signal: false`, drift on it is

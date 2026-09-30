@@ -11,9 +11,9 @@
 
 use std::path::Path;
 
-use memstead_base::Engine;
 use memstead_base::binding::{Binding, BuildMode};
 use memstead_base::pipeline_store::{BindingConfigs, load_pipeline_configs};
+use memstead_base::{Engine, EngineError};
 
 use super::brief::{
     ProcessMemInfo, assemble_discovery_brief, assemble_one_shot_brief, render_changed_slice,
@@ -59,6 +59,24 @@ pub enum RenderBriefError {
         binding: String,
         /// The underlying store error, stringified.
         detail: String,
+    },
+    /// A verify or sync brief was asked for a binding whose destination mem
+    /// this workspace does not serve ([`unserved_destination`]). Either brief
+    /// would describe a mem that is not there, and the sync brief would also
+    /// reconcile the authored exclusions against it, so both refuse before
+    /// they read the source or any store. The build brief is deliberately not
+    /// refused: it names the remedy in its Destination block instead.
+    #[error(
+        "brief refused for `{binding}`: {unserved}, so the brief would describe a mem that \
+         is not there. {}",
+        .unserved.remedy
+    )]
+    DestinationUnserved {
+        /// The binding id whose brief was asked for.
+        binding: String,
+        /// Which mem, why it is not served, and the remedy (boxed: it carries
+        /// an [`EngineError`], far larger than every other variant).
+        unserved: Box<UnservedDestination>,
     },
 }
 
@@ -210,6 +228,12 @@ pub fn render_verify_brief_for(
         .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
     let (binding_id, binding) = find_binding(&configs, binding_id)?;
     let resolved = resolve_binding_run(&binding_id, binding)?;
+    if let Some(unserved) = unserved_destination(engine, workspace_root, &resolved) {
+        return Err(RenderBriefError::DestinationUnserved {
+            binding: binding_id,
+            unserved: Box::new(unserved),
+        });
+    }
 
     let (_key, findings) =
         current_findings(engine, workspace_root, binding, &resolved).map_err(|e| {
@@ -275,6 +299,15 @@ pub fn render_sync_brief_budgeted(
         .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
     let (binding_id, binding) = find_binding(&configs, binding_id)?;
     let resolved = resolve_binding_run(&binding_id, binding)?;
+    // Above the cursor and, above all, above `reconcile_exclusions`, which
+    // prunes authored exclusions: a pass over a mem that is not served must
+    // leave every store as it found it.
+    if let Some(unserved) = unserved_destination(engine, workspace_root, &resolved) {
+        return Err(RenderBriefError::DestinationUnserved {
+            binding: binding_id,
+            unserved: Box::new(unserved),
+        });
+    }
 
     let cursor = compute_source_cursor(engine, &resolved, workspace_root);
     // The entities the slice steers, anchored and mentioned, from the live
@@ -341,7 +374,16 @@ pub fn render_sync_brief_budgeted(
 /// begin counting as pre-binding for this one, and a red verdict it should
 /// have produced would go quiet. That is the exit-code contract, which 03/01's
 /// scope excludes.
+///
+/// A destination this workspace does not serve ([`unserved_destination`])
+/// never predates its binding: there is no mem there to predate anything.
+/// Without this check the predicate answered yes for a missing mem (no
+/// anchors, no config, so "never synced"), and a verify over a binding whose
+/// mem did not exist completed with the onboarding verdict and exit 0.
 pub fn mem_predates_binding(engine: &Engine, resolved: &ResolvedIngest) -> bool {
+    if !engine.mem_router().is_visible(&resolved.destination_mem) {
+        return false;
+    }
     // Existence only — `mem_anchors_resolved` would OBSERVE every anchor
     // (hash live sources, enumerate file scopes) to answer a question the
     // sidecar parse alone answers. On the status path this ran per binding
@@ -357,6 +399,97 @@ pub fn mem_predates_binding(engine: &Engine, resolved: &ResolvedIngest) -> bool 
         })
         .unwrap_or(true);
     no_anchors && never_synced
+}
+
+/// A binding's destination mem that this workspace does not serve: no mount
+/// by that name, a mount that left the roster while the engine ran, or one
+/// quarantined at boot. A pass over it has nothing to read, so every
+/// artifact would count as uncovered and every anchor as absent.
+///
+/// Every operation that measures or repairs the destination refuses on it
+/// with this value: verify ([`crate::findings::verify_binding`]), the verify
+/// brief and the sync brief ([`RenderBriefError::DestinationUnserved`]), and
+/// the status rollup reports it as an action rather than as onboarding. The
+/// build brief is the one deliberate exception, because `projection init`
+/// allows a binding to exist before its mem: it renders and names the remedy
+/// in its Destination block.
+#[derive(Debug)]
+pub struct UnservedDestination {
+    /// The destination mem the binding names.
+    pub mem: String,
+    /// The engine's typed lookup failure for that mem
+    /// ([`Engine::unknown_mem_error`]): `UNKNOWN_MEM`, `MEM_UNMOUNTED` or
+    /// `MEM_QUARANTINED`. Its code is the one a lookup of the mem by name
+    /// returns on every other surface, so a refusal here reads the same.
+    pub error: EngineError,
+    /// What makes the destination servable, in full sentences, written for
+    /// the workspace shape the reader is in. For a mem that does not exist it
+    /// is the remedy the build brief's Destination block carries.
+    pub remedy: String,
+}
+
+impl UnservedDestination {
+    /// The typed code: `UNKNOWN_MEM`, `MEM_UNMOUNTED` or `MEM_QUARANTINED`.
+    pub fn code(&self) -> &'static str {
+        self.error.code()
+    }
+}
+
+impl std::fmt::Display for UnservedDestination {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.error {
+            EngineError::MemQuarantined { reason_message, .. } => write!(
+                f,
+                "the destination mem `{}` is quarantined ({reason_message}) and serves no \
+                 entities",
+                self.mem
+            ),
+            EngineError::MemUnmounted { .. } => write!(
+                f,
+                "the destination mem `{}` left the mount roster while this engine ran and \
+                 serves no entities",
+                self.mem
+            ),
+            _ => write!(
+                f,
+                "the destination mem `{}` does not exist in this workspace",
+                self.mem
+            ),
+        }
+    }
+}
+
+/// The destination check every measuring or repairing operation makes before
+/// it reads anything: `None` when this workspace serves the binding's
+/// destination mem, the typed [`UnservedDestination`] otherwise.
+///
+/// Served means mounted and visible, the same test the standalone anchor
+/// verify (`memstead verify-anchors --mem`) applies before it answers, so the
+/// two verify surfaces refuse the same mems with the same codes.
+pub fn unserved_destination(
+    engine: &Engine,
+    workspace_root: &Path,
+    resolved: &ResolvedIngest,
+) -> Option<UnservedDestination> {
+    let mem = resolved.destination_mem.as_str();
+    if engine.mem_router().is_visible(mem) {
+        return None;
+    }
+    let error = engine.unknown_mem_error(mem);
+    let remedy = match &error {
+        EngineError::MemQuarantined { .. } => "Repair the mem, then re-run.".to_string(),
+        EngineError::MemUnmounted { .. } => {
+            "Read the mount roster again (`memstead status`), then re-run against a mem that \
+             is mounted."
+                .to_string()
+        }
+        _ => absent_destination_remedy(engine, resolved, &resolved.name, workspace_root),
+    };
+    Some(UnservedDestination {
+        mem: mem.to_string(),
+        error,
+        remedy,
+    })
 }
 
 /// Resolve the destination mem's writing guidance (schema defaults + per-mem
@@ -466,10 +599,29 @@ fn absent_destination_note(
     binding_id: &str,
     workspace_root: &Path,
 ) -> Option<String> {
-    let dest = resolved.destination_mem.as_str();
-    if engine.schema_pin(dest).is_some() {
+    if engine.schema_pin(&resolved.destination_mem).is_some() {
         return None;
     }
+    let remedy = absent_destination_remedy(engine, resolved, binding_id, workspace_root);
+    Some(format!(
+        "**This mem does not exist in this workspace yet.** {remedy} Until then, \
+         every mutation this brief asks for will refuse."
+    ))
+}
+
+/// The remedy for a binding whose destination mem does not exist, in the
+/// shape of the workspace the reader is standing in. One text for every
+/// surface that names it: the build brief's Destination block and the
+/// refusals of verify, the verify brief and the sync brief
+/// ([`unserved_destination`]), so a reader who follows either lands in the
+/// same place.
+fn absent_destination_remedy(
+    engine: &Engine,
+    resolved: &ResolvedIngest,
+    binding_id: &str,
+    workspace_root: &Path,
+) -> String {
+    let dest = resolved.destination_mem.as_str();
     let mut writable: Vec<&str> = engine
         .mem_router()
         .writable_mems()
@@ -477,7 +629,7 @@ fn absent_destination_note(
         .map(String::as_str)
         .collect();
     writable.sort_unstable();
-    let remedy = if memstead_base::workspace_store::is_mem_repo_shaped(workspace_root) {
+    if memstead_base::workspace_store::is_mem_repo_shaped(workspace_root) {
         // `mem init` is refused by default: a mem-repo workspace creates
         // nothing until a `[[mem_management.create]]` rule admits the name.
         // Naming the second step only would hand the reader a command that
@@ -496,7 +648,7 @@ fn absent_destination_note(
         // the two disagree.
         let pin = suggested_schema_pin(engine, &writable);
         if admitted {
-            format!("Create it before writing: `memstead mem init {dest} --schema {pin}`.")
+            format!("Create it: `memstead mem init {dest} --schema {pin}`.")
         } else {
             format!(
                 "Creating it takes two steps — this workspace admits no mem name yet, \
@@ -542,11 +694,7 @@ fn absent_destination_note(
              Editing `destination_mem` alone is not enough — the record's folder \
              decides which mem's anchors resolve."
         )
-    };
-    Some(format!(
-        "**This mem does not exist in this workspace yet.** {remedy} Until then, \
-         every mutation this brief asks for will refuse."
-    ))
+    }
 }
 
 /// Assemble the discovery brief from the engine's live view of the

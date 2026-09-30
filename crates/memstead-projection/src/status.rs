@@ -20,7 +20,7 @@ use serde::Serialize;
 use crate::advance::read_advance_store;
 use crate::cursor::source_moved;
 use crate::findings::{FindingClass, current_findings};
-use crate::render::mem_predates_binding;
+use crate::render::{UnservedDestination, mem_predates_binding, unserved_destination};
 use memstead_base::Engine;
 use memstead_base::binding::CoverageSemantics;
 use memstead_base::binding_run::{
@@ -93,8 +93,9 @@ pub struct ProjectionStatus {
     pub advance: AdvanceCounts,
     /// This binding's own verdict, by the rollup's exact rules:
     /// `onboarding` when the mem predates its binding (never red);
-    /// `action-needed` on open findings that count as actions or a moved
-    /// source; `clean` otherwise.
+    /// `action-needed` on open findings that count as actions, a moved
+    /// source, or a destination mem this workspace does not serve (the
+    /// rollup's actions name which, with the remedy); `clean` otherwise.
     pub verdict: RollupVerdict,
     /// True when a change-detectable source moved past its `#synced`
     /// baseline. Always false for onboarding bindings (scan skipped).
@@ -107,6 +108,10 @@ pub struct ProjectionStatus {
 /// [`projection_rollup`] resolve from — one truth, two projections.
 struct BindingResolution {
     onboarding: bool,
+    /// The destination mem this workspace does not serve, when it is not.
+    /// Such a binding is neither onboarding nor clean: verify and the sync
+    /// brief refuse it, so it counts as an action and names its remedy.
+    unserved: Option<UnservedDestination>,
     source_moved: bool,
     findings: FindingCounts,
     /// Whether the findings/moved state counts as an action under the
@@ -146,9 +151,23 @@ fn resolve_binding_status(
 ) -> BindingResolution {
     #[cfg(test)]
     BINDING_SCANS.with(|c| c.set(c.get() + 1));
+    // Before the adopt predicate: a mem that is not served does not predate
+    // its binding, and nothing below (source movement, the findings store)
+    // says anything about a mem that is not there.
+    if let Some(unserved) = unserved_destination(engine, workspace_root, resolved) {
+        return BindingResolution {
+            onboarding: false,
+            unserved: Some(unserved),
+            source_moved: false,
+            findings: FindingCounts::default(),
+            has_action: true,
+            uncovered_counts: false,
+        };
+    }
     if mem_predates_binding(engine, resolved) {
         return BindingResolution {
             onboarding: true,
+            unserved: None,
             source_moved: false,
             findings: FindingCounts::default(),
             has_action: false,
@@ -180,6 +199,7 @@ fn resolve_binding_status(
         || findings.queued > 0;
     BindingResolution {
         onboarding: false,
+        unserved: None,
         source_moved,
         findings,
         has_action,
@@ -356,8 +376,9 @@ pub enum RollupVerdict {
     /// verdict** — 0% anchored is expected onboarding, not a defect.
     Onboarding,
     /// One or more bindings carry open findings (drift, unresolvable anchors,
-    /// uncovered artifacts under exhaustive coverage, adjudication backlog) or
-    /// have a source that moved past its `#synced` baseline.
+    /// uncovered artifacts under exhaustive coverage, adjudication backlog),
+    /// have a source that moved past its `#synced` baseline, or write into a
+    /// destination mem this workspace does not serve.
     ActionNeeded,
 }
 
@@ -427,6 +448,11 @@ struct Candidate {
 /// **onboarding** action, never a red one — its uncovered artifacts are the
 /// expected first-sync backfill worklist, so pre-binding history alone never
 /// drives an `action-needed` verdict.
+///
+/// A binding whose destination mem this workspace does not serve is not
+/// onboarding: there is no mem to backfill. It contributes the top-ranked
+/// `action-needed` action, naming the mem, the typed code verify and the sync
+/// brief refuse it with, and the remedy.
 pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
     projection_overview(engine, workspace_root).rollup
 }
@@ -443,11 +469,30 @@ fn rollup_from_scans(total: usize, scans: &[(String, Option<BindingResolution>)]
     let mut candidates: Vec<Candidate> = Vec::new();
     let mut action_bindings = 0usize;
     let mut onboarding_bindings = 0usize;
+    let mut unserved_bindings = 0usize;
 
     for (binding_id, resolution) in scans {
         let Some(resolution) = resolution else {
             continue;
         };
+
+        // A destination the workspace does not serve outranks every other
+        // action: nothing else about the binding can be measured until it is
+        // served, and verify and the sync brief refuse it. Its remedy is the
+        // one those refusals carry.
+        if let Some(unserved) = &resolution.unserved {
+            unserved_bindings += 1;
+            candidates.push(Candidate {
+                severity: 7,
+                text: format!(
+                    "`{binding_id}`: {unserved} ({}), so verify and the sync brief refuse this \
+                     binding. {}",
+                    unserved.code(),
+                    unserved.remedy
+                ),
+            });
+            continue;
+        }
 
         // Adopt: a mem that predates its binding is onboarding, never a red
         // verdict. Its uncovered artifacts are the backfill worklist, so we skip
@@ -546,7 +591,7 @@ fn rollup_from_scans(total: usize, scans: &[(String, Option<BindingResolution>)]
     candidates.sort_by_key(|c| std::cmp::Reverse(c.severity));
     let actions: Vec<String> = candidates.into_iter().take(3).map(|c| c.text).collect();
 
-    let verdict = if action_bindings > 0 {
+    let verdict = if action_bindings > 0 || unserved_bindings > 0 {
         RollupVerdict::ActionNeeded
     } else if onboarding_bindings > 0 {
         RollupVerdict::Onboarding
@@ -554,10 +599,20 @@ fn rollup_from_scans(total: usize, scans: &[(String, Option<BindingResolution>)]
         RollupVerdict::Clean
     };
 
+    let unserved_clause = "write into a mem this workspace does not serve";
     let headline = match verdict {
-        RollupVerdict::ActionNeeded => format!(
+        RollupVerdict::ActionNeeded if unserved_bindings == 0 => format!(
             "Action needed — {action_bindings} of {total} projection(s) have open findings or a \
              moved source."
+        ),
+        RollupVerdict::ActionNeeded if action_bindings == 0 => {
+            format!(
+                "Action needed: {unserved_bindings} of {total} projection(s) {unserved_clause}."
+            )
+        }
+        RollupVerdict::ActionNeeded => format!(
+            "Action needed: {action_bindings} of {total} projection(s) have open findings or a \
+             moved source, and {unserved_bindings} {unserved_clause}."
         ),
         RollupVerdict::Onboarding => format!(
             "Onboarding — {onboarding_bindings} of {total} projection(s) predate their binding; a \

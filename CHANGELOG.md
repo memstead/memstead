@@ -23,6 +23,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   baseline moves only with `--advance`. The parity matrix aligns `retype`,
   `check`, `mem set-schema` and the mem-configure writes, and the README
   shows how to check a release archive's build provenance.
+- **`projection verify` refuses a binding whose destination mem does not
+  exist.** It used to complete with the onboarding verdict ("this mem
+  predates its binding"), record every in-scope artifact as an uncovered
+  finding and exit 0, so a CI gate running verify passed on a mem that was
+  never there (with `--advance` it then failed writing the baseline). The
+  engine's verify pass now refuses before it observes or records anything,
+  with the engine's own code for the mem: `UNKNOWN_MEM` (exit 3) for a mem
+  that does not exist, `MEM_QUARANTINED` (exit 5, as before) for a
+  quarantined one. The message carries the command that creates the mem, or
+  re-declares the binding, in the workspace's shape. `brief --verify` and
+  `brief --sync`, picks from the `--all` rotation included, refuse the same
+  way, and `memstead status` reports such a binding as `action-needed` with
+  that remedy instead of as onboarding. The build brief still renders for a
+  binding whose mem does not exist yet and names the same remedy.
 
 ## [0.22.0] - 2026-09-30
 

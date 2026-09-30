@@ -218,11 +218,12 @@ Nothing repairs it. Deleting the row would tidy the sidecar and erase the only
 remaining evidence that something wrote the mem behind the engine's back.
 
 The check reads an absence from the loaded graph, which is only evidence when
-the graph holds everything the mem has. Where it does not (a mem that is not
-mounted, one that is quarantined, one whose lazy load has not run, or one with
-a file that failed to parse) no row is called dangling and the report says why
-instead. A clean anchor axis over an entity end nobody examined would be exactly
-the false assurance this contract exists to prevent.
+the graph holds everything the mem has. Where it does not (a mem whose lazy load
+has not run, or one with a file that failed to parse) no row is called dangling
+and the report says why instead. A mem that is not mounted or is quarantined gets
+no report at all: both surfaces refuse it before measuring. A clean anchor axis
+over an entity end nobody examined would be exactly the false assurance this
+contract exists to prevent.
 
 ## A figure never travels without its population
 
@@ -300,6 +301,16 @@ Where a medium cannot support a measurement, the report says so as a **degradati
 rather than faking a green result. A medium with no change signal renders freshness
 as "unknowable," and a green freshness verdict is structurally unreachable for it —
 the contract would rather admit a blind spot than paper over one.
+
+Where there is no mem to measure, there is no report. A binding whose destination
+mem this workspace does not serve (one that does not exist yet, which
+`projection init` allows, or one quarantined at boot) is refused before verify
+observes or records anything: `UNKNOWN_MEM` (exit 3) or `MEM_QUARANTINED`
+(exit 5), with the remedy in the message. A report over it would count every
+in-scope artifact as uncovered and every anchor as absent, and the onboarding
+verdict ("this mem predates its binding") would be false: a mem that is not there
+predates nothing. The verify and sync briefs refuse the same binding the same way,
+and `memstead status` lists it as an action rather than as onboarding.
 
 ## What the contract does not cover yet
 

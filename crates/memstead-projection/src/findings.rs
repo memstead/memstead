@@ -586,6 +586,28 @@ pub enum FindingsError {
         .0.facet, .0.medium_type, .0.reason
     )]
     FullWalkNonEnumerable(FullResyncRefusal),
+    /// The binding's destination mem is not served by this workspace: it
+    /// does not exist, left the mount roster, or is quarantined
+    /// ([`crate::render::unserved_destination`]). Verify refuses before it
+    /// observes or records anything. Measuring a mem that is not there reads
+    /// every artifact as uncovered and every anchor as absent, and until this
+    /// refusal existed a missing mem completed with the onboarding verdict
+    /// ("this mem predates its binding") and exit 0, so a CI gate passed on
+    /// nothing. The typed code is the engine's own lookup code
+    /// ([`crate::render::UnservedDestination::code`]).
+    #[error(
+        "verify refused for `{binding}`: {unserved}, so every artifact would read as \
+         uncovered and every anchor as absent, which is a measurement this run cannot \
+         honestly make. {}",
+        .unserved.remedy
+    )]
+    DestinationUnserved {
+        /// The binding id that was asked to verify.
+        binding: String,
+        /// Which mem, why it is not served, and the remedy (boxed: it carries
+        /// an engine error, far larger than every other variant).
+        unserved: Box<crate::render::UnservedDestination>,
+    },
 }
 
 /// The outcome of a [`verify_binding`] pass.
@@ -1265,6 +1287,18 @@ fn run_verify(
 ) -> Result<VerifyOutcome, FindingsError> {
     let binding_id = resolved.name.clone();
     let (mem, name) = split_binding_id(&binding_id)?;
+
+    // The destination first: with no mem to measure, every other question
+    // this pass asks is moot. Checked here, in the engine, so every caller of
+    // the verify pass refuses alike, and above every store the pass touches
+    // (the rotation and run counter caches, the exclusion ledger, the findings
+    // store), so a refused run leaves all of them as it found them.
+    if let Some(unserved) = crate::render::unserved_destination(engine, workspace_root, resolved) {
+        return Err(FindingsError::DestinationUnserved {
+            binding: binding_id,
+            unserved: Box::new(unserved),
+        });
+    }
 
     // Full measurement requires every primary facet to be enumerable — refuse
     // the whole run typed before observing anything (never a fake-complete

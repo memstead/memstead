@@ -2337,6 +2337,215 @@ fn verify_refuses_unreachable_source_with_typed_error() {
     );
 }
 
+/// A binding whose destination mem does not exist in the workspace: the
+/// order `projection init` deliberately allows (binding first, mem later).
+/// Pre-fix, verify completed over it with the onboarding verdict ("this mem
+/// predates its binding") and exit 0, recorded every in-scope artifact as an
+/// uncovered finding against a mem that was never there, and a CI gate
+/// running verify passed on nothing. Every engine surface that measures,
+/// repairs or reports the destination must now agree that it is not served:
+/// verify (sampled and full) and both repair-side briefs refuse with the
+/// engine's own `UNKNOWN_MEM`, the adopt predicate answers no, and the status
+/// rollup reports an action instead of onboarding. The refusals write nothing.
+#[test]
+fn every_surface_refuses_a_destination_mem_that_does_not_exist() {
+    use crate::render::{
+        RenderBriefError, mem_predates_binding, render_sync_brief_for, render_verify_brief_for,
+    };
+    use crate::status::{RollupVerdict, projection_overview};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    // One real mem, so the workspace is not empty and the remedy has a mem
+    // to name; the binding points past it at `ghost`.
+    let mem_dir = root.join("mem");
+    std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+    std::fs::write(
+        mem_dir.join(".memstead").join("config.json"),
+        r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join(".memstead")).unwrap();
+    std::fs::write(
+        root.join(".memstead").join("workspace.toml"),
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    )
+    .unwrap();
+    memstead_base::FileWorkspaceStore::new()
+        .save_state(
+            root,
+            &Workspace {
+                mounts: vec![Mount {
+                    mem: "engine".to_string(),
+                    schema: Some("default@1.0.0".parse().unwrap()),
+                    storage: MountStorage::Folder {
+                        path: mem_dir.clone(),
+                    },
+                    capability: MountCapability::Write,
+                    lifecycle: MountLifecycle::Eager,
+                    cross_linkable: false,
+                    migration_target: None,
+                }],
+                settings: WorkspaceSettings::default(),
+            },
+        )
+        .unwrap();
+    // A source that is there and has content, so nothing but the missing
+    // destination can explain a refusal.
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src").join("a.rs"), "fn a() {}\n").unwrap();
+    std::fs::write(root.join("src").join("b.rs"), "fn b() {}\n").unwrap();
+    write_binding(
+        root,
+        "ghost",
+        "graph",
+        &Binding {
+            version: BINDING_VERSION,
+            intent: None,
+            sources: vec![memstead_base::pipeline::Source {
+                name: "graph".to_string(),
+                medium_type: MediumType::Codebase,
+                pointer: "src".to_string(),
+                change_detection: None,
+                scope: vec![PatternEntry {
+                    path: "**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                engagement: None,
+                preparation: None,
+            }],
+            reference_mems: Vec::new(),
+            destination_mem: "ghost".to_string(),
+            deny_paths: Vec::new(),
+            coverage_semantics: None,
+            rules: None,
+            prune: None,
+            operations: Operations {
+                build: None,
+                sync: Some(memstead_base::binding::SyncOperation {
+                    trigger: IngestTrigger::Manual,
+                    batch_size: 20,
+                }),
+                verify: Some(VerifyOperation {
+                    trigger: IngestTrigger::Manual,
+                    batch_size: 20,
+                    adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                    full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+                }),
+            },
+        },
+    )
+    .unwrap();
+
+    let engine = Engine::from_workspace_root(root).unwrap();
+    let configs = load_pipeline_configs(root).unwrap();
+    let binding = &configs.bindings[0].config;
+    let resolved = resolve_binding_run("ghost/graph", binding).unwrap();
+
+    // Verify, sampled and full: refused, typed, with the engine's own code.
+    for (label, result) in [
+        ("sampled", verify_binding(&engine, root, binding, &resolved)),
+        (
+            "full",
+            verify_binding_full(&engine, root, binding, &resolved),
+        ),
+    ] {
+        let err = match result {
+            Err(e) => e,
+            Ok(outcome) => panic!(
+                "{label}: verify over a mem that does not exist must refuse, but it completed \
+                 and recorded {} finding(s)",
+                outcome.recorded
+            ),
+        };
+        let message = err.to_string();
+        match &err {
+            FindingsError::DestinationUnserved { binding, unserved } => {
+                assert_eq!(binding, "ghost/graph", "{label}");
+                assert_eq!(unserved.mem, "ghost", "{label}");
+                assert_eq!(unserved.code(), "UNKNOWN_MEM", "{label}");
+            }
+            other => panic!("{label}: expected DestinationUnserved, got {other:?}"),
+        }
+        assert!(
+            message.contains("`ghost` does not exist in this workspace"),
+            "{label}: the refusal names the mem and its absence: {message}"
+        );
+        assert!(
+            !message.contains("predates"),
+            "{label}: a mem that is not there predates nothing: {message}"
+        );
+    }
+
+    // Nothing recorded, nothing scheduled: the refusal sits above the
+    // findings store and the rotation / run-counter caches.
+    assert!(
+        read_findings_store(root, "ghost", "graph")
+            .unwrap()
+            .is_none(),
+        "a refused verify must not write a findings store"
+    );
+    assert!(
+        !root
+            .join(".memstead.cache/ingest/refinement/ghost")
+            .exists(),
+        "a refused verify must not tick the verify-run counter or the rotation"
+    );
+
+    // The adopt predicate the report, the sync brief and the status read.
+    assert!(
+        !mem_predates_binding(&engine, &resolved),
+        "a destination that is not served never predates its binding"
+    );
+
+    // The verify and sync briefs refuse alike.
+    for (label, result) in [
+        (
+            "verify brief",
+            render_verify_brief_for(&engine, root, "ghost/graph"),
+        ),
+        (
+            "sync brief",
+            render_sync_brief_for(&engine, root, "ghost/graph"),
+        ),
+    ] {
+        match result {
+            Err(RenderBriefError::DestinationUnserved { binding, unserved }) => {
+                assert_eq!(binding, "ghost/graph", "{label}");
+                assert_eq!(unserved.code(), "UNKNOWN_MEM", "{label}");
+            }
+            Err(other) => panic!("{label}: expected DestinationUnserved, got {other:?}"),
+            Ok(brief) => panic!("{label}: rendered for a mem that does not exist:\n{brief}"),
+        }
+    }
+
+    // The status rollup: an action naming the mem and the code, never the
+    // onboarding verdict.
+    let overview = projection_overview(&engine, root);
+    assert_eq!(overview.rollup.verdict, RollupVerdict::ActionNeeded);
+    assert_eq!(overview.bindings.len(), 1);
+    assert_eq!(overview.bindings[0].verdict, RollupVerdict::ActionNeeded);
+    let top = overview
+        .rollup
+        .actions
+        .first()
+        .expect("the unserved destination is an action");
+    assert!(
+        top.contains("`ghost/graph`") && top.contains("UNKNOWN_MEM"),
+        "the top action names the binding and the code: {top}"
+    );
+    assert!(
+        overview
+            .rollup
+            .actions
+            .iter()
+            .chain(std::iter::once(&overview.rollup.headline))
+            .all(|line| !line.contains("predate")),
+        "no status line may call a missing mem onboarding: {:?}",
+        overview.rollup
+    );
+}
+
 #[test]
 fn completed_verify_records_the_verified_baseline() {
     let tmp = tempfile::tempdir().unwrap();

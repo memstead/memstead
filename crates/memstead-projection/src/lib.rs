@@ -80,8 +80,9 @@ pub use refinement::{
     next_rotation_batch,
 };
 pub use render::{
-    RenderBriefError, mode_name, render_ingest_brief, render_sync_brief_budgeted,
-    render_sync_brief_for, render_verify_brief_for,
+    RenderBriefError, UnservedDestination, mode_name, render_ingest_brief,
+    render_sync_brief_budgeted, render_sync_brief_for, render_verify_brief_for,
+    unserved_destination,
 };
 pub use report::{
     ALLOWED_REPORT_INCLUDE_KEYS, AnchorComposition, DEFAULT_REPORT_BUDGET, DenominatorBasis,

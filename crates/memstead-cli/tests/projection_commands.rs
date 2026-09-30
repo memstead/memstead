@@ -1724,6 +1724,26 @@ fn brief_all_empty_store_reports_no_bindings() {
     );
 }
 
+/// Create the mem `mem` in the mem-repo workspace `ws`: admit the name, then
+/// `mem init`. `mem-repo init` creates no mem, so a fixture that declares a
+/// binding with `projection init` alone has a destination that does not
+/// exist, and the verify and sync briefs refuse such a destination
+/// (`UNKNOWN_MEM`). Tests that exercise those briefs create it first.
+fn create_mem(ws: &Path, mem: &str) {
+    for args in [
+        &[
+            "workspace",
+            "allow-create",
+            mem,
+            "--schema",
+            "default@1.0.0",
+        ][..],
+        &["mem", "init", mem, "--schema", "default@1.0.0"],
+    ] {
+        memstead().current_dir(ws).args(args).assert().success();
+    }
+}
+
 /// `projection brief <binding> --verify` renders the verify brief:
 /// measurement + capped-adjudication instructions only, with the explicit
 /// no-mutation refusal and NO repair block. Read-only on the mem.
@@ -1735,6 +1755,7 @@ fn brief_verify_renders_measurement_only() {
         .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
         .assert()
         .success();
+    create_mem(&ws, "ws");
     memstead()
         .current_dir(&ws)
         .args([
@@ -1783,6 +1804,11 @@ fn brief_verify_renders_measurement_only() {
 /// `projection brief <binding> --sync` renders the sync brief: the
 /// sole-maintenance-writer prompt with the absorbed reconcile conservatism. A
 /// fresh mem (no anchors, never synced) triggers the adopt / first-sync framing.
+///
+/// The mem is created, not merely named: until 2026-09-30 this fixture
+/// declared the binding into a mem that did not exist and pinned the adopt
+/// framing over it, which was the false claim ("this mem predates its
+/// binding") the unserved-destination refusal removed.
 #[test]
 fn brief_sync_renders_sole_writer_with_conservatism() {
     let tmp = TempDir::new().unwrap();
@@ -1791,6 +1817,7 @@ fn brief_sync_renders_sole_writer_with_conservatism() {
         .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
         .assert()
         .success();
+    create_mem(&ws, "ws");
     memstead()
         .current_dir(&ws)
         .args([
@@ -1844,6 +1871,7 @@ fn brief_sync_refuses_sync_disabled_binding_with_remedy() {
         .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
         .assert()
         .success();
+    create_mem(&ws, "ws");
     memstead()
         .current_dir(&ws)
         .args([
@@ -2605,6 +2633,9 @@ fn brief_all_any_dispatches_to_the_loop_declared_operation() {
     let (_tmp, ws) = operation_workspace();
     set_trigger(&ws, "build", "manual");
     set_trigger(&ws, "verify", "loop");
+    // `operation_workspace` only declares the binding; the verify brief this
+    // test dispatches to renders only over a mem that is there.
+    create_mem(&ws, "ws");
 
     let out = memstead()
         .current_dir(&ws)
@@ -2984,12 +3015,16 @@ fn a_quarantined_destination_is_refused_and_all_three_stores_are_untouched() {
             "brief",
             vec!["projection", "brief", "engine/graph", "--verify"],
         ),
+        (
+            "sync brief",
+            vec!["projection", "brief", "engine/graph", "--sync"],
+        ),
     ] {
         let out = memstead()
             .current_dir(root)
             .args(&args)
             .assert()
-            .failure()
+            .code(5)
             .get_output()
             .clone();
         let text = format!(
@@ -3022,6 +3057,176 @@ fn a_quarantined_destination_is_refused_and_all_three_stores_are_untouched() {
             "{label}: the mem config, and so the #verified token, must be byte-identical"
         );
     }
+}
+
+/// The sibling of the quarantine test above, for a destination mem that does
+/// not exist at all: the order `projection init` deliberately allows (binding
+/// first, mem later). Pre-fix, `projection verify` completed over it with
+/// "this mem predates its binding", recorded every in-scope artifact as an
+/// uncovered finding against a mem that was never there, and exited 0, so a
+/// CI gate running verify passed on nothing. Now every flag a gate might pass
+/// refuses with the engine's own `UNKNOWN_MEM` (exit 3, the not-found status
+/// that code carries on every command) before anything is recorded; the
+/// verify and sync briefs refuse alike; `status` reports an action instead of
+/// onboarding. Then the remedy the refusal prints, followed verbatim, makes
+/// the same verify complete: a refusal is only honest if its way out works.
+#[test]
+fn verify_refuses_a_destination_mem_that_does_not_exist() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("a.rs"), b"pub fn a() {}\n").unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "absent-mem",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "code",
+        ])
+        .assert()
+        .success();
+
+    let mut remedy = String::new();
+    for flags in [
+        &[][..],
+        &["--full"],
+        &["--fail-on-findings"],
+        &["--advance"],
+        &["--fail-on-inconclusive"],
+        &[
+            "--full",
+            "--fail-on-findings",
+            "--fail-on-inconclusive",
+            "--advance",
+        ],
+    ] {
+        let out = memstead()
+            .current_dir(&ws)
+            .args(["--json", "projection", "verify", "absent-mem/code"])
+            .args(flags)
+            .assert()
+            .code(3)
+            .get_output()
+            .stdout
+            .clone();
+        let env: Value = serde_json::from_slice(&out).expect("the refusal is a JSON envelope");
+        assert_eq!(env["code"], "UNKNOWN_MEM", "{flags:?}: {env}");
+        assert_eq!(env["details"]["mem"], "absent-mem", "{flags:?}: {env}");
+        assert_eq!(
+            env["details"]["binding"], "absent-mem/code",
+            "{flags:?}: {env}"
+        );
+        let message = env["message"].as_str().expect("message");
+        assert!(
+            message.contains("`absent-mem` does not exist in this workspace"),
+            "{flags:?}: the refusal names the mem and its absence: {message}"
+        );
+        assert!(
+            !message.contains("predates"),
+            "{flags:?}: a mem that is not there predates nothing: {message}"
+        );
+        remedy = message.to_string();
+    }
+    assert!(
+        !ws.join(".memstead/state/findings/absent-mem").exists(),
+        "a refused verify records no findings"
+    );
+
+    for flag in ["--verify", "--sync"] {
+        let out = memstead()
+            .current_dir(&ws)
+            .args(["--json", "projection", "brief", "absent-mem/code", flag])
+            .assert()
+            .code(3)
+            .get_output()
+            .stdout
+            .clone();
+        let env: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(env["code"], "UNKNOWN_MEM", "brief {flag}: {env}");
+    }
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "status"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["rollup"]["verdict"], "action-needed", "{env}");
+    let rollup = env["rollup"].to_string();
+    assert!(
+        rollup.contains("UNKNOWN_MEM") && !rollup.contains("predate"),
+        "status names the unserved destination, never onboarding: {rollup}"
+    );
+
+    // Follow the remedy verbatim. A span that is a proper prefix of another
+    // (the bare `memstead mem init` the two-step sentence names) is a
+    // mention, not a command.
+    let spans: Vec<&str> = remedy
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|c| c.starts_with("memstead "))
+        .collect();
+    let commands: Vec<&str> = spans
+        .iter()
+        .copied()
+        .filter(|c| {
+            !spans
+                .iter()
+                .any(|o| o != c && o.starts_with(&format!("{c} ")))
+        })
+        .collect();
+    assert!(
+        !commands.is_empty(),
+        "the refusal must carry runnable commands, got {spans:?} from: {remedy}"
+    );
+    for command in &commands {
+        let run = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(command.replace("memstead ", &format!("{} ", memstead_bin().display())))
+            .current_dir(&ws)
+            .output()
+            .expect("shell runs");
+        assert!(
+            run.status.success(),
+            "the remedy's command must run: {command}\n{}",
+            String::from_utf8_lossy(&run.stderr),
+        );
+    }
+
+    // The same verify now completes over a mem that exists, and the
+    // onboarding verdict it gives is, this time, true.
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "projection", "verify", "absent-mem/code"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["format"], "memstead-verify/v1", "{env}");
+    assert!(
+        env["rollup"]["because"]
+            .as_str()
+            .is_some_and(|b| b.contains("predates its binding")),
+        "an existing, never-synced mem is onboarding: {env}"
+    );
 }
 
 /// C6 AC1: a BARE `projection verify` leaves the destination mem's config

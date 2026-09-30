@@ -32,7 +32,7 @@ memstead projection verify my-graph/some-repo --full
 On a fresh binding this reports **0% anchored** and says so plainly — that is onboarding, not drift. The number it gives you is the denominator: how many source artifacts are in scope after the binding's deny list.
 
 :::caution
-Run this only once the destination mem exists — `quickstart` and the commands above create it. Against a binding whose mem is not there yet, a plain `verify` still completes and reports every in-scope artifact as uncovered, which says nothing about a mem that does not exist; with `--advance` it records its findings and then fails writing the baseline (`PROJECTION_VERIFY_BASELINE_FAILED: unknown mem`). If you are unsure, render the brief first (step 2): its Destination block says whether the mem is there and what to do about it in your workspace shape.
+Verify needs the destination mem to exist; `quickstart` and the commands above create it. Against a binding whose mem is not there yet, verify refuses with `UNKNOWN_MEM` (exit 3) whatever flags you pass, records nothing, and its message carries the command that creates the mem (or, in a filesystem-mem workspace, re-declares the binding against the mem you have). The brief (step 2) names the same fix in its Destination block, and the verify and sync briefs refuse the same way until it is done.
 :::
 
 :::note
