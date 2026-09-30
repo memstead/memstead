@@ -820,7 +820,7 @@ fn newest_builtin_version<'a>(
 /// backend — folder `.memstead/schemas/` or the git-branch
 /// `__MEMSTEAD:schemas/` ref, layered first into the catalogue so it
 /// wins on `(name, version)` collision), **built-in** (compiled into the
-/// binary), **remote** (memstead.io, reserved, not implemented). The
+/// binary), **remote** (a registry, reserved, not implemented). The
 /// order is fixed in code — local-over-built-in by the catalogue's
 /// insertion precedence, remote always last. On a miss it yields the
 /// per-source [`SchemaSourceDiagnostic`] trail the `SCHEMA_NOT_FOUND`

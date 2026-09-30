@@ -14,7 +14,7 @@ Terms like *mem*, *schema*, *workspace*, and *entity* have precise meanings: the
 The install script fetches the latest [release](https://github.com/memstead/memstead/releases) binaries: `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to):
 
 ```bash
-curl -sSf https://memstead.io/install.sh | sh
+curl -sSf https://memstead.com/install.sh | sh
 ```
 
 Or via Homebrew (macOS / Linux):

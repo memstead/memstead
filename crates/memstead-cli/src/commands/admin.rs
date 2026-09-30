@@ -46,7 +46,7 @@ pub struct TakedownArgs {
     #[arg(long, value_name = "TOKEN")]
     pub token: Option<String>,
 
-    /// Registry URL (overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io).
+    /// Registry URL (overrides `MEMSTEAD_REGISTRY`; one of the two is required).
     #[arg(long, value_name = "URL")]
     pub registry: Option<String>,
 }
@@ -66,7 +66,7 @@ pub struct DenylistArgs {
     #[arg(long, value_name = "TOKEN")]
     pub token: Option<String>,
 
-    /// Registry URL (overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io).
+    /// Registry URL (overrides `MEMSTEAD_REGISTRY`; one of the two is required).
     #[arg(long, value_name = "URL")]
     pub registry: Option<String>,
 }
@@ -88,7 +88,7 @@ pub fn run_takedown(ctx: &CliContext, args: TakedownArgs) -> anyhow::Result<()> 
         .into());
     }
 
-    let base = registry::registry_base(args.registry.as_deref());
+    let base = registry::registry_base(args.registry.as_deref())?;
     let host = registry::registry_host(&base);
     let client = registry::build_http()?;
     let token = resolve_admin_token(&host, args.token.as_deref())?;
@@ -126,7 +126,7 @@ pub fn run_denylist(ctx: &CliContext, args: DenylistArgs) -> anyhow::Result<()> 
         .into());
     }
 
-    let base = registry::registry_base(args.registry.as_deref());
+    let base = registry::registry_base(args.registry.as_deref())?;
     let host = registry::registry_host(&base);
     let client = registry::build_http()?;
     let token = resolve_admin_token(&host, args.token.as_deref())?;

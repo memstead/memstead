@@ -83,7 +83,7 @@ DOCUMENTED_JOB_LINES = [
     # The guide's own cap prose says a shallow clone hides drift, so this is
     # load-bearing, not decoration.
     "fetch-depth: 0",
-    "https://memstead.io/install.sh",
+    "https://memstead.com/install.sh",
     'echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"',
     # Step 1 pipes through `tee`; without pipefail the step's status is
     # tee's, so exit 6 is swallowed and the gate silently stops failing.

@@ -420,7 +420,7 @@ else
     say "this machine (not a channel)" "$local_v, in step"
   else
     say "this machine (not a channel)" "${local_v:-unreadable}, BEHIND $WANT"
-    say "" "→ curl -sSf https://memstead.io/install.sh | sh"
+    say "" "→ curl -sSf https://memstead.com/install.sh | sh"
   fi
 fi
 

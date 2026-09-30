@@ -23,7 +23,7 @@ To look before installing anything, [memstead.ai](https://memstead.ai) serves th
 **1. Install the binaries.** The install script fetches the latest [release](https://github.com/memstead/memstead/releases) binaries: `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to):
 
 ```bash
-curl -sSf https://memstead.io/install.sh | sh
+curl -sSf https://memstead.com/install.sh | sh
 ```
 
 Or via Homebrew (macOS / Linux):
@@ -146,9 +146,11 @@ Memstead ships no scheduler, no notifications, and no recurrence engine, by desi
 
 ## Share and reuse mems
 
-Publish a mem to the [memstead.io](https://memstead.io) registry, and install someone else's with one command. Domain roles: **memstead.io** hosts the registry and the install script; **memstead.com** hosts the docs and contact addresses (`hello@` / `security@memstead.com`).
+Publish a mem to a Memstead registry, and install someone else's with one command. The CLI knows no registry by name: point it at one with `--registry <URL>` or the `MEMSTEAD_REGISTRY` environment variable. **memstead.com** is the engine's public site: it hosts the docs, the install script and the contact addresses (`hello@` / `security@memstead.com`).
 
 ```bash
+export MEMSTEAD_REGISTRY=https://registry.example.com
+
 memstead export --format mem -o my.mem
 memstead publish my.mem        # GitHub Device Flow on first use
 

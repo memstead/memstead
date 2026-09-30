@@ -7,6 +7,35 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: the CLI knows no registry by name.** `publish`, `install
+  <scope>/<name>`, `login`, `logout` and `unpublish` take the registry
+  from `--registry <URL>`, then `MEMSTEAD_REGISTRY`; with neither they
+  refuse with the new typed code `REGISTRY_NOT_CONFIGURED` instead of
+  falling back to a built-in host. Installing a local `.mem` file needs
+  no registry, and `publish --dry-run` previews without one (it reports
+  the registry as not configured).
+- **Breaking: login reads its OAuth settings from the registry.** The
+  binary no longer carries a GitHub OAuth client id. Before the device
+  flow, `login` (and `publish`'s first-use login) reads `GET
+  <registry>/api/auth/config`, which answers `{"github_client_id":
+  "<id>", "github_scope": "read:user"}` (scope optional, default
+  `read:user`). A registry that does not answer with a usable client id
+  refuses with the new typed code `REGISTRY_AUTH_CONFIG_UNAVAILABLE`.
+- **The installer moved to `https://memstead.com/install.sh`.** The
+  README, the getting-started and verify-in-CI guides, the Claude Code
+  setup skill and `quickstart`'s missing-binary hint now point there.
+- **Engine commit identities use `@memstead.com`.** The committer
+  (`engine <noreply@memstead.com>`) and the derived author addresses
+  (`<client>@memstead.com`, `external@memstead.com`) changed domain.
+  Nothing parses these addresses: actor and client are read from the
+  `Actor:` and `Client:` trailers, so history written with the old
+  domain reads unchanged.
+- **`init` no longer creates `.memstead/memstead-io/`.** Nothing has
+  read the directory since the archive resolver it served was removed;
+  an existing one is left in place and can be deleted.
+
 ### Fixed
 
 - **The release-body guard sits below every size measured to work.**

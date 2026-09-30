@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-15T06:14:17Z
-last_modified: 2026-09-10T17:54:47Z
+last_modified: 2026-09-30T10:40:48Z
 status: accepted
 decided_on: 2026-08-15
 deciders: operator, implementing agent
@@ -26,11 +26,11 @@ The entry page warned honestly that libraries may lag and told readers to check 
 The deeper cause was structural: its own version line meant nothing connected the package's number to the engine's, so the skew accumulated silently across three releases. Plan 02 had already tried and failed to close the gap by *describing* it — a generated compatibility table proved underivable and was withdrawn (see [[engineering--a-surfaces-claim-about-itself-is-derived-or-absent]]). Matching the numbers removes the question instead of answering it.
 
 ## Consequences
-`release-verify.sh` failed when npm disagreed with the release, so the skew could not accumulate unnoticed again — a compared channel, not a stated skip — until the npm channel closed on 2026-09-05 (memstead.io builds the bundle from the tree since then; the project mem records that decision). The principle keeps binding the crates on crates.io, which `release-verify.sh` compares the same way since 2026-08-15.
+`release-verify.sh` failed when npm disagreed with the release, so the skew could not accumulate unnoticed again — a compared channel, not a stated skip — until the npm channel closed on 2026-09-05 (the registry frontend builds the bundle from the tree since then; the project mem records that decision). The principle keeps binding the crates on crates.io, which `release-verify.sh` compares the same way since 2026-08-15.
 
 The version jump `0.1.2` → `0.7.0` is deliberate and does not auto-upgrade anyone pinned to `^0.1.x`, which is correct: those consumers are on a package that genuinely cannot read current archives.
 
-Every consumer's dependency range now tracks the engine generation. memstead.io's prepared switch had `^0.1.0` hard-coded and would have installed the stale package verbatim — a caret on `0.x` does not cross the minor. Any future prepared switch inherits that trap.
+Every consumer's dependency range now tracks the engine generation. The registry frontend's prepared switch had `^0.1.0` hard-coded and would have installed the stale package verbatim — a caret on `0.x` does not cross the minor. Any future prepared switch inherits that trap.
 
 The cost: a library with no engine-visible change still gets a version bump each release, and the publish is one more act that must actually happen. `release-verify.sh` going red is the mechanism that makes forgetting visible rather than silent.
 

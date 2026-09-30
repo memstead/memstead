@@ -1,8 +1,10 @@
-//! HTTP client for the Memstead registry (memstead.io).
+//! HTTP client for a Memstead registry.
 //!
-//! Thin wrapper around `reqwest::blocking` that knows the two routes
-//! the CLI consumes (`POST /api/publish`, `GET /api/mem/...`) plus
-//! the typed error envelope (`ApiError`) the registry emits.
+//! Thin wrapper around `reqwest::blocking` that knows the routes the CLI
+//! consumes (`POST /api/publish`, `GET /api/mem/...`, `GET
+//! /api/auth/config`) plus the typed error envelope (`ApiError`) a
+//! registry emits. The CLI knows no registry by name: every registry
+//! command needs `--registry <URL>` or `MEMSTEAD_REGISTRY`.
 
 use std::io::Read;
 use std::path::Path;
@@ -10,12 +12,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-
-/// Default registry when no `--registry` / `MEMSTEAD_REGISTRY` is set.
-///
-/// `memstead.io` is the canonical registry. The legacy domain is retired —
-/// it no longer serves the public registry and is not a fallback.
-pub const DEFAULT_REGISTRY: &str = "https://memstead.io";
 
 /// The decoded wire-level error shape the registry returns on any
 /// non-2xx. `variant` is present only for `validation_failed`
@@ -53,15 +49,93 @@ pub struct PublishResponse {
     pub url: String,
 }
 
-/// Resolve the registry base URL in priority order: CLI flag →
-/// `MEMSTEAD_REGISTRY` env → `DEFAULT_REGISTRY`. Trailing slashes are
-/// stripped so callers can unconditionally append route segments.
-pub fn registry_base(explicit: Option<&str>) -> String {
-    let raw = explicit
+/// The registry base URL the caller configured, if any: CLI flag, then
+/// `MEMSTEAD_REGISTRY` env. Blank values count as unset. Trailing slashes
+/// are stripped so callers can unconditionally append route segments.
+pub fn configured_registry(explicit: Option<&str>) -> Option<String> {
+    explicit
         .map(str::to_string)
         .or_else(|| std::env::var("MEMSTEAD_REGISTRY").ok())
-        .unwrap_or_else(|| DEFAULT_REGISTRY.to_string());
-    raw.trim_end_matches('/').to_string()
+        .map(|raw| raw.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Resolve the registry base URL: CLI flag, then `MEMSTEAD_REGISTRY` env.
+/// There is no built-in default registry; with neither set this refuses
+/// with the typed `REGISTRY_NOT_CONFIGURED` code.
+pub fn registry_base(explicit: Option<&str>) -> Result<String, crate::CliError> {
+    configured_registry(explicit).ok_or_else(|| {
+        crate::CliError::new(
+            crate::output::ExitKind::Generic,
+            "REGISTRY_NOT_CONFIGURED",
+            "no registry configured: pass `--registry <URL>` or set `MEMSTEAD_REGISTRY` \
+             to the base URL of the Memstead registry you want to use",
+        )
+    })
+}
+
+/// GitHub OAuth settings a registry publishes at `GET /api/auth/config`:
+/// the client id of the registry's own GitHub OAuth App (device flow is a
+/// public-client protocol, so the id is not a secret) and the scope to
+/// request. The CLI carries no client id of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct AuthConfig {
+    pub github_client_id: String,
+    #[serde(default = "default_github_scope")]
+    pub github_scope: String,
+}
+
+fn default_github_scope() -> String {
+    "read:user".to_string()
+}
+
+/// Fetch the registry's OAuth settings from `<base>/api/auth/config`.
+/// Any failure (unreachable, non-2xx, malformed JSON, empty client id)
+/// refuses with the typed `REGISTRY_AUTH_CONFIG_UNAVAILABLE` code.
+pub fn fetch_auth_config(
+    client: &reqwest::blocking::Client,
+    base: &str,
+) -> Result<AuthConfig, crate::CliError> {
+    let url = format!("{base}/api/auth/config");
+    let refuse = |why: String| {
+        crate::CliError::new(
+            crate::output::ExitKind::Generic,
+            "REGISTRY_AUTH_CONFIG_UNAVAILABLE",
+            format!(
+                "could not read the login configuration from {url}: {why}. Check that \
+                 `--registry` / `MEMSTEAD_REGISTRY` points at a Memstead registry that \
+                 supports GitHub login"
+            ),
+        )
+    };
+    let resp = client
+        .get(&url)
+        .header("accept", "application/json")
+        .send()
+        .map_err(|e| refuse(format!("request failed ({e})")))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(refuse(format!("the registry answered {status}")));
+    }
+    let bytes = resp
+        .bytes()
+        .map_err(|e| refuse(format!("reading the response failed ({e})")))?;
+    let cfg: AuthConfig = serde_json::from_slice(&bytes)
+        .map_err(|e| refuse(format!("the response is not the expected JSON ({e})")))?;
+    if cfg.github_client_id.trim().is_empty() {
+        return Err(refuse(
+            "the response carries an empty `github_client_id`".into(),
+        ));
+    }
+    let github_scope = if cfg.github_scope.trim().is_empty() {
+        default_github_scope()
+    } else {
+        cfg.github_scope
+    };
+    Ok(AuthConfig {
+        github_client_id: cfg.github_client_id,
+        github_scope,
+    })
 }
 
 /// Extract the hostname for credentials keying. Falls back to the
@@ -438,4 +512,111 @@ pub enum DownloadError {
         status: reqwest::StatusCode,
         text: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_registry_is_trimmed_of_trailing_slashes() {
+        assert_eq!(
+            configured_registry(Some("https://registry.example.com/")).as_deref(),
+            Some("https://registry.example.com")
+        );
+    }
+
+    /// A blank explicit value counts as unset and, with no fallback to a
+    /// built-in host, refuses typed. The explicit flag shadows the env
+    /// variable, so the assertion holds whatever the environment carries.
+    #[test]
+    fn blank_registry_refuses_with_typed_code() {
+        let err = registry_base(Some("  ")).unwrap_err();
+        assert_eq!(err.code, "REGISTRY_NOT_CONFIGURED");
+        assert!(
+            err.message.contains("--registry") && err.message.contains("MEMSTEAD_REGISTRY"),
+            "the refusal names both ways to configure a registry: {}",
+            err.message
+        );
+    }
+
+    /// Serve `body` with `status` at `GET /api/auth/config`; returns the
+    /// base URL and the server task.
+    async fn spawn_auth_config(
+        status: u16,
+        body: &'static str,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        use axum::{Router, http::StatusCode, routing::get};
+        let app: Router = Router::new().route(
+            "/api/auth/config",
+            get(move || async move {
+                (
+                    StatusCode::from_u16(status).unwrap(),
+                    [("content-type", "application/json")],
+                    body,
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    async fn fetch(base: String) -> Result<AuthConfig, crate::CliError> {
+        tokio::task::spawn_blocking(move || {
+            let client = build_http().unwrap();
+            fetch_auth_config(&client, &base)
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn auth_config_reads_client_id_and_scope() {
+        let (base, handle) = spawn_auth_config(
+            200,
+            r#"{"github_client_id":"fixture-client","github_scope":"read:user user:email"}"#,
+        )
+        .await;
+        let cfg = fetch(base).await.unwrap();
+        handle.abort();
+        assert_eq!(cfg.github_client_id, "fixture-client");
+        assert_eq!(cfg.github_scope, "read:user user:email");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn auth_config_scope_defaults_to_read_user() {
+        let (base, handle) =
+            spawn_auth_config(200, r#"{"github_client_id":"fixture-client"}"#).await;
+        let cfg = fetch(base).await.unwrap();
+        handle.abort();
+        assert_eq!(cfg.github_scope, "read:user");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn auth_config_refuses_malformed_missing_and_empty() {
+        for (status, body) in [
+            (200, "not json"),
+            (200, r#"{"github_scope":"read:user"}"#),
+            (200, r#"{"github_client_id":"  "}"#),
+            (404, r#"{"error":"not_found"}"#),
+        ] {
+            let (base, handle) = spawn_auth_config(status, body).await;
+            let err = fetch(base).await.unwrap_err();
+            handle.abort();
+            assert_eq!(
+                err.code, "REGISTRY_AUTH_CONFIG_UNAVAILABLE",
+                "{status} {body}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn auth_config_refuses_unreachable_registry() {
+        let err = fetch("http://127.0.0.1:1".to_string()).await.unwrap_err();
+        assert_eq!(err.code, "REGISTRY_AUTH_CONFIG_UNAVAILABLE");
+    }
 }

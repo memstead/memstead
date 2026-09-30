@@ -13,7 +13,7 @@ after the snapshot fetch.
 ## Build
 
 The crate is not published as a package: the site that runs the engine
-in the browser (memstead.io) builds the bundle from the engine tree it
+in the browser builds the bundle from the engine tree it
 was built from, so the bundle and the archives it reads always share one
 version. Build it the same way yourself:
 

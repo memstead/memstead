@@ -51,7 +51,7 @@ use crate::mem_repo_schemas::{LoadOutcome, MemRepoSchemasError};
 use crate::vcs::{CommitContext, author_identity, format_commit_message};
 
 const COMMITTER_NAME: &str = "engine";
-const COMMITTER_EMAIL: &str = "noreply@memstead.io";
+const COMMITTER_EMAIL: &str = "noreply@memstead.com";
 
 /// Errors raised while migrating to or reading from the unified
 /// `__MEMSTEAD` ref.
@@ -257,7 +257,7 @@ pub fn migrate_to_memstead_ref(
     let time = gix::date::Time::now_local_or_utc();
     let signature = gix::actor::Signature {
         name: "engine".into(),
-        email: "noreply@memstead.io".into(),
+        email: "noreply@memstead.com".into(),
         time,
     };
     let mut buf = gix::date::parse::TimeBuf::default();
@@ -372,7 +372,7 @@ pub fn write_schema_to_memstead_ref(
     let time = gix::date::Time::now_local_or_utc();
     let signature = gix::actor::Signature {
         name: "engine".into(),
-        email: "noreply@memstead.io".into(),
+        email: "noreply@memstead.com".into(),
         time,
     };
     let mut buf = gix::date::parse::TimeBuf::default();

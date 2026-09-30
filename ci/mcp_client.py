@@ -211,7 +211,7 @@ def init_mem_repo_workspace(
     for var in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
         os.environ.setdefault(var, "memstead-ci")
     for var in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
-        os.environ.setdefault(var, "ci@memstead.io")
+        os.environ.setdefault(var, "ci@memstead.com")
     subprocess.run(
         [str(memstead_binary), "mem-repo", "init"],
         cwd=str(root),

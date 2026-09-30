@@ -964,7 +964,7 @@ fn resolve_mcp_binary() -> McpBinary {
         command: "memstead-mcp".to_string(),
         warning: Some(
             "`memstead-mcp` was not found next to this binary or on PATH — the wiring uses the \
-             bare name and will work once it is installed (curl -sSf https://memstead.io/install.sh | sh)"
+             bare name and will work once it is installed (curl -sSf https://memstead.com/install.sh | sh)"
                 .to_string(),
         ),
     }

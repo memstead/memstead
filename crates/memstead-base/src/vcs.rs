@@ -15,7 +15,7 @@
 
 /// Generic email domain for derived author addresses. No PII: the
 /// local-part is a sanitised client name (or `external`), never a user.
-const PROVENANCE_EMAIL_DOMAIN: &str = "memstead.io";
+const PROVENANCE_EMAIL_DOMAIN: &str = "memstead.com";
 
 /// Maximum length (in chars) of a caller-declared identity. Length-bounded like the provenance note: the engine
 /// neither generates, interprets, nor enriches the value — it is an
@@ -39,7 +39,7 @@ pub fn normalise_identity(raw: Option<&str>) -> Option<String> {
 /// Caller categories for the `Actor:` trailer and for picking an author
 /// signature. `Agent`, `Cli`, and `App` get their author from the paired
 /// `ClientId` when one is present; `External` always uses the synthetic
-/// `external <external@memstead.io>` identity (no client is known); `Unknown`
+/// `external <external@memstead.com>` identity (no client is known); `Unknown`
 /// falls back to the committer identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Actor {

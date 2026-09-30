@@ -2,10 +2,10 @@
 # memstead unified installer: wraps cargo-dist's per-crate installers so
 # `curl -sSf <url> | sh` lands both `memstead` and `memstead-mcp` in one call.
 #
-# One project, three origins: memstead.ai serves the live graph,
-# memstead.io hosts this installer and the registry, and the
-# source of both binaries is github.com/memstead/memstead — this script
-# only downloads release artifacts from that repository.
+# Two origins: memstead.com, the engine's public site, serves this
+# installer, and the source of both binaries is
+# github.com/memstead/memstead. This script only downloads release
+# artifacts from that repository.
 #
 # cargo-dist publishes two installers per release:
 #
@@ -15,14 +15,14 @@
 # This wrapper fetches and runs both in sequence, delivering the single
 # `curl -sSf <url> | sh` install path the docs advertise.
 #
-# The served copy lives at `https://memstead.io/install.sh`; this file is
-# its source.
+# The served copy lives at `https://memstead.com/install.sh`, built from
+# this file at every deploy of memstead.com; this file is its source.
 #
 # Usage:
 #
-#   curl -sSf https://memstead.io/install.sh | sh
-#   curl -sSf https://memstead.io/install.sh | sh -s -- --version <tag>
-#   MEMSTEAD_VERSION=<tag> sh -c 'curl -sSf https://memstead.io/install.sh | sh'
+#   curl -sSf https://memstead.com/install.sh | sh
+#   curl -sSf https://memstead.com/install.sh | sh -s -- --version <tag>
+#   MEMSTEAD_VERSION=<tag> sh -c 'curl -sSf https://memstead.com/install.sh | sh'
 #
 # Defaults: latest tag, ~/.cargo/bin install dir (cargo-dist's default).
 # `--version <tag>` (or `--version=<tag>`, or the MEMSTEAD_VERSION

@@ -1142,7 +1142,7 @@ mod escape_raw_html_tests {
 
     #[test]
     fn leaves_autolinks_and_comparisons_alone() {
-        let s = "see <https://memstead.io> and note 3 < 5, also a <- b";
+        let s = "see <https://memstead.com> and note 3 < 5, also a <- b";
         assert_eq!(escape_raw_html_in_markdown(s), s);
     }
 }

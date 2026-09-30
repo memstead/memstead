@@ -167,7 +167,7 @@ pub struct ReadMemSpec {
 ///
 /// The engine itself never fetches; `source` is metadata consumed by the
 /// app's installer. A `Registry` variant with scope/name identifiers
-/// will be added once the memstead.io registry ships.
+/// will be added once registry-sourced read mems are designed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ReadMemSource {
@@ -177,7 +177,7 @@ pub enum ReadMemSource {
     /// Fetched from an HTTPS URL (GitHub Releases, shared drive, any static
     /// host). Engine-side no-op; the app's installer re-fetches on attach.
     Url { url: String },
-    // `Registry` variant reserved for when the memstead.io registry ships.
+    // `Registry` variant reserved for registry-sourced read mems.
     // The exact shape (fields, id format like `@scope/name`) is designed
     // then — declaring it up front without semantics would be
     // speculative, and pre-1.0 adding a variant later is not a breaking

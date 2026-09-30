@@ -81,7 +81,7 @@ Every mem mutation lands as a native git commit with structured provenance. Auth
 
 The engine has no hardcoded entity types. Schemas — a `schema.yaml` manifest plus `types/*.yaml` definitions — are first-class, semver-versioned packages. A mem pins its schema by name; a workspace can share schemas across many mems; published mem archives embed the pinned schema so they remain self-describing on import. New schemas — for product requirements, customer research, legal compliance, anything — are author-only work, never engine work.
 
-This is the foundation the memstead.io registry is being built toward — domain-specific schemas published, browsed, and installed the way packages are: an invitation to the first publishers, not yet an achieved marketplace.
+This is the foundation a Memstead registry is built toward — domain-specific schemas published, browsed, and installed the way packages are: an invitation to the first publishers, not yet an achieved marketplace.
 
 ### LLM-first engine, human-first app
 
@@ -103,7 +103,7 @@ Two tiers fall out of this:
 - **Working Mem** — folder or git-branch backed, sized for 1k–5k entities, full read/write, agents traverse the whole graph, communities, mutations through MCP. This is what the engine ships today.
 - **Indexed Mem** *(planned, not built)* — read-only at million-entity scale. Agents don't traverse; they query an index. The index is a **derived projection over finished mems, never a parallel source of truth**: markdown+git stays authoritative, the index is rebuilt from it, and drift is one-directional — rebuild forward, never sync back. It answers questions; it never originates state. Because it is derived, its backing engine (an embedded graph store, Neo4j, a search index) is an interchangeable implementation detail — no lock-in, since truth never lives there. Cross-mem edges from working mems point into it; full-graph operations (community-detect, full-traverse) are not offered. The use case is "the FDA's structured drug database" or "every paper in PubMed" — knowledge an agent needs to query, not navigate.
 
-The federation pattern follows: a workspace mounts dozens of small working mems plus a handful of indexed mems; the memstead.io registry indexes published mems across authorities. The engine's `MemBackend` trait makes new backend kinds (indexed-archive, remote-fetch, etc.) additive — no engine surgery to add a new tier.
+The federation pattern follows: a workspace mounts dozens of small working mems plus a handful of indexed mems; a registry indexes published mems across authorities. The engine's `MemBackend` trait makes new backend kinds (indexed-archive, remote-fetch, etc.) additive — no engine surgery to add a new tier.
 
 This is what "engine is generic, apps come later" means at scale — as a **bet, not an achieved capability**. The engine ships the Working Mem tier today; the Indexed Mem tier the large end needs is planned and unbuilt, and no federated graph at that size has been run. The wager is that one engine can drive a personal planning mem (50 entities) and, once the indexed tier exists, a federated research-knowledge graph in the millions of entities across hundreds of mems — with the backend behind each mount changing, not the engine's shape. Knowledge-at-scale is an open frontier for this project, not a solved one.
 
@@ -173,21 +173,21 @@ Open-source serves three purposes:
 
 Today, website knowledge is trapped in unstructured HTML. A university has hundreds of pages about research projects, curricula, and faculty expertise — but no AI agent can navigate it systematically. A company documents its APIs, processes, and architecture across wikis and docs — all opaque to AI.
 
-Memstead's authority model opens a path: any domain registers as an authority on memstead.io and publishes structured knowledge graphs under its own scope. The natural extension is that domains *host their own mems* while memstead.io serves as a federated index — the same relationship GitHub repos have with npm, or websites with search engines.
+Memstead's authority model opens a path: any domain registers as an authority on a registry and publishes structured knowledge graphs under its own scope. The natural extension is that domains *host their own mems* while the registry serves as a federated index — the same relationship GitHub repos have with npm, or websites with search engines.
 
 ```
 https://mit.edu/.well-known/memstead-authority.json     "we are a memstead authority"
 https://mit.edu/mems/ml-curriculum.mem             self-hosted mem
-https://memstead.io/v/mit.edu:cs-dept/ml-curriculum   index entry, links to mit.edu
+https://registry.example/v/mit.edu:cs-dept/ml-curriculum index entry, links to mit.edu
 ```
 
 `.well-known/memstead-authority.json` becomes a discoverability signal: *this domain has structured, machine-readable knowledge — here is the entry point.* AI agents discovering a domain check for that file and find a graph the domain itself authored, typed, and stands behind — a stated claim with an accountable publisher, rather than whatever a page happened to render that day.
 
 **Example — a university.** A projection runs against the university website periodically. It extracts structural, timeless knowledge — departments, research areas, degree programmes, faculty expertise, institutional relationships — not events, news, or deadlines. Current information stays on the website; the mem is a durable understanding of what the university *is*.
 
-The projected graph is published as one or more `.mem` files on the university's own server. The authority file lists them. memstead.io indexes them but holds no copy — downloads go directly to `mit.edu`. When mems are added or removed, the registry updates.
+The projected graph is published as one or more `.mem` files on the university's own server. The authority file lists them. The registry indexes them but holds no copy — downloads go directly to `mit.edu`. When mems are added or removed, the registry updates.
 
-An AI agent researching *"machine-learning programmes in Europe"* hits memstead.io, finds `mit.edu:cs-dept/ml-curriculum`, downloads from `mit.edu`, and gets a graph the publishing authority validated and signed — a stated, attributable claim rather than whatever the agent managed to parse out of the HTML. The gain is provenance and publisher accountability, not a reading advantage.
+An AI agent researching *"machine-learning programmes in Europe"* hits the registry, finds `mit.edu:cs-dept/ml-curriculum`, downloads from `mit.edu`, and gets a graph the publishing authority validated and signed — a stated, attributable claim rather than whatever the agent managed to parse out of the HTML. The gain is provenance and publisher accountability, not a reading advantage.
 
 This turns Memstead from "a registry for sharing knowledge graphs" into "an open standard for how websites make their knowledge accessible to AI." The engine stays the same; the surface area grows from "developers sharing mems" to "any organisation publishing structured knowledge."
 

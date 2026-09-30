@@ -64,7 +64,7 @@ pub struct Args {
     #[arg(long, value_name = "TOKEN")]
     pub token: Option<String>,
 
-    /// Registry URL (overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io).
+    /// Registry URL (overrides `MEMSTEAD_REGISTRY`; one of the two is required).
     #[arg(long, value_name = "URL")]
     pub registry: Option<String>,
 
@@ -112,9 +112,14 @@ fn run_with_root(
     args: Args,
     root_override: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let base = registry::registry_base(args.registry.as_deref());
-    let host = registry::registry_host(&base);
-    let client = registry::build_http()?;
+    // The registry is resolved up front so a real publish with none
+    // configured refuses before any workspace mutation (a `--version`
+    // bump). A dry run posts nothing, so it previews without one.
+    let configured_base = if args.dry_run {
+        registry::configured_registry(args.registry.as_deref())
+    } else {
+        Some(registry::registry_base(args.registry.as_deref())?)
+    };
 
     // 0. Validate `--version` up front: it persists a bump through the
     //    workspace engine, so it needs `--mem <name>` and is
@@ -277,13 +282,17 @@ fn run_with_root(
     if args.dry_run {
         return emit_dry_run(
             ctx,
-            &base,
+            configured_base.as_deref(),
             &archive_path,
             args.mem.as_deref(),
             resolved_version.as_deref(),
             args.scope.as_deref(),
         );
     }
+
+    let base = configured_base.expect("a non-dry-run publish resolved its registry up front");
+    let host = registry::registry_host(&base);
+    let client = registry::build_http()?;
 
     // 3. Authorise + POST. A `<domain>:<handle>` scope is a domain-authority
     //    publish: it signs the upload with the domain's locally-stored key and
@@ -311,7 +320,7 @@ fn run_with_root(
                 )
                 .into());
             }
-            login_inline(&client, &host)?
+            login_inline(&client, &base, &host)?
         }
     };
 
@@ -415,7 +424,7 @@ fn build_domain_signature(
 /// caller's GitHub login, which the client cannot know offline.
 fn emit_dry_run(
     ctx: &CliContext,
-    base: &str,
+    base: Option<&str>,
     archive_path: &Path,
     mem: Option<&str>,
     version: Option<&str>,
@@ -437,6 +446,10 @@ fn emit_dry_run(
             "published": false,
         }))?;
     } else {
+        let registry_label = base.map_or_else(
+            || "not configured (pass `--registry <URL>` or set `MEMSTEAD_REGISTRY`)".to_string(),
+            str::to_string,
+        );
         let scope_label = match scope {
             Some(s) => format!("`{s}` (override)"),
             None => "derived from your GitHub login".to_string(),
@@ -447,7 +460,7 @@ fn emit_dry_run(
              - Version: `{version_label}`\n\
              - Scope: {scope_label}\n\
              - Archive: {size} bytes\n\
-             - Registry: {base}\n\n\
+             - Registry: {registry_label}\n\n\
              Nothing was published and nothing was changed.",
         ));
     }
@@ -523,16 +536,16 @@ fn stage_bytes_to_tempfile(bytes: &[u8]) -> anyhow::Result<(PathBuf, Option<Name
     Ok((path, Some(tempfile)))
 }
 
-fn login_inline(client: &reqwest::blocking::Client, host: &str) -> anyhow::Result<String> {
+fn login_inline(
+    client: &reqwest::blocking::Client,
+    base: &str,
+    host: &str,
+) -> anyhow::Result<String> {
+    let auth = registry::fetch_auth_config(client, base)?;
     println!("Not logged in — starting GitHub Device Flow…");
-    let outcome = device_flow::run(
-        client,
-        device_flow::MEMSTEAD_GITHUB_CLIENT_ID,
-        device_flow::MEMSTEAD_GITHUB_SCOPE,
-        |url| {
-            let _ = device_flow::open_browser(url);
-        },
-    )
+    let outcome = device_flow::run(client, &auth.github_client_id, &auth.github_scope, |url| {
+        let _ = device_flow::open_browser(url);
+    })
     .map_err(|e| {
         CliError::new(
             ExitKind::Generic,
@@ -745,7 +758,8 @@ mod tests {
     }
 
     /// Spin up an axum fixture that accepts `POST /api/publish` and
-    /// echoes a success body. The body is captured so the test can
+    /// echoes a success body, and serves the registry's OAuth settings at
+    /// `GET /api/auth/config` like a real registry. The body is captured so the test can
     /// assert it is a non-empty zip-shaped buffer (zip magic
     /// `PK\x03\x04`).
     async fn spawn_fixture_publish_registry() -> (
@@ -753,12 +767,26 @@ mod tests {
         std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
         tokio::task::JoinHandle<()>,
     ) {
-        use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
+        use axum::{
+            Json, Router,
+            extract::State,
+            http::StatusCode,
+            routing::{get, post},
+        };
         use std::sync::{Arc, Mutex};
 
         let captured: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let captured_clone = captured.clone();
         let app: Router = Router::new()
+            .route(
+                "/api/auth/config",
+                get(|| async {
+                    Json(serde_json::json!({
+                        "github_client_id": "fixture-client-id",
+                        "github_scope": "read:user",
+                    }))
+                }),
+            )
             .route(
                 "/api/publish",
                 post(

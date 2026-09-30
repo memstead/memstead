@@ -445,7 +445,7 @@ pub enum MemRepoWriteError {
 /// while a developer's machine worked by accident of their global config.
 ///
 /// The engine already signs its *commit* objects as `engine
-/// <noreply@memstead.io>` rather than borrowing the user's identity
+/// <noreply@memstead.com>` rather than borrowing the user's identity
 /// (`storage_memstead.rs`'s `COMMITTER_NAME` / `COMMITTER_EMAIL`); the reflog
 /// now does the same. Mem-repo history is engine-authored bookkeeping, not
 /// the user's authorship, so it should not depend on ambient config in either
@@ -453,7 +453,7 @@ pub enum MemRepoWriteError {
 pub(crate) fn reflog_committer() -> gix::actor::Signature {
     gix::actor::Signature {
         name: "engine".into(),
-        email: "noreply@memstead.io".into(),
+        email: "noreply@memstead.com".into(),
         time: gix::date::Time::now_local_or_utc(),
     }
 }

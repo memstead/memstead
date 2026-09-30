@@ -1,13 +1,23 @@
 ---
 title: Publish a mem
-description: "Share a mem through the memstead.io registry: describe it, dry-run, publish, and the install line others run."
+description: "Share a mem through a Memstead registry: point the CLI at one, describe the mem, dry-run, publish, and the install line others run."
 sidebar:
   order: 4
 ---
 
-A mem is the packaged unit of sharing: a whole typed model — entities, relationships, and the schema they conform to — sealed into one `.mem` archive. Publishing puts that archive on the [memstead.io](https://memstead.io) registry under your GitHub handle, where anyone can install it with one command. This guide walks the first publish end to end.
+A mem is the packaged unit of sharing: a whole typed model — entities, relationships, and the schema they conform to — sealed into one `.mem` archive. Publishing puts that archive on a Memstead registry under your GitHub handle, where anyone who uses the same registry can install it with one command. This guide walks the first publish end to end.
 
-You need a workspace with a mem worth sharing (see [Getting started](../../guides/getting-started/)) and a GitHub account. Nothing else — no registry signup; authentication is GitHub Device Flow, triggered automatically on first use.
+You need a workspace with a mem worth sharing (see [Getting started](../../guides/getting-started/)), a GitHub account, and the base URL of a registry. No registry signup: authentication is GitHub Device Flow, triggered automatically on first use, with the OAuth settings read from the registry itself.
+
+## 0. Point the CLI at a registry
+
+The CLI ships with no default registry. Every registry command (`publish`, `install <scope>/<name>`, `login`, `logout`, `unpublish`) takes the registry from `--registry <URL>` or, when the flag is absent, from the `MEMSTEAD_REGISTRY` environment variable; with neither it refuses with `REGISTRY_NOT_CONFIGURED`. The examples below assume the variable is set:
+
+```bash
+export MEMSTEAD_REGISTRY=https://registry.example.com
+```
+
+Installing a local `.mem` file needs no registry at all.
 
 ## 1. Give the mem its card text
 
@@ -34,7 +44,7 @@ memstead publish --mem recipes --dry-run
 - Version: `0.1.0`
 - Scope: derived from your GitHub login
 - Archive: 3153 bytes
-- Registry: https://memstead.io
+- Registry: https://registry.example.com
 
 Nothing was published and nothing was changed.
 ```
@@ -49,12 +59,12 @@ Same command, without the flag:
 memstead publish --mem recipes
 ```
 
-On first use this starts GitHub Device Flow: the CLI prints a code, opens the verification page, and stores the resulting token in `~/.config/memstead/credentials` — subsequent publishes are silent. On success:
+On first use this starts GitHub Device Flow: the CLI reads the registry's OAuth client id from `<registry>/api/auth/config`, prints a code, opens the verification page, and stores the resulting token in `~/.config/memstead/credentials` — subsequent publishes are silent. On success:
 
 ```text
-# Published github:dasboe/recipes v0.1.0
+# Published github:alice/recipes v0.1.0
 
-- URL: https://memstead.io/v/github:dasboe/recipes
+- URL: https://registry.example.com/v/github:alice/recipes
 ```
 
 You can also log in ahead of time with `memstead login`, or run non-interactively by setting `MEMSTEAD_TOKEN` (a GitHub token) — CI has no TTY for the device flow.
@@ -64,7 +74,7 @@ You can also log in ahead of time with `memstead login`, or run non-interactivel
 That's what you put in your README. Anyone pulls your mem into their own workspace with:
 
 ```bash
-memstead install github:dasboe/recipes
+memstead install github:alice/recipes
 ```
 
 The installed mem mounts read-only: its entities and schema structure are readable and linkable, but the engine treats non-first-party content as untrusted input — its schema's instruction prose is withheld and every read surface tags the content's `origin`.
@@ -85,6 +95,8 @@ To take a mem down: `memstead unpublish github:<handle>/recipes` (permitted to t
 
 Every refusal carries a typed code (add `--json` and branch on `.code`):
 
+- **`REGISTRY_NOT_CONFIGURED`**: neither `--registry` nor `MEMSTEAD_REGISTRY` is set. A dry run still previews and reports the registry as not configured.
+- **`REGISTRY_AUTH_CONFIG_UNAVAILABLE`**: login needed the device flow, but the registry did not answer `GET /api/auth/config` with its OAuth settings (unreachable, not a Memstead registry, or no GitHub login configured).
 - **`NOT_AUTHENTICATED`** — no token and no TTY for the device flow: ``not logged in and stdin is not a TTY — set MEMSTEAD_TOKEN or run `memstead login` first``. Also the shape a 401 from the registry maps to (expired/revoked token): re-run `memstead login`.
 - **`WORKSPACE_NOT_INITIALISED`** — you ran publish outside any workspace: `no workspace found from <cwd> or any ancestor (missing .memstead/workspace.toml)`. `cd` into the workspace, pass `--workspace <path>`, or supply a pre-built archive path.
 - **`INVALID_INPUT`** — `--version` without `--mem` (the bump needs to know which mem to re-version), or `--version` / `--redact-anchors` combined with a pre-built archive path (its content is already baked in — assemble with `--mem` or the bare shape instead).
@@ -192,5 +204,5 @@ shape — the bytes are already baked. Re-export, or use an assembling shape.
 
 ## Where next
 
-- The [publishing guide](https://memstead.io/publish) on memstead.io documents the registry side of these commands.
+- The registry you publish to documents its own side of these commands (routes, limits, terms).
 - The [Glossary](../../glossary/#mem) defines mem, archive, and mount precisely.

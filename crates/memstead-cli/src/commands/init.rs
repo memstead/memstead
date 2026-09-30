@@ -8,12 +8,6 @@
 //!   [`memstead_base::filesystem::config`].
 //! - `.memstead/cache/` — empty placeholder for any engine-managed cache
 //!   data the workspace acquires later (e.g. resolved schema bytes).
-//! - `.memstead/memstead-io/` — empty directory the engine's mem
-//!   initialiser seeds. Nothing reads it: it held the cache the tier-3
-//!   archive resolver walked, and that resolver was removed on
-//!   2026-08-27 when registry attachments moved to the mount roster.
-//!   Retiring the directory is a change to what `init` creates and is
-//!   deliberately not folded in here.
 //!
 //! No `.gitignore` is written — filesystem-mem does not assume a surrounding
 //! git repo, and writing one would surprise users who *do* track the
@@ -378,7 +372,8 @@ mod tests {
         );
 
         assert!(root.join(".memstead").join("cache").is_dir());
-        assert!(root.join(".memstead").join("memstead-io").is_dir());
+        // The retired `memstead-io/` directory is no longer seeded.
+        assert!(!root.join(".memstead").join("memstead-io").exists());
         // No .gitignore is written.
         assert!(!root.join(".gitignore").exists());
     }

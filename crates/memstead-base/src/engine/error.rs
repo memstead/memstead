@@ -150,7 +150,7 @@ pub fn format_inline_list_overflow<T: fmt::Display>(items: &[T], field: &str) ->
 ///
 /// The schema registry consults sources in a fixed order — local
 /// storage (the mem's own storage backend), built-in (compiled into
-/// the engine binary), remote (memstead.io, reserved) — and records
+/// the engine binary), remote (a registry, reserved) — and records
 /// what each held for the pinned *name* so an agent or operator can
 /// tell *where* a pin failed: missing from local authoring, absent
 /// from the shipped catalogue, or past the not-yet-wired remote. The

@@ -15,7 +15,7 @@
 //! with global signing enabled does not hang every mutation waiting for
 //! a passphrase.
 //!
-//! The *committer* (`engine <noreply@memstead.io>`) is set explicitly per
+//! The *committer* (`engine <noreply@memstead.com>`) is set explicitly per
 //! commit via `commit_as` and is therefore independent of any
 //! `user.name`/`user.email` config — global or per-repo. The *author* is
 //! derived per commit from a [`CommitContext`] so provenance (agent / cli /
@@ -228,7 +228,7 @@ pub(crate) fn head_branch_ref(repo: &gix::Repository) -> String {
 /// Deterministic committer identity — bypasses per-repo and global git
 /// config and doubles as the author fallback when no actor is known.
 const COMMITTER_NAME: &str = "engine";
-const COMMITTER_EMAIL: &str = "noreply@memstead.io";
+const COMMITTER_EMAIL: &str = "noreply@memstead.com";
 
 pub use memstead_base::vcs::{
     Actor, ClientId, CommitContext, author_identity, format_commit_message, sanitise_client_name,
@@ -969,7 +969,7 @@ mod tests {
 
         let (name, email, message) = head_commit_parts(&git_dir);
         assert_eq!(name, "claude-code");
-        assert_eq!(email, "claude-code@memstead.io");
+        assert_eq!(email, "claude-code@memstead.com");
         assert!(
             message.ends_with("\n\nTool: memstead_update\nActor: agent\nClient: claude-code@2.1.0"),
             "got message: {message:?}"
@@ -999,7 +999,7 @@ mod tests {
 
         let (name, email, message) = head_commit_parts(&git_dir);
         assert_eq!(name, "external");
-        assert_eq!(email, "external@memstead.io");
+        assert_eq!(email, "external@memstead.com");
         assert!(message.contains("\n\nActor: external"));
         assert!(!message.contains("Tool:"));
         assert!(!message.contains("Client:"));
@@ -1053,7 +1053,7 @@ mod tests {
             .unwrap();
         let (name, email, message) = head_commit_parts(&git_dir);
         assert_eq!(name, "memstead-cli");
-        assert_eq!(email, "memstead-cli@memstead.io");
+        assert_eq!(email, "memstead-cli@memstead.com");
         assert!(message.contains("\n\nActor: cli\nClient: memstead-cli@0.1.0"));
     }
 

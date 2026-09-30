@@ -114,8 +114,7 @@ fn status_markdown() {
 fn status_works_on_filesystem_mem_workspace() {
     let tmp = TempDir::new().unwrap();
     // `memstead init --name demo --schema default@1.0.0` lays down
-    // `.memstead/config.json` plus the empty cache / memstead-io subdirs
-    // (the latter seeded but unread since the tier-3 resolver was removed).
+    // `.memstead/config.json` plus the empty cache subdir.
     memstead()
         .current_dir(tmp.path())
         .args(["init", "--name", "demo", "--schema", "default@1.0.0"])

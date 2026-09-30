@@ -10,7 +10,7 @@ description: Guides plus the auto-generated reference for the Memstead engine's 
 - [Getting started](guides/getting-started/) — install, `memstead quickstart`, first entities, agent connect.
 - [Skills](skills/) — the plugin roster as a job → command map: what to run for setup, capture, building, syncing, verifying.
 - [Author a schema](guides/author-a-schema/) — scaffold a custom schema and pin a mem to it.
-- [Publish a mem](guides/publish-a-mem/) — share a mem through the memstead.io registry.
+- [Publish a mem](guides/publish-a-mem/) — share a mem through a Memstead registry.
 - [Agent recipes](guides/agent-recipes/) — worked MCP tool-call sequences with real payloads.
 - [Back up a mem-repo](guides/back-up-a-mem-repo/) — push mems to any git remote and recover them on another machine.
 
@@ -22,12 +22,12 @@ description: Guides plus the auto-generated reference for the Memstead engine's 
 
 ## Reference
 
-Rendered from the engine sources of the commit this site was built from, at every build: every MCP tool, every CLI subcommand, every typed error code the engine, the CLI and the MCP server produce. The Surface Parity Matrix lines them up so cross-surface gaps are visible by inspection. The registry's HTTP API is documented where it lives: the [publishing guide](https://memstead.io/publish) on memstead.io.
+Rendered from the engine sources of the commit this site was built from, at every build: every MCP tool, every CLI subcommand, every typed error code the engine, the CLI and the MCP server produce. The Surface Parity Matrix lines them up so cross-surface gaps are visible by inspection. A registry's HTTP API is documented by the registry that serves it.
 
 - [Skills](skills/) — the shipped plugin roster, generated from the skill frontmatter.
 - [Binding format](reference/binding/) — the versioned source→mem binding: fields, operations, and the per-medium capability matrix.
 - [MCP tools](reference/mcp/)
 - [CLI](reference/cli/cli/)
-- Registry HTTP API — not rendered here: the registry documents its own routes in the [publishing guide](https://memstead.io/publish) on memstead.io.
+- Registry HTTP API — not rendered here: each registry documents its own routes.
 - [Surface Parity Matrix](reference/parity/)
 - [Error Code Index](reference/errors/)

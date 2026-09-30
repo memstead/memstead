@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-14T21:35:13Z
-last_modified: 2026-09-08T21:08:43Z
+last_modified: 2026-09-30T10:40:49Z
 status: accepted
 decided_on: 2026-08-14
 deciders: operator, implementing agent
@@ -19,7 +19,7 @@ Two supporting changes land with it. `memstead-mcp`'s boot line names the shape 
 What this decision does NOT do: change which shape `quickstart` picks. The default stays as it is; only the disclosure is new.
 
 ## Context
-`memstead quickstart` — the command every public surface recommends — silently picks the filesystem-mem shape, and that shape cannot consume the registry. The 2026-08-14 cold-start run followed the documented path exactly and then hit `UNSUPPORTED_WORKSPACE_SHAPE` on `memstead install <scope>/<name>`, the headline command on memstead.io. The refusal was clear and named the fix, but it arrived after a workspace existed and had already been modelled; recovering means starting a second workspace and rebuilding.
+`memstead quickstart` — the command every public surface recommends — silently picks the filesystem-mem shape, and that shape cannot consume the registry. The 2026-08-14 cold-start run followed the documented path exactly and then hit `UNSUPPORTED_WORKSPACE_SHAPE` on `memstead install <scope>/<name>`, the headline command of the project's registry site at the time. The refusal was clear and named the fix, but it arrived after a workspace existed and had already been modelled; recovering means starting a second workspace and rebuilding.
 
 A sentence elsewhere had already been tried: the `install --help` text carries the clause, and the run proves it does not reach the reader, because it lives on a command the newcomer has no reason to read before they need it. The same run also found `memstead-mcp` logging `boot: mem-repo workspace at …` for the very directory `memstead install` refuses as not-mem-repo — two shipped binaries describing one directory in contradictory terms, which makes the genuine refusal read as spurious to anyone debugging from the log.
 

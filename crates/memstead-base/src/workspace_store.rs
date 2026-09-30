@@ -58,10 +58,7 @@ use crate::workspace::{
 /// The engine-managed workspace store directory under the workspace
 /// root — `<workspace_root>/.memstead/` holds `workspace.toml` and
 /// `state/mounts.json`, the roster of everything this workspace
-/// mounts. (It also carries an empty `memstead-io/` directory the mem
-/// initialiser seeds; nothing reads it since the tier-3 archive
-/// resolver was removed on 2026-08-27, and retiring the directory
-/// itself is a separate change to what `init` creates.) Distinct from
+/// mounts. Distinct from
 /// the per-mem meta directory
 /// ([`memstead_schema::MEM_META_DIR`], re-exported as
 /// `crate::mem::MEM_META_DIR`) and from the literal `".memstead/..."`

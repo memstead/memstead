@@ -649,7 +649,7 @@ mod tests {
 
         let author = crate::vcs::author_identity(&ctx).expect("app + client derives an author");
         assert_eq!(author.0, "memstead-node-app");
-        assert_eq!(author.1, "memstead-node-app@memstead.io");
+        assert_eq!(author.1, "memstead-node-app@memstead.com");
     }
 
     #[test]

@@ -13,23 +13,16 @@
 //!    token, a terminal error (`access_denied`, `expired_token`), or
 //!    we exceed the code expiry.
 //!
-//! Device Flow is a public-client protocol — no client secret exists.
-//! The client ID is the one registered for the registry's GitHub OAuth
-//! App.
+//! Device Flow is a public-client protocol: no client secret exists.
+//! The client ID and scope are the registry's own, read from its
+//! `GET /api/auth/config` route (`crate::registry::fetch_auth_config`)
+//! before the flow starts; the CLI carries no client ID of its own.
 
 use std::io::Write;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-
-/// GitHub OAuth App client ID for memstead.io. Public; safe to commit.
-pub const MEMSTEAD_GITHUB_CLIENT_ID: &str = "Ov23linvCi8kvFipqMHh";
-
-/// Scope requested at authorization time. `read:user` is the minimum
-/// the registry needs to resolve the username; asking for more would
-/// scare users off in the GitHub approval screen.
-pub const MEMSTEAD_GITHUB_SCOPE: &str = "read:user";
 
 /// Where `GET /user` lives in `crate::auth::device_flow` — used by
 /// tests that stand up a GitHub mock so the device flow doesn't hit

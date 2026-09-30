@@ -22,7 +22,7 @@ The model's modal flavour (knowledge / planning / inquiry / spec / hybrid) follo
 **Lifeforms.** One noun, two states — the live form and the `.mem` file are the same mem, never two kinds of thing (the crate/`.crate`, gem/`.gem` precedent). **Seal** is the verb for producing the sealed form; no second noun is coined for either state.
 
 - **Open** (a *live mem*) — mounted in a workspace, writable. Realised via two [storage backends](#storage-backend): **folder** (a directory on disk — either a subfolder under a multi-mem workspace, or the workspace root itself in the collapsed single-mem form) or **git-branch** (a named branch inside a mem-repo gitdir).
-- **Sealed** (a *`.mem` file*) — immutable, content-addressed, publishable and transportable via [memstead.io](https://memstead.io).
+- **Sealed** (a *`.mem` file*) — immutable, content-addressed, publishable to a Memstead registry and transportable as a single file.
 
 **Role.** Atomic unit for [mount](#mount), schema-pin, cross-mem permissions, and registry distribution.
 
@@ -284,7 +284,7 @@ A schema is the contract that makes a mem a *typed* model rather than a raw mark
    - **Folder backend** — `<workspace>/.memstead/schemas/<name>@<version>/` (or `<mem>/.memstead/schemas/<name>@<version>/` for the collapsed single-mem form).
    - **Archive backend** — `schemas/<name>@<version>/` inside the `.mem` zip.
 2. **Built-in** — schemas compiled into the engine binary, available on every install (`default` plus the bundled schema packages `software`, `planning`, `project`, `ingest`, `engineering`, `obligation`, each in every generation the engine ships). Used when no local match. Works offline by definition.
-3. **Registry** — schemas served by memstead.io, fetched on demand and cached locally. Reserved slot; not implemented yet — the third source is diagnostic-only today, with no download path.
+3. **Registry** — schemas served by a Memstead registry, fetched on demand and cached locally. Reserved slot; not implemented yet — the third source is diagnostic-only today, with no download path.
 
 **Authoring.**
 
@@ -319,7 +319,7 @@ Within-mem wikilinks (`[[slug]]`) resolve inside the source mem and are **not** 
 - **Permission** — every cross-mem edge must be authorised by the workspace's cross-mem permission table. Source mem → target mem must appear in the directed allowlist; otherwise the edge is rejected at validation. Cycles are valid policy.
 - **Direction** — edges are directed (one source, one target). A symmetric link requires two edges and reciprocal permission.
 
-**Cross-workspace edges (today: Tier-3 wikilinks like `[[scope/name:slug]]`)** are cross-mem edges to a [mount](#mount) whose storage backend is an archive — typically downloaded from memstead.io and mounted as read-only, cross-linkable. The wikilink form is different at the surface, but the edge itself follows the same rules: permission required, target mem must be mounted, target entity must exist.
+**Cross-workspace edges (today: Tier-3 wikilinks like `[[scope/name:slug]]`)** are cross-mem edges to a [mount](#mount) whose storage backend is an archive — typically downloaded from a Memstead registry and mounted as read-only, cross-linkable. The wikilink form is different at the surface, but the edge itself follows the same rules: permission required, target mem must be mounted, target entity must exist.
 
 ### Rationale
 
@@ -429,7 +429,7 @@ Two kinds, distinguished by whether the link crosses a mem boundary:
 
 Wikilinks may be *typed* (`[[REL_TYPE: target]]`, e.g. `[[DEPENDS_ON: foo]]`) or *untyped* (default `REFERENCES` edge). The schema's relationship vocabulary constrains which `REL_TYPE` values are valid.
 
-**Cross-workspace references** — pointing at mems published by other workspaces (today's `[[scope/name:slug]]` form for registry-published mems) — are not a separate wikilink kind. They are cross-mem wikilinks targeting a [mount](#mount) whose [storage backend](#storage-backend) is an archive, downloaded from memstead.io. Once mounted, they resolve like any other cross-mem wikilink.
+**Cross-workspace references** — pointing at mems published by other workspaces (today's `[[scope/name:slug]]` form for registry-published mems) — are not a separate wikilink kind. They are cross-mem wikilinks targeting a [mount](#mount) whose [storage backend](#storage-backend) is an archive, downloaded from a Memstead registry. Once mounted, they resolve like any other cross-mem wikilink.
 
 ### Rationale
 

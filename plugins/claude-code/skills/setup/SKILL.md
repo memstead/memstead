@@ -27,7 +27,7 @@ If either lookup fails (non-zero exit), install them. Work through these options
 1. **Installer script** (preferred — no package manager needed):
 
    ```bash
-   curl -sSf https://memstead.io/install.sh | sh
+   curl -sSf https://memstead.com/install.sh | sh
    ```
 
    *Fall through to option 2 when:* the download fails (network error, non-200), the script errors out, or `curl` is not available.

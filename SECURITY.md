@@ -19,8 +19,8 @@ Instead, send the report by email to:
 
 **security@memstead.com**
 
-(Mail lives on **memstead.com** — the project's docs-and-contact domain;
-**memstead.io** is the registry and install host and receives no mail.)
+(Mail lives on **memstead.com**, the engine's public site: it hosts the
+docs, the install script and the contact addresses.)
 
 Subject line: `[Memstead security] <short description>`
 

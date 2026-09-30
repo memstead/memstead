@@ -44,7 +44,7 @@ pub struct Args {
     pub source: String,
 
     /// Registry URL for `<scope>/<name>` installs. Ignored for local paths.
-    /// Overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io.
+    /// Overrides `MEMSTEAD_REGISTRY`; a registry install needs one of the two.
     #[arg(long, value_name = "URL")]
     pub registry: Option<String>,
 }
@@ -107,7 +107,7 @@ pub(crate) fn fetch_registry_archive(
     name: &str,
     registry_override: Option<&str>,
 ) -> anyhow::Result<FetchedArchive> {
-    let base = registry::registry_base(registry_override);
+    let base = registry::registry_base(registry_override)?;
     let client = registry::build_http()?;
 
     // Stream the archive into a tempfile; the cache helper reads

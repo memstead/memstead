@@ -12,8 +12,8 @@ ci = "github"
 github-attestations = true
 # The installers to generate for each app (dist emits ONE installer per
 # dist-able app — memstead-cli-installer.sh and memstead-mcp-installer.sh;
-# memstead.io/install.sh wraps both):
-#   * `shell`    — `curl -sSf https://memstead.io/install.sh | sh`
+# memstead.com/install.sh wraps both):
+#   * `shell`    — `curl -sSf https://memstead.com/install.sh | sh`
 #   * `homebrew` — auto-PRs the formula into the tap repo on tag push.
 installers = ["shell", "homebrew"]
 # Homebrew tap repository. cargo-dist opens a PR against this repo on

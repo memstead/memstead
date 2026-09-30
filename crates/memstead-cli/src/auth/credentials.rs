@@ -2,12 +2,12 @@
 //!
 //! Layout: `<config_dir>/memstead/credentials` — TOML, keyed on registry
 //! host so the same CLI can talk to staging + production without
-//! juggling files. Hostnames are lowercased so `Memstead.io` and
-//! `memstead.io` resolve to the same entry.
+//! juggling files. Hostnames are lowercased so `Registry.Example.com` and
+//! `registry.example.com` resolve to the same entry.
 //!
 //! Example on disk:
 //! ```toml
-//! [registries."memstead.io"]
+//! [registries."registry.example.com"]
 //! token = "gho_..."
 //! user_login = "you"
 //! scopes = ["read:user"]

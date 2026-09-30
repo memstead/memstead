@@ -1,7 +1,7 @@
 ---
 type: memo
 created_date: 2026-08-14T16:06:16Z
-last_modified: 2026-08-14T16:06:16Z
+last_modified: 2026-09-30T10:40:46Z
 status: closed
 tags: registry, install, schema, evidence, cold-start
 ---
@@ -9,10 +9,10 @@ tags: registry, install, schema, evidence, cold-start
 # Three of four published mems were uninstallable because two readers disagreed
 
 ## Claim
-From the first release until 2026-08-14, `memstead install` could only install mems pinned to a schema the installing binary already carried — in practice, only the built-ins. Three of the four mems published on memstead.io (1 007 of 1 133 entities, including the largest) refused with `SCHEMA_NOT_FOUND`. The registry's whole proposition — third parties publishing typed models under their own vocabulary — was unreachable for its entire life, and nobody noticed because the one mem that worked, `github:dasboe/engine`, happened to pin the built-in `software@0.1.0`.
+From the first release until 2026-08-14, `memstead install` could only install mems pinned to a schema the installing binary already carried — in practice, only the built-ins. Three of the four mems published on the project's registry (1 007 of 1 133 entities, including the largest) refused with `SCHEMA_NOT_FOUND`. The registry's whole proposition — third parties publishing typed models under their own vocabulary — was unreachable for its entire life, and nobody noticed because the one mem that worked, `github:dasboe/engine`, happened to pin the built-in `software@0.1.0`.
 
 ## Context
-Found by the 2026-08-13 cold-start run — a newcomer installing from memstead.io with no prior knowledge of the project. The newcomer's protocol attributed the failure to a renamed schema key. That was a coincidence of the sample: all three failing mems shared one non-built-in schema, `expertise@0.1.0`, and the key rename was only the second of two independent defects.
+Found by the 2026-08-13 cold-start run — a newcomer installing from the project's registry with no prior knowledge of the project. The newcomer's protocol attributed the failure to a renamed schema key. That was a coincidence of the sample: all three failing mems shared one non-built-in schema, `expertise@0.1.0`, and the key rename was only the second of two independent defects.
 
 ## Substance
 

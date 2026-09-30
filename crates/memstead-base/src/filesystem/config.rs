@@ -303,8 +303,7 @@ pub fn write_workspace_config(
 
 /// Initialise a brand-new filesystem (folder-backed) mem at `root` — the
 /// engine-owned counterpart of `memstead init` for a single collapsed mem.
-/// Writes the canonical `.memstead/config.json`, the `cache/` + `memstead-io/`
-/// subdirs, the `workspace.toml` adapter marker, and the `state/mounts.json`
+/// Writes the canonical `.memstead/config.json`, the `cache/` subdir, the `workspace.toml` adapter marker, and the `state/mounts.json`
 /// one-folder-mount roster, so the result roots directly through
 /// [`crate::Engine::from_workspace_root`]. The mem root *is* the workspace
 /// root (collapsed single-mem form).
@@ -335,7 +334,7 @@ pub fn init_filesystem_mem(root: &Path, name: &str, schema: &SchemaRef) -> std::
 ///
 /// Writes `<mem_dir>/.memstead/config.json` (the mem's own config, the
 /// same file the collapsed form writes at the root) and the workspace
-/// tier — `cache/`, `memstead-io/`, `workspace.toml`, `state/mounts.json`
+/// tier — `cache/`, `workspace.toml`, `state/mounts.json`
 /// — under `<workspace_root>/.memstead/`. Creates both directories if
 /// absent; the caller is responsible for refusing a non-empty target if
 /// that matters.
@@ -357,10 +356,6 @@ pub fn init_filesystem_mem_at(
 
     let memstead_dir = root.join(crate::WORKSPACE_STORE_DIR);
     std::fs::create_dir_all(memstead_dir.join("cache"))?;
-    // Seeded but unread since the tier-3 archive resolver was removed
-    // (2026-08-27). Kept because retiring it changes what `init` and
-    // `quickstart` produce, which is its own change.
-    std::fs::create_dir_all(memstead_dir.join("memstead-io"))?;
     // Two-layer file adapter marker — `from_workspace_root` recognises a
     // workspace by `.memstead/workspace.toml`. One folder mount carries
     // every entity, whether its folder is the workspace root (collapsed

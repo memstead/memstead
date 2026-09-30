@@ -3695,8 +3695,8 @@ fn cli_kinded_check_records_and_refuses() {
 // `memstead install` — the layout-agnostic registry attach
 // ---------------------------------------------------------------------------
 
-/// Serve one fixture archive at `/api/mem/<scope>/<name>.mem` on an
-/// ephemeral port. Returns the base URL and a guard whose drop stops the
+/// Serve one fixture archive at `/api/mem/<scope>/<name>.mem` (plus the
+/// registry's OAuth settings at `/api/auth/config`) on an ephemeral port. Returns the base URL and a guard whose drop stops the
 /// server. Runs its own multi-thread runtime on a background thread so
 /// the surrounding `assert_cmd` tests stay synchronous.
 struct FixtureRegistry {
@@ -3719,22 +3719,33 @@ fn spawn_fixture_registry(
 
     let body = Arc::new(body);
     let base = runtime.block_on(async move {
-        let app: Router = Router::new().route(
-            "/api/mem/{scope}/{file}",
-            get({
-                let body = body.clone();
-                move |AxumPath((got_scope, got_file)): AxumPath<(String, String)>| {
+        let app: Router = Router::new()
+            .route(
+                "/api/auth/config",
+                get(|| async {
+                    (
+                        StatusCode::OK,
+                        [("content-type", "application/json")],
+                        r#"{"github_client_id":"fixture-client-id","github_scope":"read:user"}"#,
+                    )
+                }),
+            )
+            .route(
+                "/api/mem/{scope}/{file}",
+                get({
                     let body = body.clone();
-                    async move {
-                        if got_scope == scope && got_file == format!("{name}.mem") {
-                            (StatusCode::OK, (*body).clone())
-                        } else {
-                            (StatusCode::NOT_FOUND, vec![])
+                    move |AxumPath((got_scope, got_file)): AxumPath<(String, String)>| {
+                        let body = body.clone();
+                        async move {
+                            if got_scope == scope && got_file == format!("{name}.mem") {
+                                (StatusCode::OK, (*body).clone())
+                            } else {
+                                (StatusCode::NOT_FOUND, vec![])
+                            }
                         }
                     }
-                }
-            }),
-        );
+                }),
+            );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
@@ -3906,6 +3917,110 @@ fn install_without_a_workspace_refuses_typed() {
         .assert()
         .failure()
         .stdout(contains("workspace.toml"));
+}
+
+/// The CLI knows no registry by name: a `<scope>/<name>` install with
+/// neither `--registry` nor `MEMSTEAD_REGISTRY` refuses typed instead of
+/// reaching for a built-in host.
+#[test]
+fn install_from_registry_without_a_configured_registry_refuses_typed() {
+    let receiver = TempDir::new().unwrap();
+    let _receiver_mem = make_receiver_mem(receiver.path());
+    memstead()
+        .current_dir(receiver.path())
+        .env_remove("MEMSTEAD_REGISTRY")
+        .args(["--json", "install", "fixture/published"])
+        .assert()
+        .failure()
+        .stdout(contains("REGISTRY_NOT_CONFIGURED"));
+}
+
+/// `login` refuses typed without a registry, and refuses typed when the
+/// registry does not serve its OAuth settings.
+#[test]
+fn login_refuses_without_registry_or_auth_config() {
+    let home = TempDir::new().unwrap();
+    memstead()
+        .env_remove("MEMSTEAD_REGISTRY")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .args(["--json", "login"])
+        .assert()
+        .failure()
+        .stdout(contains("REGISTRY_NOT_CONFIGURED"));
+    memstead()
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .args(["--json", "login", "--registry", "http://127.0.0.1:1"])
+        .assert()
+        .failure()
+        .stdout(contains("REGISTRY_AUTH_CONFIG_UNAVAILABLE"));
+}
+
+/// `login` takes the GitHub OAuth client id from the registry's
+/// `GET /api/auth/config`, not from a constant in the binary: the device
+/// code request that follows carries exactly the id the registry served.
+/// The fixture doubles as the GitHub host and rejects the device-code
+/// request, so the flow stops there with `LOGIN_FAILED`.
+#[test]
+fn login_uses_the_client_id_the_registry_serves() {
+    use axum::{
+        Router,
+        http::StatusCode,
+        routing::{get, post},
+    };
+    use std::sync::Arc;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let captured: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let sink = captured.clone();
+    let base = runtime.block_on(async move {
+        let app: Router = Router::new()
+            .route(
+                "/api/auth/config",
+                get(|| async {
+                    (
+                        StatusCode::OK,
+                        [("content-type", "application/json")],
+                        r#"{"github_client_id":"fixture-client-id"}"#,
+                    )
+                }),
+            )
+            .route(
+                "/login/device/code",
+                post(move |body: String| {
+                    let sink = sink.clone();
+                    async move {
+                        *sink.lock().unwrap() = body;
+                        (StatusCode::BAD_REQUEST, "fixture refuses")
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}")
+    });
+
+    let home = TempDir::new().unwrap();
+    memstead()
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .env("MEMSTEAD_GITHUB_HOST", &base)
+        .args(["--json", "login", "--registry", &base])
+        .assert()
+        .failure()
+        .stdout(contains("LOGIN_FAILED"));
+    let body = captured.lock().unwrap().clone();
+    assert!(
+        body.contains("client_id=fixture-client-id") && body.contains("scope=read%3Auser"),
+        "the device-code request must carry the registry's client id and the default scope; got: {body}"
+    );
 }
 
 /// Criterion 7: a declaration written by one process is not silently

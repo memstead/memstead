@@ -171,10 +171,10 @@ mod tests {
                 ("excluded-private-dirs", 1),
             ]
         );
-        let (clean, none) = redact("an ordinary note about engine-graph/ and memstead.io");
+        let (clean, none) = redact("an ordinary note about engine-graph/ and memstead.com");
         assert_eq!(
             clean,
-            "an ordinary note about engine-graph/ and memstead.io"
+            "an ordinary note about engine-graph/ and memstead.com"
         );
         assert!(none.is_empty());
     }

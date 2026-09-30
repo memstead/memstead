@@ -100,7 +100,7 @@ How Memstead differs: this is the approach Memstead's own VISION names as its or
 
 - **OCI / [Docker images](https://opencontainers.org)** — the contemporary standard for portable, content-addressed software artefacts. Memstead's `.mem` mem export-and-publish model conceptually parallels OCI's image lifecycle, though `.mem` is far simpler.
 - **[Nix](https://nixos.org)** / **[Guix](https://guix.gnu.org)** — content-addressed reproducible-build systems. Memstead mem hashes use a similar idea at a much smaller scale.
-- **[Helm](https://helm.sh)** charts, **[crates.io](https://crates.io)**, **[npm](https://www.npmjs.com)**, **[PyPI](https://pypi.org)** — versioned package registries. memstead.io follows this pattern for mem publishing.
+- **[Helm](https://helm.sh)** charts, **[crates.io](https://crates.io)**, **[npm](https://www.npmjs.com)**, **[PyPI](https://pypi.org)** — versioned package registries. Memstead's registry protocol follows this pattern for mem publishing.
 
 ## Rust ecosystem patterns
 

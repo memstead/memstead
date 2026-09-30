@@ -224,7 +224,7 @@ fn render_index(codes: &BTreeMap<String, Vec<Occurrence>>) -> String {
          (`memstead-cli`), and the MCP server (`memstead-mcp`). Each \
          row lists the code, the surfaces that emit it, and the source \
          locations. Not indexed here: the registry-relayed codes the CLI \
-         maps from memstead.io HTTP statuses during publish/install \
+         maps from registry HTTP statuses during publish/install \
          (`REGISTRY_VALIDATION_FAILED`, `NOT_AUTHENTICATED`, `FORBIDDEN`, \
          `REGISTRY_NOT_FOUND`, `GONE`, `ARCHIVE_TOO_LARGE`, \
          `RATE_LIMITED`, `REGISTRY_ERROR` — see the publish guide and \

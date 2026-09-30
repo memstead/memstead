@@ -16,24 +16,20 @@ use crate::setup::CliContext;
 
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// Registry URL (overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io).
+    /// Registry URL (overrides `MEMSTEAD_REGISTRY`; one of the two is required).
     #[arg(long, value_name = "URL")]
     pub registry: Option<String>,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    let base = registry::registry_base(args.registry.as_deref());
+    let base = registry::registry_base(args.registry.as_deref())?;
     let host = registry::registry_host(&base);
     let client = registry::build_http()?;
+    let auth = registry::fetch_auth_config(&client, &base)?;
 
-    let outcome = device_flow::run(
-        &client,
-        device_flow::MEMSTEAD_GITHUB_CLIENT_ID,
-        device_flow::MEMSTEAD_GITHUB_SCOPE,
-        |url| {
-            let _ = device_flow::open_browser(url);
-        },
-    )
+    let outcome = device_flow::run(&client, &auth.github_client_id, &auth.github_scope, |url| {
+        let _ = device_flow::open_browser(url);
+    })
     .map_err(|e| {
         CliError::new(
             ExitKind::Generic,

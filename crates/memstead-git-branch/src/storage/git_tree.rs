@@ -1166,7 +1166,7 @@ fn sync_index_and_worktree(repo: &gix::Repository, ref_name: &str) -> Result<(),
 /// `git_tree_writer_blob_oid_matches_disk_oid` test below, which only
 /// passes when both adapters produce byte-identical commit objects.
 const COMMITTER_NAME: &str = "engine";
-const COMMITTER_EMAIL: &str = "noreply@memstead.io";
+const COMMITTER_EMAIL: &str = "noreply@memstead.com";
 
 /// One blob entry returned by [`read_branch_blobs`] — the
 /// mem-relative forward-slash path and the blob bytes. The list is

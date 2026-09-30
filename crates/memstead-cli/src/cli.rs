@@ -178,7 +178,7 @@ pub enum Command {
     Quickstart(commands::quickstart::Args),
 
     /// Install a sealed `.mem` mem — either a local file, or `<scope>/<name>`
-    /// from the memstead.io registry. Registers it as a workspace-level
+    /// from a Memstead registry (`--registry` / `MEMSTEAD_REGISTRY`). Registers it as a workspace-level
     /// read-only mount; `memstead uninstall` is the symmetric removal.
     /// Works on every workspace shape: a read-mem attaches to the workspace,
     /// not to one of your mems.
