@@ -64,11 +64,14 @@ public record.)
 ## Where this figure lives
 
 This page is the figure's public record. [memstead.com](https://memstead.com)
-no longer shows it: the site rendered it from the project's graph through a
-committed projection script until the homepage was rebuilt on 2026-09-04
-without derived numbers. Its source of record is the launch-claims register
-assertion *"The measured drift loop closed 79 percent of 153 findings at a
-12-minute median."*
+rendered it from the project's graph through a committed projection script
+until the homepage was rebuilt on 2026-09-04 without derived numbers. Since
+2026-09-30 the page cites it in one dated sentence beside its measurements,
+with the reasons nothing there rests on it: the mem-repo is private, no
+outside party has reproduced the count, and the mechanism it measured was
+replaced. Its source of record is the launch-claims register assertion
+*"The measured drift loop closed 79 percent of 153 findings at a 12-minute
+median."*
 
 ## Since this was measured
 
