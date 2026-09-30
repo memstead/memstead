@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-30
+
 ### Changed
 
 - **A new product sentence: "Typed project knowledge for AI agents."**
@@ -6456,7 +6458,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/memstead/memstead/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/memstead/memstead/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/memstead/memstead/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/memstead/memstead/compare/v0.18.1...v0.19.0
