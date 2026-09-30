@@ -1,0 +1,60 @@
+/* The docs speak the engine page's visual language (memstead.com): near-white
+   paper, ink, one indigo accent, hairline rules, mono for apparatus. Colours
+   only map Starlight's own theme variables; no fonts are shipped, the
+   system sans and mono stand in. Dark mode keeps the same roles. */
+
+:root {
+  --sl-font: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --sl-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #dfe3ec;
+  --sl-color-accent: #2c3a56;
+  --sl-color-accent-high: #16181d;
+  --sl-color-white: #16181d;
+  --sl-color-gray-1: #26292f;
+  --sl-color-gray-2: #3b3f47;
+  --sl-color-gray-3: #4b4f58;
+  --sl-color-gray-4: #80848c;
+  --sl-color-gray-5: #c9c9c4;
+  --sl-color-gray-6: #eeeeea;
+  --sl-color-gray-7: #f4f4f1;
+  --sl-color-black: #fafaf8;
+  --sl-color-hairline: #dcdcd7;
+  --sl-color-hairline-shade: #dcdcd7;
+  --sl-color-bg-nav: #fafaf8;
+  --sl-color-bg-sidebar: #fafaf8;
+}
+
+:root {
+  /* dark: the same roles on ink paper */
+  --sl-color-accent-low: #1f2838;
+  --sl-color-accent: #8e9dbd;
+  --sl-color-accent-high: #d6dcea;
+  --sl-color-white: #f2f2ee;
+  --sl-color-gray-1: #e2e2dd;
+  --sl-color-gray-2: #c6c6c0;
+  --sl-color-gray-3: #9c9ea3;
+  --sl-color-gray-4: #6c6f76;
+  --sl-color-gray-5: #3a3d44;
+  --sl-color-gray-6: #22252b;
+  --sl-color-black: #16181d;
+}
+
+/* Header: a mono wordmark above one solid rule, like the engine page. */
+header.header { border-bottom: 1px solid var(--sl-color-white); }
+.site-title { font-family: var(--sl-font-mono); font-size: 0.95rem; font-weight: 600; letter-spacing: 0.02em; }
+
+/* Headings: tight sans, no ornament. */
+.sl-markdown-content :is(h1, h2, h3), h1#_top { letter-spacing: -0.02em; }
+h1#_top { font-weight: 650; }
+
+/* Sidebar group labels read as rail labels. */
+.sidebar-content .group-label .large { font-family: var(--sl-font-mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--sl-color-gray-3); }
+
+/* Square corners, as on the engine page. */
+.sl-markdown-content :is(pre, code), .expressive-code .frame, .expressive-code pre, starlight-tabs, .card, .sl-link-card { border-radius: 0 !important; }
+
+/* Tables: ruled, mono header row. */
+.sl-markdown-content table th { font-family: var(--sl-font-mono); font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sl-color-gray-3); font-weight: 500; }
