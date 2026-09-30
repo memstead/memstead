@@ -79,7 +79,7 @@ memstead quickstart
 
 One mem, plain `.md` files in this folder, no git history — nothing else to set up.
 
-- **It cannot run the atomic `batch-*` commands or `recover`.** Those are mem-repo-only and refuse here with `UNSUPPORTED_WORKSPACE_SHAPE`. `memstead install <scope>/<name>` works on either shape.
+- **It cannot run the atomic `batch-*` commands or `recover`.** Those are mem-repo-only and refuse here with `UNSUPPORTED_WORKSPACE_SHAPE`. The flags `update --append`, `--patch` and `--dry-run`, and `create --dry-run`, are mem-repo-only too and refuse here with `INVALID_INPUT`. `memstead install <scope>/<name>` works on either shape.
 - **The other shape** — mem-repo: many mems, git-backed, every mutation a commit — comes from `memstead mem-repo init` in a fresh folder. Switching later means starting a second workspace, so decide now if you want per-mutation history or the atomic batch commands.
 
 Next: Restart Claude Code so the `memstead` MCP server registers its tools — then try: memstead overview

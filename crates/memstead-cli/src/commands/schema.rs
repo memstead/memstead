@@ -670,8 +670,13 @@ relationships:
       # source_types: [note]
       # target_types: [note]
       #
-      # cardinality_per_source: 1   # at most one such edge per source
-      # manual_authoring: false     # true = engine-emitted only
+      # Who may write this edge. `forbidden` makes it engine-emitted only:
+      # an explicit `memstead relate` of this type is refused.
+      # manual_authoring: forbidden   # allow (default) | warn | forbidden
+      #
+      # Declared per-source cardinality, recorded on the definition but NOT
+      # enforced: a relate past the range still lands, with no warning.
+      # cardinality_per_source: "1"   # "1" | "0..1" | "1..N" | "0..N"
     - name: REFERENCES
       description: Soft reference. Auto-emitted from body wiki-links — never author by hand.
       default_weight: 0.5

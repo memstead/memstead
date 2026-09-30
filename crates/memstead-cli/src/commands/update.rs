@@ -66,6 +66,9 @@ pub struct Args {
     pub sections: Vec<String>,
 
     /// Append to section content: repeatable `--append key=value`.
+    /// Mem-repo workspaces only: on the filesystem-mem workspace
+    /// `memstead quickstart` produces it refuses with `INVALID_INPUT`;
+    /// replace the whole section with `--section` there instead.
     #[arg(long = "append", value_name = "KEY=VALUE", conflicts_with = "from")]
     pub append: Vec<String>,
 
@@ -80,11 +83,14 @@ pub struct Args {
     /// Find-and-replace inside a section: repeatable `--patch key=OLD=>NEW`.
     /// Use `=>` (two chars) as the separator between old and new. Exact match
     /// of the first occurrence; use `--patch-all` to replace every occurrence.
+    /// Mem-repo workspaces only, like `--append`: a filesystem-mem workspace
+    /// refuses it with `INVALID_INPUT`.
     #[arg(long = "patch", value_name = "KEY=OLD=>NEW", conflicts_with = "from")]
     pub patch: Vec<String>,
 
     /// Replace every occurrence of OLD in the section — sibling of `--patch`.
-    /// Repeatable `--patch-all key=OLD=>NEW`.
+    /// Repeatable `--patch-all key=OLD=>NEW`. Mem-repo workspaces only, like
+    /// `--patch`.
     #[arg(
         long = "patch-all",
         value_name = "KEY=OLD=>NEW",
@@ -151,7 +157,9 @@ pub struct Args {
 
     /// Preview what would change without writing. Applies on both the
     /// inline and `--from` paths; with `--from` it forces a dry run even
-    /// when the file's `dry_run` field is absent or `false`.
+    /// when the file's `dry_run` field is absent or `false`. Mem-repo
+    /// workspaces only: a filesystem-mem workspace refuses it with
+    /// `INVALID_INPUT` and writes nothing.
     #[arg(long)]
     pub dry_run: bool,
 

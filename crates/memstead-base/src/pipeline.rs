@@ -74,10 +74,10 @@ pub struct Source {
     /// not interpret it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engagement: Option<serde_json::Value>,
-    /// Optional deterministic preparation — the identifier of a
+    /// Optional deterministic preparation: the identifier of a
     /// preparation registered in the engine's [`crate::preparation`]
-    /// registry (today `entity-load-bearing` on graph sources and
-    /// `dated-entries` on path-shaped ones). At most one per source.
+    /// registry ([`crate::preparation::REGISTRY`] is the one roster of
+    /// what is registered). At most one per source.
     /// The edit/validate paths refuse an identifier the registry does not
     /// know ([`crate::binding::CapabilityError::PreparationUnsupported`]);
     /// a record that acquired an unknown one by hand is accepted at rest and

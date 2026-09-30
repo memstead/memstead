@@ -132,6 +132,18 @@ mcp = "memstead_rename"
 cli = "rename"
 
 [[operation]]
+name = "retype"
+mcp = "memstead_retype"
+cli = "retype"
+
+[[operation]]
+name = "check"
+mcp = "memstead_check"
+cli = "check"
+# Records a check of one entity (verdict and method) in the check
+# ledger; never a mutation of the entity itself.
+
+[[operation]]
 name = "mem-create"
 mcp = "memstead_mem_create"
 cli = "mem"
@@ -145,6 +157,19 @@ cli = "mem"
 name = "mem-set-version"
 mcp = "memstead_mem_set_version"
 cli = "mem"
+
+[[operation]]
+name = "mem-set-schema"
+mcp = "memstead_mem_set_schema"
+cli = "mem set-schema"
+
+[[operation]]
+name = "mem-configure"
+mcp = "memstead_mem_configure"
+cli = "mem"
+# One MCP tool sets title, description and subject; the CLI carries the
+# same writes as `mem set-title`, `mem set-description` and
+# `mem set-subject`.
 
 [[operation]]
 name = "workspace-allow-create"

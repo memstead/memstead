@@ -275,9 +275,9 @@ impl std::fmt::Display for Cardinality {
 }
 
 impl Cardinality {
-    /// Returns `true` iff `count` falls inside the allowed range. Used by
-    /// `memstead_relate` to predict whether a post-mutation outgoing count
-    /// would violate the schema's intent.
+    /// Returns `true` iff `count` falls inside the allowed range. No write
+    /// path consults it today: `cardinality_per_source` is declarative
+    /// only, so a relate that leaves the range lands without a warning.
     pub fn admits(&self, count: usize) -> bool {
         match self {
             Cardinality::One => count == 1,

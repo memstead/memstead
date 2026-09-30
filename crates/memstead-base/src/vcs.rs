@@ -70,7 +70,7 @@ impl Actor {
     }
 
     /// Inverse of [`Self::as_trailer`]. Returns `None` for any string
-    /// outside the four canonical wire forms — readers that may
+    /// outside the five canonical wire forms — readers that may
     /// encounter older or malformed values choose how to handle the
     /// absence (default to [`Actor::Unknown`], surface a warning, …).
     pub fn from_trailer(s: &str) -> Option<Self> {

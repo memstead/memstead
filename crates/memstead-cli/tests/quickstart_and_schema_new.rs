@@ -388,6 +388,58 @@ fn schema_new_scaffold_validates_unmodified() {
         .success();
 }
 
+/// The scaffold's commented relationship keys are an invitation to
+/// uncomment them, so each one must validate exactly as written. A hint
+/// that spelled `manual_authoring: false` (the key takes `allow` / `warn`
+/// / `forbidden`) handed the author a refusal for following it.
+#[test]
+fn schema_new_relationship_hints_validate_when_uncommented() {
+    let tmp = TempDir::new().unwrap();
+    memstead()
+        .current_dir(tmp.path())
+        .args(["schema", "new", "acme"])
+        .assert()
+        .success();
+    let manifest = tmp.path().join("acme/schema.yaml");
+    let original = std::fs::read_to_string(&manifest).unwrap();
+    let keys = [
+        "per_edge_description",
+        "source_types",
+        "target_types",
+        "manual_authoring",
+        "cardinality_per_source",
+    ];
+    let mut found = Vec::new();
+    let uncommented: String = original
+        .lines()
+        .map(|line| {
+            let hint = keys.iter().find(|k| {
+                line.trim_start()
+                    .strip_prefix("# ")
+                    .is_some_and(|rest| rest.starts_with(&format!("{k}:")))
+            });
+            match hint {
+                Some(k) => {
+                    found.push(*k);
+                    line.replacen("# ", "", 1)
+                }
+                None => line.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        found, keys,
+        "the scaffold must still carry each relationship hint, once, in this order:\n{original}"
+    );
+    std::fs::write(&manifest, uncommented).unwrap();
+    memstead()
+        .current_dir(tmp.path())
+        .args(["schema", "validate", "acme"])
+        .assert()
+        .success();
+}
+
 /// Follow-up AC: the printed three-command sequence, executed verbatim
 /// from a workspace, ends with the mem pinned to `acme@0.1.0` and
 /// accepting a `memstead create --type note`. (`mem set-schema` needs
