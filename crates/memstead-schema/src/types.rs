@@ -348,7 +348,7 @@ pub enum ConstraintSeverity {
 
 impl ConstraintSeverity {
     /// Serde default for forms whose default tier is `block`
-    /// (uniqueness: a field deployment's 37 duplicates are the evidence).
+    /// (uniqueness: its whole point is bouncing the duplicate).
     pub fn block() -> Self {
         Self::Block
     }

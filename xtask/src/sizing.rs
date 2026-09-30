@@ -55,8 +55,7 @@ use serde_json::{Value, json};
 pub struct SizingArgs {
     /// Comma-separated workspace sizes (entity counts) to measure.
     /// The default grid spans below, inside, and above the advertised
-    /// 1,000–5,000 range, with the top point matching the largest
-    /// real deployment observed (7.4k).
+    /// 1,000–5,000 range.
     #[arg(long, default_value = "500,2500,5000,7500")]
     pub sizes: String,
 
@@ -482,9 +481,8 @@ fn generate_workspace(binary: &Path, ws: &Path, n: usize) -> Result<()> {
 /// Synthetic corpus: `n` spec entities with realistic density —
 /// two-to-three prose sections, rotating `level` metadata, two explicit
 /// edges to earlier entities (USES / DEPENDS_ON), and one body
-/// wiki-link (which alias-emits REFERENCES). The shape follows the
-/// a field deployment's shape (typed prose + edge density ~3
-/// per entity) without depending on it.
+/// wiki-link (which alias-emits REFERENCES): typed prose at an edge
+/// density of ~3 per entity.
 fn corpus_json(n: usize) -> String {
     let levels = ["M0", "M0", "M0", "M1", "M2"]; // mostly concrete, like real mems
     let mut creates = Vec::with_capacity(n);

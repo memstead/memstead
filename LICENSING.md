@@ -2,7 +2,7 @@
 
 This repository contains code under multiple licenses. The open engine is
 dual-licensed **MIT OR Apache-2.0** (the Rust-ecosystem standard, at the user's
-option); the commercial layer carries different terms.
+option); the proprietary code outside this repository carries different terms.
 
 The open-core cut line is **engine + plugin + `.mem` format/client public;
 registry server private** — *not* a capability split inside the
@@ -15,9 +15,9 @@ engine (the `memstead-git-branch` git-backed backend is open too).
 | `/` (everything not listed below) | MIT OR Apache-2.0 ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE), [NOTICE](NOTICE)) | The Rust workspace and all open engine crates (`crates/`, incl. `memstead-git-branch`), CLI, MCP server, schemas, the `.mem` format/protocol + publish/install client, build tooling, docs, and the auto-generated docs site (`docs-site/`) — the open core. |
 | `plugins/claude-code/` | MIT ([plugins/claude-code/LICENSE](plugins/claude-code/LICENSE)) | Plugin code that extends Claude Code with memstead-aware skills and hooks. MIT chosen to encourage broad ecosystem use. |
 
-The proprietary commercial layer is **not part of this repository**:
+The proprietary code is **not part of this repository**:
 
-- The registry **server** — the network moat and seed of the commercial layer. Lives in a private repository (its own cargo workspace) and depends on the open engine crates by path. The `.mem` format, authority protocol, and publish/install client stay open; the server code does not.
+- The registry **server**: a separate, private project that builds on the open engine and is not operated publicly at the moment. It lives in a private repository (its own cargo workspace) and depends on the open engine crates by path. The `.mem` format, authority protocol, and publish/install client stay open, and the client names no registry: `--registry` or `MEMSTEAD_REGISTRY` points it at one. The server code stays closed.
 - The **hosted-deployment server layer** — the serve/bridge crates behind our hosted web surfaces (read-only HTTP/MCP deployment server, HTTP+SSE sync bridge, and its JS sync client). Product surface, not public libraries; lives in the same private repository, wired like the registry (own workspace roots, path-dependencies on the open engine). The open JS story is snapshot reads through the `memstead-wasm` crate in this repository, built from the tree with `wasm-pack`; its npm package, `@memstead/wasm`, was published until 0.18.1 and that channel closed on 2026-09-05.
 
 ## Rationale
@@ -26,7 +26,7 @@ The project follows an **open-core model**, and the cut runs by *trust*, not by 
 
 - The **full engine** — the `memstead-git-branch` backend, multi-mem, collaboration, and history — plus the **CLI**, **MCP server**, **schema definitions**, and the **`.mem` format/protocol + publish/install client** are open source under **dual MIT OR Apache-2.0** (the Rust-ecosystem standard; users pick either). There is **no crippled core** — the collaboration story *is* the differentiator, so it must be free to experience. Anyone may embed Memstead into their own products, including commercial ones, keeping copyright notices intact.
 - **Plugins** for third-party tools (Claude Code today, others later) are MIT — lighter weight than Apache for the plugin-ecosystem case.
-- The **registry server** is the commercial layer and stays private — it is the network moat (open-sourcing it would invite a fork that fragments the network). Launch posture is **adoption-first** — the open engine drives adoption; revenue layers (a private/enterprise registry, team features) come later, once the graph is embedded in real workflows.
+- The **registry server** stays private. It is a separate project that builds on the open engine, and it is not operated publicly while the engine matures. Open-sourcing it would invite forks that fragment a network of published mems, should one grow.
 
 ## Why open the whole engine (and not AGPL or BSL)
 
@@ -34,7 +34,7 @@ The project follows an **open-core model**, and the cut runs by *trust*, not by 
 - **Adoption priority.** Dual MIT/Apache is maximally accepted, including by enterprises whose policies forbid copyleft (AGPL, GPL) and source-available (BSL, SSPL) licenses.
 - **No crippled core.** The collaboration backend is open precisely because the collaboration story is what must be experienced for free.
 - **Patent grant.** The Apache-2.0 option's explicit patent grant protects users from patent-litigation risk that bare MIT/BSD does not address; the MIT option keeps maximum simplicity.
-- **A source-available license (BSL) was considered and rejected** — it taxes adoption and trust to protect the wrong thing. The one real residual risk (a large distributor bundling the open engine) is answered by speed + owning the registry/ecosystem/brand first, not by closing the engine.
+- **A source-available license (BSL) was considered and rejected** — it taxes adoption and trust to protect the wrong thing. The one real residual risk (a large distributor bundling the open engine) is answered by speed and by owning the ecosystem and the brand, not by closing the engine.
 
 ## Contributing
 

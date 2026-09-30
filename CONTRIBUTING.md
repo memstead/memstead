@@ -5,9 +5,10 @@ documentation fixes, and code alike.
 
 Memstead is a schema-agnostic graph engine: each mem keeps a typed model of a
 chosen subject as Markdown + git, readable by both humans and LLMs, with MCP as
-the AI-agent access layer. The engine is the open core; a commercial
-layer (a hosted registry) builds on top of it and is not part of
-this repository. See [LICENSING.md](LICENSING.md) for the boundary.
+the AI-agent access layer. The engine is the open core. The registry server
+that publishes and serves sealed mems is a separate, private project that
+builds on the engine: it is not part of this repository and is not operated
+publicly at the moment. See [LICENSING.md](LICENSING.md) for the boundary.
 
 ## How this project is built
 

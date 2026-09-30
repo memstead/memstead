@@ -37,6 +37,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   way, and `memstead status` reports such a binding as `action-needed` with
   that remedy instead of as onboarding. The build brief still renders for a
   binding whose mem does not exist yet and names the same remedy.
+- **The glossary, licensing and positioning pages state the current
+  facts.** The glossary's sizing note says what the sizing curve measured
+  (load linear in the entity count, no non-linear penalty above the
+  advertised range); LICENSING and CONTRIBUTING describe the registry
+  server as a separate, private project that is not operated publicly; and
+  VISION and PRIOR_ART place Memstead next to the agent-memory systems
+  rather than among them.
 
 ## [0.22.0] - 2026-09-30
 

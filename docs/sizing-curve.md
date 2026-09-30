@@ -8,9 +8,9 @@ release binaries. **All numbers are hardware-relative** — treat the shape of
 the curve as portable and the absolute milliseconds as this machine's.
 The first measurement (2026-08-06, commit `c48cd07`) is kept below as a
 dated record: it found the cost super-linear, a profile on 2026-09-10
-named the cause, and the fix made the curve linear the same day. The
-field deployment that motivated the first measurement ran on different
-hardware and saw ~0.5 ms/entity on the pre-fix engine.
+named the cause, and the fix made the curve linear the same day. A
+slow-boot report from a project that uses the engine motivated that
+first measurement.
 
 The engine's MCP instructions describe a mem as "designed for 1,000–5,000
 entities". Until this document, that span was advertised, not measured.
@@ -55,12 +55,10 @@ Synthetic corpora, self-contained: `spec` entities under the builtin
 `default` schema — the harness pins no version, so a run takes whatever
 the binary's default is (`default@1.3.0` today) — three prose sections each, rotating `level`
 metadata, two explicit edges (USES / DEPENDS_ON) to earlier entities plus
-one body wiki-link (alias-emitting REFERENCES) — edge density ~3/entity,
-following the shape of the largest real deployment without depending on
-it. Backend: git-branch (mem-repo), the backend the field pain was
-measured on. Each cold operation is a fresh `memstead` process — the
-**cold CLI path**, where cost was first reported; the **warm path**, one
-MCP server paying boot once and answering calls after it, is measured
+one body wiki-link (alias-emitting REFERENCES), an edge density of
+~3/entity. Backend: git-branch (mem-repo). Each cold operation is a fresh
+`memstead` process, the **cold CLI path**; the **warm path**, one MCP
+server paying boot once and answering calls after it, is measured
 separately below on the same workspace.
 
 The four cold operations, timed spawn-to-exit, median of 3:
@@ -104,8 +102,8 @@ Two findings carry the whole page:
    time; the per-entity figure falls from 0.12 to 0.05 ms because the
    small end is dominated by process spawn and repository open (~40 ms
    flat), not by entities. The advertised span's ceiling (5,000) costs a
-   quarter of a second per cold command on this hardware; the largest
-   real deployment's size (7,414) sits under 0.4 s.
+   quarter of a second per cold command on this hardware, and the largest
+   measured size (7,500) under 0.4 s.
 
 ### Dated record: the 2026-08-06 curve and its cause
 
@@ -130,9 +128,6 @@ inflated 7,500 times is quadratic; the markdown parser and the
 validators were under one percent. The fix is one backend primitive,
 `read_all_entities`: the whole mem in one tree walk, taken by boot and
 reload, under the same source-selection rules as the per-path read.
-Field calibration from that era (boot ~0.5 ms/entity at 7,414 entities,
-a 6,900-entity ingest at ~4 s per CLI call) measured the quadratic path
-and no longer predicts the engine.
 
 Generation context: one `batch-create` call lands 7,500 entities in
 ~4.7 s — the batch path exists precisely because per-call cold boots made

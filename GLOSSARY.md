@@ -34,7 +34,7 @@ The model's modal flavour (knowledge / planning / inquiry / spec / hybrid) follo
 
 - **Subject coherence** — a "subject" with 50k entities is usually three subjects in one bucket.
 - **Agent navigation** — agents generate workspace-overviews, walk communities, and reason about structure. At 1k–5k they hold the whole picture; at 100k+ every operation degrades to "subset selection first".
-- **Algorithm scaling** — Louvain community detection, schema validation at boot, search index build all degrade non-linearly above this range.
+- **Load cost**: measured, and linear. The [sizing curve](https://github.com/memstead/memstead/blob/main/docs/sizing-curve.md) finds workspace load linear in the entity count, validation at boot included, with community detection and the search-index rebuild invisible next to it. A larger mem pays proportionally more on every cold command (about a quarter of a second at 5,000 entities on the measuring machine), not a non-linear penalty.
 - **MCP response shapes** — list-returning tools (`memstead_search`, `memstead_overview`) become hostile to agents without aggressive pagination.
 
 For larger corpora the model is **many small mems, federated** rather than one giant mem — see [VISION.md](VISION.md#mem-scaling-many-small-federated)'s tier model (Working Mem for active read/write; Indexed Mem for million-scale read-only query, planned).
