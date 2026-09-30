@@ -1,7 +1,7 @@
 ---
 type: memo
 created_date: 2026-08-06T16:38:36Z
-last_modified: 2026-09-21T11:30:52Z
+last_modified: 2026-09-30T20:49:49Z
 status: active
 tags: performance, sizing, measurement, boot, scale
 ---
@@ -12,7 +12,7 @@ tags: performance, sizing, measurement, boot, scale
 On the cold CLI path every everyday operation costs what boot costs: workspace load dominates so completely that mutation commits, search-index rebuilds, and community detection are invisible next to it. Load is linear in the entity count (0.05 ms per entity at 7,500, measured 2026-09-10 on Apple M5 Max, release build); the super-linear growth the first curve reported (0.36 to 0.75 ms per entity, 2026-08-06) was a defect in the git-branch backend's per-entity read, not a property of loading, and is gone since the linear-boot fix that ships in 0.20.0.
 
 ## Context
-The engine advertised "designed for 1,000-5,000 entities" without ever measuring it (a finding from the field project running the largest real deployment); the largest real deployment reached 7,414 entities at ~0.5 ms/entity boot. Three backlog redesigns — real lazy mounts, incremental maintenance of derived structures, deferred cross-mem target resolution — explicitly wait for numbers. The agent-toolbox plan 02 built the measurement: `cargo run -p xtask -- sizing-curve` in [[engine--xtask-crate]] generates graded synthetic mem-repo workspaces through the product surface and times boot, update, search-after-mutation, and overview as fresh processes; the committed curve lives in `public/docs/sizing-curve.md`, machine-readable results in `sizing-curve/v1` JSON.
+The engine advertised "designed for 1,000-5,000 entities" without ever measuring it; a slow-boot report from a project that uses the engine made that visible. Three backlog redesigns — real lazy mounts, incremental maintenance of derived structures, deferred cross-mem target resolution — explicitly wait for numbers. The agent-toolbox plan 02 built the measurement: `cargo run -p xtask -- sizing-curve` in [[engine--xtask-crate]] generates graded synthetic mem-repo workspaces through the product surface and times boot, update, search-after-mutation, and overview as fresh processes; the committed curve lives in `public/docs/sizing-curve.md`, machine-readable results in `sizing-curve/v1` JSON.
 
 ## Relationships
 - **REFERENCES**: [[engine:xtask-crate]]
@@ -23,7 +23,7 @@ The engine advertised "designed for 1,000-5,000 entities" without ever measuring
 
 ## Substance
 
-Medians at 500 / 2,500 / 5,000 / 7,500 entities: boot 181 / 1,162 / 3,043 / 5,647 ms; update, search, and overview each within noise (±10 ms) of boot at every size. What this implies per redesign, as data: (1) lazy mounts are the largest lever the curve can see — every mounted mem adds its full entity count to every cold command via [[engine--engine-boot-and-construction-surface]] and [[engine--entity-load-pipeline]], so load cost is proportional to inventory, not working set; (2) the incremental-index case ([[engine--per-mem-search-index]], [[engine--community-detection]]) cannot be argued from the cold path — the rebuild hides inside load's shadow; its case rests on the warm MCP path, which is the missing measurement; (3) deferred cross-mem targets are priced by the same load dominance — each mem mounted only to satisfy write-time target checks adds its entities x 0.6-0.75 ms to every command permanently. One `batch-create` call lands 7,500 entities in ~4.7 s — the batch path already erases the per-call-boot ingest pain the same field project reported first.
+Medians at 500 / 2,500 / 5,000 / 7,500 entities: boot 181 / 1,162 / 3,043 / 5,647 ms; update, search, and overview each within noise (±10 ms) of boot at every size. What this implies per redesign, as data: (1) lazy mounts are the largest lever the curve can see — every mounted mem adds its full entity count to every cold command via [[engine--engine-boot-and-construction-surface]] and [[engine--entity-load-pipeline]], so load cost is proportional to inventory, not working set; (2) the incremental-index case ([[engine--per-mem-search-index]], [[engine--community-detection]]) cannot be argued from the cold path — the rebuild hides inside load's shadow; its case rests on the warm MCP path, which is the missing measurement; (3) deferred cross-mem targets are priced by the same load dominance — each mem mounted only to satisfy write-time target checks adds its entities x 0.6-0.75 ms to every command permanently. One `batch-create` call lands 7,500 entities in ~4.7 s — the batch path already erases the per-call-boot ingest pain the same project reported first.
 
 
 Dated record, 2026-08-06 curve: boot 181 / 1,162 / 3,043 / 5,647 ms at 500 / 2,500 / 5,000 / 7,500; 15x the entities cost 31x the time. Re-measured 2026-09-10 on the linear-boot engine: 59 / 145 / 255 / 371 ms; 15x the entities cost 6x the time, and the small end is process spawn and repository open (~40 ms flat), not entities.
