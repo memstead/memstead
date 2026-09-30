@@ -41,7 +41,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   facts.** The glossary's sizing note says what the sizing curve measured
   (load linear in the entity count, no non-linear penalty above the
   advertised range); LICENSING and CONTRIBUTING describe the registry
-  server as a separate, private project that is not operated publicly; and
+  server as a separate, private project that is not operated publicly, and
+  SECURITY no longer lists a registry service among what it covers; and
   VISION and PRIOR_ART place Memstead next to the agent-memory systems
   rather than among them.
 

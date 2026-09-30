@@ -13,7 +13,7 @@ Memstead is currently in **pre-1.0** development. Until a stable 1.0 release is 
 
 ## Reporting a vulnerability
 
-If you believe you have found a security issue in Memstead — the engine, the CLI, the MCP server, or the registry service — please **do not open a public GitHub issue**.
+If you believe you have found a security issue in Memstead (the engine, the CLI, the MCP server, the Claude Code plugin or the install script), please **do not open a public GitHub issue**.
 
 Instead, send the report by email to:
 
@@ -44,7 +44,7 @@ We do not currently operate a paid bug bounty program. Reports are appreciated a
 
 ## Third-party mem trust model
 
-A mem that did not originate in your own workspace — installed from the registry, or adopted from a foreign folder or clone — is a channel for someone else's text to enter an agent's reasoning loop. The engine treats it as untrusted input:
+A mem that did not originate in your own workspace (installed from a `.mem` file or a registry you named, or adopted from a foreign folder or clone) is a channel for someone else's text to enter an agent's reasoning loop. The engine treats it as untrusted input:
 
 - **Foreign instruction prose is withheld.** A third-party mem's schema is served structural-only regardless of requested verbosity: its `system_context` and `write_rules` prose is never served as instructions.
 - **Foreign content is labeled.** Non-first-party entity content carries a machine-readable `origin` tag on every read surface (`memstead_schema`, `memstead_entity`, `memstead_search`, `memstead_overview`, the registry manifest, the served read tier's discovery manifest).
