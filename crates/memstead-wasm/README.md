@@ -1,6 +1,6 @@
 # memstead-wasm
 
-Install expertise into your agent. `memstead-wasm` is the WebAssembly
+Typed project knowledge for AI agents. `memstead-wasm` is the WebAssembly
 binding of the [Memstead](https://github.com/memstead/memstead) engine:
 hydrate a knowledge-graph snapshot in the browser and read it with the
 same typed engine that runs natively.

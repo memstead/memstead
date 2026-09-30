@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/memstead/memstead)](https://github.com/memstead/memstead/releases)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSING.md)
 
-**Install expertise into your agent.** Memstead packages what someone curated about one subject (a library, a product, a domain, a codebase) as a **mem**: a typed knowledge graph, sealed into one file, installed in one command, read by your agent over MCP with citations into it. The knowledge lives as plain markdown in a git repository you own: readable by you, diffable in review, with no database and no vendor lock-in. Any agent that speaks [MCP (the Model Context Protocol)](https://modelcontextprotocol.io) (Claude Code, Codex, Gemini, …) or the `memstead` CLI reads and writes it through a schema *you* control, and the engine enforces that schema on every write so the graph never drifts into mush.
+**Typed project knowledge for AI agents.** Your AI coding agent keeps what it learns about a project (decisions, specifications, how the parts fit) as a **mem**: a typed knowledge graph of plain markdown files in a git repository you own, readable by you, diffable in review, with no database and no vendor lock-in. Every write is validated against a schema *you* control and refused, with the fix attached, when it does not conform; the next session reads the graph back over [MCP (the Model Context Protocol)](https://modelcontextprotocol.io) and answers with citations into it. Any MCP client (Claude Code, Codex, Gemini, …) or the `memstead` CLI reads and writes it. The path: install the binaries, run `memstead quickstart`, let your agent write its first entities, and ask about them in a fresh session.
 
 Under the hood: each **mem** is a typed graph of interconnected entities. A **schema** you pin defines the entity types, their sections, and the relationships allowed between them: knowledge, plans, specs, inquiry, or any mix. Knowledge graphs are one well-known slice; Memstead generalises across all of them.
 
@@ -200,7 +200,7 @@ The schema drives all engine behaviour; there are no hardcoded field names. Any 
 | `fuzz/` | Coverage-guided fuzz targets for the trust-boundary parsers (see [`fuzz/README.md`](fuzz/README.md)) |
 | `scripts/` | Repository guards (leak scan, plan refs, mechanism leak, plugin architecture), the release machinery (`release-verify.sh`, `untagged-release.sh`, `ci-status.sh`) and the crates.io publisher |
 
-Memstead also has a hosted registry; that is a separate, closed-source part of the project and not part of this open repository.
+No registry service is part of this open repository; `memstead publish` and `memstead install` talk to whichever registry you point them at.
 
 ## What Memstead does not do (yet)
 

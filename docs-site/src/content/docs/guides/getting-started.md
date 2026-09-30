@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-**Install expertise into your agent.** Knowledge lives as plain markdown in a **mem**, a typed graph of interconnected entities, validated on every write against a **schema** you control. This tutorial takes you from nothing to a working, agent-connected graph.
+**Typed project knowledge for AI agents.** Knowledge lives as plain markdown in a **mem**, a typed graph of interconnected entities, validated on every write against a **schema** you control. This tutorial takes you from nothing to a working, agent-connected graph.
 
 Terms like *mem*, *schema*, *workspace*, and *entity* have precise meanings: the [Glossary](../../glossary/) is the normative reference, and this page uses its vocabulary.
 

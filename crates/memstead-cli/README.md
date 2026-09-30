@@ -1,6 +1,6 @@
 # memstead-cli
 
-Install expertise into your agent. `memstead-cli` is the command-line
+Typed project knowledge for AI agents. `memstead-cli` is the command-line
 interface of [Memstead](https://github.com/memstead/memstead), the
 schema-agnostic graph engine that keeps typed knowledge graphs as plain
 markdown in git.

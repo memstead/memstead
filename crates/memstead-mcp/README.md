@@ -1,6 +1,6 @@
 # memstead-mcp
 
-Install expertise into your agent. `memstead-mcp` is the MCP server of
+Typed project knowledge for AI agents. `memstead-mcp` is the MCP server of
 [Memstead](https://github.com/memstead/memstead), the schema-agnostic
 graph engine that keeps typed knowledge graphs as plain markdown in git.
 

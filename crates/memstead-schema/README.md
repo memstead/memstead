@@ -1,6 +1,6 @@
 # memstead-schema
 
-Install expertise into your agent. `memstead-schema` holds the schema
+Typed project knowledge for AI agents. `memstead-schema` holds the schema
 types of [Memstead](https://github.com/memstead/memstead): entity
 definitions, the relationship vocabulary and the validation rules.
 

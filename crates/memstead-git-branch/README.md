@@ -1,6 +1,6 @@
 # memstead-git-branch
 
-Install expertise into your agent. `memstead-git-branch` is the mem-repo
+Typed project knowledge for AI agents. `memstead-git-branch` is the mem-repo
 storage backend of [Memstead](https://github.com/memstead/memstead): the
 multi-mem, git-backed engine behind the two products.
 

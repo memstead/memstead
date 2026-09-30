@@ -1,6 +1,6 @@
 # Memstead — Claude Code plugin
 
-Install expertise into your agent. The Memstead plugin gives Claude Code a set
+Typed project knowledge for AI agents. The Memstead plugin gives Claude Code a set
 of MCP tools (all prefixed `memstead_`) for reading and mutating a Memstead
 knowledge graph, plus a handful of slash commands for the jobs that benefit
 from a guided flow.

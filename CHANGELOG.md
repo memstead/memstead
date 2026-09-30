@@ -9,6 +9,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **A new product sentence: "Typed project knowledge for AI agents."**
+  It replaces "Install expertise into your agent." in the README and
+  docs-site ledes, every crate README, the crates.io descriptions of
+  `memstead-cli` and `memstead-mcp`, and the plugin and marketplace
+  manifests; the ledes now describe the author path (quickstart, the
+  agent writes validated entities, the next session reads them back).
 - **Breaking: the CLI knows no registry by name.** `publish`, `install
   <scope>/<name>`, `login`, `logout` and `unpublish` take the registry
   from `--registry <URL>`, then `MEMSTEAD_REGISTRY`; with neither they

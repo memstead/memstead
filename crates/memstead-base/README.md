@@ -1,6 +1,6 @@
 # memstead-base
 
-Install expertise into your agent. `memstead-base` holds the engine
+Typed project knowledge for AI agents. `memstead-base` holds the engine
 internals of [Memstead](https://github.com/memstead/memstead): the store,
 the parser, the validators, the mem lifecycle and the workspace policy.
 

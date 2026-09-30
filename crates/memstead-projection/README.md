@@ -1,6 +1,6 @@
 # memstead-projection
 
-Install expertise into your agent. `memstead-projection` is the maintenance
+Typed project knowledge for AI agents. `memstead-projection` is the maintenance
 loop of [Memstead](https://github.com/memstead/memstead): the deterministic
 half of keeping a bound mem current with its source — run briefs, change
 detection, findings and verify reports, the advance gate, prune proposals,
