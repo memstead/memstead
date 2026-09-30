@@ -155,7 +155,7 @@ For full worked schemas to read (not copy — the scaffold already gave you a va
 
 ## 7. Declare keep-health constraints
 
-Beyond what is *legal to write*, a type can declare what is *unhealthy to keep* — a `constraints:` list on the type definition, drawn from a closed vocabulary of five forms under one uniform `severity` model: `warn` (a health finding on the health report) or `block` (a write-time refusal, plus a health finding for pre-existing violations). The forms:
+Beyond what is *legal to write*, a type can declare what is *unhealthy to keep* — a `constraints:` list on the type definition, drawn from a closed vocabulary of six kinds, plus the same knobs on the type's `required_outgoing` blocks, all under one uniform `severity` model: `warn` (a health finding on the health report) or `block` (a write-time refusal, plus a health finding for pre-existing violations). The seven forms:
 
 - **`requires_when`** — a field or section becomes required when another metadata field holds a declared value (`status: checked` requires `checked_by`). Defaults to `warn`.
 - **`required_outgoing` severity and condition** — each required-edge block on the type can carry `severity: block`, promoting its historical `MISSING_REQUIRED_OUTGOING` warning to a refusal, and an optional `when_field` / `when_value` pair (the same two keys `requires_when` uses): the block then applies only while that metadata field holds that enum value. The trigger field must be declared with `enum_values`; every payload naming the unsatisfied block echoes the trigger.

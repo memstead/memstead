@@ -63,11 +63,12 @@ public record.)
 
 ## Where this figure lives
 
-The number rendered on [memstead.com](https://memstead.com) is generated from the
-project's graph by a committed projection script, not hand-typed.
-Its source of record is the launch-claims register assertion
-*"The measured drift loop closed 79 percent of 153 findings at a 12-minute
-median."*
+This page is the figure's public record. [memstead.com](https://memstead.com)
+no longer shows it: the site rendered it from the project's graph through a
+committed projection script until the homepage was rebuilt on 2026-09-04
+without derived numbers. Its source of record is the launch-claims register
+assertion *"The measured drift loop closed 79 percent of 153 findings at a
+12-minute median."*
 
 ## Since this was measured
 

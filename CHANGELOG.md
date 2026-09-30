@@ -7,6 +7,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **Help texts and docs corrected where they disagreed with the binary.**
+  `update --help` and the folder-workspace quickstart receipt state that
+  `--append`, `--patch` / `--patch-all` and `--dry-run` need a mem-repo
+  workspace. The `schema new` scaffold's relationship hints validate when
+  uncommented, and say that `cardinality_per_source` is recorded but not
+  enforced. The MCP server instructions no longer name `projection migrate`
+  or `domain` as CLI verbs. The glossary drops the inline typed wiki-link
+  `[[REL_TYPE: target]]` (the engine reads the prefix as a mem name and
+  refuses) and describes the folder backend's drift signal, the
+  `quoted-phrase` preparation, the `app` actor and the role and identity
+  provenance fields; the fidelity-contract page says the `#verified`
+  baseline moves only with `--advance`. The parity matrix aligns `retype`,
+  `check`, `mem set-schema` and the mem-configure writes, and the README
+  shows how to check a release archive's build provenance.
+
 ## [0.22.0] - 2026-09-30
 
 ### Changed

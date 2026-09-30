@@ -316,17 +316,20 @@ guide](../../guides/verify-in-ci/)), these are the edges of what the gate can se
   refuses outright; and a record that carries one anyway is refused at validation.
   Asking a web binding to sync therefore names the capability gap itself, never a
   remedy no medium can honour.
-- **Preparation is a registry, and it ships three flavours.** A source's
+- **Preparation is a registry, and it ships four preparations.** A source's
   `preparation` names a preparation the engine registers: `entity-load-bearing`
   for graph sources (an entity anchor hashes its type's load-bearing sections,
   so a notes-only edit does not drift a dependent), `dated-entries` for
   path-shaped sources (a file of dated entries is delivered as units
   `<path>#<stamp>` in stamp order, identical on every pass, and a unit anchor
-  drifts only when its own entry changes), and `code-map` for code sources (a
+  drifts only when its own entry changes), `code-map` for code sources (a
   file anchor hashes the file's interface digest and a tree anchor the code map
   of the scoped files under it, so an implementation edit does not drift an
   anchor and a signature change does, within the digest's recorded limits; the
-  digest is heuristic, by language family). A tree anchor on a source without a code map is recorded
+  digest is heuristic, by language family), and `quoted-phrase` for citations
+  (an anchor `<path-or-url-or-entity>#<phrase>` resolves while the text still
+  says those words and reads orphaned once they are gone, whatever else
+  changed). A tree anchor on a source without a code map is recorded
   but never hashed: it resolves `recheck`, not drift.
   Non-text media conversion (PDF, DOCX, audio) is a non-goal: an agent with a
   capable read tool extracts, and the prepared-content hash already falls back
@@ -366,9 +369,12 @@ that way.
 ## Verify writes
 
 Verify is **not a read-only command**, and no part of this contract should be read as
-saying it is. A completed run records its findings store, backfills observed
-content hashes onto hash-less anchors in the mem's anchors sidecar, and records a
-`#verified` baseline — on a mem-repo-backed mem, that last one is a commit. The
+saying it is. A completed run records its findings store and backfills observed
+content hashes onto hash-less anchors in the mem's anchors sidecar (on a
+mem-repo-backed mem, a backfill that records anything is a commit). The `#verified`
+baseline, the one write into the mem's own config, moves only when you pass
+`--advance`: a bare `projection verify` leaves that config byte-identical, so a gate
+that verifies in order to read does not make the binding look freshly verified. The
 measurement pass itself takes a shared engine borrow and is structurally incapable of
 mutating an entity; what it writes is measurement bookkeeping, and a failed or aborted
 run never advances the baseline. On CI's ephemeral checkout this is harmless. In a

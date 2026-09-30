@@ -10,7 +10,7 @@ Under the hood: each **mem** is a typed graph of interconnected entities. A **sc
 
 Use it for software specs, ADRs, decision logs, ontologies, research notes, or any domain you define. New here? The [glossary](GLOSSARY.md) defines the terms everything else assumes.
 
-Memstead is part of the 2026 agent-memory wave (alongside mem0, Zep/Graphiti, Letta, and basic-memory) but sits at the authored end of it: agent-curated knowledge, written and maintained as schema-validated, typed entities in markdown files in a git repository you own, rather than an extraction pipeline distilling conversations into a retrieval store. Where neighbours share the markdown substrate (basic-memory, Letta's MemFS), Memstead adds the layer they leave to convention: writes validated against a pinned schema, a typed relationship vocabulary, and git provenance on every mutation. The honest tool-by-tool comparison is in [PRIOR_ART.md](PRIOR_ART.md#the-2026-agent-memory-category).
+Memstead sits next to the agent-memory tools but works differently. Agent memory is what an agent gathers from its own sessions, automatically. A mem gathers nothing by itself: every entity in it is a deliberate write, by your agent or by you, and a write the schema refuses never lands. The tool-by-tool comparison is in [PRIOR_ART.md](PRIOR_ART.md#the-2026-agent-memory-category).
 
 > **Status: pre-1.0.** APIs, schemas, file formats, CLI flags, and the wire shape of MCP tools and HTTP endpoints may change without notice. Not yet stable. Back up your data before exercising mutation operations. See [LICENSING.md](LICENSING.md) for per-folder licenses and [SECURITY.md](SECURITY.md) for vulnerability disclosure.
 
@@ -31,6 +31,8 @@ brew install memstead/memstead/memstead-cli memstead/memstead/memstead-mcp
 ```
 
 Or build from source: with the [Rust toolchain](https://rustup.rs) installed, run `./build-engine.sh` from a clone of this repo; it compiles the workspace and installs both binaries to `~/.cargo/bin`. Whichever path you took, `memstead --version` should now work.
+
+Every release archive on the [releases page](https://github.com/memstead/memstead/releases) carries a SHA-256 checksum and a signed build-provenance attestation; check where a downloaded archive was built with `gh attestation verify <archive> -R memstead/memstead` (needs the [GitHub CLI](https://cli.github.com)).
 
 The two products are also on crates.io, so `cargo install memstead-cli` and `cargo install memstead-mcp` work: [`memstead-cli`](https://crates.io/crates/memstead-cli) and [`memstead-mcp`](https://crates.io/crates/memstead-mcp). The other crates are published only because they are their dependencies, with no API promise: [`memstead-base`](https://crates.io/crates/memstead-base) (the engine kernel), [`memstead-schema`](https://crates.io/crates/memstead-schema), [`memstead-git-branch`](https://crates.io/crates/memstead-git-branch) (the git-backed storage backend) and [`memstead-projection`](https://crates.io/crates/memstead-projection) (the maintenance loop that keeps a bound mem current with its source). They ride the engine's version line, so a set pinned to one version works together, but they are pre-1.0 and change without deprecation cycles whenever the products need it. The binaries above stay the supported way to *install* Memstead.
 
@@ -67,7 +69,7 @@ memstead status             # node / edge counts, type distribution, projection 
 memstead search idempotency # find it back
 ```
 
-On disk that entity is one readable markdown file, `idempotency.md`. This is the whole trick: your agent's memory is a file you can open, diff, and review:
+On disk that entity is one readable markdown file, `idempotency.md`. This is the whole trick: what your agent knows about the project is a file you can open, diff, and review:
 
 ```markdown
 ---
@@ -206,7 +208,7 @@ Stated here so you don't have to discover it:
 - **No one-shot import command.** Nothing turns a folder of notes into a mem in a single command; every entity enters through a schema-validated write. Bulk ingestion is a declared path instead: bind a source (a codebase, a docs tree, a URL) to a mem as a [projection](GLOSSARY.md), and the Claude Code plugin's `/ingest` and `/sync` skills build the graph from the binding's brief and keep it current, batch by batch.
 - **The engine does not calculate.** It can know a statement is due (`memstead due`), hold every input as typed entities (rates, allocation keys, receipts), and name exactly what is missing, and it will still never produce the statement, the sum, or the filled form. That output is the periodically-invoked agent's work; the engine's query path stays deterministic, with no model call and no computation in it.
 - **No built-in visualization.** The graph is queryable (status, overview, relations) but ships no renderer; projections and exports are the extension point.
-- **Windows is untested.** Developed on macOS; the CI test gate runs on Linux only. Release archives include a Windows build, but no Windows CI gate exists yet; expect rough edges, path handling especially.
+- **Windows is untested.** Developed on macOS; the CI test gate runs on Linux and macOS. Release archives include a Windows build, but no Windows CI gate exists yet; expect rough edges, path handling especially.
 
 ## Development
 
@@ -231,7 +233,7 @@ pkill -f memstead-mcp
 
 ## Built in the open, on itself
 
-Memstead is built by one person, Björn Bösenberg, a Berlin-based full-stack developer of ~25 years, building Memstead in the open, on a single thesis: *correctness enforced at boundaries replaces trust in the author.* That is why the engine is Rust (the compiler and borrow-checker stand in for the human code review a solo builder gives up) and why every write to a mem is validated at the boundary rather than trusted after the fact. The same thesis, applied to knowledge instead of code, *is* the product. The platform was built as an AI-orchestration project, none of the Rust written by hand, across roughly 4.5 **calendar** months of **part-time** work, and it keeps its own project knowledge as live Memstead mems, in the open, gaps included. That method is the project's standing working mode and not a start-up phase: what ships next quarter is built the same way. What it means for a contributor is spelled out in [CONTRIBUTING.md](CONTRIBUTING.md).
+Memstead is built by one person, Björn Bösenberg, a Berlin-based full-stack developer of ~25 years, building Memstead in the open, on a single thesis: *correctness enforced at boundaries replaces trust in the author.* That is why the engine is Rust (the compiler and borrow-checker stand in for the human code review a solo builder gives up) and why every write to a mem is validated at the boundary rather than trusted after the fact. The same thesis, applied to knowledge instead of code, *is* the product. The platform was built as an AI-orchestration project, none of the Rust written by hand: the first public release (July 2026) came after roughly 4.5 **calendar** months of **part-time** work, begun in mid-February 2026. It keeps its own project knowledge as live Memstead mems, in the open, gaps included. That method is the project's standing working mode and not a start-up phase: what ships next quarter is built the same way. What it means for a contributor is spelled out in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

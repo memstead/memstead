@@ -46,9 +46,12 @@ You know what you want; these get you there.
 Complete and generated: rendered from the engine sources at every docs-site
 build, never committed, so the pages describe the commit being built.
 
-- **[CLI / MCP reference + parity matrix](https://memstead.com/dev/reference/)**
-  — every command, tool, and binding, plus the cross-surface parity matrix and
-  the error-code index.
+- **Generated reference**: every
+  [CLI command](https://memstead.com/dev/reference/cli/cli/), every
+  [MCP tool](https://memstead.com/dev/reference/mcp/), the
+  [binding format](https://memstead.com/dev/reference/binding/), the
+  cross-surface [parity matrix](https://memstead.com/dev/reference/parity/)
+  and the [error-code index](https://memstead.com/dev/reference/errors/).
 - **[Sizing curve](sizing-curve.md)** — measured operating limits by
   workspace size (boot, update, search, overview on graded synthetic
   workspaces); rerun via `cargo run -p xtask -- sizing-curve`.
@@ -73,6 +76,14 @@ The ideas and rationale behind Memstead.
   free-form notes.
 - **[Drift-closure self-proof](proof/drift/README.md)** — the method and source
   behind the "79% of 153 findings, ~12-minute median" figure.
+- **[Blind battery](proof/blind-battery/README.md)**: eleven fixed questions
+  about Memstead, each answered by one reader limited to the engine's own mem
+  and one limited to the Rust source, then graded blind. The source won 9 of 11
+  on 2026-09-06; the graders' error lists are the mem's next sync work.
+- **[Read-surface headroom](proof/read-surface/prereg.md)**: a pre-registered
+  follow-up to the divergence campaign that holds the corpora fixed and varies
+  only the read tools. The apparatus is built and smoke-tested; the full run
+  has not started, so there is no result yet.
 
 ---
 
