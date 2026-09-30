@@ -1,5 +1,5 @@
 /* The docs speak the engine page's visual language (memstead.com): near-white
-   paper, ink, one indigo accent, hairline rules, mono for apparatus. Colours
+   paper, ink, one sage accent, hairline rules, mono for apparatus. Colours
    only map Starlight's own theme variables; no fonts are shipped, the
    system sans and mono stand in. Dark mode keeps the same roles. */
 
@@ -9,8 +9,8 @@
 }
 
 :root[data-theme='light'] {
-  --sl-color-accent-low: #dfe3ec;
-  --sl-color-accent: #2c3a56;
+  --sl-color-accent-low: #dbe6d6;
+  --sl-color-accent: #4f7a52;
   --sl-color-accent-high: #16181d;
   --sl-color-white: #16181d;
   --sl-color-gray-1: #26292f;
@@ -29,9 +29,9 @@
 
 :root {
   /* dark: the same roles on ink paper */
-  --sl-color-accent-low: #1f2838;
-  --sl-color-accent: #8e9dbd;
-  --sl-color-accent-high: #d6dcea;
+  --sl-color-accent-low: #1f2b21;
+  --sl-color-accent: #93c095;
+  --sl-color-accent-high: #d3e6d3;
   --sl-color-white: #f2f2ee;
   --sl-color-gray-1: #e2e2dd;
   --sl-color-gray-2: #c6c6c0;
