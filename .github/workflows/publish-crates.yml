@@ -38,11 +38,17 @@ jobs:
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      # Pinned by SHA like every hand-maintained workflow here (see
+      # .github/dependabot.yml): this job holds the crates.io token, so
+      # nothing beside it may run code a moved tag could swap.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: recursive
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
+        with:
+          toolchain: stable
 
       - name: Fail fast when the token is absent
         run: |

@@ -2,15 +2,17 @@
 #
 # run-tests.sh — THE definition of "green" for this repo.
 #
-# CI runs this script and nothing else (.github/workflows/ci.yml), so there is
-# exactly one answer to "does this tree pass?" and it is the same answer here
-# and there. Two gates that must be kept in sync always drift; one gate cannot.
-# Anything you want CI to check belongs in this file, not in a workflow.
+# CI runs this script and nothing else (.github/workflows/ci.yml), once on
+# Linux and once on macOS, so there is exactly one answer to "does this tree
+# pass?" and it is the same answer here and there. Two gates that must be kept
+# in sync always drift; one gate cannot. Anything you want CI to check belongs
+# in this file, not in a workflow.
 #
-# The two exceptions are declared, not accidental: the wasm32 dependency gate
-# needs a cross-compilation target installed, and the RustSec audit needs the
-# network and a fresh advisory database. Both stay their own CI jobs because
-# neither can honestly run on an offline laptop.
+# The three exceptions are declared, not accidental: the wasm32 dependency gate
+# needs a cross-compilation target installed, the MSRV check needs the
+# toolchain that `rust-version` in Cargo.toml names, and the RustSec audit
+# needs the network and a fresh advisory database. Each stays its own CI job
+# because each needs something a developer's laptop does not reliably have.
 #
 # Order is deliberate: seconds-long gates (format, lint, leak) run before
 # minutes-long ones, so a tree that cannot pass `cargo fmt` learns it in

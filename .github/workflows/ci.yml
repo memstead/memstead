@@ -1,7 +1,9 @@
 # The engine gate — every push and PR runs the complete test surface
 # (engine + plugin suites via run-tests.sh, the same script developers
-# run locally), the lint gates (clippy -D warnings, rustfmt), and a
-# RustSec advisory audit.
+# run locally) on Linux and on macOS, the lint gates (clippy -D warnings,
+# rustfmt), a check that the workspace still builds on its declared
+# minimum Rust version, and a RustSec advisory audit. Windows has no job
+# here: it stays documented as untested.
 # A failing test, warning, format diff, or advisory turns the build red.
 
 name: CI
@@ -49,6 +51,65 @@ jobs:
         run: python3 -m pip install --user pyyaml
       - name: Run the full test surface
         run: ./run-tests.sh
+
+  tests-macos:
+    name: Full test surface on macOS (run-tests.sh)
+    runs-on: macos-latest
+    # A bound, not an estimate: docs/macos-dev-setup.md records a nextest
+    # discovery hang on Apple Silicon when Gatekeeper serialises code-signing
+    # checks, and a hung job would otherwise hold the runner for six hours.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          workspaces: . -> target
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2
+        with:
+          tool: cargo-nextest
+      # Same reason as the Linux job. The runner's Homebrew Python refuses a
+      # plain `pip install --user` as an externally managed environment
+      # (PEP 668); the variable lifts that for this one package, and a pip
+      # older than the rule ignores it.
+      - name: Install PyYAML (for the verify-in-CI gate harness)
+        env:
+          PIP_BREAK_SYSTEM_PACKAGES: "1"
+        run: python3 -m pip install --user pyyaml
+      - name: Run the full test surface
+        run: ./run-tests.sh
+
+  msrv:
+    name: MSRV (cargo check on the declared rust-version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # The floor has one source, `rust-version` in the root Cargo.toml.
+      # This step reads it instead of restating it, so raising the floor
+      # moves this check in the same commit.
+      - name: Read the declared rust-version
+        id: msrv
+        run: |
+          version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          if [ -z "$version" ]; then
+            echo "::error::no rust-version line in the root Cargo.toml" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Install the MSRV toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          workspaces: . -> target
+      - name: cargo check on the MSRV toolchain
+        run: cargo +${{ steps.msrv.outputs.version }} check --workspace --all-targets --locked
 
   wasm:
     name: wasm tests (nodejs runner)

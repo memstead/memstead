@@ -15,7 +15,7 @@ on:
         description: "Fuzz target to run"
         type: choice
         default: all
-        options: [all, frontmatter, archive, content_expr]
+        options: [all, frontmatter, archive, content_expr, search_normalization]
       minutes:
         description: "Minutes per target"
         type: number
@@ -52,7 +52,7 @@ jobs:
         run: |
           secs=$(( ${{ inputs.minutes }} * 60 ))
           if [ "${{ inputs.target }}" = "all" ]; then
-            targets="frontmatter archive content_expr"
+            targets="frontmatter archive content_expr search_normalization"
           else
             targets="${{ inputs.target }}"
           fi

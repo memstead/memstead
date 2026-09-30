@@ -1,6 +1,6 @@
 # Fuzzing the trust boundaries — the long tier
 
-Coverage-guided fuzzing (cargo-fuzz/libFuzzer) over the three
+Coverage-guided fuzzing (cargo-fuzz/libFuzzer) over the four
 trust-boundary parsers. This crate is workspace-excluded: its
 dependencies and the nightly toolchain it runs under never enter the
 PR-blocking path. The bounded CI smoke tier lives inside the normal
@@ -28,6 +28,7 @@ cd fuzz
 cargo +nightly fuzz run archive corpus/archive -- -max_total_time=900
 cargo +nightly fuzz run frontmatter corpus/frontmatter -- -max_total_time=900
 cargo +nightly fuzz run content_expr corpus/content_expr -- -max_total_time=900
+cargo +nightly fuzz run search_normalization corpus/search_normalization -- -max_total_time=900
 ```
 
 Or dispatch the `Fuzz (long tier)` GitHub workflow, which runs the same

@@ -50,7 +50,7 @@ On macOS, before running the test suite the first time, follow [docs/macos-dev-s
 
 There is one build: `cargo build` produces the multi-mem, git-backed engine, and the same binaries serve folder-only workspaces (the shape `memstead quickstart` produces). No crate declares a feature that changes what ships. The kernel (`memstead-base`) still compiles without `gix` for wasm32, which the wasm CI job proves.
 
-`./run-tests.sh` runs the engine suite, the plugin architecture gate, and the plugin `node --test` suite; CI runs the same script plus the smoke lane and the wasm job.
+`./run-tests.sh` runs the engine suite, the plugin architecture gate, and the plugin `node --test` suite; CI runs the same script on Linux and on macOS, plus the smoke lane, the wasm job, a `cargo check` on the minimum Rust version that `rust-version` in `Cargo.toml` declares, and the RustSec audit.
 
 ## Specific workflows
 
