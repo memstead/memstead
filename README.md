@@ -18,8 +18,6 @@ Memstead is part of the 2026 agent-memory wave (alongside mem0, Zep/Graphiti, Le
 
 Get from nothing to your own graph in a few minutes. (The [getting-started guide](docs-site/src/content/docs/guides/getting-started.md) is the full tutorial version of this section.)
 
-To look before installing anything, [memstead.ai](https://memstead.ai) serves this project's own graph and hands an agent a writable sketch mem over MCP; see [Two hosted surfaces](#reference) below.
-
 **1. Install the binaries.** The install script fetches the latest [release](https://github.com/memstead/memstead/releases) binaries: `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to):
 
 ```bash
@@ -168,8 +166,6 @@ Auto-generated API reference for every callable surface: MCP tools and CLI, plus
 Generated from source on every push; the [parity matrix](https://memstead.com/dev/reference/parity/) shows at a glance which operations exist on which surface.
 
 The browser build of the engine is the `memstead-wasm` crate; the site that runs it in the browser builds it from the tree (`wasm-pack build --target web --release` in `crates/memstead-wasm/` produces the same bundle locally).
-
-**Two hosted surfaces, with nothing installed.** [memstead.ai](https://memstead.ai) serves Memstead's own graph read-only over plain HTTP: every page is readable with no tools at all, and `GET https://memstead.ai/llms.txt` is the agent runbook for it. That HTML surface has no search, which is what the second surface is for. Attaching the MCP endpoint at `https://memstead.ai/mcp` to Claude Code, Codex, Cursor or any MCP client mounts the same graph read-only beside a private, ephemeral sketch mem minted per connection: your agent's reads span both, its writes reach only the sketch. Restart the agent session afterwards (one already running does not attach a server added while it runs).
 
 ## How it works
 
