@@ -170,11 +170,14 @@ pub enum Command {
 
     /// One-command cold start: workspace + default-schema mem + seed
     /// entity + MCP wiring for your agent(s), in the current (or named)
-    /// folder. Tolerates dotfiles and README-grade files; derives the
-    /// mem name from the folder. For the strict, script-safe variant
-    /// use `memstead init`. Restart the agent session afterwards: a
-    /// session that is already running does not attach an MCP server
-    /// added while it runs.
+    /// folder. Tolerates dotfiles and README or LICENSE files that are
+    /// not markdown; any `.md` file (`README.md` included) or other
+    /// content refuses, because a folder mem owns every `.md` file in its
+    /// folder. In an existing repository use `--repo .`. Derives the mem
+    /// name from the folder. For the strict, script-safe variant use
+    /// `memstead init`. Restart the agent session afterwards: a session
+    /// that is already running does not attach an MCP server added while
+    /// it runs.
     Quickstart(commands::quickstart::Args),
 
     /// Install a sealed `.mem` mem — either a local file, or `<scope>/<name>`

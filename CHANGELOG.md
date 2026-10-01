@@ -9,6 +9,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **`quickstart` in a git repository names the command that works
+  there.** Run without `--repo` in a repository, quickstart refuses with
+  `TARGET_NOT_EMPTY` as soon as the folder holds a `.md` file, and a
+  `README.md` alone is enough. The refusal used to suggest only a fresh
+  folder; in a git repository it now names `memstead quickstart --repo .`
+  first (the path you ran it on, when you named one), which gives the mem
+  a folder of its own and leaves your files alone, and carries that
+  command as `details.retry`. `quickstart --help` and the setup skill say
+  exactly what is tolerated (dotfiles, and README or LICENSE files that are
+  not markdown) instead of "README-grade files", which read as if
+  `README.md` were fine. Printed commands render flags such as `--repo`
+  and `--name` bare instead of quoted.
 - **Help texts and docs corrected where they disagreed with the binary.**
   `update --help` and the folder-workspace quickstart receipt state that
   `--append`, `--patch` / `--patch-all` and `--dry-run` need a mem-repo

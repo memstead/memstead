@@ -63,7 +63,7 @@ All workspace creation is delegated to the CLI — do not hand-write any `.memst
 memstead quickstart --agent claude-code
 ```
 
-One command does everything: workspace store, a default-schema mem named after the folder, a seed entity, and the Claude Code MCP wiring (`.mcp.json` pointing at `memstead-mcp`). It tolerates dotfiles and README-grade files in the target folder.
+One command does everything: workspace store, a default-schema mem named after the folder, a seed entity, and the Claude Code MCP wiring (`.mcp.json` pointing at `memstead-mcp`). It tolerates dotfiles and README or LICENSE files that are not markdown; any `.md` file in the folder, `README.md` included, refuses it with `TARGET_NOT_EMPTY`.
 
 **In an existing repository, add `--repo .`:**
 

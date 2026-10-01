@@ -167,6 +167,10 @@ fn quickstart_refuses_conflicting_content_without_half_init() {
         err.contains("memstead quickstart"),
         "names the exact alternative; got: {err}"
     );
+    assert!(
+        !err.contains("--repo"),
+        "a folder that is not a git repository gets no repository advice; got: {err}"
+    );
 
     // Never half-initialises.
     assert!(!root.join(".memstead").exists());
@@ -1703,8 +1707,69 @@ fn quickstart_without_repo_flag_still_refuses_a_populated_repo() {
         "the refusal must still name the adoption risk; got:\n{err}",
     );
     assert!(
+        err.contains("It is a git repository") && err.contains("quickstart --repo"),
+        "in a git repository the refusal names the guided retry first; got:\n{err}",
+    );
+    assert!(
         !repo.join(".memstead").exists(),
         "a refused quickstart writes nothing",
+    );
+}
+
+/// The guided retry rides `details.retry` as well, so an agent recovers
+/// without parsing prose, and running it as given succeeds on the very
+/// repository the plain path refused.
+#[test]
+fn quickstart_refusal_in_a_repo_carries_a_retry_that_succeeds() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "retry-app");
+
+    let out = memstead()
+        .args(["--json", "quickstart", "--agent", "claude-code"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "the plain path refuses the populated repo"
+    );
+    let stream = if out.stdout.is_empty() {
+        &out.stderr
+    } else {
+        &out.stdout
+    };
+    let env: serde_json::Value = serde_json::from_slice(stream).unwrap_or_else(|e| {
+        panic!(
+            "refusal is one JSON envelope ({e}); got: {}",
+            String::from_utf8_lossy(stream)
+        )
+    });
+    let envelope = env.get("error").unwrap_or(&env);
+    assert_eq!(
+        envelope["code"], "TARGET_NOT_EMPTY",
+        "typed code; got: {env}"
+    );
+    let retry = envelope["details"]["retry"]
+        .as_str()
+        .unwrap_or_else(|| panic!("details.retry carries the guided command; got: {env}"));
+    assert!(
+        retry.ends_with(" quickstart --repo ."),
+        "run in the repo, the retry is `--repo .`, flag unquoted; got: {retry}"
+    );
+
+    memstead()
+        .args(["quickstart", "--repo", ".", "--agent", "claude-code"])
+        .current_dir(&repo)
+        .assert()
+        .success();
+    assert!(
+        repo.join(".memstead").is_dir(),
+        "the guided retry bootstraps the workspace"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("README.md")).unwrap(),
+        "# The App\n\nWhat it does.\n",
+        "the repository's README is untouched",
     );
 }
 

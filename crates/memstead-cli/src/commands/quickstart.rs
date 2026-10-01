@@ -9,8 +9,8 @@
 //! Contract split against `memstead init`: `init` is the deliberate,
 //! script-safe verb — exact pins, strict emptiness, no side effects
 //! beyond `.memstead/`. `quickstart` is the newcomer verb — it derives
-//! the mem name from the directory, tolerates dotfiles and
-//! README-grade files, and writes agent config. It composes the same
+//! the mem name from the directory, tolerates dotfiles and README or
+//! LICENSE files that are not markdown, and writes agent config. It composes the same
 //! engine primitives (`init_filesystem_mem`, `Engine::create_entity`)
 //! rather than forking a second init path; the write-validation
 //! strictness downstream of the doorway is untouched.
@@ -318,22 +318,49 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         } else {
             ""
         };
-        return Err(CliError::new(
-            ExitKind::Validation,
-            crate::TARGET_NOT_EMPTY_CODE,
-            format!(
+        // A plain run inside a git repository lands here almost every
+        // time (a README.md alone blocks), and the way forward there is
+        // the guided mode, which gives the mem a folder of its own, not a
+        // fresh folder somewhere else. Name it first, as the exact retry.
+        let repo_retry = (args.repo.is_none() && target.join(".git").exists()).then(|| {
+            let retry = ShellCmd::new(memstead_program())
+                .arg("quickstart")
+                .flag("--repo");
+            match &args.path {
+                Some(path) => retry.arg(path.display().to_string()),
+                None => retry.arg("."),
+            }
+            .render()
+        });
+        let message = match &repo_retry {
+            Some(retry) => format!(
+                "target {} has content quickstart won't touch: {}{md_note}. It is a git \
+                 repository: {retry} keeps the mem in a folder of its own and leaves your \
+                 files alone. Or start in a fresh folder: mkdir my-graph && cd my-graph && \
+                 memstead quickstart",
+                mem_dir.display(),
+                blocking.join(", "),
+            ),
+            None => format!(
                 "target {} has content quickstart won't touch: {}{md_note} — move it \
                  out, or start in a fresh folder: mkdir my-graph && cd my-graph && \
                  memstead quickstart",
                 mem_dir.display(),
                 blocking.join(", "),
             ),
-        )
-        .with_details(json!({
+        };
+        let mut details = json!({
             "path": mem_dir.display().to_string(),
             "found": blocking,
-        }))
-        .into());
+        });
+        if let Some(retry) = repo_retry {
+            details["retry"] = json!(retry);
+        }
+        return Err(
+            CliError::new(ExitKind::Validation, crate::TARGET_NOT_EMPTY_CODE, message)
+                .with_details(details)
+                .into(),
+        );
     }
 
     // Agent targets: flag > TTY prompt > default (Claude Code, stated).
@@ -445,9 +472,9 @@ fn guard_guided_mem_folder(repo: &Path, mem_dir: &Path, name: &str) -> anyhow::R
     }
     let retry = ShellCmd::new(memstead_program())
         .arg("quickstart")
-        .arg("--repo")
+        .flag("--repo")
         .arg(repo.display().to_string())
-        .arg("--name")
+        .flag("--name")
         .arg(format!("{name}-mem"))
         .render();
     if !mem_dir.is_dir() {
@@ -712,9 +739,9 @@ fn resolve_mem_name(
     let retry = |name: &str| match repo {
         Some(repo) => ShellCmd::new(memstead_program())
             .arg("quickstart")
-            .arg("--repo")
+            .flag("--repo")
             .arg(repo.display().to_string())
-            .arg("--name")
+            .flag("--name")
             .arg(name)
             .render(),
         None => format!("memstead quickstart --name {name}"),
@@ -1156,6 +1183,15 @@ impl ShellCmd {
         self
     }
 
+    /// A flag the program defines (`--repo`, `--name`, `--version`):
+    /// syntax, not a value, so it renders bare, like
+    /// [`Self::end_of_options`]. Only ever a literal the code spells, so
+    /// nothing a user typed can reach the shell unquoted through it.
+    fn flag(mut self, flag: &'static str) -> Self {
+        self.args.push(Word::Literal(flag));
+        self
+    }
+
     /// The literal `--` end-of-options separator. Distinct from
     /// [`Self::arg`] because it is syntax, not a value: quoting it
     /// would be harmless to the shell but noise to the reader, and the
@@ -1237,7 +1273,7 @@ fn report(
         .arg(seed_id)
         .in_dir(target, in_cwd)
         .render();
-    let version_cmd = ShellCmd::new(&mcp_bin.command).arg("--version").render();
+    let version_cmd = ShellCmd::new(&mcp_bin.command).flag("--version").render();
     // The one command that starts the ingest loop the brief points at.
     let brief_cmd = guided.map(|g| {
         ShellCmd::new(&memstead)
@@ -1368,7 +1404,7 @@ fn report(
                 seen_existing.push(cmd.clone());
                 verify_now.push((
                     "the pre-existing `memstead` entry's binary answers",
-                    ShellCmd::new(cmd).arg("--version").render(),
+                    ShellCmd::new(cmd).flag("--version").render(),
                 ));
             }
             _ => {}
