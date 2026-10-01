@@ -118,6 +118,7 @@ impl Engine {
             .collect();
         touched_mems.sort();
         touched_mems.dedup();
+        let _write_lock = self.lock_mems_for_write_if(!dry_run, &touched_mems)?;
         for v in &touched_mems {
             self.reload_if_stale(Some(v));
         }

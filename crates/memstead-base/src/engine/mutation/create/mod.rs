@@ -87,6 +87,7 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<CreateEntityOutcome, EngineError> {
+        let _write_lock = self.lock_mems_for_write_if(!args.dry_run, &[&args.mem])?;
         let drift_warnings = self.reload_if_stale(Some(&args.mem));
         // Declared relations on an ACYCLIC rel-type (or one in an
         // `acyclic_sets` set, whose guard walks the set's UNION

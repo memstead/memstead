@@ -27,6 +27,7 @@ impl Engine {
         // warnings ride alongside the success outcome; an
         // unreachable-backend probe collapses to no warnings (the
         // existing accessor warn-logs internally and skips).
+        let _write_lock = self.lock_mems_for_write(&[mem_name])?;
         let mut warnings = self.reload_if_stale(Some(mem_name));
         // Provenance nudge — same posture as every other commit-
         // producing mutation: when `require_notes` is set and no note
@@ -89,6 +90,7 @@ impl Engine {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
 
+        let _write_lock = self.lock_mems_for_write(&[mem_name])?;
         let mut warnings = self.reload_if_stale(Some(mem_name));
         if let Some(w) = self.note_missing_warning("set_mem_description", note) {
             warnings.push(w);
@@ -142,6 +144,7 @@ impl Engine {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
 
+        let _write_lock = self.lock_mems_for_write(&[mem_name])?;
         let mut warnings = self.reload_if_stale(Some(mem_name));
         if let Some(w) = self.note_missing_warning("set_mem_title", note) {
             warnings.push(w);
@@ -194,6 +197,7 @@ impl Engine {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
 
+        let _write_lock = self.lock_mems_for_write(&[mem_name])?;
         let mut warnings = self.reload_if_stale(Some(mem_name));
         if let Some(w) = self.note_missing_warning("set_mem_subject", note) {
             warnings.push(w);
@@ -254,6 +258,7 @@ impl Engine {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
 
+        let _write_lock = self.lock_mems_for_write(&[mem_name])?;
         let _ = self.reload_if_stale(Some(mem_name));
 
         let (_, intervened) = self.write_mem_config_merged(
@@ -341,6 +346,7 @@ impl Engine {
             }
         }
 
+        let _write_lock = self.lock_mems_for_write(&[mem_name])?;
         let mut warnings = self.reload_if_stale(Some(mem_name));
         if let Some(w) = self.note_missing_warning("set_mem_process_mem", note) {
             warnings.push(w);
@@ -418,6 +424,7 @@ impl Engine {
         // Probe for concurrent-drift before the write — same posture as
         // every other commit-producing mutation; a sibling engine that
         // committed since our last snapshot surfaces `MEM_RELOADED`.
+        let _write_lock = self.lock_mems_for_write(&[mem_name])?;
         let mut warnings = self.reload_if_stale(Some(mem_name));
         if let Some(w) = self.note_missing_warning("set_mem_sync_state", note) {
             warnings.push(w);

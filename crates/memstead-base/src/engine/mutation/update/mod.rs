@@ -147,6 +147,7 @@ impl Engine {
         // the targeted entity then trips a real `HASH_MISMATCH`; an
         // unrelated concurrent write leaves this entity's hash intact
         // and the update proceeds. The drift notice rides the outcome.
+        let _write_lock = self.lock_mems_for_write_if(!args.dry_run, &[args.id.mem()])?;
         drift_warnings.extend(self.reload_if_stale(Some(args.id.mem())));
         // Declared relations on an ACYCLIC rel-type (or one in an
         // `acyclic_sets` set, whose guard walks the set's UNION

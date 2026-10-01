@@ -70,6 +70,7 @@ impl Engine {
         let mut touched_mems: Vec<String> = creates.iter().map(|(a, _)| a.mem.clone()).collect();
         touched_mems.sort();
         touched_mems.dedup();
+        let _write_lock = self.lock_mems_for_write_if(!dry_run, &touched_mems)?;
         for m in &touched_mems {
             self.reload_if_stale(Some(m));
         }

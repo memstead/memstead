@@ -226,6 +226,19 @@ pub trait MemBackend: Send + Sync {
         Ok(None)
     }
 
+    /// The file whose exclusive OS lock serialises writers to this mem
+    /// across processes. The engine holds it from the drift reload
+    /// through the hash compare to the commit, so a sibling process can
+    /// never land a write between this process's check and its own
+    /// write. Without it, two processes holding the same stale hash
+    /// could both pass the compare and the later commit would silently
+    /// overwrite the earlier one. `None` means the backend has no
+    /// shared on-disk state to protect (archive, in-memory); the
+    /// default.
+    fn write_lock_path(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
     /// Read the per-mem `.memstead/config.json` payload, if any.
     ///
     /// Returns the raw bytes the backend has for the mem's

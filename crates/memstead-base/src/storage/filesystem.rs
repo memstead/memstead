@@ -201,6 +201,13 @@ impl crate::backend::MemBackend for FilesystemBackend {
         Ok(last_ts)
     }
 
+    /// Inside the mem's own `.memstead/`, in a self-ignoring `locks/`
+    /// subtree, so every process that mounts this folder, from any
+    /// workspace, contends on the same file.
+    fn write_lock_path(&self) -> Option<PathBuf> {
+        Some(self.root.join(".memstead").join("locks").join("write.lock"))
+    }
+
     fn read_entity(&self, rel_path: &Path) -> Result<Option<Vec<u8>>, BackendError> {
         let key = normalise_rel_path(rel_path)?;
         let pending = self.pending.lock().map_err(|_| {

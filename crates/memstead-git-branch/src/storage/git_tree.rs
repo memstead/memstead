@@ -25,9 +25,13 @@
 //! [`crate::EngineError::HashMismatch`] so MCP agents see a stable
 //! `_hash` to retry with.
 //!
-//! No internal retry loop: every CAS conflict bubbles up. Cross-process
-//! contention in Phase 1 is intentionally simple — concurrency hardening
-//! comes later (D7 in the design doc).
+//! No internal retry loop: every CAS conflict bubbles up. The ref CAS
+//! alone does not stop a lost update across processes: a writer that
+//! stages after a sibling's commit snapshots the sibling's tip as its
+//! parent and lands on top of it, although its entity-hash compare ran
+//! against the older content. The engine closes that window by holding
+//! the per-branch file lock named by `write_lock_path` from its reload
+//! to this commit (`memstead_base::engine::write_lock`).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -804,6 +808,27 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
             .collect();
         out.reverse();
         Ok(out)
+    }
+
+    /// One lock file per branch inside the gitdir (never part of any
+    /// tree), so every engine process on this mem-repo contends on it.
+    fn write_lock_path(&self) -> Option<PathBuf> {
+        let file: String = self
+            .ref_name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '%'
+                }
+            })
+            .collect();
+        Some(
+            self.gitdir
+                .join("memstead-locks")
+                .join(format!("{file}.lock")),
+        )
     }
 
     fn current_head(&self) -> Result<Option<String>, memstead_base::backend::BackendError> {

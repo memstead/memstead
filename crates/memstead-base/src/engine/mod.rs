@@ -51,6 +51,7 @@ pub mod proposal;
 pub mod query;
 pub mod review;
 pub mod roster;
+pub mod write_lock;
 
 pub use archive::FromArchiveBytesError;
 pub use error::{

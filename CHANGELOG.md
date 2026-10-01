@@ -9,6 +9,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Concurrent writers from separate processes no longer overwrite each
+  other.** Two processes writing to the same mem with the same stale
+  `expected_hash` (two agents, each with its own MCP server, or an MCP
+  server and a CLI call) could both be accepted: the hash check and the
+  commit were not one atomic step across processes, so the later write
+  silently replaced the earlier one while both callers were told the
+  write had landed. Measured on 0.22.0 with six racing writers: on a
+  folder mem, 6 of 14 trials accepted more than one writer; on a
+  git-branch mem, 1 of 9. Every mutation now holds an exclusive OS file
+  lock per mem from its reload through the hash check to the commit
+  (inside the mem-repo's gitdir for a git-branch mem, in a self-ignoring
+  `.memstead/locks/` folder for a folder mem). A racing writer waits for
+  the other write to finish, then sees the new content and is refused
+  with `HASH_MISMATCH`. A regression test races real processes on both
+  storage kinds, with and without a long-lived engine among them.
 - **`quickstart` in a git repository names the command that works
   there.** Run without `--repo` in a repository, quickstart refuses with
   `TARGET_NOT_EMPTY` as soon as the folder holds a `.md` file, and a

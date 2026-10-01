@@ -130,6 +130,8 @@ impl Engine {
         // touched mem exactly once up front instead of per entry.
         let mut drift_warnings: Vec<WarningHint> =
             source_hint.into_iter().chain(target_hint).collect();
+        let _write_lock =
+            self.lock_mems_for_write_if(!args.dry_run, &[&source_mem, &target_mem])?;
         drift_warnings.extend(self.reload_if_stale(Some(&source_mem)));
         if target_mem != source_mem && !self.mem_is_deferred(&target_mem) {
             // A DEFERRED target mem is deliberately not probed here:
@@ -1128,6 +1130,7 @@ impl Engine {
         let source_mems: std::collections::HashSet<&str> =
             relates.iter().map(|(a, _)| a.source.mem()).collect();
         touched_mems.retain(|m| source_mems.contains(m.as_str()) || !self.mem_is_deferred(m));
+        let _write_lock = self.lock_mems_for_write_if(!dry_run, &touched_mems)?;
         for m in &touched_mems {
             self.reload_if_stale(Some(m));
         }

@@ -86,6 +86,7 @@ impl Engine {
         // current truth. The drift notice rides the outcome's
         // `warnings` (real-rename path).
         let mut drift_warnings: Vec<WarningHint> = short_hint.into_iter().collect();
+        let _write_lock = self.lock_mems_for_write(&[&mem])?;
         drift_warnings.extend(self.reload_if_stale(Some(&mem)));
 
         let entity = self

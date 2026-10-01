@@ -81,6 +81,7 @@ impl Engine {
         // Reload-before-operation, so the CAS compare and the edge walk
         // run against current truth.
         let mut drift_warnings: Vec<WarningHint> = short_hint.into_iter().collect();
+        let _write_lock = self.lock_mems_for_write_if(!args.dry_run, &[&mem])?;
         drift_warnings.extend(self.reload_if_stale(Some(&mem)));
 
         let entity = self
