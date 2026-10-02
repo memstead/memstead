@@ -111,6 +111,27 @@ impl Engine {
                 && m.mount.capability == crate::workspace::MountCapability::ReadOnly
         });
         let Some(idx) = pos else {
+            // A read-only mount held in quarantine (an installed archive
+            // this machine's cache lacks, say) is unregistered too: it
+            // has no backend to hand back, but leaving its roster entry
+            // would let the next state write resurrect it.
+            // A mount quarantined at boot is absent from the merge
+            // baseline (so a state write never drops it by accident);
+            // removing it on purpose enters it there, so the merge
+            // reads the removal as ours.
+            if let Some(q) = self.quarantined.iter().find(|q| {
+                q.mount.mem == mem_name
+                    && q.mount.capability == crate::workspace::MountCapability::ReadOnly
+            }) {
+                let mut baseline = self.mounts_baseline.borrow_mut();
+                if !baseline.iter().any(|m| m.mem == mem_name) {
+                    baseline.push(q.mount.clone());
+                }
+            }
+            self.quarantined.retain(|q| {
+                !(q.mount.mem == mem_name
+                    && q.mount.capability == crate::workspace::MountCapability::ReadOnly)
+            });
             return Ok(None);
         };
         let mount = self.mounts.remove(idx);

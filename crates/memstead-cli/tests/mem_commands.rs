@@ -1872,7 +1872,7 @@ fn install_registers_workspace_read_only_mount() {
 
     let mounts = fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
     assert!(
-        mounts.contains(r#""sender-mem""#) && mounts.contains(r#""archive""#),
+        mounts.contains(r#""sender-mem""#) && mounts.contains(r#""cached-archive""#),
         "mounts.json must carry the archive mount; got:\n{mounts}"
     );
 
@@ -3766,7 +3766,7 @@ fn assert_linked(root: &Path, cache: &Path) {
     let mounts = fs::read_to_string(root.join(".memstead/state/mounts.json"))
         .unwrap_or_else(|e| panic!("mounts.json must exist at {}: {e}", root.display()));
     assert!(
-        mounts.contains(r#""sender-mem""#) && mounts.contains(r#""archive""#),
+        mounts.contains(r#""sender-mem""#) && mounts.contains(r#""cached-archive""#),
         "link must record the attachment in the mount roster; got:\n{mounts}"
     );
     memstead()

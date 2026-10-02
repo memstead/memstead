@@ -39,6 +39,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   documents that flow and the flow from nothing but the backup; a test
   runs both exactly as the guide prints them.
 
+- **An installed read-only mem travels with the workspace by identity.**
+  The tracked mount roster (`.memstead/state/mounts.json`) records a mem
+  installed into the archive cache as a `cached-archive` entry naming its
+  content-addressed file (`<mem>-<content key>.mem`), no longer the
+  absolute path of one machine's cache, so a clone on another machine
+  names the same mem. Where that machine's cache lacks the archive, the
+  mem is quarantined `ARCHIVE_NOT_INSTALLED` with the install command as
+  the repair, and an archive of the same name with other content in the
+  cache is named and never mounted in its place; installing the archive
+  brings the mem into service with the roster unchanged. A roster in the
+  previous format loads as before and is rewritten in the new form on its
+  next write (format `memstead-mounts-4`, written only when such an entry
+  is present); an archive mounted at an explicit location keeps its path.
+  A roster written earlier on another machine, naming that machine's
+  cache file, heals: the entry resolves against this machine's cache and
+  is rewritten as an identity entry. The missing archive is reported
+  before its schema is resolved, so a mem under a sealed third-party
+  schema says what to install instead of `SCHEMA_NOT_FOUND`. Boot never
+  reaches the network for a missing archive.
+
 ### Changed
 
 - **`memstead status --remote` names `memstead pull --all` as the
@@ -62,6 +82,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   only through `pull` and `pull --all`.
 - **An unreachable network remote reports `UNKNOWN_REMOTE`** on the
   transport commands instead of an untyped failure.
+- **`memstead uninstall` removes an installed mem that is held in
+  quarantine.** It refused such a mem `UNKNOWN_MEM`, and the engine's
+  unregister kept its roster entry, so the next state write brought it
+  back; both now remove it.
 - **A refspec or remote name can no longer run a command through
   `memstead fetch`.** User refspecs reached `git fetch` as arguments with
   no end-of-options marker, so `memstead fetch <mem> --

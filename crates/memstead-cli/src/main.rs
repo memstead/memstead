@@ -20,6 +20,11 @@ use memstead_cli::output::{ExitKind, print_cli_error};
 use memstead_cli::setup;
 
 fn main() -> ExitCode {
+    // Installed read-only mems resolve against this machine's archive
+    // cache on every roster read, whichever workspace shape reads it.
+    memstead_base::workspace_store::set_mem_cache_dir_provider(
+        memstead_git_branch::mem_cache::mem_cache_dir,
+    );
     let cli = Cli::parse();
     let json_mode = cli.json;
     let verb = cli.command.verb();

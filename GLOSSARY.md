@@ -234,7 +234,7 @@ A git-branch mount's `repo` field is per-mount. Multiple mounts in the same work
 
 - **Cross-mount mutations are not atomic across separate gitdirs.** A refactor that touches two mems in different repos produces two commits that can fail independently. Best-effort semantics with repair-on-next-read replaces single-commit atomicity.
 - **Operator overhead multiplies.** Clone / pull / push runs once per repo; sync responsibilities scale with repo count.
-- **Workspace portability requires path discipline.** Absolute or external `repo` paths in `state/mounts.json` break on workspace-clone; relative-to-workspace paths or a known shared parent directory keep portability.
+- **Workspace portability requires path discipline.** Absolute or external `repo` paths in `state/mounts.json` break on workspace-clone; relative-to-workspace paths or a known shared parent directory keep portability. Installed read-only mems need no discipline of their own: the roster records them by their content-addressed archive name (a `cached-archive` entry), which resolves against each machine's own archive cache.
 
 Default convention: one git-repo per workspace, multi-repo only when the operator has a concrete reason (different sharing model, different visibility, different sync target).
 

@@ -267,6 +267,85 @@ const WORKSPACE_TOML_FORMAT_LEGACY: &str = "memstead-git-branch-1";
 /// reader resolves relative values against `workspace_root` at load
 /// time.
 const MOUNTS_JSON_FORMAT_V3: &str = "memstead-mounts-3";
+/// V4 adds the `cached-archive` storage entry: a read-only mem installed
+/// into the engine's archive cache, recorded by its content-addressed
+/// file name instead of the absolute path of one machine's cache. A
+/// roster is written as V4 only when it carries such an entry, so a
+/// roster without one stays byte-identical V3; the reader accepts both.
+const MOUNTS_JSON_FORMAT_V4: &str = "memstead-mounts-4";
+
+/// The process's archive-cache directory, as the crate that owns the
+/// cache (memstead-git-branch) registers it. Unset in a build without
+/// that crate: a cached-archive entry then resolves to no file and its
+/// mem is quarantined `ARCHIVE_NOT_INSTALLED`, never mounted elsewhere.
+static MEM_CACHE_DIR_PROVIDER: std::sync::OnceLock<fn() -> PathBuf> = std::sync::OnceLock::new();
+
+/// Where a cached-archive entry points in a process with no archive
+/// cache: a directory that never holds the file, under the workspace's
+/// engine state, so the mem quarantines and the entry writes back as
+/// itself.
+const NO_ARCHIVE_CACHE_DIR: &str = "no-archive-cache";
+
+/// Register the function that names the archive-cache directory. The
+/// first registration wins; later calls are no-ops.
+pub fn set_mem_cache_dir_provider(provider: fn() -> PathBuf) {
+    let _ = MEM_CACHE_DIR_PROVIDER.set(provider);
+}
+
+/// The archive-cache directory of this process, when a provider is
+/// registered.
+pub fn registered_mem_cache_dir() -> Option<PathBuf> {
+    MEM_CACHE_DIR_PROVIDER.get().map(|f| f())
+}
+
+/// Whether `file` has the shape of an archive-cache file of `mem`:
+/// `<mem>-<16 lowercase hex>.mem`, the content-addressed name the cache
+/// gives every installed archive.
+pub fn is_cache_file_name(mem: &str, file: &str) -> bool {
+    file.strip_prefix(&format!("{mem}-"))
+        .and_then(|r| r.strip_suffix(".mem"))
+        .is_some_and(|key| {
+            key.len() == 16
+                && key
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+}
+
+/// The cache file name of an installed archive's mount path: a path
+/// directly in this process's archive cache, or the placeholder a
+/// cached-archive entry resolves to in a process with no cache.
+pub fn installed_archive_file(path: &Path) -> Option<String> {
+    cached_archive_file(path).or_else(|| {
+        let parent = path.parent()?;
+        let is_placeholder = parent
+            .file_name()
+            .is_some_and(|n| n == NO_ARCHIVE_CACHE_DIR)
+            && parent
+                .parent()
+                .and_then(|p| p.file_name())
+                .is_some_and(|n| n == WORKSPACE_STORE_DIR);
+        is_placeholder
+            .then(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .flatten()
+    })
+}
+
+/// The cache file name of an archive mount path that lives directly in
+/// the archive cache, `None` for any other path.
+pub fn cached_archive_file(path: &Path) -> Option<String> {
+    let dir = registered_mem_cache_dir()?;
+    let parent = path.parent()?;
+    let same = parent == dir
+        || match (std::fs::canonicalize(parent), std::fs::canonicalize(&dir)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        };
+    if !same {
+        return None;
+    }
+    path.file_name().map(|n| n.to_string_lossy().into_owned())
+}
 /// Pre-rename `mounts.json` formats (V1: absolute paths; V2: relative
 /// paths; both with the old unit-noun record field). Recognised only
 /// to refuse with [`StoreError::LegacyLayout`] — there is no
@@ -549,13 +628,22 @@ fn render_mounts_text(
     workspace_root: &Path,
     mounts_path: &Path,
 ) -> Result<String, StoreError> {
+    let mounts: Vec<MountWire> = workspace
+        .mounts
+        .iter()
+        .map(|m| MountWire::from_mount(m, workspace_root))
+        .collect();
+    let format = if mounts
+        .iter()
+        .any(|m| matches!(m.storage, MountStorageWire::CachedArchive { .. }))
+    {
+        MOUNTS_JSON_FORMAT_V4
+    } else {
+        MOUNTS_JSON_FORMAT_V3
+    };
     let doc = MountsJsonDoc {
-        format: MOUNTS_JSON_FORMAT_V3.to_string(),
-        mounts: workspace
-            .mounts
-            .iter()
-            .map(|m| MountWire::from_mount(m, workspace_root))
-            .collect(),
+        format: format.to_string(),
+        mounts,
     };
     serde_json::to_string_pretty(&doc).map_err(|e| StoreError::Parse {
         path: mounts_path.to_path_buf(),
@@ -583,10 +671,10 @@ fn parse_mounts_text(
             found: probe.format,
         });
     }
-    if probe.format != MOUNTS_JSON_FORMAT_V3 {
+    if probe.format != MOUNTS_JSON_FORMAT_V3 && probe.format != MOUNTS_JSON_FORMAT_V4 {
         return Err(StoreError::FormatMismatch {
             path: mounts_path.to_path_buf(),
-            expected: MOUNTS_JSON_FORMAT_V3.to_string(),
+            expected: MOUNTS_JSON_FORMAT_V4.to_string(),
             found: probe.format,
         });
     }
@@ -892,6 +980,13 @@ enum MountStorageWire {
     Archive {
         path: PathBuf,
     },
+    /// A read-only mem installed into the archive cache, by its
+    /// content-addressed file name (`<mem>-<content key>.mem`). It
+    /// resolves against the running machine's cache, so the tracked
+    /// roster names what was installed, never where one machine keeps it.
+    CachedArchive {
+        file: String,
+    },
     /// In-memory backend. Carries no fields — it serialises as the
     /// bare tag `{ "type": "in-memory" }`. Unambiguous against the
     /// other three variants (each of which carries a `path` or
@@ -930,8 +1025,21 @@ impl MountWire {
                     gitdir: relativize_mount_path(gitdir, workspace_root),
                     branch: branch.clone(),
                 },
-                MountStorage::Archive { path } => MountStorageWire::Archive {
-                    path: relativize_mount_path(path, workspace_root),
+                MountStorage::Archive { path } => match cached_archive_file(path).or_else(|| {
+                    // The placeholder a cached-archive entry resolves to in
+                    // a process with no archive cache writes back as the
+                    // same entry, so the round trip stays faithful.
+                    let placeholder = workspace_root
+                        .join(WORKSPACE_STORE_DIR)
+                        .join(NO_ARCHIVE_CACHE_DIR);
+                    (path.parent() == Some(placeholder.as_path()))
+                        .then(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
+                        .flatten()
+                }) {
+                    Some(file) => MountStorageWire::CachedArchive { file },
+                    None => MountStorageWire::Archive {
+                        path: relativize_mount_path(path, workspace_root),
+                    },
                 },
                 MountStorage::InMemory => MountStorageWire::InMemory,
             },
@@ -948,6 +1056,7 @@ impl MountWire {
     }
 
     fn into_mount(self, workspace_root: &Path) -> Mount {
+        let mem_name = self.mem.clone();
         Mount {
             mem: self.mem,
             schema: self.schema.map(|s| {
@@ -966,8 +1075,35 @@ impl MountWire {
                     gitdir: absolutize_mount_path(gitdir, workspace_root),
                     branch,
                 },
-                MountStorageWire::Archive { path } => MountStorage::Archive {
-                    path: absolutize_mount_path(path, workspace_root),
+                MountStorageWire::Archive { path } => {
+                    let path = absolutize_mount_path(path, workspace_root);
+                    // A roster written before identity entries existed, on
+                    // another machine, names that machine's cache file. A
+                    // missing path whose name is this mem's cache file name
+                    // is read as that identity, so the clone heals: it
+                    // resolves against this machine's cache and writes back
+                    // as a cached-archive entry.
+                    let file = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .filter(|f| !path.exists() && is_cache_file_name(&mem_name, f));
+                    match (file, registered_mem_cache_dir()) {
+                        (Some(file), Some(dir)) => MountStorage::Archive {
+                            path: dir.join(file),
+                        },
+                        _ => MountStorage::Archive { path },
+                    }
+                }
+                MountStorageWire::CachedArchive { file } => MountStorage::Archive {
+                    path: match registered_mem_cache_dir() {
+                        Some(dir) => dir.join(file),
+                        // No cache in this build: a path that holds no
+                        // file, so the mem quarantines instead of loading.
+                        None => workspace_root
+                            .join(WORKSPACE_STORE_DIR)
+                            .join(NO_ARCHIVE_CACHE_DIR)
+                            .join(file),
+                    },
                 },
                 MountStorageWire::InMemory => MountStorage::InMemory,
             },

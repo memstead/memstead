@@ -183,6 +183,9 @@ fn migrate_legacy_read_mems(
 pub(crate) fn load_workspace_description(
     workspace_root: &Path,
 ) -> Result<memstead_base::Workspace, BootError> {
+    // A cached-archive roster entry resolves against this machine's
+    // archive cache, which this crate owns.
+    memstead_base::workspace_store::set_mem_cache_dir_provider(crate::mem_cache::mem_cache_dir);
     match detect_layout(workspace_root) {
         // Standalone collapse: a bare folder mem (`.memstead/config.json`,
         // no `workspace.toml`) roots as a one-mount workspace. The product
@@ -218,11 +221,19 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     for mount in workspace.mounts {
         match crate::storage::instantiate_full_backend(&mount) {
             Ok(backend) => mounts.push((mount, backend)),
-            Err(e) => instantiate_quarantine.push(memstead_base::engine::QuarantinedMem {
-                reason_code: e.code().to_string(),
-                reason_message: e.to_string(),
-                mount,
-            }),
+            Err(e) => {
+                let (reason_code, reason_message) =
+                    memstead_base::engine::boot::instantiate_failure_reason(
+                        &mount,
+                        e.code(),
+                        e.to_string(),
+                    );
+                instantiate_quarantine.push(memstead_base::engine::QuarantinedMem {
+                    reason_code,
+                    reason_message,
+                    mount,
+                })
+            }
         }
     }
     // One-way legacy migration: per-host-mem `readMems` entries become

@@ -199,6 +199,7 @@ pub fn install_to_cache(
         });
     }
 
+    memstead_base::workspace_store::set_mem_cache_dir_provider(mem_cache_dir);
     let cache_dir = mem_cache_dir();
     std::fs::create_dir_all(&cache_dir)?;
     let cache_key = content_cache_key(&validated.canonical_bytes);

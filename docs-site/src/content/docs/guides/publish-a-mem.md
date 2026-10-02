@@ -79,6 +79,8 @@ memstead install github:alice/recipes
 
 The installed mem mounts read-only: its entities and schema structure are readable and linkable, but the engine treats non-first-party content as untrusted input — its schema's instruction prose is withheld and every read surface tags the content's `origin`.
 
+The workspace's tracked mount roster records the install by what was installed, the archive's content-addressed name (`recipes-<content key>.mem`), not by where this machine keeps its archive cache. A clone of the workspace on another machine therefore names the same mem; until it is installed there too, that machine holds it out with `ARCHIVE_NOT_INSTALLED`, and the message names the install command. Installing the same archive there brings it into service without changing the roster, and an archive of the same name with different content is never mounted in its place.
+
 ## Ship an update
 
 Bump the version and publish in one step (`--version` persists the bump to the mem config, like `npm version` + `npm publish`):

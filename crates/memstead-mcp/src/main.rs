@@ -95,6 +95,11 @@ fn default_identity_from(flag: Option<&str>) -> anyhow::Result<Option<String>> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Installed read-only mems resolve against this machine's archive
+    // cache on every roster read, whichever workspace shape reads it.
+    memstead_base::workspace_store::set_mem_cache_dir_provider(
+        memstead_git_branch::mem_cache::mem_cache_dir,
+    );
     let args = Args::parse();
     let cwd = std::env::current_dir().context("Could not determine current directory")?;
 

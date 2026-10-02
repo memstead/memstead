@@ -34,7 +34,36 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
     // Resolve, and refuse the two wrong-target shapes before any
     // mutation: unknown names, and writable mems (which have their own
-    // lifecycle verbs).
+    // lifecycle verbs). A read-only mem held in quarantine (an installed
+    // archive this machine's cache lacks) is still an installed read-mem:
+    // it serves no entity, so no edge can point into it, and it is
+    // unregistered directly.
+    if engine.mount(&args.name).is_none()
+        && engine
+            .quarantine_reason(&args.name)
+            .is_some_and(|q| q.mount.capability == memstead_base::MountCapability::ReadOnly)
+    {
+        engine
+            .unregister_read_mount(&args.name)
+            .map_err(|e| anyhow::Error::from(CliError::from_engine_op(e)))?;
+        engine
+            .persist_state()
+            .map_err(|e| anyhow::Error::from(CliError::from_engine_op(e)))?;
+        if ctx.json {
+            print_json(&json!({
+                "mem_name": args.name,
+                "unregistered": true,
+                "cache_retained": true,
+            }))?;
+        } else {
+            print_markdown(&format!(
+                "# Uninstalled `{}`\n\n- Mount: unregistered from the workspace (it was held \
+                 out, so nothing was serving it)",
+                args.name,
+            ));
+        }
+        return Ok(());
+    }
     let Some(mount) = engine.mount(&args.name) else {
         return Err(CliError::new(
             ExitKind::NotFound,

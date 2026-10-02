@@ -201,6 +201,25 @@ impl Engine {
         let mut deferred_idx: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
         for (m_idx, m) in mounted.iter().enumerate() {
+            // An archive mount whose file is gone is the missing-storage
+            // case before anything else: its pin may live only inside the
+            // missing archive (a sealed third-party schema), and resolving
+            // it first would answer "schema not found" where the repair is
+            // "install the archive".
+            if matches!(
+                m.mount.storage,
+                crate::workspace::MountStorage::Archive { .. }
+            ) && !m.backend.storage_present().unwrap_or(true)
+            {
+                let (reason_code, reason_message) = missing_storage_reason(&m.mount);
+                quarantined.push(crate::engine::QuarantinedMem {
+                    mount: m.mount.clone(),
+                    reason_code,
+                    reason_message,
+                });
+                quarantined_idx.insert(m_idx);
+                continue;
+            }
             // Schema-pin authority: the mem's own per-mem config is
             // the authoritative settled pin, so a copied or cloned mem
             // resolves its schema from its own backend without consulting
@@ -401,11 +420,14 @@ impl Engine {
                 Ok(pair) => pair,
                 Err(e) => {
                     // Backend read failure: quarantine this mem, serve
-                    // the rest.
+                    // the rest. An archive whose file is gone reads as
+                    // the missing-storage case, with its own repair.
+                    let (reason_code, reason_message) =
+                        instantiate_failure_reason(&m.mount, e.code(), e.to_string());
                     quarantined.push(crate::engine::QuarantinedMem {
                         mount: m.mount.clone(),
-                        reason_code: e.code().to_string(),
-                        reason_message: e.to_string(),
+                        reason_code,
+                        reason_message,
                     });
                     quarantined_idx.insert(m_idx);
                     schemas.remove(&m.mount.mem);
@@ -444,22 +466,11 @@ impl Engine {
                     | crate::workspace::MountStorage::Archive { .. }
             );
             if path_backed && !m.backend.storage_present().unwrap_or(true) {
-                let location = match &m.mount.storage {
-                    crate::workspace::MountStorage::GitBranch { branch, .. } => branch.clone(),
-                    crate::workspace::MountStorage::Folder { path }
-                    | crate::workspace::MountStorage::Archive { path } => {
-                        path.display().to_string()
-                    }
-                    crate::workspace::MountStorage::InMemory => String::new(),
-                };
+                let (reason_code, reason_message) = missing_storage_reason(&m.mount);
                 quarantined.push(crate::engine::QuarantinedMem {
                     mount: m.mount.clone(),
-                    reason_code: "MOUNT_UNBACKED".to_string(),
-                    reason_message: format!(
-                        "the mount's storage is gone ({location}); it is configured but cannot \
-                         serve, so it is held out of the roster rather than answering reads \
-                         with an empty graph"
-                    ),
+                    reason_code,
+                    reason_message,
                 });
                 quarantined_idx.insert(m_idx);
                 schemas.remove(&m.mount.mem);
@@ -973,6 +984,97 @@ pub(super) fn resolve_builtin_schema_pin(
             id.0 == pin.name && id.1 == pin.version
         })
         .cloned()
+}
+
+/// Why a mount whose storage does not exist is quarantined, as
+/// `(reason_code, reason_message)`. A read-only mem installed into the
+/// archive cache whose file this machine's cache lacks is
+/// `ARCHIVE_NOT_INSTALLED`, with the install command as the repair and,
+/// when the cache holds the same mem under other content, that file
+/// named as what is NOT mounted in its place. Every other missing
+/// storage is `MOUNT_UNBACKED`.
+pub fn missing_storage_reason(mount: &crate::workspace::Mount) -> (String, String) {
+    use crate::workspace::MountStorage;
+    if let MountStorage::Archive { path } = &mount.storage
+        && let Some(file) = crate::workspace_store::installed_archive_file(path)
+    {
+        let mem = &mount.mem;
+        let key = file
+            .strip_prefix(&format!("{mem}-"))
+            .and_then(|r| r.strip_suffix(".mem"))
+            .unwrap_or("?");
+        let dir = path
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        let others: Vec<String> = path
+            .parent()
+            .and_then(|p| std::fs::read_dir(p).ok())
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| {
+                        n.starts_with(&format!("{mem}-")) && n.ends_with(".mem") && *n != file
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let other_note = if others.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " The cache holds {} with different content; it does not match the recorded \
+                 identity and is not mounted in its place.",
+                others
+                    .iter()
+                    .map(|o| format!("`{o}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        return (
+            "ARCHIVE_NOT_INSTALLED".to_string(),
+            format!(
+                "mem `{mem}` is an installed archive (`{file}`, content key `{key}`) that this \
+                 machine's archive cache ({dir}) does not hold.{other_note} Install it here, \
+                 from the archive file (`memstead install <path to {file}>`) or from the \
+                 registry it was published to (`memstead install <scope>/{mem}`), then run \
+                 `memstead reload --full`."
+            ),
+        );
+    }
+    let location = match &mount.storage {
+        MountStorage::GitBranch { branch, .. } => branch.clone(),
+        MountStorage::Folder { path } | MountStorage::Archive { path } => {
+            path.display().to_string()
+        }
+        MountStorage::InMemory => String::new(),
+    };
+    (
+        "MOUNT_UNBACKED".to_string(),
+        format!(
+            "the mount's storage is gone ({location}); it is configured but cannot \
+             serve, so it is held out of the roster rather than answering reads \
+             with an empty graph"
+        ),
+    )
+}
+
+/// The quarantine reason for a mount whose backend could not be
+/// instantiated: an archive mount whose file does not exist is the
+/// missing-storage case ([`missing_storage_reason`]); any other failure
+/// keeps the instantiation error's own code and message.
+pub fn instantiate_failure_reason(
+    mount: &crate::workspace::Mount,
+    code: &str,
+    message: String,
+) -> (String, String) {
+    if let crate::workspace::MountStorage::Archive { path } = &mount.storage
+        && !path.exists()
+    {
+        return missing_storage_reason(mount);
+    }
+    (code.to_string(), message)
 }
 
 /// The `MOUNT_UNBACKED` probe for one mount: `Some(warning)` when the

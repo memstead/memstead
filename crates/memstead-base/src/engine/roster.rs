@@ -269,23 +269,8 @@ impl Engine {
                 super::boot::unbacked_mount_warning(&mount, backend.as_ref(), None)
                 && reason != crate::ops::MountUnbackedReason::Empty
             {
-                let location = match &mount.storage {
-                    crate::workspace::MountStorage::GitBranch { branch, .. } => branch.clone(),
-                    crate::workspace::MountStorage::Folder { path }
-                    | crate::workspace::MountStorage::Archive { path } => {
-                        path.display().to_string()
-                    }
-                    crate::workspace::MountStorage::InMemory => String::new(),
-                };
-                self.quarantine_mount(
-                    mount,
-                    "MOUNT_UNBACKED",
-                    format!(
-                        "the mount's storage is gone ({location}); it is configured but cannot \
-                         serve, so it is held out of the roster rather than answering reads \
-                         with an empty graph"
-                    ),
-                );
+                let (code, message) = super::boot::missing_storage_reason(&mount);
+                self.quarantine_mount(mount, &code, message);
                 change.quarantined.push(name);
                 continue;
             }
