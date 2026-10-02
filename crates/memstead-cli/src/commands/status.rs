@@ -24,8 +24,8 @@ pub struct Args {
     /// never pushed, a notice). Exit 6 (`REMOTE_STALE`, after the report)
     /// when any ref is behind, forked, unfetched or missing locally — the
     /// local graph lags what another machine
-    /// pushed; reconcile with `memstead fetch` then `memstead pull` per
-    /// named mem. Exit 0 otherwise, and exit 0 with a named notice when no
+    /// pushed; reconcile with `memstead pull --all` (the schema-and-config
+    /// ref first, then every mounted mem, fast-forward only). Exit 0 otherwise, and exit 0 with a named notice when no
     /// git-branch mem is mounted, no remote is configured, or the remote
     /// cannot be reached (fail open: a network blip never blocks a session).
     #[arg(long, value_name = "REMOTE", num_args = 0..=1, default_missing_value = "origin")]
@@ -398,8 +398,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         if r.stale {
             lines.push(String::new());
             lines.push(
-                "The local graph lags the remote. Reconcile before mutating: `memstead fetch` \
-                 then `memstead pull` per named mem."
+                "The local graph lags the remote. Reconcile before mutating: \
+                 `memstead pull --all` (the schema-and-config ref first, then every mounted \
+                 mem, fast-forward only; a forked ref is refused by name)."
                     .to_string(),
             );
         }
@@ -429,8 +430,8 @@ fn remote_exit(remote: Option<&memstead_base::ops::RemoteStatusOutcome>) -> anyh
         ExitKind::Findings,
         "REMOTE_STALE",
         format!(
-            "the local graph lags remote `{}`: {} — reconcile with `memstead fetch` then \
-             `memstead pull` per named mem before mutating",
+            "the local graph lags remote `{}`: {} — reconcile with `memstead pull --all` \
+             before mutating",
             r.remote,
             stale.join(", ")
         ),

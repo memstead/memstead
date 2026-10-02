@@ -17,6 +17,21 @@ use crate::workspace::MountStorage;
 use super::mutation::lookup_title_and_type;
 use super::{Engine, EngineError};
 
+/// What [`Engine::fast_forward_ref`] did with one local ref.
+enum FastForward {
+    /// The remote-tracking ref does not exist.
+    NotOnRemote,
+    /// Local and remote already point at the same commit.
+    InSync,
+    /// The local ref moved (or was created, `previous` empty).
+    Moved { previous: String, new: String },
+    /// The local ref already contains the remote's commit and more
+    /// (unpushed local work); it was left alone.
+    LocalAhead,
+    /// Local and remote each have commits the other lacks; not moved.
+    Diverged,
+}
+
 impl Engine {
     /// Reload-before-operation: before any read or write executes,
     /// check the mem ref; if it advanced past the engine's cached
@@ -560,6 +575,34 @@ impl Engine {
         remote: &str,
         refspecs: &[String],
     ) -> Result<crate::ops::FetchOutcome, EngineError> {
+        // A fetch moves remote-tracking refs only. A refspec whose
+        // destination is a local branch would move a mem's branch or the
+        // schema ref with no fast-forward test and no schema gate; the
+        // routes that move local branches are `pull` and `pull --all`.
+        // The destination is admitted by allowlist (`refs/remotes/`, in
+        // the exact spelling), never by denying `refs/heads/`: on a
+        // case-insensitive filesystem `refs/HEADS/x` is the same file.
+        for spec in refspecs {
+            if spec.starts_with('-') {
+                return Err(EngineError::InvalidInput(format!(
+                    "refspec `{spec}` starts with '-'; a refspec is never a git option"
+                )));
+            }
+            let spec_body = spec.trim_start_matches('+');
+            if spec_body.starts_with('^') {
+                continue;
+            }
+            if let Some((_, dst)) = spec_body.split_once(':')
+                && !dst.is_empty()
+                && !dst.starts_with("refs/remotes/")
+            {
+                return Err(EngineError::InvalidInput(format!(
+                    "refspec `{spec}` writes outside the remote-tracking refs (`{dst}`); a fetch \
+                     only updates `refs/remotes/<remote>/…` — move local branches with \
+                     `memstead pull <mem>` or `memstead pull --all`"
+                )));
+            }
+        }
         let m = self.find_mount(mem)?;
         match &m.mount.storage {
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
@@ -1144,6 +1187,455 @@ impl Engine {
         Ok(outcome)
     }
 
+    /// Bring every mem-repo the workspace mounts from to `remote`'s
+    /// state, fast-forward only — the inverse of [`Self::push_all`].
+    ///
+    /// Order, per the dependency between the refs: one fetch per
+    /// mem-repo; the `__MEMSTEAD` ref first (schemas and mem configs);
+    /// then the schema catalogue is re-read, every mounted mem's pin is
+    /// re-resolved from its (possibly new) config, and every mem
+    /// quarantined `SCHEMA_NOT_FOUND` is re-attached; then each mounted
+    /// mem's declared branch, validated against the schema it now
+    /// resolves to exactly as [`Self::pull`] validates; last the check
+    /// rows of the mounted mems. A ref absent locally is created; a ref
+    /// whose local side has commits the remote lacks is never moved
+    /// (`LOCAL_DIVERGENCE`), and the run continues with the next ref.
+    /// A mem quarantined for any other reason is never pulled and is
+    /// reported with its reason. Only a remote that cannot be fetched at
+    /// all (`UNKNOWN_REMOTE`) fails the run as a whole.
+    pub fn pull_all(&mut self, remote: &str) -> Result<crate::ops::PullAllOutcome, EngineError> {
+        use crate::ops::{PullAllOutcome, PulledRef, QuarantinedAfterPull, RefusedRef};
+
+        let hook = self.git_branch_ops.ok_or_else(|| {
+            EngineError::Backend(BackendError::Other(
+                "git-branch pull hook not installed (git-branch ops not wired)".to_string(),
+            ))
+        })?;
+        let map_fetch_err = |e: BackendError| match e {
+            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
+                EngineError::UnknownRemote(
+                    msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
+                )
+            }
+            other => EngineError::Backend(other),
+        };
+
+        // Mem-repos of mounted AND quarantined git-branch mems, each
+        // once: a mem quarantined because its schema lives only on the
+        // remote is exactly what this run repairs.
+        let gitdirs = self.workspace_gitdirs();
+
+        let mut outcome = PullAllOutcome {
+            remote: remote.to_string(),
+            ..Default::default()
+        };
+
+        // --- Leg 1: fetch, then the schema-and-config ref. ---
+        // A mem-repo that cannot be fetched is refused by name and its
+        // refs are skipped; the other mem-repos still move. Only when no
+        // mem-repo could be fetched because the remote is unknown or
+        // unreachable does the run fail as a whole.
+        let mut failed: Vec<std::path::PathBuf> = Vec::new();
+        let mut first_unknown_remote: Option<EngineError> = None;
+        for gitdir in &gitdirs {
+            if let Err(e) = (hook.fetch)(gitdir, remote, &[]).map_err(map_fetch_err) {
+                outcome.refused.push(RefusedRef {
+                    ref_name: gitdir.display().to_string(),
+                    mem: None,
+                    code: e.code().to_string(),
+                    message: format!(
+                        "the mem-repo at {} could not be fetched from `{remote}`; its refs \
+                         were not touched: {e}",
+                        gitdir.display()
+                    ),
+                });
+                if matches!(e, EngineError::UnknownRemote(_)) && first_unknown_remote.is_none() {
+                    first_unknown_remote = Some(e);
+                }
+                failed.push(gitdir.clone());
+                continue;
+            }
+            let local_ref = crate::workspace::branch_full_ref(crate::MEMSTEAD_REF_BRANCH);
+            let remote_ref = format!("refs/remotes/{remote}/{}", crate::MEMSTEAD_REF_BRANCH);
+            // A local schema ref that is nothing but a bootstrap seed
+            // carries no state, so adopting the backup's history in its
+            // place loses nothing, whichever engine version seeded either.
+            match Self::fast_forward_ref(&hook, gitdir, &local_ref, &remote_ref, true)? {
+                FastForward::NotOnRemote => outcome.notices.push(format!(
+                    "remote `{remote}` carries no schema-and-config ref for {}; \
+                     the local one was left as it is",
+                    gitdir.display()
+                )),
+                FastForward::InSync => outcome.in_sync.push(local_ref),
+                FastForward::Moved { previous, new } => outcome.pulled.push(PulledRef {
+                    ref_name: local_ref,
+                    mem: None,
+                    previous_sha: previous,
+                    new_sha: new,
+                }),
+                FastForward::LocalAhead => outcome.local_ahead.push(local_ref),
+                FastForward::Diverged => outcome.refused.push(RefusedRef {
+                    ref_name: local_ref,
+                    mem: None,
+                    code: "LOCAL_DIVERGENCE".to_string(),
+                    message: format!(
+                        "the local schema-and-config ref has commits remote `{remote}` lacks; \
+                         it was not moved. Push them from this clone (`memstead push --all`) \
+                         or reconcile on the other clone first"
+                    ),
+                }),
+            }
+        }
+
+        if failed.len() == gitdirs.len()
+            && let Some(e) = first_unknown_remote
+        {
+            return Err(e);
+        }
+        let usable: Vec<std::path::PathBuf> = gitdirs
+            .iter()
+            .filter(|g| !failed.contains(g))
+            .cloned()
+            .collect();
+
+        // --- Leg 2: schemas, pins and quarantines re-resolved. ---
+        let mut refresh = crate::ops::FullRefreshReport::default();
+        self.refresh_schema_sources(&mut refresh);
+        let mut unresolved: std::collections::HashMap<String, EngineError> =
+            std::collections::HashMap::new();
+        let mounted_git: Vec<String> = self
+            .mounts
+            .iter()
+            .filter(|m| matches!(m.mount.storage, MountStorage::GitBranch { .. }))
+            .map(|m| m.mount.mem.clone())
+            .collect();
+        for mem in &mounted_git {
+            if let Err(e) = self.rebind_schema_from_config(mem) {
+                unresolved.insert(mem.clone(), e);
+            }
+        }
+        let schema_quarantined: Vec<String> = self
+            .quarantined
+            .iter()
+            .filter(|q| {
+                q.reason_code == "SCHEMA_NOT_FOUND"
+                    && matches!(q.mount.storage, MountStorage::GitBranch { .. })
+            })
+            .map(|q| q.mount.mem.clone())
+            .collect();
+        for mem in schema_quarantined {
+            if self.reload_one_mem(&mem).is_ok() && self.quarantine_reason(&mem).is_none() {
+                outcome.returned_to_service.push(mem);
+            }
+        }
+
+        // Mems on the remote that nothing here mounts: named with the
+        // command that mounts them, never mounted by this run.
+        let known: std::collections::HashSet<String> = self
+            .mounts
+            .iter()
+            .map(|m| &m.mount.storage)
+            .chain(self.quarantined.iter().map(|q| &q.mount.storage))
+            .filter_map(|s| match s {
+                MountStorage::GitBranch { branch, .. } => {
+                    Some(crate::workspace::branch_full_ref(branch))
+                }
+                _ => None,
+            })
+            .collect();
+        let schema_ref = crate::workspace::branch_full_ref(crate::MEMSTEAD_REF_BRANCH);
+        for gitdir in &usable {
+            let Ok(remote_refs) = (hook.ls_remote)(gitdir, remote) else {
+                continue;
+            };
+            for (ref_name, _) in remote_refs {
+                let Some(short) = ref_name.strip_prefix("refs/heads/") else {
+                    continue;
+                };
+                if known.contains(&ref_name)
+                    || short.starts_with(crate::MEMSTEAD_REF_BRANCH)
+                    || short == "main"
+                {
+                    continue;
+                }
+                let Ok(Some(bytes)) = (hook.read_config_at_ref)(gitdir, &schema_ref, short) else {
+                    continue;
+                };
+                let schema = serde_json::from_slice::<serde_json::Value>(&bytes)
+                    .ok()
+                    .and_then(|v| memstead_schema::config::parse_mem_config(&v).ok())
+                    .and_then(|c| c.schema)
+                    .map(|p| p.as_display());
+                outcome
+                    .unmounted_on_remote
+                    .push(crate::ops::UnmountedRemoteMem {
+                        branch: short.to_string(),
+                        schema,
+                    });
+            }
+        }
+
+        // --- Leg 3: every mounted mem's declared branch. ---
+        let targets: Vec<(String, std::path::PathBuf, String)> = self
+            .mounts
+            .iter()
+            .filter_map(|m| match &m.mount.storage {
+                MountStorage::GitBranch { gitdir, branch } => {
+                    Some((m.mount.mem.clone(), gitdir.clone(), branch.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        for (mem, gitdir, branch) in targets {
+            if failed.contains(&gitdir) {
+                continue;
+            }
+            let local_ref = crate::workspace::branch_full_ref(&branch);
+            if let Some(e) = unresolved.remove(&mem) {
+                outcome.refused.push(RefusedRef {
+                    ref_name: local_ref,
+                    mem: Some(mem.clone()),
+                    code: e.code().to_string(),
+                    message: e.to_string(),
+                });
+                continue;
+            }
+            let remote_ref = format!(
+                "refs/remotes/{remote}/{}",
+                crate::workspace::branch_short_name(&branch)
+            );
+            let Some(remote_sha) =
+                (hook.resolve_ref)(&gitdir, &remote_ref).map_err(EngineError::Backend)?
+            else {
+                outcome.notices.push(format!(
+                    "remote `{remote}` does not carry {local_ref} (mem `{mem}`); \
+                     the local branch was left as it is"
+                ));
+                continue;
+            };
+            let local_sha =
+                (hook.resolve_ref)(&gitdir, &local_ref).map_err(EngineError::Backend)?;
+            if local_sha.as_deref() == Some(remote_sha.as_str()) {
+                outcome.in_sync.push(local_ref);
+                continue;
+            }
+            if let Some(l) = &local_sha
+                && (hook.is_ancestor)(&gitdir, &remote_sha, l).map_err(EngineError::Backend)?
+            {
+                outcome.local_ahead.push(local_ref);
+                continue;
+            }
+            // The same whole-tree gate `pull` runs, against the schema
+            // the mem resolves to now that the schema ref has arrived.
+            if let Err(e) = self.validate_ref_against_schema(&hook, &gitdir, &mem, &remote_ref) {
+                outcome.refused.push(RefusedRef {
+                    ref_name: local_ref,
+                    mem: Some(mem.clone()),
+                    code: e.code().to_string(),
+                    message: e.to_string(),
+                });
+                continue;
+            }
+            match Self::fast_forward_ref(&hook, &gitdir, &local_ref, &remote_ref, false)? {
+                FastForward::Moved { previous, new } => {
+                    // The store serves the pulled state before the run
+                    // returns; a reload failure is reported, the ref
+                    // move stands (the next operation reloads again).
+                    if let Err(e) = self.reload_one_mem(&mem) {
+                        outcome.notices.push(format!(
+                            "mem `{mem}` was pulled but did not reload in this process: {e}"
+                        ));
+                    }
+                    let event = crate::engine::events::MemChangedEvent {
+                        mem: mem.clone(),
+                        head: new.clone(),
+                        previous: previous.clone(),
+                        n_commits: 1,
+                    };
+                    self.emit_mem_changed(&event);
+                    outcome.pulled.push(PulledRef {
+                        ref_name: local_ref,
+                        mem: Some(mem.clone()),
+                        previous_sha: previous,
+                        new_sha: new,
+                    });
+                }
+                FastForward::InSync => outcome.in_sync.push(local_ref),
+                FastForward::LocalAhead => outcome.local_ahead.push(local_ref),
+                FastForward::NotOnRemote => {}
+                FastForward::Diverged => outcome.refused.push(RefusedRef {
+                    ref_name: local_ref.clone(),
+                    mem: Some(mem.clone()),
+                    code: "LOCAL_DIVERGENCE".to_string(),
+                    message: EngineError::LocalDivergence {
+                        mem: mem.clone(),
+                        remote_ref,
+                    }
+                    .to_string(),
+                }),
+            }
+        }
+
+        // --- Leg 4: the mounted mems' check rows, once per mem-repo. ---
+        for gitdir in &usable {
+            let mems: Vec<String> = self
+                .mounts
+                .iter()
+                .filter_map(|m| match &m.mount.storage {
+                    MountStorage::GitBranch { gitdir: g, .. } if g == gitdir => {
+                        Some(m.mount.mem.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            if mems.is_empty() {
+                continue;
+            }
+            let mem_refs: Vec<&str> = mems.iter().map(String::as_str).collect();
+            outcome.checks_imported += self.import_checks(&hook, gitdir, remote, &mem_refs)?;
+        }
+
+        outcome.quarantined = self
+            .quarantined
+            .iter()
+            .map(|q| QuarantinedAfterPull {
+                mem: q.mount.mem.clone(),
+                code: q.reason_code.clone(),
+                message: q.reason_message.clone(),
+            })
+            .collect();
+        Ok(outcome)
+    }
+
+    /// The mem-repos this workspace keeps git-branch mems in, each once:
+    /// those of the mounted mems, then those of the quarantined ones (a
+    /// mem quarantined because its schema lives only on the remote is
+    /// still in its mem-repo), and, when no mount names one, the
+    /// workspace's own `mem-repo/` as `memstead mem-repo init` creates
+    /// it, so a workspace with no mem yet can still be wired to a remote
+    /// and restored from it.
+    fn workspace_gitdirs(&self) -> Vec<std::path::PathBuf> {
+        let mut gitdirs: Vec<std::path::PathBuf> = Vec::new();
+        let storages = self
+            .mounts
+            .iter()
+            .map(|m| &m.mount.storage)
+            .chain(self.quarantined.iter().map(|q| &q.mount.storage));
+        for storage in storages {
+            if let MountStorage::GitBranch { gitdir, .. } = storage
+                && !gitdirs.contains(gitdir)
+            {
+                gitdirs.push(gitdir.clone());
+            }
+        }
+        if gitdirs.is_empty()
+            && let Some(root) = self.workspace_root.as_ref()
+        {
+            let default = root.join("mem-repo").join(".git");
+            if default.is_dir() {
+                gitdirs.push(default);
+            }
+        }
+        gitdirs
+    }
+
+    /// Fast-forward `local_ref` to what `remote_ref` points at, the
+    /// ancestry tested first. A local ref that does not exist is
+    /// created (a fast-forward from nothing).
+    fn fast_forward_ref(
+        hook: &crate::engine::GitBranchOps,
+        gitdir: &std::path::Path,
+        local_ref: &str,
+        remote_ref: &str,
+        replace_empty_seed: bool,
+    ) -> Result<FastForward, EngineError> {
+        let Some(remote_sha) =
+            (hook.resolve_ref)(gitdir, remote_ref).map_err(EngineError::Backend)?
+        else {
+            return Ok(FastForward::NotOnRemote);
+        };
+        let local_sha = (hook.resolve_ref)(gitdir, local_ref).map_err(EngineError::Backend)?;
+        match &local_sha {
+            Some(l) if *l == remote_sha => return Ok(FastForward::InSync),
+            Some(l) => {
+                if !(hook.is_ancestor)(gitdir, l, &remote_sha).map_err(EngineError::Backend)? {
+                    if (hook.is_ancestor)(gitdir, &remote_sha, l).map_err(EngineError::Backend)? {
+                        return Ok(FastForward::LocalAhead);
+                    }
+                    let seed = replace_empty_seed
+                        && (hook.is_empty_root)(gitdir, l).map_err(EngineError::Backend)?;
+                    if !seed {
+                        return Ok(FastForward::Diverged);
+                    }
+                }
+            }
+            None => {}
+        }
+        (hook.update_ref)(gitdir, local_ref, &remote_sha).map_err(EngineError::Backend)?;
+        Ok(FastForward::Moved {
+            previous: local_sha.unwrap_or_default(),
+            new: remote_sha,
+        })
+    }
+
+    /// Re-read a mounted mem's config and re-resolve its schema pin
+    /// against the current catalogue, the boot resolver's order. Used
+    /// after the schema-and-config ref moved: a pin another clone
+    /// switched must govern what this engine validates next. A pin that
+    /// no longer resolves leaves the mem's current schema in place and
+    /// returns the typed refusal.
+    fn rebind_schema_from_config(&mut self, mem: &str) -> Result<(), EngineError> {
+        let Some(idx) = self.mounts.iter().position(|m| m.mount.mem == mem) else {
+            return Ok(());
+        };
+        let mem_config = self.mounts[idx]
+            .backend
+            .read_mem_config()
+            .ok()
+            .flatten()
+            .and_then(|bytes| {
+                let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+                memstead_schema::config::parse_mem_config(&value).ok()
+            });
+        let Some(pin) = self.mounts[idx]
+            .mount
+            .migration_target
+            .clone()
+            .or_else(|| mem_config.as_ref().and_then(|c| c.schema.clone()))
+            .or_else(|| self.mounts[idx].mount.schema.clone())
+        else {
+            return Ok(());
+        };
+        let catalogue: Vec<std::sync::Arc<memstead_schema::Schema>> = self
+            .workspace_schemas
+            .iter()
+            .cloned()
+            .chain(self.builtin_schemas.iter().cloned())
+            .collect();
+        let schema = crate::engine::SchemaResolver::new(&catalogue)
+            .resolve(&pin)
+            .map_err(|sources| {
+                EngineError::SchemaNotFound {
+                    mem: mem.to_string(),
+                    pin: pin.as_display(),
+                    sources,
+                    install_hint: None,
+                }
+                .with_schema_install_probe(self.workspace_root())
+            })?;
+        let unchanged = self
+            .schemas
+            .get(mem)
+            .is_some_and(|current| current.id() == schema.id());
+        if mem_config.is_some() {
+            self.mounts[idx].mem_config = mem_config;
+        }
+        if !unchanged {
+            self.schemas_insert(mem.to_string(), schema);
+        }
+        Ok(())
+    }
+
     /// Configure (or re-point) a named remote on the workspace's
     /// mem-repo, so `fetch` / `pull` / `push` have somewhere to go.
     /// Upsert semantics — safe to re-run with a new URL. The mem-repo
@@ -1163,18 +1655,12 @@ impl Engine {
                  (got name '{name}', url '{url}')",
             )));
         }
-        let gitdir = self
-            .mounts
-            .iter()
-            .find_map(|m| match &m.mount.storage {
-                MountStorage::GitBranch { gitdir, .. } => Some(gitdir.clone()),
-                _ => None,
-            })
-            .ok_or_else(|| {
-                EngineError::InvalidInput(
-                    "no git-branch mounts — `remote-add` requires a mem-repo workspace".to_string(),
-                )
-            })?;
+        let gitdir = self.workspace_gitdirs().into_iter().next().ok_or_else(|| {
+            EngineError::InvalidInput(
+                "no mem-repo in this workspace — `remote-add` requires a mem-repo workspace"
+                    .to_string(),
+            )
+        })?;
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
                 "git-branch remote_add hook not installed (git-branch ops not wired)".to_string(),

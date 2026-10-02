@@ -47,8 +47,9 @@ pub use proposal::{
     render_proposal_brief, render_proposal_merge, render_proposal_record,
 };
 pub use transport::{
-    FetchOutcome, PullOutcome, PushAllOutcome, PushOutcome, PushedRef, RefusedRef,
-    RemoteAddOutcome, RemoteRefState, RemoteRefStatus, RemoteStatusOutcome, UpdatedRef,
+    FetchOutcome, PullAllOutcome, PullOutcome, PulledRef, PushAllOutcome, PushOutcome, PushedRef,
+    QuarantinedAfterPull, RefusedRef, RemoteAddOutcome, RemoteRefState, RemoteRefStatus,
+    RemoteStatusOutcome, UnmountedRemoteMem, UpdatedRef,
 };
 
 use crate::entity::EntityId;

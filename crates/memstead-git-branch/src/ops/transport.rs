@@ -76,7 +76,9 @@ pub fn fetch_in_gitdir(
     }
     let pre = ref_snapshot(gitdir);
 
-    let mut args: Vec<String> = vec!["fetch".to_string(), remote.to_string()];
+    // `--` ends option parsing: a remote or refspec that starts with `-`
+    // is an operand, never an option such as `--upload-pack=<command>`.
+    let mut args: Vec<String> = vec!["fetch".to_string(), "--".to_string(), remote.to_string()];
     for spec in refspecs {
         args.push(spec.clone());
     }
@@ -185,6 +187,7 @@ pub fn push_in_gitdir(
     if force {
         args.push("--force-with-lease".to_string());
     }
+    args.push("--".to_string());
     args.push(remote.to_string());
     args.push(format!("{branch_ref}:{branch_ref}"));
     let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -241,9 +244,11 @@ pub fn ls_remote_in_gitdir(
         )));
     }
     let remote_owned = remote.to_string();
-    let stdout = run_git(gitdir, &["ls-remote", "--heads", remote], move |stderr| {
-        classify_remote_failure(&remote_owned, stderr)
-    })?;
+    let stdout = run_git(
+        gitdir,
+        &["ls-remote", "--heads", "--", remote],
+        move |stderr| classify_remote_failure(&remote_owned, stderr),
+    )?;
     Ok(stdout
         .lines()
         .filter_map(|line| {
@@ -268,6 +273,20 @@ pub fn resolve_ref_in_gitdir(
         )));
     }
     Ok(resolve_ref(gitdir, ref_name))
+}
+
+/// Whether `sha` is a root commit (no parent) whose tree is the empty
+/// tree: the shape of a bootstrap seed that carries no state. Read-only.
+pub fn is_empty_root_in_gitdir(gitdir: &Path, sha: &str) -> Result<bool, BackendError> {
+    let out = run_git(gitdir, &["show", "-s", "--format=%P %T", sha], |stderr| {
+        format!("git show failed: {stderr}")
+    })?;
+    let line = out.trim();
+    let (parents, tree) = match line.rsplit_once(' ') {
+        Some((p, t)) => (p.trim(), t.trim()),
+        None => ("", line),
+    };
+    Ok(parents.is_empty() && tree == "4b825dc642cb6eb9a060e54bf8d69288fbee4904")
 }
 
 /// `Engine::remote_status` half: is `ancestor` reachable from
@@ -472,6 +491,11 @@ fn classify_remote_failure(remote: &str, stderr: &str) -> String {
         || normalized.contains("could not read from remote repository")
         || normalized.contains("repository not found")
         || normalized.contains("name or service not known")
+        || normalized.contains("could not resolve host")
+        || normalized.contains("failed to connect")
+        || normalized.contains("connection refused")
+        || normalized.contains("connection timed out")
+        || normalized.contains("unable to access")
         || (normalized.contains("fatal:") && normalized.contains("not found"))
     {
         return format!("UNKNOWN_REMOTE:{remote}");

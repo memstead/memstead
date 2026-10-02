@@ -373,6 +373,11 @@ pub enum Command {
     /// and reload the in-memory store. Refuses `LOCAL_DIVERGENCE` when
     /// the local branch is not an ancestor of the remote — reconcile
     /// via `branch-reset`, or resolve on another clone and push.
+    /// `--all` brings the whole mem-repo to the remote's state, the
+    /// inverse of `push --all`: the schema-and-config ref first, then
+    /// every mounted mem's branch (a branch missing locally is
+    /// created), fast-forward only, a refused ref named while the
+    /// others still move, non-zero exit at the end.
     Pull(commands::transport::PullArgs),
 
     /// Push a mem's branch to a git remote. `--force` uses

@@ -137,6 +137,81 @@ pub struct RefusedRef {
     pub message: String,
 }
 
+/// Outcome of `Engine::pull_all`, the inverse of
+/// [`PushAllOutcome`]: the `__MEMSTEAD` ref of every mem-repo the
+/// workspace mounts from, then every mounted git-branch mem's declared
+/// branch, fast-forwarded to the remote's state. A ref absent locally
+/// counts as a fast-forward (it is created). The run never stops at the
+/// first refusal: a ref that cannot fast-forward lands in `refused`
+/// and the remaining refs are still attempted.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct PullAllOutcome {
+    /// Remote name the run targeted.
+    pub remote: String,
+    /// Local refs the run moved, in pull order (the schema ref first).
+    pub pulled: Vec<PulledRef>,
+    /// Refs whose local and remote SHA already agreed.
+    pub in_sync: Vec<String>,
+    /// Refs that already hold the remote's commit plus local commits
+    /// not yet pushed; left alone, never a refusal.
+    pub local_ahead: Vec<String>,
+    /// Refs the run could not move, each with its typed code
+    /// (`LOCAL_DIVERGENCE`, `SCHEMA_VIOLATION_IN_FETCH`,
+    /// `SCHEMA_NOT_FOUND`, …).
+    pub refused: Vec<RefusedRef>,
+    /// Mems that were quarantined because their schema pin did not
+    /// resolve and serve again because the pulled schema ref carries it.
+    pub returned_to_service: Vec<String>,
+    /// Mems still quarantined after the run, each with its reason.
+    /// A mem whose quarantine has another cause is never pulled.
+    pub quarantined: Vec<QuarantinedAfterPull>,
+    /// Facts that are not failures: a mounted branch the remote does
+    /// not carry, a mem-repo whose remote has no schema ref.
+    pub notices: Vec<String>,
+    /// Mems the remote carries (a branch with a config on the pulled
+    /// schema ref) that no mount here names. Never mounted by the run:
+    /// mounting is an explicit `memstead mem init <name> --reattach`.
+    pub unmounted_on_remote: Vec<UnmountedRemoteMem>,
+    /// Check-ledger rows imported for the mounted mems.
+    pub checks_imported: usize,
+}
+
+/// A mem on the remote that this workspace does not mount.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UnmountedRemoteMem {
+    /// The branch's name below `refs/heads/`, which is the mem's name
+    /// for a mem created with `memstead mem init`.
+    pub branch: String,
+    /// The schema pin its config names, when it names one.
+    pub schema: Option<String>,
+}
+
+/// One local ref `Engine::pull_all` moved.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PulledRef {
+    /// Full local ref name (e.g. `refs/heads/specs`, `refs/heads/__MEMSTEAD`).
+    pub ref_name: String,
+    /// Mem the ref belongs to; `None` for the `__MEMSTEAD` ref.
+    pub mem: Option<String>,
+    /// SHA the local ref held before the pull. Empty when it did not
+    /// exist locally.
+    pub previous_sha: String,
+    /// SHA the local ref points at after the pull.
+    pub new_sha: String,
+}
+
+/// A mem `Engine::pull_all` left quarantined, with the reason the
+/// engine's quarantine roster carries for it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QuarantinedAfterPull {
+    /// The quarantined mem.
+    pub mem: String,
+    /// Typed reason code (e.g. `SCHEMA_NOT_FOUND`, `MOUNT_UNBACKED`).
+    pub code: String,
+    /// The reason's message, repair included.
+    pub message: String,
+}
+
 /// Outcome of `Engine::remote_add`. Configures a named remote on the
 /// workspace's mem-repo so `fetch` / `pull` / `push` have somewhere to
 /// go — upsert semantics (re-pointing an existing remote is not an

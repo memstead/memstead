@@ -49,6 +49,7 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     ls_remote: ls_remote_dispatch,
     resolve_ref: resolve_ref_dispatch,
     is_ancestor: is_ancestor_dispatch,
+    is_empty_root: is_empty_root_dispatch,
     merge_base: merge_base_dispatch,
     update_ref: update_ref_dispatch,
     remote_add: remote_add_dispatch,
@@ -386,6 +387,13 @@ fn is_ancestor_dispatch(
     descendant: &str,
 ) -> Result<bool, memstead_base::backend::BackendError> {
     crate::ops::transport::is_ancestor_in_gitdir(gitdir, ancestor, descendant)
+}
+
+fn is_empty_root_dispatch(
+    gitdir: &std::path::Path,
+    sha: &str,
+) -> Result<bool, memstead_base::backend::BackendError> {
+    crate::ops::transport::is_empty_root_in_gitdir(gitdir, sha)
 }
 
 fn merge_base_dispatch(

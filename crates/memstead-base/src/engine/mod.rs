@@ -677,6 +677,12 @@ pub type GitBranchResolveRefFn =
 pub type GitBranchIsAncestorFn =
     fn(gitdir: &Path, ancestor: &str, descendant: &str) -> Result<bool, BackendError>;
 
+/// `Engine::pull_all` dispatch: whether the commit `sha` is a root
+/// commit (no parent) over the empty tree, the shape of a freshly
+/// bootstrapped schema-and-config ref that carries no state yet.
+/// Read-only.
+pub type GitBranchIsEmptyRootFn = fn(gitdir: &Path, sha: &str) -> Result<bool, BackendError>;
+
 /// The nearest common ancestor of two commits (`git merge-base`);
 /// `None` when they share no history. Read-only. The adopt form of
 /// `mem fork` reads the ancestor of a fork branch that arrived on a
@@ -834,6 +840,7 @@ pub struct GitBranchOps {
     pub ls_remote: GitBranchLsRemoteFn,
     pub resolve_ref: GitBranchResolveRefFn,
     pub is_ancestor: GitBranchIsAncestorFn,
+    pub is_empty_root: GitBranchIsEmptyRootFn,
     pub merge_base: GitBranchMergeBaseFn,
     pub update_ref: GitBranchUpdateRefFn,
     pub remote_add: GitBranchRemoteAddFn,

@@ -7,7 +7,67 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **`memstead pull --all` restores a mem-repo from its remote.** It is the
+  inverse of `push --all`: the workspace's schema-and-config ref first,
+  then every mounted mem's branch, then the mounted mems' check records,
+  fast-forward only. A branch missing locally is created; a branch with
+  local commits the remote lacks is refused by name (`LOCAL_DIVERGENCE`)
+  while the other refs still move, and the run exits non-zero at the
+  end. Because the schemas arrive first, content written under a schema
+  generation that only the remote carries is pulled instead of refused
+  `SCHEMA_VIOLATION_IN_FETCH`, and a mem quarantined `SCHEMA_NOT_FOUND`
+  only because its schema lived on the remote serves again in the same
+  run; every other quarantine stays and is named with its reason. A
+  branch holding unpushed local work is reported and left alone, not
+  refused, and a mem-repo that cannot be fetched is named while the
+  others still restore. A fresh `mem-repo init` seed carries no state, so
+  it gives way to a backup bootstrapped by an earlier engine version; a
+  schema-and-config ref that holds state is never replaced. Mems
+  the remote carries but this workspace does not mount are listed with
+  the command that mounts them (`mem init <name> --schema <pin>
+  --reattach`), never mounted silently. Before, no command moved the
+  local schema-and-config ref from a remote, so a backup made with
+  `push --all` could not be restored with engine commands alone.
+- **`memstead mem-repo init --remote <url>`** configures `origin` as part
+  of the bootstrap, so a workspace cloned with its tracked engine state
+  but without its mem-repo is restored by `memstead mem-repo init --remote
+  <url>` and `memstead pull --all`. Run again on an existing mem-repo it
+  re-points the remote instead of refusing, so a restore started with a
+  wrong URL is retried with the same command. The guide on backing up a mem-repo
+  documents that flow and the flow from nothing but the backup; a test
+  runs both exactly as the guide prints them.
+
+### Changed
+
+- **`memstead status --remote` names `memstead pull --all` as the
+  reconcile** when the local graph lags the remote, instead of a fetch
+  and a pull per named mem.
+- **A relative local path given as a remote URL resolves against the
+  current directory** (`mem-repo remote-add`, `mem-repo init --remote`).
+  Git resolved it against the mem-repo's gitdir, so `../backup.git` named
+  a different directory and every transport command refused
+  `UNKNOWN_REMOTE`.
+
 ### Fixed
+
+- **`memstead fetch` refuses a refspec that writes outside the
+  remote-tracking refs.** Refspecs were passed to git unchanged, so a
+  destination under the local branch namespace moved a mem's branch or the
+  schema-and-config ref with no fast-forward test and no schema check. A
+  destination must now start with `refs/remotes/` (an allowlist, so
+  `refs/HEADS/…` on a case-insensitive filesystem is refused too); any
+  other refuses `INVALID_INPUT` before git runs, and local branches move
+  only through `pull` and `pull --all`.
+- **An unreachable network remote reports `UNKNOWN_REMOTE`** on the
+  transport commands instead of an untyped failure.
+- **A refspec or remote name can no longer run a command through
+  `memstead fetch`.** User refspecs reached `git fetch` as arguments with
+  no end-of-options marker, so `memstead fetch <mem> --
+  "--upload-pack=<command>"` ran the command. `fetch` now refuses a
+  refspec that starts with `-`, and every transport call to git (fetch,
+  push, ls-remote) ends option parsing before the remote and refspecs.
 
 - **Concurrent writers from separate processes no longer overwrite each
   other.** Two processes writing to the same mem with the same stale

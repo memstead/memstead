@@ -25,16 +25,29 @@ pub struct FetchArgs {
     pub refspecs: Vec<String>,
 }
 
-/// `memstead pull <mem> [--remote <name>]` arguments.
+/// `memstead pull <mem> [--remote <name>]` and
+/// `memstead pull --all [--remote <name>]` arguments.
 #[derive(Args, Debug)]
 pub struct PullArgs {
     /// The mem whose branch to fast-forward. Its check records come
     /// with it: the remote's check-ledger ref is fetched and the mem's
     /// rows are added to this workspace's ledger, so an export made
-    /// here seals the checks recorded elsewhere.
-    pub mem: String,
+    /// here seals the checks recorded elsewhere. Omitted with `--all`.
+    #[arg(required_unless_present = "all", conflicts_with = "all")]
+    pub mem: Option<String>,
     #[arg(long, default_value = "origin")]
     pub remote: String,
+    /// Bring the whole mem-repo to the remote's state, the inverse of
+    /// `push --all`: the workspace's schema-and-config ref first, then
+    /// every mounted git-branch mem's branch (validated against the
+    /// schema it resolves to after the first step), then the mounted
+    /// mems' check records. Fast-forward only; a ref missing locally is
+    /// created. A mem quarantined only because its schema pin lives on
+    /// the remote serves again afterwards. A ref with local commits the
+    /// remote lacks is refused by name (`LOCAL_DIVERGENCE`) while the
+    /// other refs still move, and the run exits non-zero at the end.
+    #[arg(long, default_value_t = false)]
+    pub all: bool,
 }
 
 /// `memstead push <mem> [--remote <name>] [--force]` and
@@ -110,11 +123,16 @@ pub fn run_fetch(ctx: &CliContext, args: FetchArgs) -> anyhow::Result<()> {
 }
 
 pub fn run_pull(ctx: &CliContext, args: PullArgs) -> anyhow::Result<()> {
+    if args.all {
+        return run_pull_all(ctx, &args.remote);
+    }
+    // clap guarantees `mem` when `--all` is absent.
+    let mem = args.mem.as_deref().unwrap_or_default();
     let outcome = match ctx.cli_engine()? {
         CliEngine::MemRepo(mut engine) => engine
-            .pull(&args.mem, &args.remote)
+            .pull(mem, &args.remote)
             .map_err(CliError::from_engine_op)?,
-        CliEngine::Filesystem(_) => return Err(folder_refusal("memstead pull", &args.mem)),
+        CliEngine::Filesystem(_) => return Err(folder_refusal("memstead pull", mem)),
     };
     if ctx.json {
         crate::output::print_json(&outcome)?;
@@ -243,6 +261,138 @@ fn run_push_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
                 "pushed": outcome.pushed,
                 "in_sync": outcome.in_sync,
             })),
+        }
+        .into());
+    }
+    Ok(())
+}
+
+/// `memstead pull --all`: one line per local ref moved, then the mems
+/// that returned to service, the mems still quarantined (with their
+/// reason) and the notices. `--json` prints the whole outcome. Any
+/// refused ref turns the exit into a typed refusal carrying the first
+/// refusal's code, with the whole outcome under `details`.
+fn run_pull_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
+    let outcome = match ctx.cli_engine()? {
+        CliEngine::MemRepo(mut engine) => {
+            engine.pull_all(remote).map_err(CliError::from_engine_op)?
+        }
+        CliEngine::Filesystem(_) => {
+            return Err(CliError {
+                code: "INVALID_INPUT",
+                kind: ExitKind::Validation,
+                message: "this workspace has no git-branch mems — `memstead pull --all` \
+                          requires a mem-repo workspace"
+                    .to_string(),
+                details: None,
+            }
+            .into());
+        }
+    };
+    if ctx.json {
+        if outcome.refused.is_empty() {
+            crate::output::print_json(&outcome)?;
+        }
+    } else {
+        for p in &outcome.pulled {
+            let prev = if p.previous_sha.is_empty() {
+                "<new>".to_string()
+            } else {
+                p.previous_sha.clone()
+            };
+            println!("{} {prev} -> {}", p.ref_name, p.new_sha);
+        }
+        for m in &outcome.returned_to_service {
+            println!("mem `{m}` serves again: its schema arrived with the pull");
+        }
+        for q in &outcome.quarantined {
+            println!(
+                "mem `{}` is still quarantined [{}]: {}",
+                q.mem, q.code, q.message
+            );
+        }
+        for r in &outcome.local_ahead {
+            println!(
+                "{r} has local commits the remote lacks: left as it is \
+                 (`memstead push --all` publishes them)"
+            );
+        }
+        for u in &outcome.unmounted_on_remote {
+            let schema = u.schema.as_deref().unwrap_or("<its pin>");
+            if u.branch.contains('/') {
+                // A namespaced branch is not itself a mem name; the
+                // mount names the mem, so no command is guessed here.
+                println!(
+                    "branch `{}` on the remote holds a mem (schema {schema}) that is not \
+                     mounted here: mount it under its mem name, then run `memstead pull --all` \
+                     again",
+                    u.branch
+                );
+            } else {
+                println!(
+                    "mem `{}` is on the remote but not mounted here: mount it with \
+                     `memstead mem init {} --schema {schema} --reattach`, then run \
+                     `memstead pull --all` again",
+                    u.branch, u.branch
+                );
+            }
+        }
+        for n in &outcome.notices {
+            println!("notice: {n}");
+        }
+    }
+    // The exit code names a refused ref first: a mem-repo that could not
+    // be fetched at all is reported too, but a ref-level refusal in the
+    // same run is the more specific answer.
+    let primary = outcome
+        .refused
+        .iter()
+        .find(|r| r.ref_name.starts_with("refs/"))
+        .or_else(|| outcome.refused.first());
+    if let Some(first) = primary {
+        let code: &'static str = match first.code.as_str() {
+            "LOCAL_DIVERGENCE" => "LOCAL_DIVERGENCE",
+            "SCHEMA_VIOLATION_IN_FETCH" => "SCHEMA_VIOLATION_IN_FETCH",
+            "SCHEMA_NOT_FOUND" => "SCHEMA_NOT_FOUND",
+            "UNKNOWN_REF" => "UNKNOWN_REF",
+            "UNKNOWN_REMOTE" => "UNKNOWN_REMOTE",
+            "MEM_ERROR" => "MEM_ERROR",
+            _ => "INTERNAL",
+        };
+        let divergence_hint = if outcome.refused.iter().any(|r| r.code == "LOCAL_DIVERGENCE") {
+            " A LOCAL_DIVERGENCE ref has local commits the remote lacks and the remote has \
+             commits it lacks: push from the other clone first, or reconcile with \
+             `memstead branch-reset` after inspecting both sides."
+        } else {
+            ""
+        };
+        let listed = outcome
+            .refused
+            .iter()
+            .map(|r| {
+                format!(
+                    "{} ({}{})",
+                    r.ref_name,
+                    r.code,
+                    r.mem
+                        .as_deref()
+                        .map(|m| format!(", mem `{m}`"))
+                        .unwrap_or_default()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(CliError {
+            code,
+            kind: ExitKind::Validation,
+            message: format!(
+                "memstead pull --all: {} refused, {} pulled, {} already in sync — refused: \
+                 {listed}.{divergence_hint}",
+                outcome.refused.len(),
+                outcome.pulled.len(),
+                outcome.in_sync.len(),
+            ),
+            details: Some(serde_json::to_value(&outcome)?),
         }
         .into());
     }

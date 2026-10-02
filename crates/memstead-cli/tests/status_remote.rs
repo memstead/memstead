@@ -315,7 +315,7 @@ fn status_remote_classifies_every_ref_and_exits_six_only_when_stale() {
     let md = String::from_utf8(md.stdout).unwrap();
     assert!(md.contains("## Remote `origin`"), "{md}");
     assert!(md.contains("behind"), "{md}");
-    assert!(md.contains("memstead fetch"), "{md}");
+    assert!(md.contains("memstead pull --all"), "{md}");
     drop(remote);
 }
 

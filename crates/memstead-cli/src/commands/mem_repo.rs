@@ -67,6 +67,16 @@ pub struct InitArgs {
     /// detection heuristic would pick the wrong outer repo.
     #[arg(long)]
     pub no_gitignore: bool,
+
+    /// Configure this URL as the mem-repo's `origin` remote right after
+    /// the bootstrap, so a workspace whose tracked engine state was
+    /// cloned without its mem-repo is restored by one more command,
+    /// `memstead pull --all`. A relative local path is resolved against
+    /// the current directory. On a workspace whose mem-repo already
+    /// exists, nothing is re-initialised: the remote is re-pointed, so a
+    /// restore can be retried with a corrected URL.
+    #[arg(long, value_name = "URL")]
+    pub remote: Option<String>,
 }
 
 pub fn run(ctx: &CliContext, action: MemRepoAction) -> anyhow::Result<()> {
@@ -76,10 +86,27 @@ pub fn run(ctx: &CliContext, action: MemRepoAction) -> anyhow::Result<()> {
     }
 }
 
+/// A relative local path given as a remote URL is resolved against the
+/// current directory. Git itself would resolve it against the mem-repo
+/// gitdir it runs in, so `../backup.git` typed next to the workspace
+/// would name a path two levels off. URLs (`scheme://`, `user@host:`)
+/// and absolute paths pass through unchanged.
+fn absolutize_local_url(url: &str) -> String {
+    let looks_remote = url.contains("://") || (url.contains(':') && !url.starts_with('.'));
+    let path = std::path::Path::new(url);
+    if looks_remote || path.is_absolute() {
+        return url.to_string();
+    }
+    match std::env::current_dir() {
+        Ok(cwd) => cwd.join(path).display().to_string(),
+        Err(_) => url.to_string(),
+    }
+}
+
 fn remote_add(ctx: &CliContext, args: RemoteAddArgs) -> anyhow::Result<()> {
     let outcome = match ctx.cli_engine()? {
         crate::setup::CliEngine::MemRepo(engine) => engine
-            .remote_add(&args.name, &args.url)
+            .remote_add(&args.name, &absolutize_local_url(&args.url))
             .map_err(CliError::from_engine_op)?,
         crate::setup::CliEngine::Filesystem(_) => {
             return Err(CliError {
@@ -110,7 +137,66 @@ fn remote_add(ctx: &CliContext, args: RemoteAddArgs) -> anyhow::Result<()> {
 }
 
 fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
+    // With `--remote` on a workspace whose mem-repo already exists (a
+    // restore retried with a corrected URL), the bootstrap is not
+    // repeated and nothing is overwritten: the remote is re-pointed.
+    if let Some(url) = &args.remote {
+        // The same shape rule `remote-add` applies: a value that would
+        // parse as a flag is refused before anything is written.
+        if url.is_empty() || url.starts_with('-') {
+            return Err(CliError {
+                code: "INVALID_INPUT",
+                kind: ExitKind::Validation,
+                message: format!(
+                    "remote url must be non-empty and must not start with '-' (got '{url}')"
+                ),
+                details: None,
+            }
+            .into());
+        }
+        let gitdir = args.path.join("mem-repo").join(".git");
+        if gitdir.is_dir() {
+            let r = memstead_git_branch::ops::transport::remote_add_in_gitdir(
+                &gitdir,
+                "origin",
+                &absolutize_local_url(url),
+            )
+            .map_err(|e| generic_error(format!("configuring the remote failed: {e}")))?;
+            if ctx.json {
+                crate::output::print_json(&serde_json::json!({
+                    "mem_repo_dir": args.path.join("mem-repo").display().to_string(),
+                    "already_initialised": true,
+                    "remote": r,
+                }))?;
+            } else {
+                println!(
+                    "mem-repo already exists at {}; remote `{}` {} -> {} \
+                     (restore with `memstead pull --all`)",
+                    args.path.join("mem-repo").display(),
+                    r.remote,
+                    if r.updated { "re-pointed" } else { "added" },
+                    r.url
+                );
+            }
+            return Ok(());
+        }
+    }
     let outcome = run_init(&args.path, args.no_gitignore)?;
+    let remote = match &args.remote {
+        Some(url) => Some(
+            memstead_git_branch::ops::transport::remote_add_in_gitdir(
+                &outcome.mem_repo_dir.join(".git"),
+                "origin",
+                &absolutize_local_url(url),
+            )
+            .map_err(|e| {
+                generic_error(format!(
+                    "the mem-repo was initialised but the remote was not configured: {e}"
+                ))
+            })?,
+        ),
+        None => None,
+    };
 
     // `--json` stdout is machine-only: exactly one JSON document, the
     // contract `--help` advertises and steers callers to pipe through
@@ -121,6 +207,7 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             "mem_repo_dir": outcome.mem_repo_dir.display().to_string(),
             "workspace_toml": outcome.workspace_toml.display().to_string(),
             "workspace_shape": crate::setup::WorkspaceShape::MemRepo.label(),
+            "remote": remote,
             "workspace_shape_disclosure":
                 crate::setup::shape_disclosure(crate::setup::WorkspaceShape::MemRepo).to_json(),
         }))?;
@@ -134,6 +221,12 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             "  __MEMSTEAD: empty (unified registry ref for workspace schemas + per-mem configs)"
         );
         println!("  config: {}", outcome.workspace_toml.display());
+        if let Some(r) = &remote {
+            println!(
+                "  remote: `{}` -> {} (restore with `memstead pull --all`)",
+                r.remote, r.url
+            );
+        }
         // Symmetric disclosure: whichever verb opened the workspace
         // says which of the two shapes the user now has, what it costs,
         // and the command for the other one. A shape statement attached

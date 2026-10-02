@@ -1,6 +1,6 @@
 ---
 title: Back up a mem-repo to a remote
-description: "Push a workspace's mems to any git remote and recover them on another machine — fetch, pull, push, and branch-reset end to end."
+description: "Push a workspace's mems to any git remote and restore them on another machine with pull --all, then keep machines in sync."
 sidebar:
   order: 6
 ---
@@ -15,7 +15,7 @@ Transport is deliberately a CLI-only surface: agents connected over MCP
 have no push/fetch primitive. Moving a mem-repo off-machine is an owner
 decision, made at the terminal.
 
-All four commands need the full build (the default `memstead` binary)
+The transport commands need the full build (the default `memstead` binary)
 and a git-branch-backed workspace (`memstead mem-repo init`).
 
 ## 1. Configure the remote
@@ -47,8 +47,8 @@ The argument is the mem's name; the pushed ref is the branch the mem's
 mount declares. The two usually coincide (`knowledge` lives on
 `refs/heads/knowledge`), but a mount may declare any branch it likes —
 a mem named `engine` on `refs/heads/team/engine` pushes that declared
-branch, and the recovery flow below fetches and resets against it
-(`refs/remotes/origin/team/engine`).
+branch, and `pull --all` restores that declared branch from
+`refs/remotes/origin/team/engine`.
 
 The push refuses rather than surprises:
 
@@ -59,30 +59,55 @@ The push refuses rather than surprises:
 - `LOCAL_INVALID_STATE` — the local branch fails schema validation;
   nothing is sent. Fix the named entities first.
 
-## 3. Recover on a fresh machine
+## 3. Recover on another machine
 
-The recovery flow bootstraps a workspace, then replaces each mem's
-initial branch state with the backed-up one:
+Recovery is `memstead pull --all`, the inverse of `push --all`. It
+brings the workspace's schema-and-config ref first, so every schema and
+mem config the backup carries is in place before any content is
+checked against it; then every mounted mem's branch, validated against
+the schema it now resolves to; then the mounted mems' check records.
+It only fast-forwards: a branch missing locally is created, a branch
+with local commits the remote lacks is refused by name and left alone.
+A mem that could not load because its schema existed only in the
+backup serves again afterwards.
+
+### The workspace's engine state came with a clone
+
+The usual case: the workspace lives inside a repository that tracks
+`.memstead/` (the mount roster, the workspace config) and ignores
+`mem-repo/`, so a clone on the second machine has the roster but no
+mems. Two commands restore it:
+
+```sh
+memstead mem-repo init --remote git@github.com:you/mem-backup.git
+memstead pull --all
+```
+
+`--remote` configures `origin` as part of the bootstrap. The output
+lists every ref that moved; `memstead status --remote` then reports
+everything in sync.
+
+### Nothing but the backup
+
+When only the backup exists, the roster has to be rebuilt, one mount
+per mem. `pull --all` names each mem the backup carries together with
+the exact command that mounts it:
 
 ```sh
 mkdir restored && cd restored
-memstead mem-repo init
+memstead mem-repo init --remote git@github.com:you/mem-backup.git
+memstead pull --all       # schemas and mem configs arrive; each unmounted mem is named
 memstead workspace allow-create --schema '*' knowledge
-memstead mem init knowledge --schema default@1.3.0
-memstead mem-repo remote-add origin git@github.com:you/mem-backup.git
-
-memstead fetch knowledge                                  # refs arrive, nothing moves
-memstead branch-reset knowledge refs/remotes/origin/knowledge
-memstead reload --mem knowledge
-memstead status                                          # your entities are back
+memstead mem init knowledge --schema widgets@0.1.0 --reattach
+memstead pull --all       # the mem's branch and its check records
+memstead status           # your entities are back
 ```
 
-`branch-reset` is the deliberate "adopt the remote state" move: the
-freshly-initialised local branch shares no history with the backup, so a
-plain `pull` would refuse with `LOCAL_DIVERGENCE`. The reset discards
-only the local initial commit — and it refuses
-(`PUSHED_COMMITS_PROTECTED`) if it would ever discard commits that any
-remote already has.
+`--reattach` mounts the mem against the config the backup already
+holds instead of writing a fresh one, so the schema-and-config ref
+keeps the backup's history and the next `push --all` from this
+machine fast-forwards. The pin to pass is the one `pull --all`
+printed for the mem.
 
 If the mem was published as an archive instead, `memstead install` is
 the simpler recovery; this flow is for live workspaces with history.
@@ -95,6 +120,7 @@ fetch-inspect-pull:
 ```sh
 memstead fetch knowledge     # see what moved (updated refs print per ref)
 memstead pull knowledge      # fast-forward + reload, refuses on divergence
+memstead pull --all          # the schema ref, every mem branch and the check records
 memstead push knowledge      # send your own commits
 memstead push --all          # every mem branch plus __MEMSTEAD and __MEMSTEAD_CHECKS, fast-forward only
 ```
@@ -119,7 +145,10 @@ prints one line per ref it moved, and names a ref it could not
 fast-forward (`NON_FAST_FORWARD`) while still pushing the others, exiting
 non-zero at the end. It also carries the `__MEMSTEAD` ref, where schemas
 and mem configs live, which the single-mem form has no route for. There
-is no `--force` on `--all`.
+is no `--force` on `--all`. `pull --all` is its inverse and the one
+route that moves the local `__MEMSTEAD` ref from a remote: a `fetch`
+given a refspec that writes into a local branch is refused, since a
+fetch only updates remote-tracking refs.
 
 `pull` validates the incoming tree against the mem's pinned schema
 before moving anything (`SCHEMA_VIOLATION_IN_FETCH` refuses the whole
