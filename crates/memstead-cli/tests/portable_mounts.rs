@@ -557,3 +557,60 @@ fn a_roster_naming_another_machines_cache_heals() {
     assert!(!written.contains("someone-else"), "{written}");
     assert!(written.contains("\"cached-archive\""), "{written}");
 }
+
+/// A folder workspace whose mem config still carries a legacy
+/// `readMems` registration migrates it at the CLI's first boot, as a
+/// mem-repo workspace and the MCP server always did: the entry becomes
+/// a workspace mount, the key leaves the config, one warning names the
+/// mem, and a second boot is silent.
+#[test]
+fn a_folder_workspace_migrates_legacy_read_mems_on_the_cli() {
+    let f = fixture();
+    let c1 = f.path("c1");
+    let key = fs::read_dir(&c1)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .find_map(|n| {
+            n.strip_prefix("recipes-")
+                .and_then(|r| r.strip_suffix(".mem"))
+                .map(str::to_string)
+        })
+        .unwrap();
+
+    let fw = f.path("legacy-folder");
+    fs::create_dir_all(&fw).unwrap();
+    ok(
+        &fw,
+        &c1,
+        &["init", "--name", "home", "--schema", "default@1.3.0"],
+    );
+    let cfg_path = fw.join(".memstead/config.json");
+    let mut cfg: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&cfg_path).unwrap()).unwrap();
+    cfg["readMems"] = serde_json::json!({
+        "recipes": {"source": {"type": "local"}, "cacheKey": key}
+    });
+    fs::write(&cfg_path, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+
+    let health = ok(&fw, &c1, &["--json", "health"]);
+    assert!(
+        health.contains("READ_MEMS_MIGRATED_TO_MOUNTS") && health.contains("recipes"),
+        "{health}"
+    );
+    assert!(
+        roster(&fw).contains("\"cached-archive\""),
+        "{}",
+        roster(&fw)
+    );
+    let cfg_after: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&cfg_path).unwrap()).unwrap();
+    assert!(
+        cfg_after
+            .get("readMems")
+            .is_none_or(|v| v.as_object().is_some_and(|o| o.is_empty())),
+        "{cfg_after}"
+    );
+    ok(&fw, &c1, &["entity", "recipes--bread"]);
+    let again = ok(&fw, &c1, &["--json", "health"]);
+    assert!(!again.contains("READ_MEMS_MIGRATED_TO_MOUNTS"), "{again}");
+}

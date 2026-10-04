@@ -480,8 +480,11 @@ impl CliContext {
                 return Ok(CliEngine::MemRepo(engine));
             }
         }
+        // The same boot path the MCP server takes for every shape, so the
+        // one-way boot migrations (legacy `readMems` entries becoming
+        // workspace mounts) run for a folder workspace too.
         let mut engine =
-            BaseEngine::from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
+            engine_from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
         engine.set_role(self.role);
         engine.set_identity(self.identity.clone());
         engine.set_actor(Actor::Cli);

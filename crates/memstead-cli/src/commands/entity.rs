@@ -450,7 +450,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         text.push_str(&format!("- sealed checks: {reason}\n"));
                     }
                     if let Some(state) = prov.get("check_state").and_then(|v| v.as_str()) {
-                        text.push_str(&format!("- check state: {state}\n"));
+                        text.push_str(&format!("- check state (verification): {state}\n"));
                     }
                     if let Some(l) = render_check(&prov["last_check"], foreign_prose(prov)) {
                         text.push_str(&l);
@@ -472,7 +472,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         text.push('\n');
                     }
                     if let Some(state) = prov.get("check_state").and_then(|v| v.as_str()) {
-                        text.push_str(&format!("- check state: {state}\n"));
+                        text.push_str(&format!("- check state (verification): {state}\n"));
                     }
                     if let Some(l) = render_check(&prov["last_check"], foreign_prose(prov)) {
                         text.push_str(&l);

@@ -82,6 +82,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   only through `pull` and `pull --all`.
 - **An unreachable network remote reports `UNKNOWN_REMOTE`** on the
   transport commands instead of an untyped failure.
+- **The CLI migrates legacy `readMems` entries on a folder workspace
+  too.** The one-way migration of 0.6.0 (a mem config's `readMems`
+  registration becomes a workspace mount, one `READ_MEMS_MIGRATED_TO_MOUNTS`
+  warning) ran only in the boot path of mem-repo workspaces and of the
+  MCP server; the CLI booted a folder workspace through another path,
+  where the registered mem stayed invisible with no warning. The CLI now
+  boots every workspace shape through the same path as the MCP server.
+- **`entity --provenance` names the check kind of its state line**:
+  `check state (verification): …`. A caller-declared `x-<name>` check
+  never moves that state and has a line of its own, so the unlabelled
+  "check state: never_checked" beside a recorded `x-` check read as if
+  the entity had never been checked.
 - **`memstead uninstall` removes an installed mem that is held in
   quarantine.** It refused such a mem `UNKNOWN_MEM`, and the engine's
   unregister kept its roster entry, so the next state write brought it
