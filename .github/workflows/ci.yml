@@ -31,7 +31,7 @@ concurrency:
 jobs:
   tests:
     name: Full test surface (run-tests.sh)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       # The version and components (clippy, rustfmt) come from
@@ -57,7 +57,7 @@ jobs:
 
   tests-macos:
     name: Full test surface on macOS (run-tests.sh)
-    runs-on: macos-latest
+    runs-on: macos-26
     # Release commits and manual dispatch only (see the header).
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:'))
     # A bound, not an estimate: docs/macos-dev-setup.md records a nextest
@@ -90,7 +90,7 @@ jobs:
 
   msrv:
     name: MSRV (cargo check on the declared rust-version)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       # The floor has one source, `rust-version` in the root Cargo.toml.
@@ -117,7 +117,7 @@ jobs:
 
   wasm:
     name: wasm tests (nodejs runner)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install the pinned toolchain (wasm32 target)
@@ -148,7 +148,7 @@ jobs:
 
   audit:
     name: RustSec advisories
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The action reports via the Checks API on top of failing the job.
     permissions:
       contents: read

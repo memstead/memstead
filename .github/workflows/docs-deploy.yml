@@ -19,6 +19,13 @@ name: Docs deploy
 on:
   push:
     branches: [main]
+  # A pull request builds the site and stops there: a dependency update
+  # that breaks the build fails on its PR instead of on main (recorded
+  # 2026-10-08: an Astro minor release dropped the remark processor the
+  # config relies on, and the PR looked green because this workflow did
+  # not run on PRs). Deploying stays push and dispatch only.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -27,13 +34,15 @@ permissions:
   id-token: write
 
 concurrency:
-  group: docs-deploy
+  # One queue per ref: deploys from main stay serialised, a PR build
+  # never waits behind them.
+  group: docs-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   build:
     name: Build site
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -91,14 +100,16 @@ jobs:
           fi
           echo "Footer present on all $(find dist -name '*.html' | wc -l | tr -d ' ') page(s)."
 
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: docs-site/dist
 
   deploy:
     name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
