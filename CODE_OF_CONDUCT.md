@@ -1,70 +1,32 @@
-# Contributor Covenant Code of Conduct
+# Code of Conduct
 
-## Our Pledge
+Memstead is a software project. This code covers how people treat each other
+in its spaces: the repositories, issues, pull requests, discussions and any
+channel the project runs. It applies to everyone in the same way.
 
-We as members, contributors, and leaders pledge to make participation in our
-community a harassment-free experience for everyone, regardless of age, body
-size, visible or invisible disability, ethnicity, sex characteristics, gender
-identity and expression, level of experience, education, socio-economic status,
-nationality, personal appearance, race, religion, or sexual identity and
-orientation.
+## Expected
 
-We pledge to act and interact in ways that contribute to an open, welcoming,
-diverse, inclusive, and healthy community.
+- Keep to the subject: the engine, its design, its use.
+- Criticise work, not people. Disagree with reasons.
+- Assume good intent, and ask before concluding otherwise.
 
-## Our Standards
+## Not accepted
 
-Examples of behavior that contributes to a positive environment for our
-community include:
+- Harassment, insults, threats or personal attacks, towards anyone and on any
+  ground.
+- Publishing someone's private information without their consent.
+- Sustained disruption: off-topic flooding, deliberate provocation.
+- Political, religious or ideological debate. These are left out of the
+  project's spaces whatever their direction, so the work stays open to
+  everyone regardless of where they stand.
 
-- Demonstrating empathy and kindness toward other people
-- Being respectful of differing opinions, viewpoints, and experiences
-- Giving and gracefully accepting constructive feedback
-- Accepting responsibility and apologizing to those affected by our mistakes,
-  and learning from the experience
-- Focusing on what is best not just for us as individuals, but for the overall
-  community
+## Reporting
 
-Examples of unacceptable behavior include:
-
-- The use of sexualized language or imagery, and sexual attention or advances of
-  any kind
-- Trolling, insulting or derogatory comments, and personal or political attacks
-- Public or private harassment
-- Publishing others' private information, such as a physical or email address,
-  without their explicit permission
-- Other conduct which could reasonably be considered inappropriate in a
-  professional setting
-
-## Enforcement Responsibilities
-
-Community leaders are responsible for clarifying and enforcing our standards of
-acceptable behavior and will take appropriate and fair corrective action in
-response to any behavior that they deem inappropriate, threatening, offensive,
-or harmful.
-
-Community leaders have the right and responsibility to remove, edit, or reject
-comments, commits, code, wiki edits, issues, and other contributions that are
-not aligned to this Code of Conduct, and will communicate reasons for moderation
-decisions when appropriate.
-
-## Scope
-
-This Code of Conduct applies within all community spaces, and also applies when
-an individual is officially representing the community in public spaces.
+Write to **hello@memstead.com**. Reports are read by the maintainer and kept
+confidential.
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-**hello@memstead.com**. All complaints will be reviewed and investigated promptly and
-fairly. All community leaders are obligated to respect the privacy and security
-of the reporter of any incident.
-
-## Attribution
-
-This Code of Conduct is adapted from the [Contributor Covenant][homepage],
-version 2.1, available at
-<https://www.contributor-covenant.org/version/2/1/code_of_conduct.html>.
-
-[homepage]: https://www.contributor-covenant.org
+The maintainer may edit, hide or remove contributions that break this code,
+and may restrict or end someone's participation. Decisions are proportionate
+to what happened, and the reason is stated where that is possible.
