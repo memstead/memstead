@@ -7,6 +7,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **`memstead-mcp` declares the rmcp version it needs.** The server uses
+  `ServerConfig`, which rmcp 3.5 introduced, while the manifest still
+  accepted 3.1; a build that resolved an older rmcp failed to compile. The
+  requirement is now 3.5.
+
 ## [0.23.0] - 2026-10-08
 
 ### Added
