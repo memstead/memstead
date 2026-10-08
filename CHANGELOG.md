@@ -61,6 +61,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Building from source uses one pinned Rust version.** `rust-toolchain.toml`
+  names Rust 1.99.0 with clippy and rustfmt; rustup installs it on the first
+  build in the repository, and CI builds, lints and tests with the same
+  version. The minimum supported version (`rust-version`, 1.91) is unchanged
+  and still checked. CI runs the macOS test surface on release commits and
+  on manual dispatch instead of on every push.
 - **`memstead status --remote` names `memstead pull --all` as the
   reconcile** when the local graph lags the remote, instead of a fetch
   and a pull per named mem.

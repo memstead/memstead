@@ -47,10 +47,9 @@ jobs:
           echo "sha=$(git show -s --format='%h' HEAD)" >> "$GITHUB_OUTPUT"
           echo "date=$(git show -s --format='%cI' HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
-        with:
-          toolchain: stable
+      # Version and components come from rust-toolchain.toml.
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:

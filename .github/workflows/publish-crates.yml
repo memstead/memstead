@@ -45,10 +45,9 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
-        with:
-          toolchain: stable
+      # Version and components come from rust-toolchain.toml.
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
 
       - name: Fail fast when the token is absent
         run: |

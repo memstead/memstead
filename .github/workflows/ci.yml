@@ -1,9 +1,15 @@
-# The engine gate — every push and PR runs the complete test surface
+# The engine gate: every push and PR runs the complete test surface
 # (engine + plugin suites via run-tests.sh, the same script developers
-# run locally) on Linux and on macOS, the lint gates (clippy -D warnings,
-# rustfmt), a check that the workspace still builds on its declared
-# minimum Rust version, and a RustSec advisory audit. Windows has no job
-# here: it stays documented as untested.
+# run locally) on Linux, the lint gates (clippy -D warnings, rustfmt), a
+# check that the workspace still builds on its declared minimum Rust
+# version, and a RustSec advisory audit. The macOS run of the same
+# surface is reserved for release commits (subject `release: ...`, as
+# `cargo run -p xtask -- release` writes it) and manual dispatch: the
+# development machines are Macs and run the suite locally, so a per-push
+# macOS run only doubled the wait. Windows has no job here: it stays
+# documented as untested.
+# The Rust version is the one rust-toolchain.toml pins, so CI lints with
+# exactly the clippy a developer runs locally.
 # A failing test, warning, format diff, or advisory turns the build red.
 
 name: CI
@@ -28,13 +34,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
-        with:
-          toolchain: stable
-          # run-tests.sh runs clippy and rustfmt itself — this job has no
-          # lint step of its own to reveal that need, so it is stated here.
-          components: clippy, rustfmt
+      # The version and components (clippy, rustfmt) come from
+      # rust-toolchain.toml; with no argument rustup installs exactly that.
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           workspaces: . -> target
@@ -55,17 +58,18 @@ jobs:
   tests-macos:
     name: Full test surface on macOS (run-tests.sh)
     runs-on: macos-latest
+    # Release commits and manual dispatch only (see the header).
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:'))
     # A bound, not an estimate: docs/macos-dev-setup.md records a nextest
     # discovery hang on Apple Silicon when Gatekeeper serialises code-signing
     # checks, and a hung job would otherwise hold the runner for six hours.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
-        with:
-          toolchain: stable
-          components: clippy, rustfmt
+      # The version and components (clippy, rustfmt) come from
+      # rust-toolchain.toml; with no argument rustup installs exactly that.
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           workspaces: . -> target
@@ -116,11 +120,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Install stable toolchain (wasm32 target)
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
-        with:
-          toolchain: stable
-          targets: wasm32-unknown-unknown
+      - name: Install the pinned toolchain (wasm32 target)
+        run: |
+          rustup toolchain install
+          rustup target add wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           workspaces: . -> target

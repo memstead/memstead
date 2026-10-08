@@ -1,0 +1,12 @@
+# The one Rust version this workspace is built, linted and tested with,
+# locally and in CI alike. rustup reads this file in every directory below
+# it, so `cargo clippy -- -D warnings` judges a change by the same lint set
+# on a laptop as on a runner. Raising it is a deliberate one-line commit:
+# a new release brings new clippy lints, and they belong in that commit's
+# CI run, never in an unrelated push that happens to land the day the
+# release ships. The minimum supported version is separate: `rust-version`
+# in Cargo.toml, checked by the MSRV job with an explicit `+<version>`.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
