@@ -51,6 +51,10 @@ post-announce-jobs = ["./release-verify"]
 # top-level `contents: write` grant does not include; the checkout keeps
 # `contents: read`.
 github-custom-job-permissions = { release-verify = { actions = "read", contents = "read" } }
+# Steps inserted into every build job: install the Rust version
+# rust-toolchain.toml pins, with the job's targets, so the release builds
+# with the same toolchain CI tests with.
+github-build-setup = "../build-setup.yml"
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # Whether to install an updater program

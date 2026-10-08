@@ -1,0 +1,16 @@
+# Steps cargo-dist inserts into every build job of the generated
+# release.yml (`github-build-setup` in dist-workspace.toml). The release
+# builds with the Rust version rust-toolchain.toml pins, like every other
+# workflow: install it explicitly, with the job's targets, instead of
+# relying on rustup to fetch it on first use.
+- name: Install the pinned toolchain and the job's targets
+  shell: bash
+  run: |
+    if ! command -v rustup > /dev/null 2>&1; then
+      export PATH="$HOME/.cargo/bin:$PATH"
+    fi
+    rustup toolchain install
+    targets="${{ join(matrix.targets, ' ') }}"
+    if [ -n "$targets" ]; then
+      rustup target add $targets
+    fi

@@ -131,6 +131,17 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
+      - name: "Install the pinned toolchain and the job's targets"
+        run: |
+          if ! command -v rustup > /dev/null 2>&1; then
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install
+          targets="${{ join(matrix.targets, ' ') }}"
+          if [ -n "$targets" ]; then
+            rustup target add $targets
+          fi
+        shell: "bash"
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest
