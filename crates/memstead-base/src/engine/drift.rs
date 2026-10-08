@@ -1555,21 +1555,23 @@ impl Engine {
             return Ok(FastForward::NotOnRemote);
         };
         let local_sha = (hook.resolve_ref)(gitdir, local_ref).map_err(EngineError::Backend)?;
-        match &local_sha {
-            Some(l) if *l == remote_sha => return Ok(FastForward::InSync),
-            Some(l) => {
-                if !(hook.is_ancestor)(gitdir, l, &remote_sha).map_err(EngineError::Backend)? {
-                    if (hook.is_ancestor)(gitdir, &remote_sha, l).map_err(EngineError::Backend)? {
-                        return Ok(FastForward::LocalAhead);
-                    }
-                    let seed = replace_empty_seed
-                        && (hook.is_empty_root)(gitdir, l).map_err(EngineError::Backend)?;
-                    if !seed {
-                        return Ok(FastForward::Diverged);
-                    }
-                }
+        if let Some(l) = &local_sha {
+            if *l == remote_sha {
+                return Ok(FastForward::InSync);
             }
-            None => {}
+            let fast_forward =
+                (hook.is_ancestor)(gitdir, l, &remote_sha).map_err(EngineError::Backend)?;
+            let local_ahead = !fast_forward
+                && (hook.is_ancestor)(gitdir, &remote_sha, l).map_err(EngineError::Backend)?;
+            if local_ahead {
+                return Ok(FastForward::LocalAhead);
+            }
+            let replaceable_seed = !fast_forward
+                && replace_empty_seed
+                && (hook.is_empty_root)(gitdir, l).map_err(EngineError::Backend)?;
+            if !fast_forward && !replaceable_seed {
+                return Ok(FastForward::Diverged);
+            }
         }
         (hook.update_ref)(gitdir, local_ref, &remote_sha).map_err(EngineError::Backend)?;
         Ok(FastForward::Moved {
