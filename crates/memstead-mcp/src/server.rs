@@ -407,14 +407,14 @@ impl ServerHandler for McpServer {
     /// distinguishable. The const keeps its compile-time semver line;
     /// a short runtime "Build:" sentence is appended only when a sha
     /// exists. Mirrors the shape `#[tool_handler]` would generate.
-    fn get_info(&self) -> rmcp::model::ServerInfo {
+    fn get_info(&self) -> rmcp::model::ServerConfig {
         let full_version = memstead_base::build_info::full_version();
         let instructions = if memstead_base::build_info::BUILD_SHA.is_empty() {
             SERVER_INSTRUCTIONS.to_string()
         } else {
             format!("{SERVER_INSTRUCTIONS} Build: {full_version}.")
         };
-        rmcp::model::ServerInfo::new(
+        rmcp::model::ServerConfig::new(
             rmcp::model::ServerCapabilities::builder()
                 .enable_tools()
                 .build(),
