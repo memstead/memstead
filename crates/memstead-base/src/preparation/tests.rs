@@ -1139,7 +1139,7 @@ fn canonical_span_form_folds_exactly_the_listed_noise() {
 /// absent, and no tolerance exists on the path.
 #[test]
 fn a_span_matches_exactly_beyond_the_canonical_form() {
-    let text = "The tariff rose to 12,5 % in March 2026; the board did not approve it.";
+    let text = "The shipping fee rose to 12,5 % in March 2026; the committee did not approve it.";
     assert!(span_occurs("rose to 12,5 % in March 2026", text));
     for (altered, what) in [
         ("rose to 12,6 % in March 2026", "a single changed digit"),
@@ -1147,7 +1147,7 @@ fn a_span_matches_exactly_beyond_the_canonical_form() {
         ("rose to 12,5 ‰ in March 2026", "a changed unit"),
         ("rose to 12,5 % in march 2026", "a changed case"),
         ("rose in March 2026 to 12,5 %", "a reordered word"),
-        ("the board did approve it", "a dropped negation"),
+        ("the committee did approve it", "a dropped negation"),
     ] {
         assert!(!span_occurs(altered, text), "{what} must read absent");
     }

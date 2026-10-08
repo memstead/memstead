@@ -21,8 +21,8 @@ decide to contribute:
   in CI, and consistency with the recorded decisions in
   [`engineering/`](engineering/README.md). The question asked of a change here
   is which gate checked it, not whether a human understood it.
-- Anyone who needs every line of a codebase human-understood before it ships is
-  in the wrong place.
+- This project does not offer line-by-line human review; if you need that
+  guarantee, it is not a fit.
 
 Security is the exception and stays a human channel. Report a vulnerability
 through [SECURITY.md](SECURITY.md), never as a public issue or pull request.

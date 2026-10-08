@@ -21,8 +21,8 @@ fn memstead() -> Command {
 }
 
 const PAGE: &str = "https://example.test/report.pdf";
-const TARIFF: &str = "notes--the-tariff-rose";
-const BOARD: &str = "notes--the-board-refused";
+const FEE: &str = "notes--the-shipping-fee-rose";
+const COMMITTEE: &str = "notes--the-committee-refused";
 
 fn create(ws: &Path, title: &str, claim: &str, anchor: &str) {
     memstead()
@@ -67,18 +67,18 @@ fn workspace() -> TempDir {
         .success();
     create(
         ws.path(),
-        "The tariff rose",
-        "The tariff rose to 12,5 % in March 2026.",
+        "The shipping fee rose",
+        "The shipping fee rose to 12,5 % in March 2026.",
         &format!(
-            r#"{{"artifact":"{PAGE}","grain":"url","class":"anchored","span":"rose to 12,5 % in March 2026","content":"REPORT 2026\nThe tariff rose to 12,5 % in\nMarch 2026. Footer a."}}"#
+            r#"{{"artifact":"{PAGE}","grain":"url","class":"anchored","span":"rose to 12,5 % in March 2026","content":"REPORT 2026\nThe shipping fee rose to 12,5 % in\nMarch 2026. Footer a."}}"#
         ),
     );
     create(
         ws.path(),
-        "The board refused",
-        "The board did not approve the tariff.",
+        "The committee refused",
+        "The committee did not approve the shipping fee.",
         &format!(
-            r#"{{"artifact":"{PAGE}","grain":"url","class":"anchored","span":"board did not approve it","content":"Report 2026 - The tariff rose to 12,5 % in March 2026.\nThe board did not approve it.\nFooter b."}}"#
+            r#"{{"artifact":"{PAGE}","grain":"url","class":"anchored","span":"committee did not approve it","content":"Report 2026 - The shipping fee rose to 12,5 % in March 2026.\nThe committee did not approve it.\nFooter b."}}"#
         ),
     );
     ws
@@ -118,7 +118,7 @@ fn the_write_refuses_a_span_the_content_does_not_carry() {
     let refused = |anchor: &str, needle: &str| {
         let out = memstead()
             .current_dir(ws.path())
-            .args(["update", TARIFF, "--quiet", "--anchor", anchor])
+            .args(["update", FEE, "--quiet", "--anchor", anchor])
             .output()
             .unwrap();
         assert_eq!(
@@ -133,7 +133,7 @@ fn the_write_refuses_a_span_the_content_does_not_carry() {
     };
     refused(
         &format!(
-            r#"{{"artifact":"{PAGE}","grain":"url","class":"anchored","span":"rose to 12,6 %","content":"The tariff rose to 12,5 %."}}"#
+            r#"{{"artifact":"{PAGE}","grain":"url","class":"anchored","span":"rose to 12,6 %","content":"The shipping fee rose to 12,5 %."}}"#
         ),
         "rose to 12,6 %",
     );
@@ -144,7 +144,7 @@ fn the_write_refuses_a_span_the_content_does_not_carry() {
         "both `span` and `hash`",
     );
     refused(
-        r#"{"artifact":"notes--the-board-refused","grain":"entity","class":"anchored","span":"rose"}"#,
+        r#"{"artifact":"notes--the-committee-refused","grain":"entity","class":"anchored","span":"rose"}"#,
         "does not accept `span`",
     );
     // Nothing was written: the roster still holds the two rows.
@@ -172,11 +172,11 @@ fn two_extractions_resolve_from_one_observation_and_a_lost_span_reads_span_absen
         .output()
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(row(&v, TARIFF)["span"], "rose to 12,5 % in March 2026");
-    assert_eq!(row(&v, BOARD)["span"], "board did not approve it");
-    assert_ne!(row(&v, TARIFF)["hash"], row(&v, BOARD)["hash"]);
-    assert!(row(&v, TARIFF)["span_hash"].is_string());
-    assert_eq!(row(&v, TARIFF)["hash_source"], "author");
+    assert_eq!(row(&v, FEE)["span"], "rose to 12,5 % in March 2026");
+    assert_eq!(row(&v, COMMITTEE)["span"], "committee did not approve it");
+    assert_ne!(row(&v, FEE)["hash"], row(&v, COMMITTEE)["hash"]);
+    assert!(row(&v, FEE)["span_hash"].is_string());
+    assert_eq!(row(&v, FEE)["hash_source"], "author");
     let sidecar: serde_json::Value = serde_json::from_slice(
         &fs::read(ws.path().join(".memstead").join("anchors.json")).unwrap(),
     )
@@ -187,13 +187,13 @@ fn two_extractions_resolve_from_one_observation_and_a_lost_span_reads_span_absen
     fs::write(
         &obs,
         format!(
-            r#"[{{"artifact":"{PAGE}","content":"Report 2026\n\nThe tariff rose to\n12,5 % in March 2026. The board\ndid not approve it.\n\nFooter c."}}]"#
+            r#"[{{"artifact":"{PAGE}","content":"Report 2026\n\nThe shipping fee rose to\n12,5 % in March 2026. The committee\ndid not approve it.\n\nFooter c."}}]"#
         ),
     )
     .unwrap();
     let v = verify(ws.path(), Some(&obs));
-    assert_eq!(row(&v, TARIFF)["state"], "resolves", "{v}");
-    assert_eq!(row(&v, BOARD)["state"], "resolves", "{v}");
+    assert_eq!(row(&v, FEE)["state"], "resolves", "{v}");
+    assert_eq!(row(&v, COMMITTEE)["state"], "resolves", "{v}");
     assert_eq!(v["drifted"], 0);
     assert_eq!(v["span_absent"], 0);
     assert_eq!(v["observations"]["recorded"], 2, "{v}");
@@ -202,13 +202,13 @@ fn two_extractions_resolve_from_one_observation_and_a_lost_span_reads_span_absen
     fs::write(
         &obs,
         format!(
-            r#"[{{"artifact":"{PAGE}","content":"Report 2026, corrected: the tariff rose to 12,6 % in March 2026. The board did not approve it."}}]"#
+            r#"[{{"artifact":"{PAGE}","content":"Report 2026, corrected: the shipping fee rose to 12,6 % in March 2026. The committee did not approve it."}}]"#
         ),
     )
     .unwrap();
     let v = verify(ws.path(), Some(&obs));
-    assert_eq!(row(&v, TARIFF)["state"], "span_absent", "{v}");
-    assert_eq!(row(&v, BOARD)["state"], "resolves", "{v}");
+    assert_eq!(row(&v, FEE)["state"], "span_absent", "{v}");
+    assert_eq!(row(&v, COMMITTEE)["state"], "resolves", "{v}");
     assert_eq!(v["span_absent"], 1);
     assert_eq!(v["drifted"], 0);
     // The markdown rendering names the state and the span.
@@ -230,7 +230,7 @@ fn two_extractions_resolve_from_one_observation_and_a_lost_span_reads_span_absen
         .output()
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(row(&v, TARIFF)["state"], "span_absent", "{v}");
+    assert_eq!(row(&v, FEE)["state"], "span_absent", "{v}");
     let out = memstead()
         .current_dir(ws.path())
         .args([
@@ -254,7 +254,7 @@ fn two_extractions_resolve_from_one_observation_and_a_lost_span_reads_span_absen
         .current_dir(ws.path())
         .args([
             "update",
-            TARIFF,
+            FEE,
             "--quiet",
             "--anchor-unset",
             &format!(r#"{{"artifact":"{PAGE}","span":"rose to  12,5 % in March 2026"}}"#),
@@ -268,7 +268,7 @@ fn two_extractions_resolve_from_one_observation_and_a_lost_span_reads_span_absen
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["count"], 1, "{v}");
-    assert_eq!(row(&v, BOARD)["span"], "board did not approve it");
+    assert_eq!(row(&v, COMMITTEE)["span"], "committee did not approve it");
 }
 
 /// AC2 refusal complement through the CLI: an `absent` observation reads
@@ -280,14 +280,14 @@ fn absent_reads_recheck_and_a_hash_observation_leaves_a_span_row_as_it_was() {
     let obs = ws.path().join("obs.json");
     fs::write(&obs, format!(r#"[{{"artifact":"{PAGE}","hash":"zz"}}]"#)).unwrap();
     let v = verify(ws.path(), Some(&obs));
-    assert_eq!(row(&v, TARIFF)["state"], "unobserved", "{v}");
+    assert_eq!(row(&v, FEE)["state"], "unobserved", "{v}");
     assert_eq!(v["observations"]["recorded"], 0);
     assert_eq!(v["observations"]["unmatched"][0], PAGE);
 
     fs::write(&obs, format!(r#"[{{"artifact":"{PAGE}","absent":true}}]"#)).unwrap();
     let v = verify(ws.path(), Some(&obs));
-    assert_eq!(row(&v, TARIFF)["state"], "recheck", "{v}");
-    assert_eq!(row(&v, BOARD)["state"], "recheck", "{v}");
+    assert_eq!(row(&v, FEE)["state"], "recheck", "{v}");
+    assert_eq!(row(&v, COMMITTEE)["state"], "recheck", "{v}");
 }
 
 /// The record seam through the CLI: two span rows and a span-less row on

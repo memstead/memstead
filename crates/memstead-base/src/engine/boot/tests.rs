@@ -4392,11 +4392,11 @@ fn url_span_rows_adjudicate_on_the_spans_presence_through_every_read_surface() {
         ..Default::default()
     };
     // Two agents extracted the same PDF differently.
-    let extraction_a = "REPORT 2026\nThe tariff rose to 12,5 % in\nMarch 2026. Footer a.";
-    let extraction_b = "Report 2026 - The tariff rose to 12,5 % in March 2026.\nThe board did not approve it.\nFooter b.";
+    let extraction_a = "REPORT 2026\nThe shipping fee rose to 12,5 % in\nMarch 2026. Footer a.";
+    let extraction_b = "Report 2026 - The shipping fee rose to 12,5 % in March 2026.\nThe committee did not approve it.\nFooter b.";
     let first = spec_with_anchors(
         &mut engine,
-        "Tariff claim",
+        "Fee claim",
         vec![span(
             report_url,
             "rose to 12,5 % in March 2026",
@@ -4405,9 +4405,13 @@ fn url_span_rows_adjudicate_on_the_spans_presence_through_every_read_surface() {
     );
     let second = spec_with_anchors(
         &mut engine,
-        "Board claim",
+        "Committee claim",
         vec![
-            span(report_url, "board did not approve it", Some(extraction_b)),
+            span(
+                report_url,
+                "committee did not approve it",
+                Some(extraction_b),
+            ),
             span(
                 "https://w.test/gone",
                 "some words",
@@ -4456,7 +4460,7 @@ fn url_span_rows_adjudicate_on_the_spans_presence_through_every_read_surface() {
     // One observation, a third extraction with both spans and a document
     // hash neither row recorded; the gone page absent; the later page as a
     // hash only.
-    let extraction_c = "Report 2026\n\nThe tariff rose to\n12,5 % in March 2026. The board\ndid not approve it.\n\nFooter c.";
+    let extraction_c = "Report 2026\n\nThe shipping fee rose to\n12,5 % in March 2026. The committee\ndid not approve it.\n\nFooter c.";
     let doc_hash_c = crate::anchor::prepared_content_hash(extraction_c.as_bytes());
     let rows = vec![
         SuppliedObservationInput {
@@ -4560,7 +4564,7 @@ fn url_span_rows_adjudicate_on_the_spans_presence_through_every_read_surface() {
     // The words of the first claim leave the page; the second's stay.
     let rows = vec![SuppliedObservationInput {
         artifact: Some(report_url.into()),
-        content: Some("Report 2026, corrected: the tariff rose to 12,6 % in March 2026. The board did not approve it.".into()),
+        content: Some("Report 2026, corrected: the shipping fee rose to 12,6 % in March 2026. The committee did not approve it.".into()),
         ..Default::default()
     }];
     let supplied = validate_supplied_observations(&rows, clock_now).unwrap();

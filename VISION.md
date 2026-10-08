@@ -176,18 +176,18 @@ Today, website knowledge is trapped in unstructured HTML. A university has hundr
 Memstead's authority model opens a path: any domain registers as an authority on a registry and publishes structured knowledge graphs under its own scope. The natural extension is that domains *host their own mems* while the registry serves as a federated index — the same relationship GitHub repos have with npm, or websites with search engines.
 
 ```
-https://mit.edu/.well-known/memstead-authority.json     "we are a memstead authority"
-https://mit.edu/mems/ml-curriculum.mem             self-hosted mem
-https://registry.example/v/mit.edu:cs-dept/ml-curriculum index entry, links to mit.edu
+https://university.example/.well-known/memstead-authority.json        "we are a memstead authority"
+https://university.example/mems/ml-curriculum.mem                     self-hosted mem
+https://registry.example/v/university.example:cs-dept/ml-curriculum   index entry, links to university.example
 ```
 
 `.well-known/memstead-authority.json` becomes a discoverability signal: *this domain has structured, machine-readable knowledge — here is the entry point.* AI agents discovering a domain check for that file and find a graph the domain itself authored, typed, and stands behind — a stated claim with an accountable publisher, rather than whatever a page happened to render that day.
 
 **Example — a university.** A projection runs against the university website periodically. It extracts structural, timeless knowledge — departments, research areas, degree programmes, faculty expertise, institutional relationships — not events, news, or deadlines. Current information stays on the website; the mem is a durable understanding of what the university *is*.
 
-The projected graph is published as one or more `.mem` files on the university's own server. The authority file lists them. The registry indexes them but holds no copy — downloads go directly to `mit.edu`. When mems are added or removed, the registry updates.
+The projected graph is published as one or more `.mem` files on the university's own server. The authority file lists them. The registry indexes them but holds no copy — downloads go directly to `university.example`. When mems are added or removed, the registry updates.
 
-An AI agent researching *"machine-learning programmes in Europe"* hits the registry, finds `mit.edu:cs-dept/ml-curriculum`, downloads from `mit.edu`, and gets a graph the publishing authority validated and signed — a stated, attributable claim rather than whatever the agent managed to parse out of the HTML. The gain is provenance and publisher accountability, not a reading advantage.
+An AI agent researching *"machine-learning programmes in Europe"* hits the registry, finds `university.example:cs-dept/ml-curriculum`, downloads from `university.example`, and gets a graph the publishing authority validated and signed — a stated, attributable claim rather than whatever the agent managed to parse out of the HTML. The gain is provenance and publisher accountability, not a reading advantage.
 
 This turns Memstead from "a registry for sharing knowledge graphs" into "an open standard for how websites make their knowledge accessible to AI." The engine stays the same; the surface area grows from "developers sharing mems" to "any organisation publishing structured knowledge."
 

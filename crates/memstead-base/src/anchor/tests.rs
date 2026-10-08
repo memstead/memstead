@@ -1346,7 +1346,7 @@ fn url_span_input(span: &str, content: Option<&str>) -> AnchorInput {
 /// with the author as the hash source.
 #[test]
 fn a_span_inside_the_supplied_content_writes_with_both_hashes() {
-    let content = "Preface.\n\nThe tariff rose to 12,5 %\nin March 2026.\n";
+    let content = "Preface.\n\nThe shipping fee rose to 12,5 %\nin March 2026.\n";
     for grain in ["url", "span", "file"] {
         let mut input = url_span_input("rose to 12,5 % in March 2026", Some(content));
         input.grain = Some(grain.into());
@@ -1378,7 +1378,7 @@ fn a_span_inside_the_supplied_content_writes_with_both_hashes() {
 /// beside a supplied hash refuses.
 #[test]
 fn a_span_absent_from_the_content_and_a_span_beside_a_hash_refuse() {
-    let err = url_span_input("rose to 12,6 %", Some("The tariff rose to 12,5 %."))
+    let err = url_span_input("rose to 12,6 %", Some("The shipping fee rose to 12,5 %."))
         .validate(None)
         .unwrap_err();
     assert!(
