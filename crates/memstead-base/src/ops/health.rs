@@ -1763,6 +1763,13 @@ pub enum UnsatisfiedConstraint {
         /// The tainting ancestor — the entity holding the terminal
         /// value that this entity (transitively) reaches.
         tainted_by: String,
+        /// The chain of ids the taint travelled, from `tainted_by` first
+        /// to this entity last, one shortest path (a stub on the way is
+        /// named: it carried the edge). A reader of a finding on an
+        /// entity with several parents can say through which parent the
+        /// fall arrived instead of guessing; with several fallen sources
+        /// each finding carries its own path.
+        path: Vec<String>,
         severity: memstead_schema::ConstraintSeverity,
     },
     /// Form 6 — the entity holds the gated `to_value` while related
@@ -1852,9 +1859,13 @@ impl UnsatisfiedConstraint {
                 field,
                 value,
                 tainted_by,
+                path,
                 ..
             } => {
-                format!("status_propagation: tainted by '{tainted_by}' ({field}={value})")
+                format!(
+                    "status_propagation: tainted by '{tainted_by}' ({field}={value}) via {}",
+                    path.join(" → ")
+                )
             }
             Self::MustReach {
                 relationships,
@@ -2406,7 +2417,7 @@ pub fn collect_constraint_findings(
             let set = c
                 .propagation_rel_types()
                 .expect("StatusPropagation always yields a set");
-            for tainted in reach_transitively(store, &entity.id, &set, *direction) {
+            for (tainted, path) in reach_transitively(store, &entity.id, &set, *direction) {
                 if let Some(v) = mem_filter
                     && tainted.mem() != v
                 {
@@ -2419,6 +2430,7 @@ pub fn collect_constraint_findings(
                         rel_type: rel_type.clone(),
                         rel_types: rel_types.clone(),
                         tainted_by: entity.id.to_string(),
+                        path: path.iter().map(ToString::to_string).collect(),
                         severity: *severity,
                     },
                 );
@@ -2446,24 +2458,29 @@ pub fn collect_constraint_findings(
 }
 
 /// Transitive reachability along one rel-type from `start`, excluding
-/// `start` itself. `Incoming` walks against edge direction (the
-/// entities whose `rel_type` edges point at the frontier — "what
-/// stands on this"); `Outgoing` follows the frontier's own edges.
-/// Stubs are traversed (an edge through a stub still transmits the
-/// taint) but stubs themselves are not returned.
+/// `start` itself, each reached entity with the path the walk took to
+/// it (`start` first, the entity last). `Incoming` walks against edge
+/// direction (the entities whose `rel_type` edges point at the frontier
+/// — "what stands on this"); `Outgoing` follows the frontier's own
+/// edges. Breadth first with neighbours in id order, so the path is one
+/// shortest path and the same one on every run. Stubs are traversed (an
+/// edge through a stub still transmits the taint) and named on the
+/// paths that cross them, but stubs themselves are not returned.
 fn reach_transitively(
     store: &Store,
     start: &crate::entity::EntityId,
     rel_types: &[String],
     direction: memstead_schema::PropagationDirection,
-) -> Vec<crate::entity::EntityId> {
+) -> Vec<(crate::entity::EntityId, Vec<crate::entity::EntityId>)> {
     use memstead_schema::PropagationDirection;
+    let mut parent: std::collections::HashMap<crate::entity::EntityId, crate::entity::EntityId> =
+        Default::default();
     let mut seen: std::collections::HashSet<crate::entity::EntityId> =
         std::iter::once(start.clone()).collect();
-    let mut frontier = vec![start.clone()];
+    let mut frontier = std::collections::VecDeque::from([start.clone()]);
     let mut reached = Vec::new();
-    while let Some(current) = frontier.pop() {
-        let next: Vec<crate::entity::EntityId> = match direction {
+    while let Some(current) = frontier.pop_front() {
+        let mut next: Vec<crate::entity::EntityId> = match direction {
             PropagationDirection::Incoming => store
                 .all_entities()
                 .filter(|e| {
@@ -2484,12 +2501,21 @@ fn reach_transitively(
                 })
                 .unwrap_or_default(),
         };
+        next.sort_by(|a, b| a.0.cmp(&b.0));
         for id in next {
             if seen.insert(id.clone()) {
+                parent.insert(id.clone(), current.clone());
                 if store.get(&id).is_some_and(|e| !e.stub) {
-                    reached.push(id.clone());
+                    let mut path = vec![id.clone()];
+                    let mut at = id.clone();
+                    while let Some(p) = parent.get(&at) {
+                        path.push(p.clone());
+                        at = p.clone();
+                    }
+                    path.reverse();
+                    reached.push((id.clone(), path));
                 }
-                frontier.push(id);
+                frontier.push_back(id);
             }
         }
     }

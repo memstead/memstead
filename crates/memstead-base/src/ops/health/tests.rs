@@ -1919,6 +1919,138 @@ community:
     );
 }
 
+/// Every taint finding carries the path the taint travelled, source
+/// first, tainted entity last, one shortest path chosen in id order:
+/// in a diamond with two foreign roots (d3 rests on d1 and d2, d1 on x,
+/// d2 on y) a reader of d3's finding can say the fall came through d1,
+/// and with both roots fallen d3 carries two findings, each with its
+/// own path. A stub on the way is named on the path.
+#[test]
+fn status_propagation_findings_carry_the_path_the_taint_took() {
+    use crate::entity::MetadataValue;
+    let manifest = r#"name: tests-prop-path
+version: 0.1.0
+description: propagation path test schema
+when_to_use: tests
+types:
+  - claim
+relationships:
+  mode: strict
+  definitions:
+    - name: GROUNDS
+      description: g
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+    let claim_yaml = "name: claim\ndescription: t\nwhen_to_use: Here\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: standing\n    description: dialectical standing\n    field_type: string\n    enum_values: [active, withdrawn]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - standing\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nconstraints:\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    rel_type: GROUNDS\n    direction: incoming\n";
+    let schema = std::sync::Arc::new(
+        memstead_schema::load_schema_from_memory(
+            manifest,
+            &[("claim".to_string(), claim_yaml.to_string())],
+        )
+        .expect("propagation path fixture schema must parse"),
+    );
+    let withdrawn = |mut e: crate::entity::Entity| {
+        e.metadata
+            .insert("standing".into(), MetadataValue::String("withdrawn".into()));
+        e
+    };
+    let x = withdrawn(make_typed_entity("library/a", "x", "claim"));
+    let y = make_typed_entity("library/a", "y", "claim");
+    let mut d1 = make_typed_entity("library/b", "d1", "claim");
+    link(&mut d1, "GROUNDS", &x.id);
+    let mut d2 = make_typed_entity("library/b", "d2", "claim");
+    link(&mut d2, "GROUNDS", &y.id);
+    let mut d3 = make_typed_entity("library/b", "d3", "claim");
+    link(&mut d3, "GROUNDS", &d1.id);
+    link(&mut d3, "GROUNDS", &d2.id);
+    let mut store = Store::new();
+    for e in [x.clone(), y.clone(), d1.clone(), d2.clone(), d3.clone()] {
+        store.upsert(e.id.clone(), e);
+    }
+    let mut mem_schemas = HashMap::new();
+    mem_schemas.insert("library/a".to_string(), schema.clone());
+    mem_schemas.insert("library/b".to_string(), schema);
+
+    let paths_of = |reports: &[ConstraintFindingReport], id: &crate::entity::EntityId| {
+        reports
+            .iter()
+            .filter(|r| &r.id == id)
+            .flat_map(|r| r.violations.iter())
+            .filter_map(|v| match v {
+                UnsatisfiedConstraint::StatusPropagation {
+                    tainted_by, path, ..
+                } => Some((tainted_by.clone(), path.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let b = collect_constraint_findings(&store, Some("library/b"), &mem_schemas, None);
+    assert_eq!(
+        paths_of(&b, &d1.id),
+        vec![(
+            "library/a--x".to_string(),
+            vec!["library/a--x".to_string(), "library/b--d1".to_string()]
+        )]
+    );
+    assert_eq!(
+        paths_of(&b, &d3.id),
+        vec![(
+            "library/a--x".to_string(),
+            vec![
+                "library/a--x".to_string(),
+                "library/b--d1".to_string(),
+                "library/b--d3".to_string()
+            ]
+        )],
+        "the fall reached d3 through d1, and the finding says so"
+    );
+    assert!(
+        paths_of(&b, &d2.id).is_empty(),
+        "d2 rests on y, which stands"
+    );
+
+    // Both roots fallen: d3 carries one finding per source, each with
+    // its own path, in (mem, id) order of the sources.
+    store.upsert(y.id.clone(), withdrawn(y.clone()));
+    let b = collect_constraint_findings(&store, Some("library/b"), &mem_schemas, None);
+    assert_eq!(
+        paths_of(&b, &d3.id),
+        vec![
+            (
+                "library/a--x".to_string(),
+                vec![
+                    "library/a--x".to_string(),
+                    "library/b--d1".to_string(),
+                    "library/b--d3".to_string()
+                ]
+            ),
+            (
+                "library/a--y".to_string(),
+                vec![
+                    "library/a--y".to_string(),
+                    "library/b--d2".to_string(),
+                    "library/b--d3".to_string()
+                ]
+            ),
+        ]
+    );
+    assert!(
+        b.iter()
+            .flat_map(|r| r.violations.iter())
+            .all(|v| v.describe().contains(" via ")),
+        "the human line names the path too"
+    );
+}
+
 // ----------------------------------------------------------------------
 // transition_requires_checks (form 6)
 // ----------------------------------------------------------------------

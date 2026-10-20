@@ -7,6 +7,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **A status-propagation finding carries the path the taint travelled.**
+  Beside `tainted_by`, each `status_propagation` violation in the health
+  constraints axis carries `path`: the ids from the fallen ancestor to
+  the tainted entity, one shortest path (neighbours walked in id order,
+  so the same path on every run; a stub on the way is named, it carried
+  the edge). An entity that rests on several parents can now say through
+  which one a fall arrived, and with several fallen ancestors each
+  finding carries its own path; the human line reads `tainted by 'x'
+  (status=fallen) via x → d1 → d3`. Before, a reader of the finding on a
+  diamond's bottom entity saw only the source and had to guess the
+  parent.
+
 ## [0.24.0] - 2026-10-20
 
 ### Added
