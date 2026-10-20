@@ -125,7 +125,13 @@ fn read_zip_archive(
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
-        let raw_name = entry.name().to_string();
+        // zip 9 decodes the entry name fallibly; a name the crate
+        // cannot read is refused with the entry index, as the other
+        // shape refusals are, never served under a guessed spelling.
+        let raw_name = entry
+            .name()
+            .map_err(|e| LoadError::InvalidArchive(format!("entry {i}: undecodable name: {e}")))?
+            .into_owned();
 
         // Symlinks are rejected outright — a malicious archive could
         // point one at /etc/passwd or any other absolute path. We never

@@ -238,7 +238,7 @@ fn inject_zip_member(archive: &[u8], name: &str, content: &[u8]) -> Vec<u8> {
             .compression_method(zip::CompressionMethod::Deflated);
         for i in 0..src.len() {
             let mut f = src.by_index(i).unwrap();
-            let fname = f.name().to_string();
+            let fname = f.name().unwrap().to_string();
             let mut buf = Vec::new();
             f.read_to_end(&mut buf).unwrap();
             w.start_file(fname, opts).unwrap();
@@ -263,7 +263,7 @@ fn rewrite_zip_member(archive: &[u8], name: &str, content: &[u8]) -> Vec<u8> {
             .compression_method(zip::CompressionMethod::Deflated);
         for i in 0..src.len() {
             let mut f = src.by_index(i).unwrap();
-            let fname = f.name().to_string();
+            let fname = f.name().unwrap().to_string();
             let mut buf = Vec::new();
             f.read_to_end(&mut buf).unwrap();
             w.start_file(fname.clone(), opts).unwrap();

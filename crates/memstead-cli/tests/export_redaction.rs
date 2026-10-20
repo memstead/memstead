@@ -134,7 +134,7 @@ fn unpack(archive: &Path) -> TempDir {
     let mut zip = zip::ZipArchive::new(file).unwrap();
     for i in 0..zip.len() {
         let mut member = zip.by_index(i).unwrap();
-        let target = dir.path().join(member.name());
+        let target = dir.path().join(member.name().unwrap().as_ref());
         fs::create_dir_all(target.parent().unwrap()).unwrap();
         let mut bytes = Vec::new();
         member.read_to_end(&mut bytes).unwrap();

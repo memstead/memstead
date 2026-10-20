@@ -226,7 +226,11 @@ pub fn redact_archive_anchors(archive: &[u8]) -> Result<Vec<u8>, AssembleError> 
 
     let mut zip = zip::ZipArchive::new(Cursor::new(archive))
         .map_err(|e| AssembleError::Anchors(format!("read archive: {e}")))?;
-    let names: Vec<String> = zip.file_names().map(str::to_string).collect();
+    let names: Vec<String> = zip
+        .file_names()
+        .map(|n| n.map(|c| c.into_owned()))
+        .collect::<Result<_, _>>()
+        .map_err(|e| AssembleError::Anchors(format!("read member name: {e}")))?;
     if !names.iter().any(|n| n == ANCHOR_SIDECAR_PATH) {
         return Ok(archive.to_vec());
     }
@@ -242,7 +246,10 @@ pub fn redact_archive_anchors(archive: &[u8]) -> Result<Vec<u8>, AssembleError> 
             let mut member = zip
                 .by_index(index)
                 .map_err(|e| AssembleError::Anchors(format!("read member: {e}")))?;
-            let name = member.name().to_string();
+            let name = member
+                .name()
+                .map_err(|e| AssembleError::Anchors(format!("read member name: {e}")))?
+                .into_owned();
             let mut bytes = Vec::new();
             member
                 .read_to_end(&mut bytes)

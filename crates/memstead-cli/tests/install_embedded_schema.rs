@@ -355,7 +355,7 @@ fn repack(src: &Path, dest: &Path, member: &str, new_bytes: &[u8], drop: &[&str]
     let mut replaced = false;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).unwrap();
-        let name = entry.name().to_string();
+        let name = entry.name().unwrap().to_string();
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes).unwrap();
         if drop.contains(&name.as_str()) {
@@ -382,7 +382,7 @@ fn append_member(src: &Path, dest: &Path, member: &str, bytes: &[u8]) {
     let opts = zip::write::SimpleFileOptions::default();
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).unwrap();
-        let name = entry.name().to_string();
+        let name = entry.name().unwrap().to_string();
         let mut body = Vec::new();
         entry.read_to_end(&mut body).unwrap();
         writer.start_file(&name, opts).unwrap();
@@ -451,7 +451,7 @@ fn builtin_installs_with_scaffolding_still_export_and_reread() {
         // The sealed language travelled; the scaffolding did not.
         let mut zip = zip::ZipArchive::new(fs::File::open(&archive).unwrap()).unwrap();
         let names: Vec<String> = (0..zip.len())
-            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .map(|i| zip.by_index(i).unwrap().name().unwrap().to_string())
             .collect();
         assert!(
             names.iter().any(|n| n == ".memstead/schema/schema.yaml"),

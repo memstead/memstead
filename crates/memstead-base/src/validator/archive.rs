@@ -145,8 +145,16 @@ pub fn extract_entries(
             continue;
         }
 
+        // zip 9 decodes the entry name fallibly: a name the crate cannot
+        // read is refused with the entry index, never validated under a
+        // guessed spelling.
+        let raw_name: String = entry
+            .name()
+            .map_err(|e| ValidationError::Zip(format!("entry {i}: undecodable name: {e}")))?
+            .into_owned();
+
         if entry.is_symlink() {
-            return Err(ValidationError::Symlink(entry.name().to_string()));
+            return Err(ValidationError::Symlink(raw_name));
         }
 
         // `enclosed_name()` normalizes absolute POSIX paths (`/foo`) and
@@ -154,7 +162,6 @@ pub fn extract_entries(
         // into innocent-looking relative paths, which masks adversarial
         // intent. Catch those shapes on the raw name first so the
         // rejection carries the original, truthful path.
-        let raw_name = entry.name();
         if raw_name.starts_with('/') || raw_name.starts_with('\\') {
             return Err(ValidationError::Zip(format!(
                 "unsafe entry path: {raw_name}"
@@ -169,10 +176,10 @@ pub fn extract_entries(
 
         let enclosed = entry
             .enclosed_name()
-            .ok_or_else(|| ValidationError::Zip(format!("unsafe entry path: {}", entry.name())))?;
+            .ok_or_else(|| ValidationError::Zip(format!("unsafe entry path: {raw_name}")))?;
         let path_string = enclosed
             .to_str()
-            .ok_or_else(|| ValidationError::Zip(format!("non-UTF-8 entry path: {}", entry.name())))?
+            .ok_or_else(|| ValidationError::Zip(format!("non-UTF-8 entry path: {raw_name}")))?
             .replace('\\', "/");
 
         if path_string.len() > limits.max_path_length {

@@ -704,7 +704,7 @@ mod tests {
         let opts = zip::write::SimpleFileOptions::default();
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).unwrap();
-            let name = entry.name().to_string();
+            let name = entry.name().unwrap().to_string();
             let name = match name.strip_prefix(".memstead/") {
                 Some(rest) => format!(".other/{rest}"),
                 None => name,

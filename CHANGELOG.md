@@ -45,6 +45,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   rationale per entity, and its sealed independence reading already
   answers author-versus-checker without carrying identities.
 
+### Changed
+
+- **`zip` 9 and `rustls` 0.23.46.** The RustSec audit on the release
+  commit named four `rustls` 0.23.45 advisories (RUSTSEC-2026-0346 to
+  0349, patched in 0.23.46) and three `zip` 8 advisories (RUSTSEC-2026-0367
+  to 0369: SUID bits and symlink targets preserved by `ZipArchive::extract`,
+  patched in 9.0.0). The engine never extracts an archive to disk (it
+  reads members by name and index under its own zip-slip guard), so the
+  `zip` findings did not reach it; the bump is taken anyway, as the
+  audit is a release gate and an ignore line would have outlived the
+  reason. `zip` 9 decodes a member name fallibly, and every reader
+  (archive mount, source loader, archive validator, anchor redaction)
+  now refuses a name the crate cannot decode by entry index instead of
+  serving it under a guessed spelling.
+
 ### Fixed
 
 - **A mem resting on a fallen anchor in another mem sees it fall under

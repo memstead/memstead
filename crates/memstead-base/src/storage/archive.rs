@@ -365,7 +365,10 @@ where
         let mut entry = archive
             .by_index(i)
             .map_err(|e| BackendError::Other(format!("archive entry {i}: {e}")))?;
-        let raw_name = entry.name().to_string();
+        let raw_name = entry
+            .name()
+            .map_err(|e| BackendError::Other(format!("archive entry {i}: undecodable name: {e}")))?
+            .into_owned();
         if entry.is_symlink() {
             return Err(BackendError::Other(format!(
                 "entry '{raw_name}': symlinks are not allowed in sealed mem archives"
