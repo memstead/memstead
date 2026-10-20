@@ -683,8 +683,8 @@ impl super::Engine {
 /// through `backend`, merged over the existing sidecar at BOTH levels —
 /// other entities' rows survive (document level), and within the entity's
 /// own row `unsets` apply first, then each incoming anchor replaces the
-/// existing anchor with the same `(artifact, grain, class)` triple or
-/// appends ([`crate::anchor::AnchorSidecar::merge`]). Writing never
+/// existing anchor with the same `(artifact, grain, class, span)` identity
+/// or appends ([`crate::anchor::AnchorSidecar::merge`]). Writing never
 /// removes an anchor the call did not name in `unsets`. The write is
 /// buffered into the SAME pending op set the entity write used — so the
 /// next [`crate::backend::MemBackend::commit`] carries entity + anchors

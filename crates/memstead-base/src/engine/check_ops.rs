@@ -52,6 +52,7 @@ impl Engine {
             &crate::check::RecordKind::Engine(kind),
             method,
             None,
+            None,
             actor,
             client,
         )
@@ -60,8 +61,12 @@ impl Engine {
     /// [`Self::record_check`] with the full record shape: a kind that may
     /// be a caller-declared foreign `x-<name>` kind (recorded verbatim,
     /// never interpreted — it stamps no schema pin and moves no state),
-    /// and an optional structured finding (validated before anything is
-    /// appended; a malformed one refuses `INVALID_CHECK_FINDING`).
+    /// an optional structured finding (validated before anything is
+    /// appended; a malformed one refuses `INVALID_CHECK_FINDING`), and an
+    /// optional `observed_at`, the time the check was MADE as the caller
+    /// states it (ISO-8601 UTC or a civil date; a shape the parser does
+    /// not read or an instant in the future refuses `INVALID_INPUT`),
+    /// stored beside the engine's own write time `ts`.
     #[allow(clippy::too_many_arguments)]
     pub fn record_check_with(
         &mut self,
@@ -71,9 +76,18 @@ impl Engine {
         kind: &crate::check::RecordKind,
         method: Option<&str>,
         finding: Option<crate::check::CheckFinding>,
+        observed_at: Option<&str>,
         actor: Actor,
         client: Option<&ClientId>,
     ) -> Result<CheckRecord, EngineError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let observed_at = observed_at
+            .map(|raw| crate::check::parse_observed_at(raw, now))
+            .transpose()
+            .map_err(EngineError::InvalidInput)?;
         if let Some(f) = &finding {
             f.validate()
                 .map_err(|reason| EngineError::InvalidCheckFinding { reason })?;
@@ -147,10 +161,8 @@ impl Engine {
         };
         let ledger = CheckLedger::for_workspace(root);
         let record = CheckRecord {
-            ts: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
+            ts: now,
+            observed_at,
             entity: entity_id.to_string(),
             verdict: verdict.as_str().to_string(),
             method: method
@@ -671,6 +683,7 @@ write_rules: []
                 Verdict::Ok,
                 &crate::check::RecordKind::from_wire(kind).unwrap(),
                 Some("projection walked"),
+                None,
                 None,
                 actor,
                 Some(&client),

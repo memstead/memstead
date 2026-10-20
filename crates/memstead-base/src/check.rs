@@ -286,8 +286,20 @@ impl CarriedFrom {
 /// One recorded check — the full ledger line.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckRecord {
-    /// Unix epoch seconds at record time.
+    /// Unix epoch seconds at record time: the engine's clock when the
+    /// line was written, never caller-supplied.
     pub ts: u64,
+    /// Unix epoch seconds at which the check was MADE, when the caller
+    /// said so (`observed_at` on `memstead check`, a `--from` row and
+    /// `memstead_check`): a recorder transcribing checks that were made
+    /// earlier, or out of order, states the time of each act here and
+    /// `ts` keeps the time of the transcription. Informational: a reader
+    /// ordering checks by time takes `observed_at` where present and `ts`
+    /// otherwise; the engine's own state derivation ("the newest record
+    /// of a kind") reads ledger order and ignores both. Absent on every
+    /// line written without it, so existing ledgers parse unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<u64>,
     /// Full entity id (`mem--slug`).
     pub entity: String,
     /// `ok` | `failed`.
@@ -350,6 +362,35 @@ pub struct CheckRecord {
     /// before and the reason. Absent on every line a checker wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub carried_from: Option<CarriedFrom>,
+}
+
+/// The largest lead an `observed_at` may have over the engine's clock
+/// before it refuses as "in the future": two machines' clocks disagree by
+/// seconds, a transcription of a check that has not happened yet is a
+/// mistake.
+pub const OBSERVED_AT_SKEW_SECS: u64 = 300;
+
+/// Parse a caller-supplied `observed_at` (`YYYY-MM-DDTHH:MM:SSZ` or a
+/// bare `YYYY-MM-DD`) against the engine's clock `now` (epoch seconds):
+/// epoch seconds on success, the refusal reason otherwise (a shape the
+/// parser does not read, or an instant more than
+/// [`OBSERVED_AT_SKEW_SECS`] ahead of `now`). One parser for the CLI, the
+/// batch file and the MCP tool, so the three cannot drift.
+pub fn parse_observed_at(raw: &str, now: u64) -> Result<u64, String> {
+    let s = raw.trim();
+    let Some(at) = crate::engine::due::parse_iso_utc_seconds(s) else {
+        return Err(format!(
+            "observed_at {raw:?} is not an ISO-8601 UTC instant (`YYYY-MM-DDTHH:MM:SSZ`) \
+             or a civil date (`YYYY-MM-DD`)"
+        ));
+    };
+    if at > now.saturating_add(OBSERVED_AT_SKEW_SECS) {
+        return Err(format!(
+            "observed_at {raw:?} lies in the future (the engine's clock reads {now} epoch \
+             seconds); a check is recorded after it was made, never before"
+        ));
+    }
+    Ok(at)
 }
 
 impl CheckRecord {
@@ -665,6 +706,10 @@ pub const SEALED_CHECKS_VERSION: u32 = 1;
 pub struct SealedCheck {
     /// Unix epoch seconds at record time.
     pub ts: u64,
+    /// When the check was made, as the caller stated it (see
+    /// [`CheckRecord::observed_at`]); absent when nobody did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<u64>,
     /// `ok` | `failed`.
     pub verdict: String,
     /// The free-text method note, after the export's private-pattern
@@ -727,6 +772,7 @@ impl SealedCheck {
     pub fn from_record(rec: &CheckRecord) -> Self {
         Self {
             ts: rec.ts,
+            observed_at: rec.observed_at,
             verdict: rec.verdict.clone(),
             method: rec.method.clone(),
             entity_hash: rec.entity_hash.clone(),
@@ -776,6 +822,7 @@ impl SealedCheck {
     pub fn to_record(&self, entity_id: &str, kind: &str) -> CheckRecord {
         CheckRecord {
             ts: self.ts,
+            observed_at: self.observed_at,
             entity: entity_id.to_string(),
             verdict: self.verdict.clone(),
             method: self.method.clone(),
@@ -963,6 +1010,7 @@ mod tests {
     fn rec(entity: &str, verdict: &str, hash: &str) -> CheckRecord {
         CheckRecord {
             ts: 1,
+            observed_at: None,
             entity: entity.to_string(),
             verdict: verdict.to_string(),
             method: None,
@@ -1012,6 +1060,56 @@ mod tests {
     /// line keeps the hash the check was made against, so it derives
     /// `check_stale` against the renamed file's new hash — never a
     /// silently fresh `checked_ok`, never `never_checked`.
+    /// `observed_at` is the caller's statement of when the check was
+    /// made: parsed from the two ISO shapes, refused when unreadable or
+    /// ahead of the clock beyond the skew allowance, kept verbatim by
+    /// the rename carry (every carried field is the original act's) and
+    /// by the sealed form's round trip, and absent from a line that
+    /// never carried it, byte for byte.
+    #[test]
+    fn observed_at_parses_refuses_the_future_and_survives_the_carries() {
+        let now = 1_792_503_930; // 2026-10-20T13:45:30Z
+        assert_eq!(parse_observed_at("2026-10-19", now), Ok(1_792_368_000));
+        assert_eq!(parse_observed_at(" 2026-10-20T13:45:30Z ", now), Ok(now));
+        // Inside the skew allowance: accepted. Beyond it: refused.
+        assert!(parse_observed_at("2026-10-20T13:50:00Z", now).is_ok());
+        let err = parse_observed_at("2026-10-20T13:51:00Z", now).unwrap_err();
+        assert!(err.contains("future"), "{err}");
+        let err = parse_observed_at("20.10.2026", now).unwrap_err();
+        assert!(err.contains("ISO-8601"), "{err}");
+
+        let tmp = TempDir::new().unwrap();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        let mut dated = rec("m--old", "ok", "h1");
+        dated.observed_at = Some(1_792_368_000);
+        ledger.record(&dated).unwrap();
+        ledger.record(&rec("m--old", "ok", "h2")).unwrap();
+        assert_eq!(ledger.carry_rename("m--old", "m--new").unwrap(), 2);
+        let carried: Vec<CheckRecord> = ledger
+            .all()
+            .into_iter()
+            .filter(|r| r.entity == "m--new")
+            .collect();
+        assert_eq!(carried[0].observed_at, Some(1_792_368_000));
+        assert_eq!(carried[1].observed_at, None);
+
+        let sealed = SealedCheck::from_record(&dated);
+        assert_eq!(sealed.observed_at, Some(1_792_368_000));
+        assert_eq!(
+            sealed.to_record("m--old", "verification").observed_at,
+            Some(1_792_368_000)
+        );
+
+        let raw = std::fs::read_to_string(check_ledger_path(tmp.path())).unwrap();
+        let lines: Vec<&str> = raw.lines().collect();
+        assert!(
+            lines[0].contains("\"observed_at\":1792368000"),
+            "{}",
+            lines[0]
+        );
+        assert!(!lines[1].contains("observed_at"), "{}", lines[1]);
+    }
+
     #[test]
     fn carry_rename_rekeys_without_erasing() {
         let tmp = TempDir::new().unwrap();

@@ -120,9 +120,15 @@ pub struct Args {
     /// (comma-separated). Keys: `anchors` — each entity envelope gains
     /// an `anchors` array with its stored provenance anchors, so the
     /// file-to-entity map a carving or sync pass starts from is one
-    /// export instead of one `memstead anchors <id>` per entity. An
-    /// unknown key refuses naming the allowed set; refused for every
-    /// other format.
+    /// export instead of one `memstead anchors <id>` per entity.
+    /// `provenance` — each envelope gains the block `memstead entity
+    /// <id> --provenance` serves (`created_by` and `last_modified_by`
+    /// with identity, role, client and timestamp, `story_truncated`,
+    /// the check states), so a reader can tell the author's own rows
+    /// from a checker's without one entity read per entity; the identity
+    /// handle is the ledger's, verbatim, the same string the check rows
+    /// carry. An unknown key refuses naming the allowed set; refused for
+    /// every other format.
     #[arg(long, value_delimiter = ',', value_name = "KEY")]
     pub include: Vec<String>,
 }
@@ -277,10 +283,10 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .into());
     }
 
-    // Include-key validation — one key today; an unknown key refuses
-    // naming the allowed set rather than silently exporting less than
-    // the caller asked for.
-    const JSON_INCLUDE_KEYS: &[&str] = &["anchors"];
+    // Include-key validation — an unknown key refuses naming the
+    // allowed set rather than silently exporting less than the caller
+    // asked for.
+    const JSON_INCLUDE_KEYS: &[&str] = &["anchors", "provenance"];
     for key in &args.include {
         if !JSON_INCLUDE_KEYS.contains(&key.as_str()) {
             return Err(CliError::new(
@@ -295,6 +301,7 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
     }
     let include_anchors = args.include.iter().any(|k| k == "anchors");
+    let include_provenance = args.include.iter().any(|k| k == "provenance");
 
     let cli_engine = ctx.cli_engine()?;
     let engine = cli_engine.base();
@@ -398,6 +405,18 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         "anchors".to_string(),
                         serde_json::to_value(&anchors).unwrap_or(serde_json::Value::Null),
                     );
+                }
+                // `--include provenance`: the same derived block the
+                // entity read serves under `--provenance`, read from the
+                // append-only history; unavailability (a seam with no
+                // history) is stated per entity, never fabricated, and
+                // never fails the export.
+                if include_provenance && let Some(obj) = envelope.as_object_mut() {
+                    let block = match engine.entity_provenance(mem_name, entity.id.as_ref()) {
+                        Ok(prov) => serde_json::to_value(&prov).unwrap_or(serde_json::Value::Null),
+                        Err(e) => json!({ "unavailable": e.to_string() }),
+                    };
+                    obj.insert("provenance".to_string(), block);
                 }
                 // A chain export is an auditor's read: every node carries
                 // its anchors WITH live state (artifact, grain, class,

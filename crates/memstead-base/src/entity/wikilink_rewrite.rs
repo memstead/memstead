@@ -272,6 +272,15 @@ fn split_qualified_target<'a>(target: &'a str, mem: &str) -> Option<(&'static st
 /// containing dashes — disambiguation is the caller's concern). The
 /// `:` form wins when both could match because the parser canonicalises
 /// new cross-mem wiki-links to `:`.
+///
+/// The mem half follows the resolver's tiers: the colon form takes a
+/// hierarchical mem (`[[team/sub:slug]]` is the only unambiguous
+/// spelling of a reference into `team/sub`, and the parser accepts
+/// it), the dash form stays flat-only because `team/sub--slug` is the
+/// ambiguous shape the resolver refuses. A colon target into a
+/// hierarchical mem used to fall out here as `None`, so a rename found
+/// the referrer (the lenient parser resolves it) and then left its
+/// body untouched while rewriting its relationship row.
 fn split_cross_mem_target(target: &str) -> Option<(&str, &'static str, &str)> {
     if target.contains("::") {
         // `::` is reserved syntax in the parser — don't split.
@@ -280,7 +289,7 @@ fn split_cross_mem_target(target: &str) -> Option<(&str, &'static str, &str)> {
     if let Some(idx) = target.find(':') {
         let (mem, rest) = target.split_at(idx);
         let slug = &rest[1..];
-        if !mem.is_empty() && !slug.is_empty() && !mem.contains('/') {
+        if !mem.is_empty() && !slug.is_empty() {
             return Some((mem, ":", slug));
         }
     }
@@ -395,6 +404,25 @@ See [[planning/plan-x--alpha]] and [[planning/plan-x:beta|the beta]], not
             "new-name",
         );
         assert_eq!(out, "see [[specs:new-name]] now");
+        assert_eq!(n, 1);
+    }
+
+    /// A hierarchical mem is addressed in the colon form only; the
+    /// rewriter follows the resolver and rewrites it, while the dash
+    /// form into a hierarchical mem stays out (it is the ambiguous
+    /// shape the resolver refuses, so it never names a referrer).
+    #[test]
+    fn cross_mem_rewrites_colon_form_into_a_hierarchical_mem() {
+        let (out, n) = rewrite_cross_mem_slug(
+            "see [[library/a:old-name|the card]] and [[library/a--old-name]]",
+            "library/a",
+            "old-name",
+            "new-name",
+        );
+        assert_eq!(
+            out,
+            "see [[library/a:new-name|the card]] and [[library/a--old-name]]"
+        );
         assert_eq!(n, 1);
     }
 

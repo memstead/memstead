@@ -2212,6 +2212,7 @@ fn the_sealed_row_reader_carries_the_class_only_once_identities_are_declared() {
 
     let row = |identity: &str| crate::check::CheckRecord {
         ts: 1,
+        observed_at: None,
         entity: "local--own".to_string(),
         verdict: "ok".to_string(),
         method: Some("read the source".to_string()),
@@ -2397,6 +2398,7 @@ fn a_sealed_first_party_claim_cannot_loosen_a_third_party_mem() {
 
     let rec = crate::check::CheckRecord {
         ts: 1,
+        observed_at: None,
         entity: "external--ext".to_string(),
         verdict: "ok".to_string(),
         method: Some("trust me".to_string()),

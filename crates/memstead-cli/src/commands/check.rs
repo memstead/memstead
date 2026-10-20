@@ -68,12 +68,26 @@ pub struct Args {
     #[arg(long, value_name = "JSON", conflicts_with = "from")]
     pub finding: Option<String>,
 
+    /// When the check was MADE, when that is not now: an ISO-8601 UTC
+    /// instant (`YYYY-MM-DDTHH:MM:SSZ`) or a civil date (`YYYY-MM-DD`,
+    /// midnight UTC). For a recorder transcribing checks made earlier or
+    /// out of order: the record stores it as `observed_at` beside the
+    /// engine's own write time `ts`, and a reader ordering checks by time
+    /// takes `observed_at` where present and `ts` otherwise. Informational:
+    /// which record is the newest of its kind is still decided by ledger
+    /// order. A shape the parser does not read, or an instant more than
+    /// five minutes ahead of the engine's clock, refuses `INVALID_INPUT`.
+    #[arg(long = "observed-at", value_name = "ISO-8601", conflicts_with = "from")]
+    pub observed_at: Option<String>,
+
     /// Record a batch of checks from a JSON file in one engine boot:
     /// `{"checks": [{"id": "...", "verdict": "ok", "method": "...",
-    /// "kind": "...", "finding": {...}}, ...]}` — `method`, `kind` and
-    /// `finding` optional per entry, mirroring the single form. All-or-nothing: any invalid entry
-    /// (unknown verdict or kind, missing entity) refuses the whole
-    /// batch and names EVERY failing entry; nothing is recorded.
+    /// "kind": "...", "finding": {...}, "observed_at": "..."}, ...]}` —
+    /// `method`, `kind`, `finding` and `observed_at` optional per entry,
+    /// mirroring the single form. All-or-nothing: any invalid entry
+    /// (unknown verdict or kind, missing entity, unreadable or future
+    /// `observed_at`) refuses the whole batch and names EVERY failing
+    /// entry; nothing is recorded.
     #[arg(long, value_name = "PATH")]
     pub from: Option<std::path::PathBuf>,
 }
@@ -100,6 +114,19 @@ struct BatchEntry {
     /// `message` refuses the entry rather than dropping data.
     #[serde(default)]
     finding: Option<serde_json::Value>,
+    /// The time the check was made, as `--observed-at` takes it.
+    #[serde(default)]
+    observed_at: Option<String>,
+}
+
+/// The engine's clock as epoch seconds, for the batch's up-front
+/// `observed_at` validation (the engine re-reads its clock when it
+/// records; the two readings are seconds apart at most).
+fn now_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Parse a wire kind string, `None` input meaning the default
@@ -208,6 +235,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             &kind,
             args.method.as_deref(),
             finding,
+            args.observed_at.as_deref(),
             Actor::Cli,
             Some(&client),
         )
@@ -223,6 +251,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "role": record.role,
             "identity": record.identity,
             "ts": record.ts,
+            "observed_at": record.observed_at,
             "method": record.method,
             "finding": record.finding,
         }))?;
@@ -239,13 +268,16 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// One validated batch entry: id, verdict, kind, method, finding.
+/// One validated batch entry: id, verdict, kind, method, finding,
+/// observed_at (validated here so the batch refuses as a whole, parsed
+/// again by the engine from the same string).
 type ParsedEntry = (
     EntityId,
     Verdict,
     RecordKind,
     Option<String>,
     Option<CheckFinding>,
+    Option<String>,
 );
 
 /// The `--from` batch: parse, validate EVERY entry, refuse atomically on
@@ -264,7 +296,7 @@ fn run_batch(ctx: &CliContext, path: &std::path::Path) -> anyhow::Result<()> {
             "INVALID_INPUT",
             format!(
                 "--from payload is not the documented shape ({e}); expected \
-                 {{\"checks\": [{{\"id\", \"verdict\", \"method\"?, \"kind\"?, \"finding\"?}}, …]}}"
+                 {{\"checks\": [{{\"id\", \"verdict\", \"method\"?, \"kind\"?, \"finding\"?, \"observed_at\"?}}, …]}}"
             ),
         )
     })?;
@@ -327,6 +359,14 @@ fn run_batch(ctx: &CliContext, path: &std::path::Path) -> anyhow::Result<()> {
                 "message": format!("entity not found: {}", id.as_ref()),
             }));
         }
+        if let Some(raw) = entry.observed_at.as_deref()
+            && let Err(reason) = memstead_base::check::parse_observed_at(raw, now_epoch_secs())
+        {
+            entry_errors.push(serde_json::json!({
+                "code": "INVALID_INPUT",
+                "message": reason,
+            }));
+        }
         if entry_errors.is_empty() {
             parsed.push((
                 id,
@@ -334,6 +374,7 @@ fn run_batch(ctx: &CliContext, path: &std::path::Path) -> anyhow::Result<()> {
                 kind.unwrap(),
                 entry.method.clone(),
                 finding.unwrap(),
+                entry.observed_at.clone(),
             ));
         } else {
             failures.push(serde_json::json!({
@@ -359,7 +400,7 @@ fn run_batch(ctx: &CliContext, path: &std::path::Path) -> anyhow::Result<()> {
 
     let client = crate::setup::cli_client_id();
     let mut recorded: Vec<serde_json::Value> = Vec::new();
-    for (id, verdict, kind, method, finding) in &parsed {
+    for (id, verdict, kind, method, finding, observed_at) in &parsed {
         let record = engine
             .record_check_with(
                 id.mem(),
@@ -368,6 +409,7 @@ fn run_batch(ctx: &CliContext, path: &std::path::Path) -> anyhow::Result<()> {
                 kind,
                 method.as_deref(),
                 finding.clone(),
+                observed_at.as_deref(),
                 Actor::Cli,
                 Some(&client),
             )
@@ -378,6 +420,7 @@ fn run_batch(ctx: &CliContext, path: &std::path::Path) -> anyhow::Result<()> {
             "kind": record.kind.as_deref().unwrap_or("verification"),
             "schema_ref": record.schema_ref,
             "ts": record.ts,
+            "observed_at": record.observed_at,
             "finding": record.finding,
         }));
     }

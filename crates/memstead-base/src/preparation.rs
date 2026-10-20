@@ -382,14 +382,55 @@ fn canonical_text_owned(text: &str) -> String {
 ///   the break and the indentation after it, so a word split at a line end
 ///   matches its unsplit form;
 /// - every run of whitespace (spaces, tabs, line breaks, non-breaking
-///   spaces) becomes one space, and the ends are trimmed.
+///   spaces) becomes one space, a space directly after an opening bracket
+///   or before a closing one (`(`, `[`, `{` and their closers) is removed,
+///   and the ends are trimmed.
 ///
 /// Digits, decimal marks, units, case and word order are untouched: beyond
 /// this form the match is exact, and no similarity threshold exists on any
 /// path. Case folding is deliberately absent (capitalisation carries meaning
 /// in the sources' languages) and so is NFKC (it would equate `m²` with
 /// `m2`, a changed unit).
+///
+/// The form is a function of its text alone, so the span's hash
+/// ([`span_hash`]) is one value wherever the span is quoted. The line-end
+/// hyphen is the one fold that loses a distinction (`statement-\nlevel`
+/// may be a split `statementlevel` or a compound `statement-level`), and
+/// the text side of a comparison answers it: [`span_occurs`] looks for
+/// the span in the joined form and in the form that keeps the hyphen
+/// ([`canonical_text_forms`]), so both readings are found and no rule
+/// has to guess from the rest of the document.
 pub fn canonical_span_form(text: &str) -> String {
+    canonical_form(text, LineEndHyphen::Join)
+}
+
+/// The two canonical forms of an observed TEXT a span is looked for in:
+/// the joined form ([`canonical_span_form`], a hyphen at a line end is a
+/// split word) and the form that keeps the hyphen (a compound word broken
+/// at the line end: `statement-\nlevel` reads `statement-level`). The
+/// second is omitted when it equals the first (no hyphen sat at a line
+/// end), so a text without the ambiguity costs one form.
+pub fn canonical_text_forms(text: &str) -> Vec<String> {
+    let joined = canonical_form(text, LineEndHyphen::Join);
+    let kept = canonical_form(text, LineEndHyphen::Keep);
+    if kept == joined {
+        vec![joined]
+    } else {
+        vec![joined, kept]
+    }
+}
+
+/// What a hyphen directly before a line break becomes in a canonical form.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LineEndHyphen {
+    /// The hyphen, the break and the indentation go: a split word rejoins.
+    Join,
+    /// The hyphen stays, the break and the indentation go: a compound word
+    /// broken at the line end keeps its hyphen, with nothing around it.
+    Keep,
+}
+
+fn canonical_form(text: &str, line_end_hyphen: LineEndHyphen) -> String {
     use unicode_normalization::UnicodeNormalization;
     let composed: String = text.nfc().collect();
     let mut mapped = String::with_capacity(composed.len());
@@ -413,8 +454,9 @@ pub fn canonical_span_form(text: &str) -> String {
             other => mapped.push(other),
         }
     }
-    // A hyphen at a line end joins the word it split: the hyphen, the break
-    // and any indentation that follows go.
+    // A hyphen at a line end: the break and any indentation that follows
+    // go, and the hyphen goes with them (a split word rejoins) or stays (a
+    // compound word keeps its hyphen), as the caller asked.
     let mut joined = String::with_capacity(mapped.len());
     let mut chars = mapped.chars().peekable();
     while let Some(c) = chars.next() {
@@ -435,11 +477,16 @@ pub fn canonical_span_form(text: &str) -> String {
                 for _ in 0..consumed {
                     chars.next();
                 }
+                if line_end_hyphen == LineEndHyphen::Keep {
+                    joined.push('-');
+                }
                 continue;
             }
         }
         joined.push(c);
     }
+    // Whitespace runs become one space, except directly inside a bracket
+    // pair, where typesetting puts a space the words never had.
     let mut out = String::with_capacity(joined.len());
     let mut pending_space = false;
     for c in joined.chars() {
@@ -447,7 +494,11 @@ pub fn canonical_span_form(text: &str) -> String {
             pending_space = !out.is_empty();
         } else {
             if pending_space {
-                out.push(' ');
+                let after_opener = out.ends_with(['(', '[', '{']);
+                let before_closer = matches!(c, ')' | ']' | '}');
+                if !after_opener && !before_closer {
+                    out.push(' ');
+                }
                 pending_space = false;
             }
             out.push(c);
@@ -456,15 +507,21 @@ pub fn canonical_span_form(text: &str) -> String {
     out
 }
 
-/// Whether `span` occurs in `text`, both taken in the canonical span form.
-/// An empty span (empty after canonicalisation) occurs nowhere: it names no
-/// words, and the write path refuses it before it can be stored.
+/// Whether `span` occurs in `text`: the span in the canonical span form,
+/// the text in each of its canonical forms ([`canonical_text_forms`]), so
+/// a span quoting a compound word the text breaks at a line end
+/// (`statement-level` against `statement-\nlevel`) is found as surely as
+/// a split word (`generated` against `gener-\nated`). An empty span (empty
+/// after canonicalisation) occurs nowhere: it names no words, and the
+/// write path refuses it before it can be stored.
 pub fn span_occurs(span: &str, text: &str) -> bool {
     let span = canonical_span_form(span);
     if span.is_empty() {
         return false;
     }
-    canonical_span_form(text).contains(span.as_str())
+    canonical_text_forms(text)
+        .iter()
+        .any(|form| form.contains(span.as_str()))
 }
 
 /// The hash a span row records for its span: the house prepared-content

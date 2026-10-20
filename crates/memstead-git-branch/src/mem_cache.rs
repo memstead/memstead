@@ -505,6 +505,7 @@ mod tests {
         memstead_base::check::CheckLedger::for_workspace(&ws)
             .record(&memstead_base::check::CheckRecord {
                 ts: 1,
+                observed_at: None,
                 entity: "aws-patterns--alpha".to_string(),
                 verdict: "ok".to_string(),
                 method: None,

@@ -131,12 +131,17 @@ pub struct Args {
     /// Provenance anchor: repeatable `--anchor '<json>'`, each a JSON
     /// object of the anchor shape. Written into the mem-branch anchors
     /// sidecar in the same commit as the update; a malformed anchor
-    /// refuses `INVALID_ANCHOR`. A row naming a stored (artifact, grain,
-    /// class) triple replaces it, on folder and git-branch mems alike:
-    /// rewritten hash-less for the next verify to backfill when any
-    /// supplied field differs or the update also changed content (a sync
-    /// repair's re-pin), a no-op that writes nothing when it restates the
-    /// stored row; the response says which under `anchors_changed`.
+    /// refuses `INVALID_ANCHOR`. A row's identity is (artifact, grain,
+    /// class, span): a row naming a stored identity replaces it, on
+    /// folder and git-branch mems alike, rewritten hash-less for the next
+    /// verify to backfill when any supplied field differs or the update
+    /// also changed content (a sync repair's re-pin), a no-op that writes
+    /// nothing when it restates the stored row; the response says which
+    /// under `anchors_changed`. The span is part of the identity, so a
+    /// row quoting a NEW span on the same (artifact, grain, class) is a
+    /// second row beside the old one, never its replacement; to move a
+    /// span, `--anchor-unset` the old span and `--anchor` the new one in
+    /// the same update.
     /// An update carrying only `--anchor` (no
     /// section/metadata change) still commits the sidecar. Conflicts with
     /// `--from` (the file's `anchors[]` is authoritative there).

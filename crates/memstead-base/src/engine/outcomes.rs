@@ -189,8 +189,8 @@ pub struct UpdateEntityArgs {
     /// non-empty, **merged** into the entity's row in the mem-branch
     /// anchors sidecar in the SAME commit as the update so entity +
     /// anchors land atomically: an incoming anchor replaces the existing
-    /// anchor with the same `(artifact, grain, class)` triple and appends
-    /// otherwise — writing never removes an anchor this call did not name
+    /// anchor with the same `(artifact, grain, class, span)` identity and
+    /// appends otherwise — writing never removes an anchor this call did not name
     /// in [`Self::anchors_unset`]. Empty (the default) merges nothing and
     /// leaves the stored set untouched. A malformed element refuses the
     /// whole update with [`EngineError::InvalidAnchor`] (`INVALID_ANCHOR`)

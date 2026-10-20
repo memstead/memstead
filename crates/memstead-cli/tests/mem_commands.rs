@@ -2833,6 +2833,138 @@ fn verify_anchors_observations_adjudicate_and_age_url_rows() {
     assert_eq!(state_of(&v, "https://w.test/never"), "unobserved");
 }
 
+/// `observed_at`: the time a check was MADE, stated by the caller,
+/// stored beside the engine's write time `ts`. The single form takes
+/// `--observed-at`, the batch file an `observed_at` key per entry;
+/// both echo it, the ledger line carries it, the health checks axis
+/// serves it on the row, and a line recorded without it stays byte-free
+/// of the key. An unreadable shape or a future instant refuses
+/// `INVALID_INPUT` (the batch as a whole, naming the entry) with nothing
+/// appended.
+#[test]
+fn check_observed_at_is_stored_beside_the_write_time() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_anchor_workspace(root);
+    let ledger = root.join(".memstead/state/checks/checks.jsonl");
+    let lines = || {
+        fs::read_to_string(&ledger)
+            .map(|t| t.lines().count())
+            .unwrap_or(0)
+    };
+
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "check",
+            "hold--holder",
+            "--verdict",
+            "ok",
+            "--kind",
+            "x-review",
+            "--observed-at",
+            "2026-10-19T08:00:00Z",
+            "--identity",
+            "checker-one",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["observed_at"], 1_792_396_800, "{v}");
+    assert!(v["ts"].as_u64().unwrap() > 1_792_396_800, "{v}");
+    assert_eq!(lines(), 1);
+    assert!(
+        fs::read_to_string(&ledger)
+            .unwrap()
+            .contains("\"observed_at\":1792396800"),
+        "the ledger line carries the stated time"
+    );
+
+    // Batch: a dated entry beside an undated one.
+    fs::write(
+        root.join("b.json"),
+        r#"{"checks":[{"id":"hold--holder","verdict":"ok","kind":"x-answer","observed_at":"2026-10-18"},{"id":"hold--holder","verdict":"ok","kind":"x-question"}]}"#,
+    )
+    .unwrap();
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "check",
+            "--from",
+            "b.json",
+            "--identity",
+            "checker-one",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["checks"][0]["observed_at"], 1_792_281_600, "{v}");
+    assert!(v["checks"][1]["observed_at"].is_null(), "{v}");
+    assert_eq!(lines(), 3);
+    let raw = fs::read_to_string(&ledger).unwrap();
+    assert!(
+        !raw.lines().nth(2).unwrap().contains("observed_at"),
+        "an undated line carries no key: {raw}"
+    );
+
+    // Refusals: unreadable shape (single form), future instant (batch),
+    // nothing appended either way.
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "check",
+            "hold--holder",
+            "--verdict",
+            "ok",
+            "--observed-at",
+            "19.10.2026",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let e: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(e["code"], "INVALID_INPUT", "{e}");
+    assert!(e["message"].as_str().unwrap().contains("ISO-8601"), "{e}");
+    fs::write(
+        root.join("future.json"),
+        r#"{"checks":[{"id":"hold--holder","verdict":"ok","observed_at":"2999-01-01"}]}"#,
+    )
+    .unwrap();
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "check", "--from", "future.json"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let e: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(e["code"], "BATCH_REFUSED", "{e}");
+    assert_eq!(
+        e["details"]["failed_entries"][0]["errors"][0]["code"], "INVALID_INPUT",
+        "{e}"
+    );
+    assert!(
+        e["details"]["failed_entries"][0]["errors"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("future"),
+        "{e}"
+    );
+    assert_eq!(lines(), 3, "nothing appended on refusal");
+}
+
 /// Check findings and open kinds (evidence-engine plan 5): a batch entry
 /// with a `finding` persists it on the ledger line, the health checks
 /// axis renders it under the entity's latest verdict, an `x-` kind is
@@ -4322,7 +4454,7 @@ fn export_json_include_anchors_rides_the_envelope() {
         .clone();
     let e = String::from_utf8_lossy(&refused.stderr).to_string();
     assert!(e.contains("unknown --include key"), "{e}");
-    assert!(e.contains("anchors"), "{e}");
+    assert!(e.contains("anchors, provenance"), "{e}");
 
     // Non-json formats refuse --include.
     memstead()
@@ -4330,6 +4462,95 @@ fn export_json_include_anchors_rides_the_envelope() {
         .args(["export", "--format", "llms-txt", "--include", "anchors"])
         .assert()
         .failure();
+}
+
+/// `--include provenance` on the JSON export: each envelope gains the
+/// block `entity --provenance` serves, so a page rendered from one
+/// export can tell the author's rows (`created_by.identity`) from the
+/// checker's (the check rows' `identity`) without one entity read per
+/// entity; the handle is the ledger's string, verbatim on both. Both
+/// include keys compose, and without the key the envelope carries no
+/// `provenance` member.
+#[test]
+fn export_json_include_provenance_names_the_creating_identity() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let m = |args: &[&str]| {
+        memstead()
+            .current_dir(root)
+            .env("MEMSTEAD_OPERATOR_MODE", "1")
+            .args(args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone()
+    };
+    m(&["mem-repo", "init", "."]);
+    m(&["mem", "init", "lib", "--no-gitignore"]);
+    m(&[
+        "create",
+        "--mem",
+        "lib",
+        "--identity",
+        "author-a",
+        "--role",
+        "author",
+        "--title",
+        "Sample",
+        "--type",
+        "spec",
+        "--section",
+        "identity=A sample.",
+        "--section",
+        "purpose=Provenance export.",
+    ]);
+    m(&[
+        "check",
+        "lib--sample",
+        "--verdict",
+        "ok",
+        "--identity",
+        "checker-b",
+        "--role",
+        "checker",
+    ]);
+
+    let out = m(&[
+        "export",
+        "--format",
+        "json",
+        "--include",
+        "provenance,anchors",
+    ]);
+    let doc: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let entity = &doc["mems"]["lib"]["entities"][0];
+    assert_eq!(entity["id"], "lib--sample", "{entity}");
+    let prov = &entity["provenance"];
+    assert_eq!(prov["created_by"]["identity"], "author-a", "{prov}");
+    assert_eq!(prov["created_by"]["role"], "author", "{prov}");
+    assert_eq!(prov["created_by"]["verb"], "create", "{prov}");
+    assert!(
+        prov["created_by"]["timestamp"].as_i64().unwrap() > 0,
+        "{prov}"
+    );
+    assert_eq!(prov["last_modified_by"]["identity"], "author-a", "{prov}");
+    assert!(
+        prov.get("story_truncated").is_none_or(|v| v == false),
+        "the story starts at the creation: {prov}"
+    );
+    assert_eq!(prov["check_state"], "checked_ok", "{prov}");
+    assert_eq!(prov["last_check"]["identity"], "checker-b", "{prov}");
+    assert!(entity["anchors"].is_array(), "both keys compose: {entity}");
+
+    let plain = m(&["export", "--format", "json"]);
+    let plain_doc: serde_json::Value = serde_json::from_slice(&plain).unwrap();
+    assert!(
+        plain_doc["mems"]["lib"]["entities"][0]
+            .get("provenance")
+            .is_none(),
+        "no provenance key without the include"
+    );
 }
 
 /// Repeated `--patch` flags for ONE section apply in order (the old

@@ -815,6 +815,7 @@ impl McpServer {
             &kind,
             p.method.as_deref(),
             finding,
+            p.observed_at.as_deref(),
             Actor::Agent,
             client.as_ref(),
         ) {
@@ -840,6 +841,7 @@ impl McpServer {
                     "role": record.role,
                     "identity": record.identity,
                     "ts": record.ts,
+                    "observed_at": record.observed_at,
                     "method": record.method,
                     "finding": record.finding,
                 });

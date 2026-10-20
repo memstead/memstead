@@ -529,6 +529,7 @@ pub fn health_checks_axis(
                         "verdict": rec.verdict,
                         "kind": rec.kind.as_deref().unwrap_or("verification"),
                         "ts": rec.ts,
+                        "observed_at": rec.observed_at,
                         "identity": rec.identity,
                         // The trust class of the prose on this row: the
                         // message is whatever agent recorded the check
@@ -561,6 +562,7 @@ pub fn health_checks_axis(
                         );
                         serde_json::json!({
                             "ts": rec.ts,
+                            "observed_at": rec.observed_at,
                             "identity": rec.identity,
                             "verdict": rec.verdict,
                             "reading": reading,
@@ -2360,11 +2362,28 @@ pub fn collect_constraint_findings(
                 .0
                 .extend(violations);
         }
+    }
 
-        // Pass 2 — this entity as a taint source: it holds a declared
-        // terminal value, so sweep its dependents. The taint walks
-        // the declared relation set's union subgraph — a single
-        // `rel_type` is a one-element set.
+    // Pass 2 — every entity as a taint source, whatever mem it lives
+    // in: it holds a declared terminal value, so sweep its dependents.
+    // The taint walks the declared relation set's union subgraph (a
+    // single `rel_type` is a one-element set) and crosses mem
+    // boundaries like any walk here; the mem filter narrows which
+    // TAINTED entities are reported, never which sources are swept.
+    // Folded into the per-entity loop above, the filter skipped a
+    // source in another mem before its dependents in the filtered mem
+    // were ever computed, so a mem resting on a fallen card elsewhere
+    // read clean under `--mem` and tainted without it.
+    for entity in store.all_entities() {
+        if entity.stub {
+            continue;
+        }
+        let Some(mem_schema) = mem_schemas.get(entity.mem.as_str()) else {
+            continue;
+        };
+        let Some(td) = mem_schema.types.get(entity.entity_type.as_str()) else {
+            continue;
+        };
         for c in &td.constraints {
             let ConstraintDef::StatusPropagation {
                 field,

@@ -1831,6 +1831,94 @@ fn must_reach_cross_mem_path_and_mem_filter() {
     assert_eq!(filtered[0].id, floating_arg.id);
 }
 
+/// The taint crosses the mem boundary like any walk, and the mem
+/// filter narrows the TAINTED entities reported, not the sources
+/// swept: a derivation in `library/b` resting on a fallen anchor in
+/// `library/a` is listed under `--mem library/b` with `tainted_by`
+/// naming the foreign anchor. Before, the filter skipped the source
+/// before its dependents were computed, so b read clean under the
+/// filter and tainted without it.
+#[test]
+fn status_propagation_crosses_the_mem_boundary_under_a_mem_filter() {
+    use crate::entity::MetadataValue;
+    let manifest = r#"name: tests-prop-cross
+version: 0.1.0
+description: propagation cross-mem test schema
+when_to_use: tests
+types:
+  - claim
+relationships:
+  mode: strict
+  definitions:
+    - name: GROUNDS
+      description: g
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+    let claim_yaml = "name: claim\ndescription: t\nwhen_to_use: Here\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: standing\n    description: dialectical standing\n    field_type: string\n    enum_values: [active, withdrawn]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - standing\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nconstraints:\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    rel_type: GROUNDS\n    direction: incoming\n";
+    let schema = std::sync::Arc::new(
+        memstead_schema::load_schema_from_memory(
+            manifest,
+            &[("claim".to_string(), claim_yaml.to_string())],
+        )
+        .expect("propagation cross-mem fixture schema must parse"),
+    );
+
+    let mut store = Store::new();
+    let mut anchor = make_typed_entity("library/a", "anchor", "claim");
+    anchor
+        .metadata
+        .insert("standing".into(), MetadataValue::String("withdrawn".into()));
+    let mut local = make_typed_entity("library/a", "local-derivation", "claim");
+    link(&mut local, "GROUNDS", &anchor.id);
+    let mut foreign = make_typed_entity("library/b", "foreign-derivation", "claim");
+    link(&mut foreign, "GROUNDS", &anchor.id);
+    let bystander = make_typed_entity("library/b", "bystander", "claim");
+    for e in [anchor.clone(), local.clone(), foreign.clone(), bystander] {
+        store.upsert(e.id.clone(), e);
+    }
+    let mut mem_schemas = HashMap::new();
+    mem_schemas.insert("library/a".to_string(), schema.clone());
+    mem_schemas.insert("library/b".to_string(), schema);
+
+    let all = collect_constraint_findings(&store, None, &mem_schemas, None);
+    let ids: Vec<&str> = all.iter().map(|r| r.id.0.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![local.id.0.as_str(), foreign.id.0.as_str()],
+        "both derivations are tainted without a filter: {all:?}"
+    );
+
+    let b_only = collect_constraint_findings(&store, Some("library/b"), &mem_schemas, None);
+    assert_eq!(
+        b_only.len(),
+        1,
+        "the filtered mem lists its tainted derivation: {b_only:?}"
+    );
+    assert_eq!(b_only[0].id, foreign.id);
+    let UnsatisfiedConstraint::StatusPropagation { tainted_by, .. } = &b_only[0].violations[0]
+    else {
+        panic!("expected status_propagation finding");
+    };
+    assert_eq!(tainted_by, "library/a--anchor", "names the foreign anchor");
+
+    let a_only = collect_constraint_findings(&store, Some("library/a"), &mem_schemas, None);
+    let a_ids: Vec<&str> = a_only.iter().map(|r| r.id.0.as_str()).collect();
+    assert_eq!(
+        a_ids,
+        vec![local.id.0.as_str()],
+        "a lists only its own: {a_only:?}"
+    );
+}
+
 // ----------------------------------------------------------------------
 // transition_requires_checks (form 6)
 // ----------------------------------------------------------------------

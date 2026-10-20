@@ -66,6 +66,49 @@ pub fn pinned_days_since_epoch(s: &str) -> Option<u64> {
     u64::try_from(days_from_civil(y, m, d)).ok()
 }
 
+/// An ISO-8601 UTC instant (`YYYY-MM-DDTHH:MM:SSZ`) or a bare civil date
+/// (`YYYY-MM-DD`, read as midnight UTC) to Unix epoch seconds; `None`
+/// for any other spelling or an impossible date. The shape every
+/// caller-supplied time on the engine's surfaces takes (the anchors
+/// observations' `observed_at`, the check record's `observed_at`).
+pub fn parse_iso_utc_seconds(s: &str) -> Option<u64> {
+    let (date, time) = match s.len() {
+        10 => (s, None),
+        20 if s.as_bytes()[10] == b'T' && s.as_bytes()[19] == b'Z' => (&s[..10], Some(&s[11..19])),
+        _ => return None,
+    };
+    let (y, m, d) = parse_ymd(date)?;
+    let last_day = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        _ => {
+            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+                29
+            } else {
+                28
+            }
+        }
+    };
+    if d > last_day {
+        return None;
+    }
+    let days = u64::try_from(days_from_civil(y, m, d)).ok()?;
+    let secs = match time {
+        None => 0,
+        Some(t) => {
+            let mut it = t.split(':');
+            let hh: u64 = it.next()?.parse().ok()?;
+            let mm: u64 = it.next()?.parse().ok()?;
+            let ss: u64 = it.next()?.parse().ok()?;
+            if it.next().is_some() || hh > 23 || mm > 59 || ss > 60 {
+                return None;
+            }
+            hh * 3600 + mm * 60 + ss
+        }
+    };
+    Some(days * 86_400 + secs)
+}
+
 fn parse_ymd(s: &str) -> Option<(i64, u32, u32)> {
     let mut it = s.splitn(3, '-');
     let y: i64 = it.next()?.parse().ok()?;
@@ -658,6 +701,34 @@ mod tests {
             .unwrap();
         assert!(!own_only.contains("foreign--fremd-frist"), "{own_only}");
         assert!(own_only.contains("own--wartung"), "{own_only}");
+    }
+
+    /// The ISO instant parser: a civil date is midnight UTC, an instant
+    /// carries its clock, and every other shape or impossible date is
+    /// `None` (checked against values computed independently).
+    #[test]
+    fn iso_utc_seconds_parse_exactly_the_two_shapes() {
+        assert_eq!(parse_iso_utc_seconds("2026-10-20"), Some(1_792_454_400));
+        assert_eq!(
+            parse_iso_utc_seconds("2026-10-20T13:45:30Z"),
+            Some(1_792_503_930)
+        );
+        assert_eq!(parse_iso_utc_seconds("2024-02-29"), Some(1_709_164_800));
+        assert_eq!(parse_iso_utc_seconds("1970-01-01T00:00:00Z"), Some(0));
+        for bad in [
+            "",
+            "2026-10-20T13:45:30",
+            "2026-10-20 13:45:30Z",
+            "2026-10-20T13:45:30.000Z",
+            "2026-13-01",
+            "2026-02-30",
+            "2023-02-29",
+            "2026-10-20T24:00:00Z",
+            "1792454400",
+            "yesterday",
+        ] {
+            assert_eq!(parse_iso_utc_seconds(bad), None, "{bad:?} must not parse");
+        }
     }
 
     /// Window parsing and calendar arithmetic.

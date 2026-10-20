@@ -55,9 +55,11 @@ impl Engine {
     /// the same mem that pointed at the old id (via an explicit
     /// relation or an inline body wiki-link) gets the same two-
     /// surface rewrite. All rewrites land in one per-mem commit.
-    /// Cross-mem referrers and ReadOnly-mount referrers are not
-    /// yet walked — those land with the multi-mem atomicity
-    /// machinery and the residual-stub demotion path respectively.
+    /// Cross-mem referrers in other Write mounts get the same
+    /// rewrite (colon-form body links and relationship rows), each
+    /// peer mem in its own commit pinned to the parent the scan saw,
+    /// gated by the cross-mem link policy; a ReadOnly-mount referrer
+    /// is left as it is and reported as a residual stub.
     pub fn rename_entity(
         &mut self,
         args: RenameEntityArgs,

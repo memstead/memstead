@@ -98,6 +98,10 @@ pub fn is_engine_code_shape(code: &str) -> bool {
 pub struct Acknowledgement {
     /// Unix epoch seconds of the record.
     pub ts: u64,
+    /// When the check was made, as the caller stated it; absent when
+    /// nobody did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<u64>,
     /// The caller-declared identity, when one was declared.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<String>,
@@ -115,6 +119,7 @@ impl Acknowledgement {
     fn from_record(r: &CheckRecord) -> Self {
         Self {
             ts: r.ts,
+            observed_at: r.observed_at,
             identity: r.identity.clone(),
             actor: r.actor.clone(),
             role: r.role.clone(),
@@ -451,6 +456,7 @@ mod tests {
     fn record(entity: &str, verdict: &str, code: &str, ts: u64) -> CheckRecord {
         CheckRecord {
             ts,
+            observed_at: None,
             entity: entity.to_string(),
             verdict: verdict.to_string(),
             method: Some("owner: the work-down lane; plan: repairs".to_string()),

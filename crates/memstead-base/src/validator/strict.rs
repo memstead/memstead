@@ -34,7 +34,7 @@ pub fn validate_strict(
     check_unknown_sections(body, schema, path)?;
     check_relationships_syntax(body, path)?;
     check_relationship_types(entity, path)?;
-    check_wiki_links(body, path)?;
+    check_wiki_links(body, &entity.mem, path)?;
 
     Ok(())
 }
@@ -326,7 +326,7 @@ fn rel_type_regex() -> &'static Regex {
 /// to display a literal backtick) are one span to the parser, where a
 /// single-backtick regex would slice into the middle of one and leave
 /// stray `` ` `` / `[[` remnants that then fool the bracket checker.
-fn check_wiki_links(body: &str, path: &str) -> Result<(), ValidationError> {
+fn check_wiki_links(body: &str, current_mem: &str, path: &str) -> Result<(), ValidationError> {
     let masked = crate::markdown::mask_code_blocks_and_spans(body);
 
     check_bracket_balance(&masked, path)?;
@@ -366,11 +366,15 @@ fn check_wiki_links(body: &str, path: &str) -> Result<(), ValidationError> {
         }
 
         // Delegate the slug / mem grammar checks to the shared
-        // strict resolver. The validator passes an empty current
-        // mem — the strict resolver's self-prefix-strip step is
-        // skipped (it's a Tier-1 convenience; the grammar gate fires
-        // before it), so the grammar outcome is mem-independent.
-        if let Err(e) = wiki_link_to_id(inner, "") {
+        // strict resolver, under the entity's own mem. The grammar
+        // outcome is NOT mem-independent: the resolver strips a
+        // redundant `<current-mem>--` self-prefix before its
+        // ambiguity check, so `[[alpha/beta--x]]` inside mem
+        // `alpha/beta` is the same-mem slug `x` on the create path,
+        // and it must read the same here or push refuses what create
+        // committed (LOCAL_INVALID_STATE on a link the writer never
+        // saw refused).
+        if let Err(e) = wiki_link_to_id(inner, current_mem) {
             return Err(ValidationError::InvalidWikiLink {
                 path: path.to_string(),
                 link: format!("[[{inner}]]"),
@@ -600,6 +604,40 @@ Design notes.
         let content = format!("{MINIMAL_SPEC}\nSee [[external/engine:health]] for details.\n");
         let entity = parse(&content);
         validate(&content, &entity).unwrap();
+    }
+
+    /// The create path strips a redundant `<mem>--` self-prefix
+    /// before the `/`-plus-`--` ambiguity check, so inside the
+    /// hierarchical mem `alpha/beta` the link `[[alpha/beta--x]]` is
+    /// the same-mem slug `x`. The strict validator runs under the
+    /// entity's mem and reads it the same way; before, it passed an
+    /// empty mem, refused the link as ambiguous, and `push` rejected
+    /// an entity `create` had committed.
+    #[test]
+    fn accepts_hierarchical_self_prefixed_dash_link_under_own_mem() {
+        let content = format!("{MINIMAL_SPEC}\nSee [[alpha/beta--x]] for details.\n");
+        let entity = parse_markdown(&content, "test.md", &spec_type(), "alpha/beta")
+            .unwrap()
+            .entity;
+        validate(&content, &entity).unwrap();
+    }
+
+    /// The same dashed link from another mem stays ambiguous (a
+    /// cross-mem reference into a hierarchical mem must take the
+    /// colon form), so the refusal and its recovery hint are kept.
+    #[test]
+    fn rejects_hierarchical_dash_link_into_a_foreign_mem() {
+        let content = format!("{MINIMAL_SPEC}\nSee [[alpha/beta--x]] for details.\n");
+        let entity = parse_markdown(&content, "test.md", &spec_type(), "gamma")
+            .unwrap()
+            .entity;
+        let err = validate(&content, &entity).unwrap_err();
+        match err {
+            ValidationError::InvalidWikiLink { reason, .. } => {
+                assert!(reason.contains("[[alpha/beta:x]]"), "reason={reason}");
+            }
+            other => panic!("expected InvalidWikiLink, got {other:?}"),
+        }
     }
 
     #[test]

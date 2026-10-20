@@ -1114,6 +1114,12 @@ fn canonical_span_form_folds_exactly_the_listed_noise() {
             "final flow off efficient ffl",
             "ligatures",
         ),
+        // A space directly inside a bracket pair is typesetting, not words.
+        (
+            "( value ) and [ x ] and { y }",
+            "(value) and [x] and {y}",
+            "bracket spacing",
+        ),
         // The ends are trimmed.
         ("  padded  ", "padded", "trim"),
     ];
@@ -1133,6 +1139,50 @@ fn canonical_span_form_folds_exactly_the_listed_noise() {
             "{what}: one hash for both forms"
         );
     }
+}
+
+/// A hyphen at a line end is ambiguous (a split word or a compound word
+/// broken there), and the TEXT side answers it: the span is looked for in
+/// the joined form and in the form that keeps the hyphen, so `generated`
+/// is found in `gener-\nated` and `statement-level` in
+/// `statement-\nlevel`, while the span's own canonical form and hash stay
+/// a function of the span alone. A text with no hyphen at a line end has
+/// one form.
+#[test]
+fn a_compound_word_broken_at_a_line_end_is_found_with_its_hyphen() {
+    let text = "the statement-\nlevel share was gener-\n    ated (see\nbelow)";
+    assert_eq!(
+        canonical_text_forms(text),
+        vec![
+            "the statementlevel share was generated (see below)".to_string(),
+            "the statement-level share was gener-ated (see below)".to_string(),
+        ]
+    );
+    assert!(
+        span_occurs("statement-level share", text),
+        "compound, hyphen kept"
+    );
+    assert!(span_occurs("was generated", text), "split word, rejoined");
+    assert!(
+        span_occurs("statement-\nlevel share", text),
+        "a verbatim copy of the broken text is found too"
+    );
+    assert!(
+        !span_occurs("statement level share", text),
+        "a space is not a hyphen"
+    );
+    assert_eq!(
+        span_hash("statement-\nlevel"),
+        span_hash("statementlevel"),
+        "the span's hash is a function of the span alone"
+    );
+    assert_eq!(
+        canonical_text_forms("no break here"),
+        vec!["no break here".to_string()]
+    );
+    // The bracket fold reaches the observation path through the same
+    // function: typeset `( value)` matches the words `(value)`.
+    assert!(span_occurs("(value) and more", "( value) and more"));
 }
 
 /// Beyond the canonical form the match is exact: each alteration reads

@@ -1455,6 +1455,7 @@ fn nested_mem_export_rekeys_fresh_sealed_checks_to_the_archived_bytes() {
                 &RecordKind::Engine(CheckKind::Verification),
                 None,
                 None,
+                None,
                 actor,
                 Some(&client),
             )
@@ -1465,6 +1466,7 @@ fn nested_mem_export_rekeys_fresh_sealed_checks_to_the_archived_bytes() {
     crate::check::CheckLedger::for_workspace(tmp.path())
         .record(&crate::check::CheckRecord {
             ts: 1,
+            observed_at: None,
             entity: "planning/plan-x--alpha".to_string(),
             verdict: "ok".to_string(),
             method: None,
@@ -1574,6 +1576,7 @@ fn check_as(
             &kind,
             method,
             None,
+            None,
             actor,
             Some(&client),
         )
@@ -1674,6 +1677,7 @@ fn export_seals_latest_check_per_entity_and_kind() {
     crate::check::CheckLedger::for_workspace(tmp.path())
         .record(&crate::check::CheckRecord {
             ts: 1,
+            observed_at: None,
             entity: "other--thing".to_string(),
             verdict: "ok".to_string(),
             method: None,
@@ -1771,6 +1775,7 @@ fn export_without_a_qualifying_record_embeds_no_checks_member() {
     crate::check::CheckLedger::for_workspace(tmp.path())
         .record(&crate::check::CheckRecord {
             ts: 1,
+            observed_at: None,
             entity: "other--thing".to_string(),
             verdict: "ok".to_string(),
             method: None,
@@ -2262,6 +2267,7 @@ fn archive_mount_never_reads_the_workspace_ledger() {
     crate::check::CheckLedger::for_workspace(ws.path())
         .record(&crate::check::CheckRecord {
             ts: 1,
+            observed_at: None,
             entity: "specs--alpha".to_string(),
             verdict: "ok".to_string(),
             method: None,

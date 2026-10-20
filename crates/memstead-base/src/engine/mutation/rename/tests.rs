@@ -589,31 +589,136 @@ fn rename_entity_rewrites_same_mem_referrers_atomically() {
 /// mem directories, and the actor/client tuple. The test then
 /// seeds whatever entities it needs.
 fn engine_with_two_mems_and_bidirectional_policy(specs_dir: PathBuf, memos_dir: PathBuf) -> Engine {
+    engine_with_two_named_mems_and_bidirectional_policy("specs", specs_dir, "memos", memos_dir)
+}
+
+/// The same scaffolding with the mem names supplied, so a test can
+/// mount hierarchical names (`library/a`) beside flat ones.
+fn engine_with_two_named_mems_and_bidirectional_policy(
+    first: &str,
+    first_dir: PathBuf,
+    second: &str,
+    second_dir: PathBuf,
+) -> Engine {
     use memstead_schema::workspace_config::CrossLinkValue;
-    let writer_specs = FilesystemBackend::new(specs_dir.clone());
-    let writer_memos = FilesystemBackend::new(memos_dir.clone());
+    let writer_first = FilesystemBackend::new(first_dir.clone());
+    let writer_second = FilesystemBackend::new(second_dir.clone());
     let mut engine = Engine::from_mounts(vec![
         (
-            folder_mount("specs", specs_dir),
-            Box::new(writer_specs) as Box<dyn MemBackend>,
+            folder_mount(first, first_dir),
+            Box::new(writer_first) as Box<dyn MemBackend>,
         ),
         (
-            folder_mount("memos", memos_dir),
-            Box::new(writer_memos) as Box<dyn MemBackend>,
+            folder_mount(second, second_dir),
+            Box::new(writer_second) as Box<dyn MemBackend>,
         ),
     ])
     .unwrap();
     let mut settings = crate::workspace::WorkspaceSettings::default();
     settings.cross_mem_links.insert(
-        "memos".to_string(),
-        CrossLinkValue::List(vec!["specs".to_string()]),
+        second.to_string(),
+        CrossLinkValue::List(vec![first.to_string()]),
     );
     settings.cross_mem_links.insert(
-        "specs".to_string(),
-        CrossLinkValue::List(vec!["memos".to_string()]),
+        first.to_string(),
+        CrossLinkValue::List(vec![second.to_string()]),
     );
     engine.set_settings(settings);
     engine
+}
+
+/// Hierarchical mem names: the referrer in `library/b` links the
+/// target in `library/a` in the colon form (the only unambiguous
+/// spelling into a hierarchical mem). The rename rewrites that body
+/// link beside the relationship row. Before, the cross-mem rewriter
+/// refused any mem half containing `/`, so the row moved to the new
+/// id while the body kept the old slug, and the referrer's mem read
+/// `DANGLING_LINK_TARGET_MISSING` until someone edited it by hand.
+#[test]
+fn rename_entity_rewrites_cross_mem_referrer_in_hierarchical_mems() {
+    use crate::engine::CreateEntityArgs;
+    use crate::entity::EntityId;
+    use indexmap::IndexMap;
+
+    let tmp_a = TempDir::new().unwrap();
+    let tmp_b = TempDir::new().unwrap();
+    let a_dir = tmp_a.path().to_path_buf();
+    let b_dir = tmp_b.path().to_path_buf();
+    let mut engine = engine_with_two_named_mems_and_bidirectional_policy(
+        "library/a",
+        a_dir.clone(),
+        "library/b",
+        b_dir.clone(),
+    );
+    let (actor, client) = cli_actor();
+
+    let target = engine
+        .create_entity(
+            empty_create_args("library/a", "Target Spec"),
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    assert_eq!(target.id.to_string(), "library/a--target-spec");
+
+    let mut sections: IndexMap<String, String> = IndexMap::new();
+    sections.insert("claim".to_string(), "the claim".to_string());
+    sections.insert(
+        "context".to_string(),
+        "discussion stems from [[library/a:target-spec]]".to_string(),
+    );
+    let referrer = engine
+        .create_entity(
+            CreateEntityArgs {
+                anchors: Vec::new(),
+                mem: "library/b".to_string(),
+                title: "Cross Note".to_string(),
+                entity_type: "memo".to_string(),
+                sections,
+                metadata: IndexMap::new(),
+                relations: Vec::new(),
+                dry_run: false,
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+
+    let renamed = engine
+        .rename_entity(
+            RenameEntityArgs {
+                id: target.id.clone(),
+                expected_hash: Some(target.content_hash.clone()),
+                new_title: "Renamed Spec".to_string(),
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    assert_eq!(renamed.new_id.to_string(), "library/a--renamed-spec");
+
+    let referrer_bytes = std::fs::read_to_string(b_dir.join(&referrer.file_path)).unwrap();
+    assert!(
+        referrer_bytes.contains("[[library/a:renamed-spec]]"),
+        "expected colon-form rewrite in referrer body, got:\n{referrer_bytes}"
+    );
+    assert!(
+        !referrer_bytes.contains("target-spec"),
+        "old slug must not survive in referrer file, got:\n{referrer_bytes}"
+    );
+    let in_mem = engine.get_entity(&referrer.id).unwrap();
+    assert!(
+        in_mem
+            .relationships
+            .iter()
+            .any(|r| r.rel_type == "REFERENCES"
+                && r.target == EntityId::new("library/a", "renamed-spec")),
+        "expected cross-mem relation to point at renamed-spec, got {:?}",
+        in_mem.relationships
+    );
 }
 
 #[test]

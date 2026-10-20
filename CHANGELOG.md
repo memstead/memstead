@@ -7,8 +7,93 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **A check record carries the time the check was made, beside the time
+  it was written.** `memstead check` takes `--observed-at <ISO-8601>`, a
+  `--from` batch entry takes an `observed_at` key, and the MCP
+  `memstead_check` tool takes an `observed_at` parameter: an ISO-8601 UTC
+  instant (`YYYY-MM-DDTHH:MM:SSZ`) or a civil date (`YYYY-MM-DD`, midnight
+  UTC). The record stores it as `observed_at` (Unix epoch seconds) beside
+  the engine's own write time `ts`, which stays the engine's clock and is
+  never caller-supplied; the check reply, the batch reply, the health
+  checks axis rows and findings, the strict acknowledgements and the
+  sealed `.memstead/checks.json` carry it, and the rename and transition
+  carries keep it as they keep every field of the original act. A line
+  recorded without it carries no key, so existing ledgers parse unchanged.
+  A shape the parser does not read, or an instant more than five minutes
+  ahead of the engine's clock, refuses `INVALID_INPUT` (a batch as a
+  whole, naming the entry; nothing appended). Informational by design:
+  which record is the newest of its kind is still decided by ledger
+  order, and a reader ordering checks by time takes `observed_at` where
+  present and `ts` otherwise. Before, a recorder transcribing checks made
+  earlier, or out of order, could only state when it wrote them, so a
+  check that answered another read as older than the question.
+- **`memstead export --format json --include provenance` names who
+  created and last touched each entity.** Beside `anchors`, the `--include`
+  key `provenance` adds to every entity envelope the block `memstead
+  entity <id> --provenance` serves: `created_by` and `last_modified_by`
+  (actor, client, role, identity, timestamp, reference, verb),
+  `story_truncated` where the recorded story does not start at the
+  creation, and the check states; a seam with no history states
+  `unavailable` for that entity and never fails the export. The identity
+  handle is the ledger's string, verbatim, the same the check rows carry,
+  so one export tells an author's rows from a checker's. The `.mem`
+  archive is unchanged: its provenance member stays the current
+  rationale per entity, and its sealed independence reading already
+  answers author-versus-checker without carrying identities.
+
 ### Fixed
 
+- **A mem resting on a fallen anchor in another mem sees it fall under
+  `--mem`.** The `status_propagation` taint walk crosses mem boundaries
+  like every walk in the constraints axis, but `health --mem <b>
+  --include constraints` applied the filter before the taint sources were
+  swept, so a source in mem `a` was skipped and its dependents in `b`
+  were never computed: `b` read clean under the filter and tainted
+  without it. The sources are now swept across every mem and the filter
+  narrows only the tainted entities reported, with `tainted_by` naming
+  the foreign source's full id.
+- **`memstead rename` rewrites a colon-form link into a hierarchical
+  mem.** The cross-mem rewriter refused any mem half containing `/`,
+  while the parser accepts `[[library/a:slug]]` (the one unambiguous
+  spelling into a hierarchical mem), so a rename found the referrer in
+  `library/b`, moved its relationship row to the new id and left its body
+  link at the old slug, which `health --strict` on `b` then reported as
+  `DANGLING_LINK_TARGET_MISSING` until someone edited it by hand. Flat
+  mem names were never affected. The dash form into a hierarchical mem
+  stays out of the rewriter, as it stays out of the resolver.
+- **`memstead push` accepts the self-prefixed link `create` committed in
+  a hierarchical mem.** Inside mem `alpha/beta`, `create` reads
+  `[[alpha/beta--x]]` as the same-mem slug `x` (the resolver strips the
+  redundant self-prefix before its ambiguity check), but the strict
+  validator that `push`, `pull` and `fork` run passed an empty mem name,
+  skipped that strip, and refused the link as ambiguous:
+  `LOCAL_INVALID_STATE` before the remote was contacted, on an entity the
+  writer never saw refused. The validator now runs under the entity's own
+  mem; a dashed link into a foreign hierarchical mem still refuses with
+  the colon form as the recovery hint.
+- **The anchor help names the span in a row's identity.** A stored row is
+  `(artifact, grain, class, span)`, as the merge, the no-op check, the
+  duplicate refusal and the unset selector have treated it; the CLI
+  `--anchor` help, the MCP `memstead_create` / `memstead_update`
+  descriptions and the server instructions still said "triple", so a
+  re-pin with a new span read as a replacement that never happened. The
+  texts now say: a new span on a stored artifact is a second row, and
+  moving a span is `--anchor-unset` (or `anchors_unset`) naming the old
+  span plus the new row in the same update. The MCP `anchors_unset`
+  description also names `span` as a selector field, as the CLI's did.
+- **A compound word broken at a line end can be quoted as a span, and a
+  typeset space inside brackets does not block one.** The canonical span
+  form removed every hyphen at a line end, so `statement-\nlevel` read
+  `statementlevel` and the span `statement-level` matched nothing. The
+  span's canonical form (and so its hash) stays a function of the span
+  alone; the observed TEXT is now taken in two forms, the joined one and
+  one that keeps the hyphen, and a span occurs when it occurs in either,
+  so `generated` still matches `gener-\nated` and `statement-level` now
+  matches `statement-\nlevel`. Both forms also drop a space directly
+  after an opening bracket or before a closing one (`( value)` reads
+  `(value)`). Ligatures (ﬀ ﬁ ﬂ ﬃ ﬄ ﬅ ﬆ) were already folded since 0.21.0.
 - **`memstead-mcp` declares the rmcp version it needs.** The server uses
   `ServerConfig`, which rmcp 3.5 introduced, while the manifest still
   accepted 3.1; a build that resolved an older rmcp failed to compile. The
