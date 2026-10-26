@@ -195,6 +195,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Conflicts(args) => commands::conflicts::run(&ctx, args),
         Command::Changes(args) => commands::changes::run(&ctx, args),
         Command::Check(args) => commands::check::run(&ctx, args),
+        Command::Checks(args) => commands::check::run_list(&ctx, args),
         Command::ReviewMark(args) => commands::review_mark::run(&ctx, args),
         Command::Reload(args) => commands::reload::run(&ctx, args),
         Command::Fetch(args) => commands::transport::run_fetch(&ctx, args),

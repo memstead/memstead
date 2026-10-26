@@ -2965,6 +2965,135 @@ fn check_observed_at_is_stored_beside_the_write_time() {
     assert_eq!(lines(), 3, "nothing appended on refusal");
 }
 
+/// `memstead checks --mem <name>` lists the ledger rows of one mem as
+/// stored (every kind, oldest first, the full record shape including
+/// `observed_at`), narrowed by kind, verdict, identity, entity and a
+/// time window judged on `observed_at` where stated and `ts` otherwise.
+/// A consumer reads this instead of parsing `checks.jsonl`. A bad
+/// instant refuses `INVALID_INPUT`; an unknown mem refuses `UNKNOWN_MEM`.
+#[test]
+fn checks_lists_a_mems_ledger_rows_with_filters() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_anchor_workspace(root);
+    let record = |args: &[&str]| {
+        memstead()
+            .current_dir(root)
+            .args([
+                "check",
+                "hold--holder",
+                "--identity",
+                "checker-one",
+                "--role",
+                "checker",
+            ])
+            .args(args)
+            .assert()
+            .success();
+    };
+    record(&[
+        "--verdict",
+        "failed",
+        "--kind",
+        "x-review",
+        "--method",
+        "step 3 overreaches",
+        "--observed-at",
+        "2026-10-18T09:00:00Z",
+    ]);
+    record(&[
+        "--verdict",
+        "ok",
+        "--kind",
+        "x-disposition",
+        "--method",
+        "applied: narrowed",
+        "--observed-at",
+        "2026-10-19",
+    ]);
+    record(&["--verdict", "ok"]);
+
+    let list = |args: &[&str]| -> serde_json::Value {
+        let out = memstead()
+            .current_dir(root)
+            .args(["--json", "checks", "--mem", "hold"])
+            .args(args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice(&out).unwrap()
+    };
+    let all = list(&[]);
+    assert_eq!(all["count"], 3, "{all}");
+    let rows = all["checks"].as_array().unwrap();
+    assert_eq!(
+        rows[0]["kind"], "x-review",
+        "ledger order, oldest first: {all}"
+    );
+    assert_eq!(rows[0]["method"], "step 3 overreaches", "{all}");
+    assert_eq!(rows[0]["observed_at"], 1_792_314_000, "{all}");
+    assert_eq!(rows[0]["identity"], "checker-one", "{all}");
+    assert_eq!(rows[0]["role"], "checker", "{all}");
+    assert!(
+        rows[2].get("kind").is_none(),
+        "a verification row carries no kind key, as stored: {all}"
+    );
+    assert!(rows[2].get("observed_at").is_none(), "{all}");
+
+    assert_eq!(list(&["--kind", "x-disposition"])["count"], 1);
+    assert_eq!(list(&["--kind", "verification"])["count"], 1);
+    assert_eq!(list(&["--verdict", "failed"])["count"], 1);
+    assert_eq!(list(&["--identity", "checker-one"])["count"], 3);
+    assert_eq!(list(&["--identity", "nobody"])["count"], 0);
+    assert_eq!(list(&["--entity", "hold--holder"])["count"], 3);
+    // The window judges stated times first: the x-review row sits on
+    // the 18th, the x-disposition row on the 19th, the plain row now.
+    assert_eq!(list(&["--since", "2026-10-19"])["count"], 2);
+    assert_eq!(list(&["--until", "2026-10-19"])["count"], 1);
+    assert_eq!(
+        list(&["--since", "2026-10-18", "--until", "2026-10-19T00:00:00Z"])["count"],
+        1
+    );
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "checks", "--mem", "hold", "--since", "yesterday"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let e: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(e["code"], "INVALID_INPUT", "{e}");
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "checks", "--mem", "nope"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let e: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(e["code"], "UNKNOWN_MEM", "{e}");
+
+    // The human surface names each row once.
+    let md = memstead()
+        .current_dir(root)
+        .args(["checks", "--mem", "hold", "--kind", "x-review"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let md = String::from_utf8(md).unwrap();
+    assert!(
+        md.contains("1 row(s)") && md.contains("step 3 overreaches"),
+        "{md}"
+    );
+}
+
 /// Check findings and open kinds (evidence-engine plan 5): a batch entry
 /// with a `finding` persists it on the ledger line, the health checks
 /// axis renders it under the entity's latest verdict, an `x-` kind is

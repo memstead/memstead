@@ -9,6 +9,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`memstead checks --mem <name>` lists a mem's check records.** Every
+  row of the workspace ledger for that mem, every kind, oldest first, in
+  the shape the ledger stores (entity, kind, verdict, method, identity,
+  role, `ts`, `observed_at`, finding, carries), narrowed by `--kind`,
+  `--verdict`, `--identity`, `--entity`, and a time window `--since` /
+  `--until` (ISO-8601 UTC instant or civil date) judged on `observed_at`
+  where the caller stated one and `ts` otherwise; `--json` serves
+  `{mem, count, checks}`. Read-only, CLI only. Before, `health --include
+  checks` served counts and derived states and `entity --provenance` one
+  entity's state, so a consumer counting rows by kind or reading their
+  methods parsed `.memstead/state/checks/checks.jsonl` itself and broke
+  silently whenever the line shape grew. An archive mount's sealed
+  records stay under `entity --provenance`.
 - **A status-propagation finding carries the path the taint travelled.**
   Beside `tainted_by`, each `status_propagation` violation in the health
   constraints axis carries `path`: the ids from the fallen ancestor to

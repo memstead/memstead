@@ -201,6 +201,24 @@ impl Engine {
         Ok(record)
     }
 
+    /// The check records of one mem's entities as the ledger stores them,
+    /// oldest first: every row, every kind, nothing derived. The read a
+    /// consumer takes instead of parsing `checks.jsonl` itself, so the
+    /// line shape can grow (as it did with `observed_at`) without
+    /// breaking a reader. Refuses an unknown mem; an engine with no
+    /// workspace root has no ledger and serves nothing. An archive mount
+    /// keeps its sealed records under `entity --provenance`; this read is
+    /// the workspace ledger's.
+    pub fn check_records(&self, mem_name: &str) -> Result<Vec<CheckRecord>, EngineError> {
+        if !self.mounts.iter().any(|m| m.mount.mem == mem_name) {
+            return Err(self.unknown_mem_error(mem_name));
+        }
+        Ok(self
+            .workspace_root()
+            .map(|root| CheckLedger::for_workspace(root).records_for_mem(mem_name))
+            .unwrap_or_default())
+    }
+
     /// Carry the check ledger across a rename: every line recorded under
     /// `old` is appended again under `new`, marked `renamed_from`, so the
     /// renamed entity keeps its check history instead of reading

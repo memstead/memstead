@@ -349,6 +349,12 @@ pub enum Command {
     /// `memstead entity <id> --provenance`.
     Check(commands::check::Args),
 
+    /// List a mem's check records as the ledger stores them — every
+    /// row, every kind, oldest first — with filters by kind, verdict,
+    /// identity, entity and time window. Read-only; the read to take
+    /// instead of parsing `.memstead/state/checks/checks.jsonl`.
+    Checks(commands::check::ListArgs),
+
     /// Read and move the per-mem review mark — the engine's one
     /// pointer per mem to the last human-approved state. `list` shows
     /// every mem's mark and head; `set`/`clear` move it (explicit
@@ -495,6 +501,7 @@ impl Command {
             Command::Conflicts(_) => "conflicts",
             Command::Changes(_) => "changes",
             Command::Check(_) => "check",
+            Command::Checks(_) => "checks",
             Command::ReviewMark(_) => "review-mark",
             Command::Reload(_) => "reload",
             Command::Fetch(_) => "fetch",

@@ -2384,11 +2384,13 @@ pub fn collect_constraint_findings(
     // Folded into the per-entity loop above, the filter skipped a
     // source in another mem before its dependents in the filtered mem
     // were ever computed, so a mem resting on a fallen card elsewhere
-    // read clean under `--mem` and tainted without it.
-    for entity in store.all_entities() {
-        if entity.stub {
-            continue;
-        }
+    // read clean under `--mem` and tainted without it. Sources are
+    // swept in id order, so an entity tainted by several ancestors
+    // carries its findings in the same order on every run.
+    let mut sources: Vec<&crate::entity::Entity> =
+        store.all_entities().filter(|e| !e.stub).collect();
+    sources.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+    for entity in sources {
         let Some(mem_schema) = mem_schemas.get(entity.mem.as_str()) else {
             continue;
         };

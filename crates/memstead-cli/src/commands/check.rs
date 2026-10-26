@@ -92,6 +92,138 @@ pub struct Args {
     pub from: Option<std::path::PathBuf>,
 }
 
+/// `memstead checks` — list a mem's check records as the ledger stores
+/// them: every row, every kind, oldest first, with optional filters.
+/// Read-only; the read a consumer takes instead of parsing
+/// `.memstead/state/checks/checks.jsonl` itself, so the line shape can
+/// grow without breaking anyone. Serves the workspace ledger; an archive
+/// mount's sealed records stay under `entity <id> --provenance`.
+#[derive(Parser, Debug)]
+pub struct ListArgs {
+    /// The mem whose check records to list.
+    #[arg(long, value_name = "NAME")]
+    pub mem: String,
+
+    /// Keep only records of this check kind (`verification`,
+    /// `conformance`, or a caller-declared `x-<name>`). A record written
+    /// without a kind is a `verification` record.
+    #[arg(long, value_name = "KIND")]
+    pub kind: Option<String>,
+
+    /// Keep only records with this verdict: `ok` | `failed`.
+    #[arg(long, value_name = "VERDICT")]
+    pub verdict: Option<String>,
+
+    /// Keep only records this identity recorded (the handle as declared,
+    /// compared exactly).
+    #[arg(long, value_name = "IDENTITY")]
+    pub identity: Option<String>,
+
+    /// Keep only records of one entity (full id `mem--slug`).
+    #[arg(long, value_name = "ID")]
+    pub entity: Option<String>,
+
+    /// Keep only records made at or after this instant (ISO-8601 UTC
+    /// `YYYY-MM-DDTHH:MM:SSZ` or a civil date `YYYY-MM-DD`). The time a
+    /// record is judged by is `observed_at` where the caller stated one
+    /// and `ts` otherwise.
+    #[arg(long, value_name = "ISO-8601")]
+    pub since: Option<String>,
+
+    /// Keep only records made before this instant (same shapes as
+    /// `--since`; a civil date means its midnight, so `--until 2026-10-20`
+    /// ends at the start of that day).
+    #[arg(long, value_name = "ISO-8601")]
+    pub until: Option<String>,
+}
+
+fn parse_instant(flag: &str, raw: &str) -> Result<u64, CliError> {
+    memstead_base::engine::due::parse_iso_utc_seconds(raw.trim()).ok_or_else(|| {
+        CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "--{flag} {raw:?} is not an ISO-8601 UTC instant (`YYYY-MM-DDTHH:MM:SSZ`) or a \
+                 civil date (`YYYY-MM-DD`)"
+            ),
+        )
+    })
+}
+
+pub fn run_list(ctx: &CliContext, args: ListArgs) -> anyhow::Result<()> {
+    if let Some(v) = args.verdict.as_deref() {
+        parse_verdict(v)?;
+    }
+    if let Some(k) = args.kind.as_deref() {
+        parse_kind(Some(k))?;
+    }
+    let since = args
+        .since
+        .as_deref()
+        .map(|s| parse_instant("since", s))
+        .transpose()?;
+    let until = args
+        .until
+        .as_deref()
+        .map(|s| parse_instant("until", s))
+        .transpose()?;
+    let engine = ctx.cli_engine_scoped(&args.mem)?.into_base();
+    let records: Vec<memstead_base::check::CheckRecord> = engine
+        .check_records(&args.mem)
+        .map_err(CliError::from_engine_op)?
+        .into_iter()
+        .filter(|r| {
+            args.kind
+                .as_deref()
+                .is_none_or(|k| r.kind.as_deref().unwrap_or("verification") == k)
+        })
+        .filter(|r| args.verdict.as_deref().is_none_or(|v| r.verdict == v))
+        .filter(|r| {
+            args.identity
+                .as_deref()
+                .is_none_or(|i| r.identity.as_deref() == Some(i))
+        })
+        .filter(|r| args.entity.as_deref().is_none_or(|e| r.entity == e))
+        .filter(|r| {
+            let at = r.observed_at.unwrap_or(r.ts);
+            since.is_none_or(|s| at >= s) && until.is_none_or(|u| at < u)
+        })
+        .collect();
+    if ctx.json {
+        print_json(&serde_json::json!({
+            "mem": args.mem,
+            "count": records.len(),
+            "checks": records,
+        }))?;
+        return Ok(());
+    }
+    let mut md = format!(
+        "# Check records of `{}` — {} row(s)\n\n",
+        args.mem,
+        records.len()
+    );
+    for r in &records {
+        md.push_str(&format!(
+            "- `{}` — {} **{}** by {} ({}) at {}{}{}\n",
+            r.entity,
+            r.kind.as_deref().unwrap_or("verification"),
+            r.verdict,
+            r.identity.as_deref().unwrap_or("(no identity)"),
+            r.role,
+            r.observed_at.unwrap_or(r.ts),
+            r.observed_at
+                .map(|_| format!(", written {}", r.ts))
+                .unwrap_or_default(),
+            r.method
+                .as_deref()
+                .map(|m| format!(": {m}"))
+                .unwrap_or_default(),
+        ));
+    }
+    print_markdown(&md);
+    Ok(())
+}
+
 /// The `--from` file payload. `deny_unknown_fields` on both levels so a
 /// typo'd key refuses loudly instead of silently dropping data — the
 /// batch family's posture.

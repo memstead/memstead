@@ -213,6 +213,7 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         no_verdict("export", READS_DATA),
         no_verdict("changes", READS_DATA),
         no_verdict("anchors", READS_DATA),
+        no_verdict("checks", READS_DATA),
         no_verdict("conflicts list", READS_DATA),
         no_verdict("review-mark list", READS_DATA),
         no_verdict("review-mark diff", READS_DATA),
