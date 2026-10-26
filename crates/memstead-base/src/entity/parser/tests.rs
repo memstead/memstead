@@ -28,6 +28,37 @@ fn parse_metadata_strips_comments() {
     assert_eq!(meta["key"], MetadataValue::String("value".to_string()));
 }
 
+/// A ` #` inside a quoted value is part of the value, not a comment;
+/// the comment can only begin after the closing quote. Inside double
+/// quotes `\"` and `\\` read as the quote and the backslash. A value
+/// with no closing quote is read as before (unquoted, cut at ` #`).
+#[test]
+fn parse_metadata_keeps_a_hash_inside_quotes() {
+    let meta = parse_metadata(
+        "a: \"difference for Project #1 and Project #3 with 55% and 90%\" # note\n\
+         b: 'single #1' # note\n\
+         c: \"say \\\"hi\\\" and \\\\ back\"\n\
+         d: \"unterminated #1\n\
+         e: plain #1 here",
+    );
+    assert_eq!(
+        meta["a"],
+        MetadataValue::String(
+            "difference for Project #1 and Project #3 with 55% and 90%".to_string()
+        )
+    );
+    assert_eq!(meta["b"], MetadataValue::String("single #1".to_string()));
+    assert_eq!(
+        meta["c"],
+        MetadataValue::String("say \"hi\" and \\ back".to_string())
+    );
+    assert_eq!(
+        meta["d"],
+        MetadataValue::String("\"unterminated".to_string())
+    );
+    assert_eq!(meta["e"], MetadataValue::String("plain".to_string()));
+}
+
 #[test]
 fn parse_metadata_strips_quotes() {
     let meta = parse_metadata("key: \"quoted value\"\nkey2: 'single'");

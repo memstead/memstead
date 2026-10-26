@@ -648,7 +648,8 @@ impl CliError {
             ProposalDispositionsIncomplete { .. }
             | ProposalConflict { .. }
             | ProposalStale { .. }
-            | ProposalUnattributed { .. } => (ExitKind::Validation, Some(e.details())),
+            | ProposalUnattributed { .. }
+            | ProposalLinksRejected { .. } => (ExitKind::Validation, Some(e.details())),
             BranchResetHeadMoved {
                 mem,
                 expected,

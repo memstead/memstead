@@ -243,21 +243,26 @@ fn build_metadata(entity: &Entity, schema: &TypeDefinition) -> String {
 /// the tolerant parser's `strip_quotes` branch, which keeps the value
 /// in `MetadataValue::String`.
 ///
-/// Prefer double quotes; fall back to single quotes if the value
-/// contains `"`. If the value contains both quote styles the tolerant
-/// parser's `strip_quotes` cannot escape either, so we leave it
-/// unquoted — accepted as a rare lossy corner case, not defended here.
+/// Quoting is also forced for every shape the tolerant parser would
+/// otherwise read back changed: a ` #` inside the value (read as an
+/// inline comment and cut; a value `Project #1 and #3` once came back
+/// `Project`), a leading `#`, a leading quote character (`strip_quotes`
+/// would peel it) and leading or trailing whitespace (trimmed on read).
+/// Double quotes always, with `"` and `\` escaped as `\"` and `\\`,
+/// which the parser's `strip_quotes` reads back: the round trip is whole
+/// for every string.
 fn quote_if_ambiguous(s: &str) -> String {
-    if !crate::entity::parser::would_coerce_from_string(s) {
+    let ambiguous = crate::entity::parser::would_coerce_from_string(s)
+        || s.contains(" #")
+        || s.starts_with('#')
+        || s.starts_with('"')
+        || s.starts_with('\'')
+        || s != s.trim();
+    if !ambiguous {
         return s.to_string();
     }
-    if !s.contains('"') {
-        format!("\"{s}\"")
-    } else if !s.contains('\'') {
-        format!("'{s}'")
-    } else {
-        s.to_string()
-    }
+    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
 }
 
 #[cfg(test)]
@@ -639,6 +644,41 @@ mod tests {
             !notes.contains("the engine") && !notes.contains("the moon"),
             "scope content must not be absorbed into the catch-all: {notes:?}"
         );
+    }
+
+    /// A string value the tolerant parser would read back changed is
+    /// quoted and escaped on the way out and read whole on the way in:
+    /// a ` #` inside the value (once cut as a comment), a leading `#`, a
+    /// leading quote, surrounding whitespace, and the two quote
+    /// characters together.
+    #[test]
+    fn metadata_strings_round_trip_through_quoting() {
+        let schema = type_by_name(builtin_names::SPEC).unwrap();
+        for value in [
+            "difference for Project #1 and Project #3 with 55% and 90%",
+            "#hashtag first",
+            "\"already quoted\"",
+            "'single' and \"double\" together",
+            "  padded  ",
+            "back\\slash and \"quote\"",
+            "plain value",
+        ] {
+            let mut entity = make_entity("Round Trip", "specs");
+            entity.metadata.insert(
+                "level".to_string(),
+                MetadataValue::String(value.to_string()),
+            );
+            let md = generate_markdown(&entity, &schema);
+            let parsed =
+                crate::entity::parser::parse_markdown(&md, "round-trip.md", &schema, "specs")
+                    .unwrap()
+                    .entity;
+            assert_eq!(
+                parsed.metadata["level"],
+                MetadataValue::String(value.to_string()),
+                "value {value:?} must read back whole; written as:\n{md}"
+            );
+        }
     }
 
     #[test]

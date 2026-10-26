@@ -1194,6 +1194,25 @@ pub enum EngineError {
         slug: String,
         sha: String,
     },
+    /// An adopted entity links an entity the same disposition file
+    /// rejects, and the target mem holds no entity under that slug, so
+    /// the merge would land the edge on a dangling stub and the target
+    /// would read `UNRESOLVED_STUB` the moment the merge reported
+    /// success. Typed code `PROPOSAL_LINKS_REJECTED_ENTITY`;
+    /// `details.slug`, `details.rel_type` and `details.target` name the
+    /// adopted entity, the edge and the rejected target.
+    #[error(
+        "entity '{slug}' of fork '{fork}' links '{target}' via {rel_type}, and the same file \
+         rejects '{target}' while the target mem holds no entity under that slug: the merge \
+         would land a dangling stub. Adopt '{target}' too, or `adopt_with_changes` '{slug}' \
+         with a `relations` list that leaves the edge out, or reject '{slug}'"
+    )]
+    ProposalLinksRejected {
+        fork: String,
+        slug: String,
+        rel_type: String,
+        target: String,
+    },
     /// `memstead_changes_since` received a `rename_similarity` value
     /// outside the allowed range. Maps to wire code `INVALID_INPUT`
     /// with `details.allowed_range: [min, max]` and
@@ -1496,6 +1515,7 @@ impl EngineError {
             EngineError::ProposalConflict { .. } => "PROPOSAL_CONFLICT",
             EngineError::ProposalStale { .. } => "PROPOSAL_STALE",
             EngineError::ProposalUnattributed { .. } => "PROPOSAL_UNATTRIBUTED",
+            EngineError::ProposalLinksRejected { .. } => "PROPOSAL_LINKS_REJECTED_ENTITY",
             EngineError::UnknownRemote(_) => "UNKNOWN_REMOTE",
             EngineError::LocalDivergence { .. } => "LOCAL_DIVERGENCE",
             EngineError::NonFastForward { .. } => "NON_FAST_FORWARD",
@@ -2082,6 +2102,17 @@ impl EngineError {
                 "fork": fork,
                 "slug": slug,
                 "sha": sha,
+            }),
+            EngineError::ProposalLinksRejected {
+                fork,
+                slug,
+                rel_type,
+                target,
+            } => serde_json::json!({
+                "fork": fork,
+                "slug": slug,
+                "rel_type": rel_type,
+                "target": target,
             }),
             EngineError::InvalidChangesCursor { mem, since } => serde_json::json!({
                 "mem": mem,

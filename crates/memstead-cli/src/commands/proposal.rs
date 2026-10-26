@@ -105,7 +105,11 @@ pub struct MergeArgs {
     /// `adopt_with_changes` without a `body` refuses `INVALID_INPUT`;
     /// `adopt` on a conflict entity refuses `PROPOSAL_CONFLICT`; an
     /// adopted entity whose last fork commit carries no identity
-    /// refuses `PROPOSAL_UNATTRIBUTED`; a body the target's write gate
+    /// refuses `PROPOSAL_UNATTRIBUTED`; an adopted entity that links an
+    /// entity the same file rejects, while the target holds none under
+    /// that slug, refuses `PROPOSAL_LINKS_REJECTED_ENTITY` (adopt the
+    /// target too, or `adopt_with_changes` with a `relations` list that
+    /// leaves the edge out); a body the target's write gate
     /// refuses lands nothing and returns the gate's own code. A
     /// `reason` on an `adopt` is recorded like the others. The file's
     /// top-level `description` (free text, the proposal in your words;

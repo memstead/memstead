@@ -1092,6 +1092,68 @@ fn merge_refuses_incomplete_stale_and_conflicting_files_and_lands_nothing() {
 /// never refused; a `reject` of a conflict entity is admitted; the same
 /// file merged twice refuses the second time as stale, never applying
 /// twice.
+/// An adopted entity that links an entity the same file rejects, while
+/// the target holds none under that slug, refuses before anything
+/// lands: the gate would otherwise auto-stub the missing target and the
+/// merge would report success over a dangling edge, which the target
+/// then read as `UNRESOLVED_STUB`. Adopting the target too clears it.
+#[test]
+fn merge_refuses_an_adopted_entity_that_links_a_rejected_one_and_lands_nothing() {
+    let (tmp, mut engine) = staged();
+    let gitdir = gitdir_of(tmp.path());
+    // The proposer adds Mu, resting on Eta (itself new on the fork).
+    engine.set_identity(Some(PROPOSER.to_string()));
+    engine.set_role(Role::Author);
+    create(
+        &mut engine,
+        "specs-fork",
+        "Mu",
+        sections("mu rests on eta", "seed"),
+        Vec::new(),
+    );
+    relate(&mut engine, ("specs-fork", "mu"), ("specs-fork", "eta"));
+    engine.set_role(Role::Unspecified);
+    engine.set_identity(Some(MERGER.to_string()));
+
+    let before = refs_and_sidecars(&gitdir);
+    let state_before = workspace_state(tmp.path());
+    let mut file = filled(&mut engine);
+    {
+        let mu = file.dispositions.get_mut("mu").unwrap();
+        mu.disposition = "adopt".to_string();
+        mu.reason.clear();
+        let eta = file.dispositions.get_mut("eta").unwrap();
+        eta.disposition = "reject".to_string();
+        eta.reason = "not yet".to_string();
+    }
+    let err = engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .unwrap_err();
+    assert_eq!(err.code(), "PROPOSAL_LINKS_REJECTED_ENTITY", "{err}");
+    assert_eq!(err.details()["slug"], "mu");
+    assert_eq!(err.details()["rel_type"], "DEPENDS_ON");
+    assert_eq!(err.details()["target"], "eta");
+    assert!(err.to_string().contains("adopt_with_changes"), "{err}");
+    assert_eq!(refs_and_sidecars(&gitdir), before, "nothing landed");
+    assert_eq!(workspace_state(tmp.path()), state_before);
+
+    // Adopting eta as well: the edge lands on a real entity.
+    {
+        let eta = file.dispositions.get_mut("eta").unwrap();
+        eta.disposition = "adopt".to_string();
+        eta.reason.clear();
+    }
+    engine
+        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
+        .expect("the merge lands once the target is adopted too");
+    assert!(engine.get_entity(&EntityId::new("specs", "mu")).is_some());
+    assert!(
+        engine
+            .get_entity(&EntityId::new("specs", "eta"))
+            .is_some_and(|e| !e.stub)
+    );
+}
+
 #[test]
 fn a_valid_file_merges_once_and_refuses_the_second_time_as_stale() {
     let (tmp, mut engine) = staged();

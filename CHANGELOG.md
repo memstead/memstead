@@ -7,6 +7,36 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **A metadata string with ` #` in it round-trips.** The frontmatter
+  writer quoted a string only when it would read back as a number or a
+  boolean, and the reader cut every value at the first ` #` as an inline
+  comment, quoted or not; so `difference for Project #1 and Project #3`
+  was written bare and read back as `difference for Project`, on `create`
+  and on `update --metadata` alike, with no warning, while a span anchor
+  quoting the same words kept them. The writer now quotes every string
+  the reader would otherwise change (a ` #` inside, a leading `#` or
+  quote character, surrounding whitespace) in double quotes with `"` and
+  `\` escaped, and the reader keeps a ` #` inside quotes and reads the
+  two escapes back, so every string round-trips whole; a value with both
+  quote characters, once left unquoted and lossy, is covered too.
+  Existing files are unchanged until their next write.
+- **A proposal merge refuses an adopted entity that links a rejected
+  one.** With entity A adopted and entities B and C of the same fork
+  rejected while A's rows point at them, the brief's precheck read clean
+  (it rehearses each entry alone), the merge auto-stubbed B and C,
+  reported success, and `health --strict` on the target then refused
+  `UNRESOLVED_STUB` for B and C and the constraint on A. The merge now
+  reads every adopted entity's edges (its landed rows, body-link aliases
+  included, or the `relations` list an `adopt_with_changes` body
+  supplies) against the file's rejected slots and refuses
+  `PROPOSAL_LINKS_REJECTED_ENTITY` before anything lands, naming the
+  entity, the edge and the rejected target (`details.slug`,
+  `details.rel_type`, `details.target`), unless the target mem already
+  holds an entity under that slug. Adopt the target too, or
+  `adopt_with_changes` with a `relations` list that leaves the edge out.
+
 ### Added
 
 - **`memstead checks --mem <name>` lists a mem's check records.** Every

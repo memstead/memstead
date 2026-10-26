@@ -182,7 +182,8 @@ pub(super) fn engine_err_unified(
         E::ProposalDispositionsIncomplete { .. }
         | E::ProposalConflict { .. }
         | E::ProposalStale { .. }
-        | E::ProposalUnattributed { .. } => tool_error_with_payload(
+        | E::ProposalUnattributed { .. }
+        | E::ProposalLinksRejected { .. } => tool_error_with_payload(
             e.code(),
             &message,
             envelope(e.code(), message.clone(), e.details()),

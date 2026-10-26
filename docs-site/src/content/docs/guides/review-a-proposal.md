@@ -128,6 +128,12 @@ fork tip and the base the file recorded are still the branches' tips
 reads the proposer of every adopted entity off the fork commit that
 last touched it; an entity whose last fork commit carries no identity
 refuses `PROPOSAL_UNATTRIBUTED`, because a merge never invents an author.
+An adopted entity whose relations (authored rows or body-link aliases)
+point at an entity the same file rejects, while the target holds none
+under that slug, refuses `PROPOSAL_LINKS_REJECTED_ENTITY`: the merge
+would otherwise land the edge on a dangling stub and report success.
+Adopt the target too, or `adopt_with_changes` the entity with a
+`relations` list that leaves the edge out.
 Then every adopted body goes through the target's write gate, and a
 deletion is judged against the target's referrers as the adopted bodies
 leave them. Only after all of that does anything land, and a refusal at

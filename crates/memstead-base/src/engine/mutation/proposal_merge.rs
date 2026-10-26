@@ -405,6 +405,47 @@ impl Engine {
                 })?;
             versions.insert(slug.to_string(), landing);
         }
+        // ---- An adopted entity that links a rejected one of the same file ----
+        // The gate would auto-stub the missing target and the merge would
+        // report success over a dangling edge (the target then read
+        // `UNRESOLVED_STUB` under `health --strict`). The file itself cut
+        // the link, so the file is where it refuses.
+        let rejected: BTreeSet<&str> = slots
+            .iter()
+            .filter(|s| s.disposition == DISPOSITION_REJECT)
+            .map(|s| s.entry.slug.as_str())
+            .collect();
+        for slot in slots
+            .iter()
+            .filter(|s| s.disposition != DISPOSITION_REJECT)
+            .filter(|s| s.entry.status != ProposalChange::Deleted)
+        {
+            let slug = slot.entry.slug.as_str();
+            // An owner's body with `relations` replaces the landed rows;
+            // otherwise the fork's rows land, body-link aliases included.
+            let edges: Vec<(String, EntityId)> =
+                match slot.body.as_ref().and_then(|b| b.relations.as_ref()) {
+                    Some(relations) => relations
+                        .iter()
+                        .map(|r| (r.rel_type.clone(), EntityId::canonical(&r.target)))
+                        .collect(),
+                    None => versions[slug]
+                        .relationships
+                        .iter()
+                        .map(|r| (r.rel_type.clone(), r.target.clone()))
+                        .collect(),
+                };
+            for (rel_type, to) in edges {
+                if to.mem() == target && rejected.contains(to.path()) && !self.target_holds(&to) {
+                    return Err(EngineError::ProposalLinksRejected {
+                        fork: fork.to_string(),
+                        slug: slug.to_string(),
+                        rel_type,
+                        target: to.path().to_string(),
+                    });
+                }
+            }
+        }
         // Every entity the merge creates is staged as a typed skeleton
         // first, so a sibling's edge to it validates against a real
         // target (the batch create's rule).

@@ -448,24 +448,68 @@ pub(crate) fn would_coerce_from_string(s: &str) -> bool {
     s == "true" || s == "false" || is_integer_literal(s) || is_float_literal(s)
 }
 
-/// Strip inline comments: `value # comment` → `value`.
+/// Strip inline comments: `value # comment` → `value`. A quoted value
+/// keeps every ` #` inside its quotes (`"Project #1" # note` → `"Project
+/// #1"`): the comment can only begin after the closing quote. Inside a
+/// double-quoted value `\"` is an escaped quote and does not close it.
 fn strip_inline_comment(s: &str) -> &str {
-    // Find ` #` pattern (space followed by #)
-    // But be careful not to strip inside quoted strings
-    if let Some(idx) = s.find(" #") {
-        s[..idx].trim_end()
-    } else {
-        s
+    let close = match s.as_bytes().first() {
+        Some(b'"') => closing_quote(s, '"', true),
+        Some(b'\'') => closing_quote(s, '\'', false),
+        _ => None,
+    };
+    let (quoted, rest) = match close {
+        Some(end) => (&s[..=end], &s[end + 1..]),
+        None => ("", s),
+    };
+    match rest.find(" #") {
+        Some(idx) if quoted.is_empty() => s[..idx].trim_end(),
+        Some(idx) => &s[..quoted.len() + idx],
+        None => s,
     }
+    .trim_end()
 }
 
-/// Strip surrounding quotes: `"value"` or `'value'` → `value`.
+/// The byte index of the quote that closes a value opening with `quote`
+/// at byte 0, honouring backslash escapes when `escapes` is set; `None`
+/// when the value never closes (it is then read unquoted, as before).
+fn closing_quote(s: &str, quote: char, escapes: bool) -> Option<usize> {
+    let mut escaped = false;
+    for (i, c) in s.char_indices().skip(1) {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if escapes && c == '\\' {
+            escaped = true;
+            continue;
+        }
+        if c == quote {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Strip surrounding quotes: `"value"` or `'value'` → `value`. Inside a
+/// double-quoted value `\"` reads as `"` and `\\` as `\`, the two
+/// escapes the writer emits; every other backslash is kept as is.
 /// A lone quote character is not a quoted value — `len >= 2` keeps the
 /// slice in bounds (a 1-char `"` satisfies both starts_with and ends_with).
 fn strip_quotes(s: &str) -> String {
-    if s.len() >= 2
-        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
-    {
+    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+        let inner = &s[1..s.len() - 1];
+        let mut out = String::with_capacity(inner.len());
+        let mut chars = inner.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\\' && matches!(chars.peek(), Some('"') | Some('\\')) {
+                out.push(chars.next().unwrap());
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    } else if s.len() >= 2 && s.starts_with('\'') && s.ends_with('\'') {
         s[1..s.len() - 1].to_string()
     } else {
         s.to_string()
