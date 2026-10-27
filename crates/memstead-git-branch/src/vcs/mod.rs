@@ -267,27 +267,14 @@ pub enum VcsError {
     Io(#[from] std::io::Error),
 }
 
-impl From<gix::open::Error> for VcsError {
-    fn from(e: gix::open::Error) -> Self {
-        VcsError::NotRepo(e.to_string())
-    }
-}
-
-impl From<gix::init::Error> for VcsError {
-    fn from(e: gix::init::Error) -> Self {
-        VcsError::Git(format!("init: {e}"))
-    }
-}
-
-impl From<gix::commit::Error> for VcsError {
-    fn from(e: gix::commit::Error) -> Self {
-        VcsError::Git(format!("commit: {e}"))
-    }
-}
-
-impl From<gix::object::write::Error> for VcsError {
-    fn from(e: gix::object::write::Error) -> Self {
-        VcsError::Git(format!("write-object: {e}"))
+/// gix 0.89 reports every operation through one `gix::Error` (causes
+/// and classifications inside it), so the per-operation conversions
+/// collapsed into this one; an open that fails is mapped to
+/// [`VcsError::NotRepo`] at its call sites, where the operation is
+/// known.
+impl From<gix::Error> for VcsError {
+    fn from(e: gix::Error) -> Self {
+        VcsError::Git(e.to_string())
     }
 }
 
@@ -314,7 +301,7 @@ pub fn create_vcs(git_dir: &Path, work_tree: &Path) -> Result<Arc<dyn Vcs>, VcsE
         if let Some(parent) = git_dir.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        gix::init_bare(git_dir)?;
+        gix::init_bare(git_dir).map_err(|e| VcsError::Git(format!("init: {e}")))?;
 
         let mut kvs: Vec<(&str, &str, &str)> = vec![
             ("core", "bare", "false"),
@@ -339,7 +326,7 @@ pub fn create_vcs(git_dir: &Path, work_tree: &Path) -> Result<Arc<dyn Vcs>, VcsE
     // Sanity: opening must succeed now. If it doesn't, something is wrong
     // with the layout (e.g. config file corrupted) — surface it rather
     // than masking with the "open works at commit time" lazy path.
-    let _repo = gix::open(git_dir)?;
+    let _repo = gix::open(git_dir).map_err(|e| VcsError::NotRepo(e.to_string()))?;
 
     // Canonicalize the stored paths. Shared-gitdir configs express
     // `worktree` with `..` segments (e.g. `../.git`, `..`); `strip_prefix`
@@ -455,7 +442,7 @@ impl Vcs for GixVcs {
         // its tip. We resolve HEAD's symref target up-front so that a
         // future git-tree writer committing onto the same concrete
         // branch (e.g. `refs/heads/main`) shares the same mutex key.
-        let repo = gix::open(&self.git_dir)?;
+        let repo = gix::open(&self.git_dir).map_err(|e| VcsError::NotRepo(e.to_string()))?;
         let head_ref = head_branch_ref(&repo);
         let mutex = acquire_branch_mutex(&head_ref);
         let _guard = mutex.lock().map_err(|_| {

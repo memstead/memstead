@@ -204,7 +204,7 @@ pub fn changes_since(
     platform
         .for_each_to_obtain_tree(
             &head_tree,
-            |change| -> Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
+            |change| -> gix::Result<std::ops::ControlFlow<()>> {
                 use gix::object::tree::diff::Change;
                 match change {
                     Change::Addition { location, .. } => {

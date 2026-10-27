@@ -194,7 +194,7 @@ pub fn diff_two_refs(
     platform
         .for_each_to_obtain_tree(
             &tree_b,
-            |change| -> Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
+            |change| -> gix::Result<std::ops::ControlFlow<()>> {
                 match change {
                     Change::Addition { location, .. } => {
                         if let Some(id) = path_to_entity_id(mem, location) {

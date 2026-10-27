@@ -18,8 +18,10 @@
 //! [`gix::Repository::commit_as`]; gix's underlying ref-edit transaction
 //! enforces `PreviousValue::ExistingMustMatch(previous)` for non-`HEAD`
 //! refs, which is the exact CAS guard we want. If a concurrent writer
-//! advanced the ref between snapshot and commit, the gix call returns
-//! [`gix::commit::Error::ReferenceEdit`]; we re-resolve the live tip and
+//! advanced the ref between snapshot and commit, the gix call returns an
+//! error whose cause is the ref transaction's
+//! [`gix::refs::file::transaction::prepare::ReferenceOutOfDate`] (or
+//! `MustNotExist` for a ref that appeared); we re-resolve the live tip and
 //! surface [`super::BackendError::HashMismatch`] with the new tip's
 //! hex OID. That maps into
 //! [`crate::EngineError::HashMismatch`] so MCP agents see a stable
@@ -657,7 +659,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         pending.clear();
         let commit_id = match commit_result {
             Ok(id) => id,
-            Err(gix::commit::Error::ReferenceEdit(_)) => {
+            Err(e) if is_ref_cas_conflict(&e) => {
                 // CAS conflict. Re-resolve the live tip and surface
                 // the new sha so the caller can retry with a fresh
                 // `_hash`.
@@ -1132,6 +1134,17 @@ fn commit_note_to_provenance(n: crate::ops::agent_notes::CommitNote) -> memstead
 /// to whoever's `read-tree` ran last; intermediate readers may see a
 /// mix. Single-process engines today; the open seam is documented in
 /// `mem-repo-write-cutover`'s "Open seams" section.
+/// Whether a failed commit failed on the ref transaction's
+/// compare-and-swap: the ref moved since the snapshot
+/// (`ReferenceOutOfDate`), or a ref the writer expected absent now
+/// exists (`MustNotExist`). gix 0.89 carries the cause inside its one
+/// error type; any other cause is not a CAS conflict.
+fn is_ref_cas_conflict(e: &gix::Error) -> bool {
+    use gix::refs::file::transaction::prepare::{MustNotExist, ReferenceOutOfDate};
+    e.downcast_any_ref::<ReferenceOutOfDate>().is_some()
+        || e.downcast_any_ref::<MustNotExist>().is_some()
+}
+
 fn sync_index_and_worktree(repo: &gix::Repository, ref_name: &str) -> Result<(), BackendError> {
     let Some(workdir) = repo.workdir() else {
         return Ok(());
@@ -1213,7 +1226,7 @@ pub enum BranchReadError {
     Open {
         path: String,
         #[source]
-        source: gix::open::Error,
+        source: gix::Error,
     },
     #[error("git-tree reader: branch {ref_name} not found")]
     BranchMissing { ref_name: String },

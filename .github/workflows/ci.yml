@@ -42,7 +42,7 @@ jobs:
         with:
           workspaces: . -> target
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
           tool: cargo-nextest
       # ci/verify_gate.py parses the docs guide's printed workflow with a
@@ -74,7 +74,7 @@ jobs:
         with:
           workspaces: . -> target
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
           tool: cargo-nextest
       # Same reason as the Linux job. The runner's Homebrew Python refuses a
@@ -128,7 +128,7 @@ jobs:
         with:
           workspaces: . -> target
       - name: Install wasm-pack
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
           tool: wasm-pack
       # This job is the kernel's portability proof: memstead-base must
@@ -158,12 +158,6 @@ jobs:
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          # RUSTSEC-2026-0253: `lru` 0.16 (an unsound `pop()` when a stored
-          # key's `Drop` panics under `catch_unwind`). It reaches the engine
-          # only through tantivy's index cache, whose keys are plain
-          # integers and file ids with no `Drop` of their own, and the engine
-          # wraps no index read in `catch_unwind`, so the condition cannot
-          # arise here. The patched line (0.18) is a major bump tantivy has
-          # not taken (0.26.2 still pins 0.16). Retire this line the release
-          # tantivy moves; owner: the engine maintainer.
-          ignore: RUSTSEC-2026-0253
+          # No ignore line: the one that stood here (RUSTSEC-2026-0253,
+          # `lru` 0.16 through tantivy 0.26) retired with tantivy 0.27,
+          # which moved to the patched lru line.
