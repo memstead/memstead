@@ -3013,10 +3013,10 @@ fn checks_lists_a_mems_ledger_rows_with_filters() {
     ]);
     record(&["--verdict", "ok"]);
 
-    let list = |args: &[&str]| -> serde_json::Value {
+    let list_of = |mem: &str, args: &[&str]| -> serde_json::Value {
         let out = memstead()
             .current_dir(root)
-            .args(["--json", "checks", "--mem", "hold"])
+            .args(["--json", "checks", "--mem", mem])
             .args(args)
             .assert()
             .success()
@@ -3025,6 +3025,7 @@ fn checks_lists_a_mems_ledger_rows_with_filters() {
             .clone();
         serde_json::from_slice(&out).unwrap()
     };
+    let list = |args: &[&str]| list_of("hold", args);
     let all = list(&[]);
     assert_eq!(all["count"], 3, "{all}");
     let rows = all["checks"].as_array().unwrap();
@@ -3067,16 +3068,11 @@ fn checks_lists_a_mems_ledger_rows_with_filters() {
         .clone();
     let e: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(e["code"], "INVALID_INPUT", "{e}");
-    let out = memstead()
-        .current_dir(root)
-        .args(["--json", "checks", "--mem", "nope"])
-        .assert()
-        .failure()
-        .get_output()
-        .stdout
-        .clone();
-    let e: serde_json::Value = serde_json::from_slice(&out).unwrap();
-    assert_eq!(e["code"], "UNKNOWN_MEM", "{e}");
+    // A name the ledger never saw answers no rows, unmounted: the ledger
+    // is the record, and a mem it holds nothing for is simply empty here.
+    let none = list_of("nope", &[]);
+    assert_eq!(none["count"], 0, "{none}");
+    assert_eq!(none["mounted"], false, "{none}");
 
     // The human surface names each row once.
     let md = memstead()
@@ -3091,6 +3087,44 @@ fn checks_lists_a_mems_ledger_rows_with_filters() {
     assert!(
         md.contains("1 row(s)") && md.contains("step 3 overreaches"),
         "{md}"
+    );
+
+    // Without --mem: every row of the workspace ledger. A mem that is no
+    // longer mounted still answers with its rows, marked unmounted: the
+    // ledger keeps a deleted or archived mem's history, and this read
+    // replaces the file read for it.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "checks"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let all: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(all["count"], 3, "{all}");
+    assert!(all["mem"].is_null(), "{all}");
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args(["mem", "delete", "hold"])
+        .assert()
+        .success();
+    let gone = list(&[]);
+    assert_eq!(gone["count"], 3, "{gone}");
+    assert_eq!(gone["mounted"], false, "{gone}");
+    assert_eq!(list(&["--kind", "x-review"])["count"], 1);
+    let md = memstead()
+        .current_dir(root)
+        .args(["checks", "--mem", "hold"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert!(
+        String::from_utf8(md).unwrap().contains("not mounted"),
+        "the human surface says the mem is unmounted"
     );
 }
 

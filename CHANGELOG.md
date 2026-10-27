@@ -7,6 +7,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **`memstead checks` reads an unmounted mem's rows, and the whole
+  ledger without `--mem`.** The ledger keeps a mem's check records after
+  the mem was unmounted or deleted (an archived bundle, a deleted fork),
+  and a reader computing a history over every row needs exactly those,
+  but `checks --mem <m>` refused a name that was not mounted
+  (`UNKNOWN_MEM`), so the file read it was meant to replace stayed. The
+  verb now serves the ledger's rows for any mem name, with `mounted:
+  false` (and a notice on the human surface) when the mem is not
+  mounted, and `--mem` is optional: without it every row of the
+  workspace ledger is listed, with the same filters.
+
 ## [0.25.0] - 2026-10-27
 
 ### Changed

@@ -92,17 +92,21 @@ pub struct Args {
     pub from: Option<std::path::PathBuf>,
 }
 
-/// `memstead checks` — list a mem's check records as the ledger stores
-/// them: every row, every kind, oldest first, with optional filters.
-/// Read-only; the read a consumer takes instead of parsing
+/// `memstead checks` — list check records as the ledger stores them:
+/// every row, every kind, oldest first, with optional filters; one mem's
+/// rows with `--mem`, the whole workspace ledger without. Read-only; the
+/// read a consumer takes instead of parsing
 /// `.memstead/state/checks/checks.jsonl` itself, so the line shape can
 /// grow without breaking anyone. Serves the workspace ledger; an archive
 /// mount's sealed records stay under `entity <id> --provenance`.
 #[derive(Parser, Debug)]
 pub struct ListArgs {
-    /// The mem whose check records to list.
+    /// The mem whose check records to list. The mem need not be mounted:
+    /// the ledger keeps a mem's rows after it was unmounted or deleted
+    /// (an archived bundle, a deleted fork), and they are served with
+    /// `mounted: false`. Omit to list every row of the workspace ledger.
     #[arg(long, value_name = "NAME")]
-    pub mem: String,
+    pub mem: Option<String>,
 
     /// Keep only records of this check kind (`verification`,
     /// `conformance`, or a caller-declared `x-<name>`). A record written
@@ -167,10 +171,12 @@ pub fn run_list(ctx: &CliContext, args: ListArgs) -> anyhow::Result<()> {
         .as_deref()
         .map(|s| parse_instant("until", s))
         .transpose()?;
-    let engine = ctx.cli_engine_scoped(&args.mem)?.into_base();
-    let records: Vec<memstead_base::check::CheckRecord> = engine
-        .check_records(&args.mem)
-        .map_err(CliError::from_engine_op)?
+    let engine = ctx.cli_engine()?.into_base();
+    let (rows, mounted) = match args.mem.as_deref() {
+        Some(mem) => engine.check_records(mem),
+        None => (engine.check_records_all(), true),
+    };
+    let records: Vec<memstead_base::check::CheckRecord> = rows
         .into_iter()
         .filter(|r| {
             args.kind
@@ -192,16 +198,23 @@ pub fn run_list(ctx: &CliContext, args: ListArgs) -> anyhow::Result<()> {
     if ctx.json {
         print_json(&serde_json::json!({
             "mem": args.mem,
+            "mounted": mounted,
             "count": records.len(),
             "checks": records,
         }))?;
         return Ok(());
     }
     let mut md = format!(
-        "# Check records of `{}` — {} row(s)\n\n",
-        args.mem,
+        "# Check records of {} — {} row(s)\n\n",
+        match args.mem.as_deref() {
+            Some(mem) => format!("`{mem}`"),
+            None => "the workspace ledger".to_string(),
+        },
         records.len()
     );
+    if !mounted {
+        md.push_str("- Notice: this mem is not mounted; the rows are the ledger's record of it.\n");
+    }
     for r in &records {
         md.push_str(&format!(
             "- `{}` — {} **{}** by {} ({}) at {}{}{}\n",

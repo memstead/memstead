@@ -208,15 +208,26 @@ impl Engine {
     /// breaking a reader. Refuses an unknown mem; an engine with no
     /// workspace root has no ledger and serves nothing. An archive mount
     /// keeps its sealed records under `entity --provenance`; this read is
-    /// the workspace ledger's.
-    pub fn check_records(&self, mem_name: &str) -> Result<Vec<CheckRecord>, EngineError> {
-        if !self.mounts.iter().any(|m| m.mount.mem == mem_name) {
-            return Err(self.unknown_mem_error(mem_name));
-        }
-        Ok(self
+    /// the workspace ledger's. The mem need not be mounted: the ledger
+    /// keeps the rows of a mem after it was unmounted or deleted
+    /// (archived bundles, deleted forks), and a history over them is
+    /// exactly what a reader comes here for instead of the file; the
+    /// second value says whether the mem is mounted now.
+    pub fn check_records(&self, mem_name: &str) -> (Vec<CheckRecord>, bool) {
+        let mounted = self.mounts.iter().any(|m| m.mount.mem == mem_name);
+        let rows = self
             .workspace_root()
             .map(|root| CheckLedger::for_workspace(root).records_for_mem(mem_name))
-            .unwrap_or_default())
+            .unwrap_or_default();
+        (rows, mounted)
+    }
+
+    /// Every record of the workspace ledger, oldest first, whatever mem
+    /// the entity belongs to and whether that mem is mounted.
+    pub fn check_records_all(&self) -> Vec<CheckRecord> {
+        self.workspace_root()
+            .map(|root| CheckLedger::for_workspace(root).all())
+            .unwrap_or_default()
     }
 
     /// Carry the check ledger across a rename: every line recorded under
