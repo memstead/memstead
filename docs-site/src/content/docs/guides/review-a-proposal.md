@@ -6,7 +6,7 @@ sidebar:
 ---
 
 A proposal against a mem is a fork of it (see [fork a mem at a recorded
-ancestor](/guides/back-up-a-mem-repo/#5-fork-a-mem-at-a-recorded-ancestor)):
+ancestor](../back-up-a-mem-repo/#5-fork-a-mem-at-a-recorded-ancestor)):
 the proposer works on their own branch for as long as they like, and the
 owner reviews the result against a common ancestor instead of guessing
 which of two unrelated mems changed. The review is one read, the brief.
