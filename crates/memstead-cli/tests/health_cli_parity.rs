@@ -250,6 +250,95 @@ impl Mcp {
     }
 }
 
+/// `memstead-mcp` honours `MEMSTEAD_WORKSPACE` (and `--workspace`) as
+/// the CLI does: started in an unrelated directory with the variable
+/// naming a workspace, it serves that workspace; naming a directory
+/// without the marker, it refuses `WORKSPACE_NOT_INITIALISED` with the
+/// path and never falls back to the directory walk. Before, the server
+/// walked up from its working directory only, so an MCP client that
+/// cannot set the server's cwd got the walk's refusal although the
+/// documented variable was set.
+#[test]
+fn mcp_server_honours_the_workspace_variable_and_flag() {
+    let ws = seed();
+    let elsewhere = TempDir::new().unwrap();
+
+    let serve = |env: Option<&Path>, flag: Option<&Path>| -> std::process::Child {
+        let bin = assert_cmd::cargo::cargo_bin("memstead-mcp");
+        let mut cmd = StdCommand::new(bin);
+        cmd.current_dir(elsewhere.path())
+            .env_remove("MEMSTEAD_WORKSPACE")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(p) = env {
+            cmd.env("MEMSTEAD_WORKSPACE", p);
+        }
+        if let Some(p) = flag {
+            cmd.arg("--workspace").arg(p);
+        }
+        cmd.spawn().expect("memstead-mcp spawns")
+    };
+    let overview = |child: &mut std::process::Child| -> serde_json::Value {
+        let mut stdin = child.stdin.take().unwrap();
+        let mut reader = BufReader::new(child.stdout.take().unwrap());
+        let mut send = |line: &str| {
+            stdin.write_all(line.as_bytes()).unwrap();
+            stdin.write_all(b"\n").unwrap();
+            stdin.flush().unwrap();
+        };
+        send(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#,
+        );
+        send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+        send(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memstead_overview","arguments":{}}}"#,
+        );
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap() == 0 {
+                panic!("mcp exited before answering");
+            }
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line)
+                && v["id"] == serde_json::json!(2)
+            {
+                return v;
+            }
+        }
+    };
+
+    // The variable names the workspace: served from an unrelated cwd.
+    let mut child = serve(Some(ws.path()), None);
+    let reply = overview(&mut child);
+    assert!(reply["result"].is_object(), "{reply}");
+    assert!(
+        reply["result"]["isError"] != serde_json::json!(true),
+        "{reply}"
+    );
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // The flag wins over a variable that names nothing.
+    let mut child = serve(Some(elsewhere.path()), Some(ws.path()));
+    let reply = overview(&mut child);
+    assert!(reply["result"].is_object(), "{reply}");
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // A directory without the marker refuses, naming the path, and the
+    // walk from cwd is not tried.
+    let child = serve(Some(elsewhere.path()), None);
+    let out = child.wait_with_output().unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("WORKSPACE_NOT_INITIALISED"), "{err}");
+    assert!(
+        err.contains(&elsewhere.path().display().to_string()),
+        "{err}"
+    );
+    assert!(err.contains("MEMSTEAD_WORKSPACE"), "{err}");
+}
+
 impl Drop for Mcp {
     fn drop(&mut self) {
         let _ = self.child.kill();

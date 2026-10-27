@@ -7,7 +7,48 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependencies: `gix` 0.89, `tantivy` 0.27, `rustls-webpki` 0.103.16,
+  `webpki-roots` and `webpki-root-certs` 1.0.11, plus the compatible
+  group (`rmcp` 3.8, `tokio` 1.54, `serde_json`, `schemars`, `sha2`,
+  `unicode-normalization`), the pinned actions and the docs-site's
+  `@astrojs/markdown-remark`.** The three webpki bumps close
+  RUSTSEC-2026-0381 to 0383 (distrusted emSign intermediates); `tantivy`
+  0.27 moves off `lru` 0.16, so the audit's one ignore line
+  (RUSTSEC-2026-0253) is retired. `gix` 0.89 reports every operation
+  through one error type: the git-branch backend's conversions collapsed
+  into one, an open failure is mapped to `NotRepo` at its call sites,
+  and the writer's compare-and-swap conflict is read from the ref
+  transaction's `ReferenceOutOfDate` (or `MustNotExist`) cause inside
+  that error, with the same `HASH_MISMATCH` outcome as before.
+
 ### Fixed
+
+- **A gate on a `conformance` self-check can close.** The gate's check
+  reader (`transition_requires_self_check`, `transition_requires_checks`)
+  derived the state by hash alone, while a conformance record carries
+  the schema pin it judged against and is fresh only under that pin, so
+  every conformance record read `check_stale` and a transition gated on
+  that kind stayed blocked forever. The reader now derives under the
+  mem's pin, as the entity read does; `verification` and `x-` records
+  are unaffected.
+- **`memstead pull <mem>` serves the pulled state at once.** The
+  single-mem pull moved the cached head and emitted the change event
+  but did not reload the in-memory store, so a long-lived engine served
+  the old content until its next stale probe, against what `pull --help`
+  and the backup guide promise; `pull --all` already reloaded. The
+  single-mem pull now reloads the mem before it returns; a reload that
+  fails is reported under the outcome's new `notices` (the ref move
+  stands and the next operation reloads again).
+- **`memstead-mcp` honours `MEMSTEAD_WORKSPACE` and takes `--workspace`.**
+  The server walked up from its working directory only, so an MCP client
+  that cannot set the server's cwd got `WORKSPACE_NOT_INITIALISED`
+  although the variable the CLI documents was set. The flag wins over
+  the variable, either beats the walk, the process enters the directory
+  (so relative `--read-mem` paths resolve against it), and a path
+  without `.memstead/workspace.toml` refuses naming the path and never
+  falls back to the walk, exactly the CLI's semantics.
 
 - **A metadata string with ` #` in it round-trips.** The frontmatter
   writer quoted a string only when it would read back as a number or a

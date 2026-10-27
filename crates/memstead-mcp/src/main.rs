@@ -69,6 +69,17 @@ struct Args {
     /// operations without an identity unless a call declares one.
     #[arg(long = "identity")]
     identity: Option<String>,
+
+    /// Serve the workspace at PATH instead of walking up from the
+    /// current directory (like `git -C`; the process enters PATH, so
+    /// relative `--read-mem` paths resolve against it). Also settable
+    /// via the `MEMSTEAD_WORKSPACE` environment variable; the flag
+    /// wins when both are present. A PATH that is not an initialised
+    /// workspace refuses with `WORKSPACE_NOT_INITIALISED` naming the
+    /// path and never falls back to the directory walk, as the CLI's
+    /// `--workspace` does.
+    #[arg(long = "workspace", value_name = "PATH")]
+    workspace: Option<PathBuf>,
 }
 
 /// Resolve the session-level default identity from the `--identity`
@@ -101,6 +112,29 @@ async fn main() -> anyhow::Result<()> {
         memstead_git_branch::mem_cache::mem_cache_dir,
     );
     let args = Args::parse();
+    // Workspace override — `--workspace` beats `MEMSTEAD_WORKSPACE`, and
+    // either beats the upward walk; the marker is verified and the
+    // process enters the directory, the CLI's semantics. An override
+    // without the marker refuses, naming the tried path, and never
+    // falls back to the walk (an MCP client that cannot set the server's
+    // working directory used to get the walk's refusal although the
+    // variable the CLI documents was set).
+    let override_path = args
+        .workspace
+        .clone()
+        .or_else(|| std::env::var_os("MEMSTEAD_WORKSPACE").map(PathBuf::from));
+    if let Some(root) = &override_path {
+        if !memstead_base::is_workspace_root(root) {
+            anyhow::bail!(
+                "memstead-mcp: ERROR [WORKSPACE_NOT_INITIALISED]: workspace override `{}` (from \
+                 --workspace or MEMSTEAD_WORKSPACE) does not carry `.memstead/workspace.toml` — \
+                 refusing rather than falling back to the directory walk",
+                root.display()
+            );
+        }
+        std::env::set_current_dir(root)
+            .with_context(|| format!("cannot enter workspace override {}", root.display()))?;
+    }
     let cwd = std::env::current_dir().context("Could not determine current directory")?;
 
     let workspace_root = find_workspace_root(&cwd).ok_or_else(|| {

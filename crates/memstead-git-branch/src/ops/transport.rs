@@ -160,6 +160,7 @@ pub fn pull_in_gitdir(
         new_sha: remote_sha,
         updated_refs: fetched.updated_refs,
         checks_imported: 0,
+        notices: Vec::new(),
     })
 }
 

@@ -716,10 +716,18 @@ impl Engine {
         // The mem's check-ledger rows travel with it (engine::checks_transport).
         outcome.checks_imported = self.import_checks(&hook, &gitdir, remote, &[mem])?;
 
-        // Rewind cached head + emit change event.
+        // Rewind cached head, reload the store so it serves the pulled
+        // state before this call returns (as `pull_all` does; a
+        // long-lived engine used to serve the old content until its
+        // next stale probe), then emit the change event.
         if outcome.previous_sha != outcome.new_sha {
             if let Some(state) = self.mounts.get_mut(mount_idx) {
                 state.last_known_head = Some(outcome.new_sha.clone());
+            }
+            if let Err(e) = self.reload_one_mem(mem) {
+                outcome.notices.push(format!(
+                    "mem `{mem}` was pulled but did not reload in this process: {e}"
+                ));
             }
             let event = crate::engine::events::MemChangedEvent {
                 mem: mem.to_string(),

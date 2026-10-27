@@ -181,6 +181,33 @@ fn a_push_publishes_the_mems_rows_once() {
     assert!(all.in_sync.contains(&CHECKS_REF.to_string()), "{all:?}");
 }
 
+/// A single-mem pull serves the pulled entities before it returns: B
+/// creates and pushes an entity, A pulls, and A's store holds it with
+/// no reload in between. Before, the pull moved the cached head and
+/// emitted the event only, so a long-lived engine served the old
+/// content until its next stale probe.
+#[test]
+fn a_pull_serves_the_pulled_entities_without_a_reload() {
+    let (a, _remote) = fixture();
+    let b = clone_workspace(a.path());
+    let mut engine_b = engine_from_workspace_root(b.path()).expect("B boots");
+    let gamma = create(&mut engine_b, "Gamma");
+    engine_b.push("specs", "hub", false).unwrap();
+
+    let mut engine_a = engine_from_workspace_root(a.path()).unwrap();
+    assert!(
+        engine_a.get_entity(&gamma).is_none(),
+        "A has not pulled yet"
+    );
+    let pulled = engine_a.pull("specs", "hub").expect("A pulls");
+    assert_ne!(pulled.previous_sha, pulled.new_sha);
+    assert!(pulled.notices.is_empty(), "{pulled:?}");
+    assert!(
+        engine_a.get_entity(&gamma).is_some_and(|e| !e.stub),
+        "the store serves the pulled entity at once"
+    );
+}
+
 /// The other machine pulls the branch and gets the rows: its ledger
 /// holds A's record, its checks axis reads it, and an export made there
 /// seals it. Its own check then rides back: A pulls and holds both

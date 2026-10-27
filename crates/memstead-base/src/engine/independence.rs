@@ -493,7 +493,21 @@ impl Engine {
             // One source per mount (the sealed member on an archive, the
             // workspace ledger elsewhere), the same the entity read derives from.
             let latest = self.latest_check_record(&entity.mem, &entity.id.0, kind);
-            let state = crate::check::derive_state(latest.as_ref(), &entity.content_hash);
+            // Pin-aware, as the entity read derives: a `conformance`
+            // record carries the schema pin it judged against and is
+            // fresh only under that pin; a record without one (every
+            // `verification` and `x-` record) ignores the argument.
+            // Hash-only derivation read every conformance record as
+            // `check_stale`, so a gate on that kind never closed.
+            let current_pin = self
+                .find_mount(&entity.mem)
+                .ok()
+                .and_then(|m| m.mount.schema.as_ref().map(|s| s.as_display()));
+            let state = crate::check::derive_state_pinned(
+                latest.as_ref(),
+                &entity.content_hash,
+                current_pin.as_deref(),
+            );
             if state != CheckState::CheckedOk {
                 return CheckStanding {
                     state,

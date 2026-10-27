@@ -63,6 +63,11 @@ pub struct PullOutcome {
     /// for the mem, into the workspace ledger.
     #[serde(default)]
     pub checks_imported: usize,
+    /// What the pull could not finish in this process: today only a
+    /// store reload that failed after the branch moved (the ref move
+    /// stands; the next operation reloads again). Empty on a clean pull.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notices: Vec<String>,
 }
 
 /// Outcome of `Engine::push`. The remote's view of the mem's

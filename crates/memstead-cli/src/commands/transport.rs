@@ -142,8 +142,13 @@ pub fn run_pull(ctx: &CliContext, args: PullArgs) -> anyhow::Result<()> {
         } else {
             outcome.previous_sha.clone()
         };
+        let notices = outcome
+            .notices
+            .iter()
+            .map(|n| format!("\n- Notice: {n}"))
+            .collect::<String>();
         crate::output::print_markdown(&format!(
-            "# Pulled `{}`\n\n- Branch ref: `{}`\n- Source ref: `{}`\n- Previous: `{prev}`\n- New: `{}`\n- Check records imported: {}",
+            "# Pulled `{}`\n\n- Branch ref: `{}`\n- Source ref: `{}`\n- Previous: `{prev}`\n- New: `{}`\n- Check records imported: {}{notices}",
             outcome.mem,
             outcome.branch_ref,
             outcome.source_ref,

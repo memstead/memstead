@@ -718,6 +718,32 @@ write_rules: []
     /// carried to the post-write hash, marked, still the checker's; the
     /// constraints axis stays clean and the gate keeps holding across a
     /// later write to the complete plan.
+    /// A gate on the `conformance` kind closes on a fresh conformance
+    /// record: the gate's reader derives the state under the mem's
+    /// schema pin, as the entity read does. Before, it derived by hash
+    /// alone, every conformance record (which carries its pin) read
+    /// `check_stale`, and the transition stayed blocked forever.
+    #[test]
+    fn a_conformance_self_check_gate_closes_on_a_fresh_record() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "conformance");
+        engine.set_identity(Some("author-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+        let entity = engine.get_entity(&id).unwrap().clone();
+        let standing = (engine.check_standing_provider())(&entity, "conformance");
+        assert_eq!(standing.state, CheckState::NeverChecked);
+
+        check_plan(&mut engine, "checker-c", &id, "conformance");
+        let entity = engine.get_entity(&id).unwrap().clone();
+        let standing = (engine.check_standing_provider())(&entity, "conformance");
+        assert_eq!(standing.state, CheckState::CheckedOk, "{standing:?}");
+        assert!(standing.confirms(), "{standing:?}");
+
+        engine.set_identity(Some("author-a".to_string()));
+        set_status(&mut engine, &id, "complete").expect("the gate admits the write");
+        assert!(engine.constraint_findings(Some("bundles")).is_empty());
+    }
+
     #[test]
     fn licensing_self_check_carries_across_the_transition_it_admitted() {
         let tmp = tempfile::TempDir::new().unwrap();
