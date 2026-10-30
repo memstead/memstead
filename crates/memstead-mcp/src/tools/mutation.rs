@@ -9,7 +9,7 @@ pub(crate) const ROLE_PARAM_DESCRIPTION: &str = "The role this mutation is perfo
 
 /// The one description of the per-call `identity` parameter, shared by
 /// every mutating tool (entity and lifecycle alike).
-pub(crate) const IDENTITY_PARAM_DESCRIPTION: &str = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle. Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars).";
+pub(crate) const IDENTITY_PARAM_DESCRIPTION: &str = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle. Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars), and so does a value that differs from the declared one on a server started with --pin-identity.";
 
 /// Shared `note` description rendered identically on every mutation-tool
 /// parameter. One sentence, ≤280 chars, agent-authored — it lands in the
@@ -472,7 +472,7 @@ pub struct CheckParams {
     )]
     pub role: Option<String>,
     #[schemars(
-        description = "WHO is checking: an opaque identity string, recorded immutably on the check record. The independence gate compares the author's recorded identity against this one and nothing else — declare a stable identity per agent/session and author≠checker becomes machine-checkable. Omit to record the session default, or nothing (the check then reads unconfirmable). Over-length refuses INVALID_IDENTITY (cap 128 chars)."
+        description = "WHO is checking: an opaque identity string, recorded immutably on the check record. The independence gate compares the author's recorded identity against this one and nothing else — declare a stable identity per agent/session and author≠checker becomes machine-checkable. Omit to record the session default, or nothing (the check then reads unconfirmable). Over-length refuses INVALID_IDENTITY (cap 128 chars), and so does a value that differs from the declared one on a server started with --pin-identity."
     )]
     pub identity: Option<String>,
     #[schemars(

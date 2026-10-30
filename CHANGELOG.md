@@ -7,6 +7,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **`memstead-mcp --pin-identity` makes the declared identity the
+  session's one identity.** A server started with `--identity <name>`
+  (or `MEMSTEAD_IDENTITY`) and `--pin-identity` refuses a tool call whose
+  `identity` differs, `INVALID_IDENTITY` with `details.declared`,
+  `details.claimed` and `details.pinned: true`; an absent or equal value
+  records the declared identity as before. Off by default, so an
+  orchestrator running several agents through one server keeps its
+  per-call names; on, the start-up declaration is a fence a client cannot
+  step over by picking a name of its own and reading as a different
+  person at the author≠checker gate. `--pin-identity` without a declared
+  identity refuses at start. Before, a per-call `identity` always won
+  over the declared one, by design and as documented; a headless agent
+  that invented its own handle therefore landed its checks under that
+  handle instead of the operator's declaration.
+
 ### Changed
 
 - **`memstead checks` reads an unmounted mem's rows, and the whole

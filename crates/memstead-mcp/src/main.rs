@@ -65,10 +65,22 @@ struct Args {
     /// this server performs: an opaque identity
     /// string — an agent name, a session handle. Also settable via
     /// the `MEMSTEAD_IDENTITY` environment variable; the flag wins.
-    /// Per-call `identity` parameters win over either. Omit to record
-    /// operations without an identity unless a call declares one.
+    /// Per-call `identity` parameters win over either unless
+    /// `--pin-identity` is set. Omit to record operations without an
+    /// identity unless a call declares one.
     #[arg(long = "identity")]
     identity: Option<String>,
+
+    /// Pin the declared identity for the session: a tool call whose
+    /// `identity` differs from `--identity` / `MEMSTEAD_IDENTITY` refuses
+    /// `INVALID_IDENTITY` naming both (an absent or equal value records
+    /// the declared one). For a server an operator starts for one agent,
+    /// so the agent cannot read as a different person at the
+    /// author≠checker gate by picking a name of its own. Off by default:
+    /// an orchestrator running several agents through one server keeps
+    /// per-call names. Requires a declared identity.
+    #[arg(long = "pin-identity", default_value_t = false)]
+    pin_identity: bool,
 
     /// Serve the workspace at PATH instead of walking up from the
     /// current directory (like `git -C`; the process enters PATH, so
@@ -198,6 +210,12 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     use memstead_mcp::read_mems;
 
     let default_identity = default_identity_from(args.identity.as_deref())?;
+    if args.pin_identity && default_identity.is_none() {
+        anyhow::bail!(
+            "memstead-mcp: ERROR [INVALID_INPUT]: --pin-identity pins the declared identity, and \
+             none was declared — pass --identity <name> or set MEMSTEAD_IDENTITY"
+        );
+    }
     let default_role = match args.role.as_deref() {
         None => memstead_base::vcs::Role::Unspecified,
         Some(s) => memstead_base::vcs::Role::from_wire(s).ok_or_else(|| {
@@ -332,7 +350,8 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     )
     .with_operator_mode(args.operator_mode)
     .with_default_role(default_role)
-    .with_default_identity(default_identity);
+    .with_default_identity(default_identity)
+    .with_pin_identity(args.pin_identity);
 
     let service = server.serve(stdio()).await?;
     service.waiting().await?;

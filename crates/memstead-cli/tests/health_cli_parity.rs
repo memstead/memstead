@@ -339,6 +339,96 @@ fn mcp_server_honours_the_workspace_variable_and_flag() {
     assert!(err.contains("MEMSTEAD_WORKSPACE"), "{err}");
 }
 
+/// `memstead-mcp --pin-identity`: a call whose `identity` differs from
+/// the declared one refuses `INVALID_IDENTITY` naming both, an absent or
+/// equal value records the declared identity, and the flag without a
+/// declared identity refuses at start. Without the flag a per-call
+/// identity still wins, as documented.
+#[test]
+fn mcp_server_pins_the_declared_identity_on_request() {
+    let ws = seed();
+    let spawn = |extra: &[&str]| -> std::process::Child {
+        let bin = assert_cmd::cargo::cargo_bin("memstead-mcp");
+        let mut cmd = StdCommand::new(bin);
+        cmd.current_dir(ws.path())
+            .env_remove("MEMSTEAD_IDENTITY")
+            .args(extra)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        cmd.spawn().expect("memstead-mcp spawns")
+    };
+    let check = |child: &mut std::process::Child, identity: Option<&str>| -> serde_json::Value {
+        let mut stdin = child.stdin.take().unwrap();
+        let mut reader = BufReader::new(child.stdout.take().unwrap());
+        let mut send = |line: &str| {
+            stdin.write_all(line.as_bytes()).unwrap();
+            stdin.write_all(b"\n").unwrap();
+            stdin.flush().unwrap();
+        };
+        send(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#,
+        );
+        send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+        let mut args =
+            serde_json::json!({"entity": "notes--hub", "verdict": "ok", "kind": "x-pin"});
+        if let Some(i) = identity {
+            args["identity"] = serde_json::json!(i);
+        }
+        let req = serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memstead_check","arguments":args}});
+        send(&req.to_string());
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap() == 0 {
+                panic!("mcp exited before answering");
+            }
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line)
+                && v["id"] == serde_json::json!(2)
+            {
+                return v["result"]["structuredContent"].clone();
+            }
+        }
+    };
+
+    // Pinned: a different name refuses, naming both; the declared name
+    // and an absent one record the declared identity.
+    let mut child = spawn(&["--identity", "checker-x", "--pin-identity"]);
+    let r = check(&mut child, Some("independent-checker-1"));
+    assert_eq!(r["code"], "INVALID_IDENTITY", "{r}");
+    assert_eq!(r["details"]["declared"], "checker-x", "{r}");
+    assert_eq!(r["details"]["claimed"], "independent-checker-1", "{r}");
+    assert_eq!(r["details"]["pinned"], true, "{r}");
+    let _ = child.kill();
+    let _ = child.wait();
+    let mut child = spawn(&["--identity", "checker-x", "--pin-identity"]);
+    let r = check(&mut child, None);
+    assert_eq!(r["identity"], "checker-x", "{r}");
+    let _ = child.kill();
+    let _ = child.wait();
+    let mut child = spawn(&["--identity", "checker-x", "--pin-identity"]);
+    let r = check(&mut child, Some("checker-x"));
+    assert_eq!(r["identity"], "checker-x", "{r}");
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // Unpinned: the per-call name wins, as documented.
+    let mut child = spawn(&["--identity", "checker-x"]);
+    let r = check(&mut child, Some("independent-checker-1"));
+    assert_eq!(r["identity"], "independent-checker-1", "{r}");
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // The flag without a declared identity refuses at start.
+    let child = spawn(&["--pin-identity"]);
+    let out = child.wait_with_output().unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("--pin-identity") && err.contains("--identity"),
+        "{err}"
+    );
+}
+
 impl Drop for Mcp {
     fn drop(&mut self) {
         let _ = self.child.kill();

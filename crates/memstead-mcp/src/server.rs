@@ -52,6 +52,13 @@ pub struct McpServer {
     /// win over this default; when both are absent, operations record
     /// no identity.
     default_identity: Option<String>,
+    /// `--pin-identity`: the declared identity is the session's one
+    /// identity, and a per-call `identity` that differs refuses
+    /// `INVALID_IDENTITY` naming both. Off by default, so an
+    /// orchestrator running several agents through one server keeps
+    /// its per-call names; on, the operator's start-up declaration is a
+    /// fence a client cannot step over by picking a name of its own.
+    pin_identity: bool,
     /// Effective set of tool names hidden from this server. Resolved once
     /// from `[mcp].disabled_tools` at construction. Unknown names from
     /// the raw config are filtered out by `validate_disabled_tools` in
@@ -161,6 +168,7 @@ impl McpServer {
             token_budget,
             default_role: memstead_base::vcs::Role::Unspecified,
             default_identity: None,
+            pin_identity: false,
             disabled_tools: Arc::new(disabled_tools),
             config_source: config_source.map(Arc::new),
             client: Arc::new(OnceLock::new()),
@@ -191,6 +199,15 @@ impl McpServer {
         self
     }
 
+    /// Pin the session identity (the binary's `--pin-identity`): a
+    /// per-call `identity` that differs from the declared one refuses
+    /// `INVALID_IDENTITY`; an absent or equal one records the declared
+    /// identity as before.
+    pub fn with_pin_identity(mut self, pin: bool) -> Self {
+        self.pin_identity = pin;
+        self
+    }
+
     /// Resolve a per-call `identity` parameter against the session
     /// default. Per-call wins; an over-length
     /// value refuses typed (`INVALID_IDENTITY`) — the record is
@@ -217,6 +234,29 @@ impl McpServer {
                             serde_json::json!({
                                 "length": len,
                                 "max": memstead_base::vcs::IDENTITY_MAX_LEN,
+                            }),
+                        ),
+                    )));
+                }
+                if self.pin_identity
+                    && let Some(declared) = self.default_identity.as_deref()
+                    && declared != id
+                {
+                    let msg = format!(
+                        "identity is pinned: this server was started with `--identity {declared}` \
+                         and `--pin-identity`, so a call may not record itself as `{id}`; omit \
+                         `identity` or pass the declared one"
+                    );
+                    return Err(Box::new(tool_error_with_payload(
+                        "INVALID_IDENTITY",
+                        &msg,
+                        envelope(
+                            "INVALID_IDENTITY",
+                            msg.clone(),
+                            serde_json::json!({
+                                "declared": declared,
+                                "claimed": id,
+                                "pinned": true,
                             }),
                         ),
                     )));
