@@ -24,6 +24,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   that invented its own handle therefore landed its checks under that
   handle instead of the operator's declaration.
 
+### Fixed
+
+- **`memstead rename` rewrites a self-prefixed link inside a hierarchical
+  mem.** Inside mem `library/a`, a body link spelled by the full id
+  (`[[library/a--first-note]]`) is accepted at write (the resolver strips
+  the self-prefix) and its relationship row followed a rename, but the
+  body kept the old slug, because the rewriter refused any dash form with
+  a `/` in the mem half as ambiguous; `health --strict` then read the
+  body link as dangling until someone edited it by hand. The rewriter
+  now follows the exact `<mem>--<slug>` spelling of the renamed entity
+  as the resolver does; a dash form into a different hierarchical mem
+  stays out, as it stays out of the resolver. Every other same-mem form
+  (bare slug, alias, colon self-reference) and the flat-mem forms were
+  already rewritten.
+
 ### Changed
 
 - **`memstead checks` reads an unmounted mem's rows, and the whole

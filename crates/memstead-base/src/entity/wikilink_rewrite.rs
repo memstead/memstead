@@ -133,11 +133,24 @@ pub(crate) fn rewrite_cross_mem_slug(
 
         out.push_str(&text[last_end..whole.start()]);
 
-        let rewritten_inner = match split_cross_mem_target(target) {
-            Some((mem, sep, slug)) if mem == old_mem && slug == old_slug => {
-                Some(format!("{old_mem}{sep}{new_slug}"))
+        // The exact `<old_mem>--<old_slug>` spelling first: inside a
+        // hierarchical mem the resolver strips that self-prefix and reads
+        // the link as the same-mem slug (a cross-mem writer never gets it
+        // past the gate), so it names the renamed entity although the
+        // generic splitter refuses a `/` in the dash form as ambiguous.
+        let self_prefixed = target
+            .strip_prefix(old_mem)
+            .and_then(|rest| rest.strip_prefix("--"))
+            .is_some_and(|slug| slug == old_slug);
+        let rewritten_inner = if self_prefixed {
+            Some(format!("{old_mem}--{new_slug}"))
+        } else {
+            match split_cross_mem_target(target) {
+                Some((mem, sep, slug)) if mem == old_mem && slug == old_slug => {
+                    Some(format!("{old_mem}{sep}{new_slug}"))
+                }
+                _ => None,
             }
-            _ => None,
         };
 
         if let Some(new_target) = rewritten_inner {
@@ -407,23 +420,25 @@ See [[planning/plan-x--alpha]] and [[planning/plan-x:beta|the beta]], not
         assert_eq!(n, 1);
     }
 
-    /// A hierarchical mem is addressed in the colon form only; the
-    /// rewriter follows the resolver and rewrites it, while the dash
-    /// form into a hierarchical mem stays out (it is the ambiguous
-    /// shape the resolver refuses, so it never names a referrer).
+    /// A hierarchical mem is addressed in the colon form, and inside
+    /// the mem itself also by the exact `<mem>--<slug>` spelling (the
+    /// resolver strips that self-prefix); the rewriter follows both. A
+    /// dash form into a DIFFERENT hierarchical mem stays out: it is the
+    /// ambiguous shape the resolver refuses, so it never names a
+    /// referrer.
     #[test]
     fn cross_mem_rewrites_colon_form_into_a_hierarchical_mem() {
         let (out, n) = rewrite_cross_mem_slug(
-            "see [[library/a:old-name|the card]] and [[library/a--old-name]]",
+            "see [[library/a:old-name|the card]], [[library/a--old-name]] and [[library/b--old-name]]",
             "library/a",
             "old-name",
             "new-name",
         );
         assert_eq!(
             out,
-            "see [[library/a:new-name|the card]] and [[library/a--old-name]]"
+            "see [[library/a:new-name|the card]], [[library/a--new-name]] and [[library/b--old-name]]"
         );
-        assert_eq!(n, 1);
+        assert_eq!(n, 2);
     }
 
     #[test]
