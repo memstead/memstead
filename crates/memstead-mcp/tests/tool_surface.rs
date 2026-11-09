@@ -1374,6 +1374,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "memstead_update",
             // Residual-stub demotion path (only-ReadOnly referrers).
             "RESIDUAL_STUB_FOR_READONLY_REFERRERS",
+            // A step after the landed commit failed: success, not a retry.
+            "WRITE_FOLLOW_UP_FAILED",
             // memstead_entity frontmatter field referenced to describe the stub-
             // delete contract (empty `_hash` on stubs).
             "_hash",
@@ -1928,6 +1930,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "elapsed_ms",
             // Auto-reload-on-read warning the description points at.
             "MEM_RELOADED",
+            // A load that completed a cut-off folder commit says so.
+            "INTERRUPTED_COMMIT_COMPLETED",
             // Cross-tool reference for diff-list lookup.
             "memstead_changes_since",
             // Membership-fixed-at-boot clause cites the lifecycle tools that

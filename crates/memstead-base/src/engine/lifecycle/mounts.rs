@@ -24,7 +24,7 @@ impl Engine {
     pub fn unregister_writable_mem(
         &mut self,
         mem_name: &str,
-    ) -> Result<Option<Box<dyn MemBackend>>, EngineError> {
+    ) -> Result<Option<Arc<dyn MemBackend>>, EngineError> {
         let pos = self.mounts.iter().position(|m| m.mount.mem == mem_name);
         let Some(idx) = pos else {
             return Ok(None);
@@ -105,7 +105,7 @@ impl Engine {
     pub fn unregister_read_mount(
         &mut self,
         mem_name: &str,
-    ) -> Result<Option<Box<dyn MemBackend>>, EngineError> {
+    ) -> Result<Option<Arc<dyn MemBackend>>, EngineError> {
         let pos = self.mounts.iter().position(|m| {
             m.mount.mem == mem_name
                 && m.mount.capability == crate::workspace::MountCapability::ReadOnly
@@ -301,7 +301,9 @@ impl Engine {
         // view (new mem included) so cross-mem references
         // targeting the new mem resolve correctly during this
         // load.
-        let (entries, read_errors) = collect_source_entries(backend.as_ref())?;
+        let read = collect_source_entries(&mount.mem, backend.as_ref())?;
+        self.load_warnings.extend(read.completed_commit);
+        let (entries, read_errors) = (read.entries, read.read_errors);
         if let Some(w) = crate::engine::boot::unbacked_mount_warning(
             &mount,
             backend.as_ref(),
@@ -372,7 +374,7 @@ impl Engine {
         let mount_capability_for_router = mount.capability;
         self.mounts.push(MountedBackend {
             mount,
-            backend,
+            backend: backend.into(),
             last_known_head,
             mem_config,
             // A runtime-created mem is authored live, not installed from

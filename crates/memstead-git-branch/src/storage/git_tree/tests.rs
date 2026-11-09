@@ -1322,3 +1322,174 @@ fn changes_since_unknown_cursor_returns_typed_commit_not_found_marker() {
         other => panic!("expected BackendError::Other, got {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------
+// A commit that fails ends its transaction: nothing stays staged
+// ---------------------------------------------------------------------
+
+/// A backend with one committed entity and one staged write on top.
+fn seeded_with_a_staged_write(gitdir: &Path) -> GitTreeBackend {
+    use memstead_base::backend::MemBackend;
+    let backend = GitTreeBackend::new(gitdir.to_path_buf(), "refs/heads/test".to_string());
+    MemBackend::write_entity(&backend, Path::new("seed.md"), b"seed").unwrap();
+    MemBackend::commit(&backend, "seed", &ctx_for_test()).unwrap();
+    MemBackend::write_entity(&backend, Path::new("staged.md"), b"never lands").unwrap();
+    MemBackend::write_entity(&backend, Path::new("seed.md"), b"never lands either").unwrap();
+    backend
+}
+
+/// What the backend serves is what the branch holds: the staged write
+/// is gone from every read.
+fn assert_nothing_staged(backend: &GitTreeBackend) {
+    use memstead_base::backend::MemBackend;
+    assert_eq!(
+        MemBackend::read_entity(backend, Path::new("staged.md")).unwrap(),
+        None,
+        "a write that never landed is still served"
+    );
+    assert_eq!(
+        MemBackend::read_entity(backend, Path::new("seed.md")).unwrap(),
+        Some(b"seed".to_vec()),
+        "a staged overwrite that never landed is still served"
+    );
+    assert!(!MemBackend::entity_exists(backend, Path::new("staged.md")).unwrap());
+}
+
+/// `true` when this process can write into a directory it has just
+/// made read-only (a privileged user): the permission-based failures
+/// below cannot be produced then, and the tests say so and stop.
+#[cfg(unix)]
+fn ignores_permissions(dir: &Path) -> bool {
+    let probe = dir.join("permission-probe");
+    let writable = std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    writable
+}
+
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
+#[test]
+fn a_commit_that_cannot_open_the_repository_leaves_nothing_staged() {
+    use memstead_base::backend::MemBackend;
+    let tmp = TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let backend = seeded_with_a_staged_write(&gitdir);
+
+    let away = tmp.path().join("moved-away.git");
+    std::fs::rename(&gitdir, &away).unwrap();
+    MemBackend::commit(&backend, "cannot land", &ctx_for_test())
+        .expect_err("a repository that is gone cannot take a commit");
+    std::fs::rename(&away, &gitdir).unwrap();
+
+    assert_nothing_staged(&backend);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_commit_that_cannot_write_its_objects_leaves_nothing_staged() {
+    use memstead_base::backend::MemBackend;
+    let tmp = TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let backend = seeded_with_a_staged_write(&gitdir);
+    let before = MemBackend::current_head(&backend).unwrap();
+
+    // Every directory under `objects/` read-only: the blob of the
+    // staged write cannot be stored.
+    let objects = gitdir.join("objects");
+    let mut dirs = vec![objects.clone()];
+    let mut i = 0;
+    while i < dirs.len() {
+        for entry in std::fs::read_dir(&dirs[i]).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+            }
+        }
+        i += 1;
+    }
+    for dir in &dirs {
+        set_mode(dir, 0o555);
+    }
+    if ignores_permissions(&objects) {
+        for dir in &dirs {
+            set_mode(dir, 0o755);
+        }
+        eprintln!("skipped: this user writes through read-only directories");
+        return;
+    }
+    let result = MemBackend::commit(&backend, "cannot land", &ctx_for_test());
+    for dir in &dirs {
+        set_mode(dir, 0o755);
+    }
+    result.expect_err("objects that cannot be written cannot make a commit");
+
+    assert_eq!(MemBackend::current_head(&backend).unwrap(), before);
+    assert_nothing_staged(&backend);
+}
+
+#[test]
+fn a_parent_mismatch_refusal_leaves_nothing_staged() {
+    use memstead_base::backend::{BackendError, MemBackend};
+    let tmp = TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let backend = seeded_with_a_staged_write(&gitdir);
+
+    let err = MemBackend::commit_with_expected_parent(
+        &backend,
+        "pinned on a tip that is not the branch's",
+        &ctx_for_test(),
+        Some("0000000000000000000000000000000000000000"),
+    )
+    .expect_err("the pin does not match");
+    assert!(
+        matches!(err, BackendError::ParentMismatch { .. }),
+        "{err:?}"
+    );
+
+    assert_nothing_staged(&backend);
+}
+
+/// The ref has moved when the worktree refresh runs. A refresh that
+/// fails is a failed follow-up of a commit that landed, with the
+/// commit's id, never a failed write.
+#[cfg(unix)]
+#[test]
+fn a_failed_worktree_refresh_reports_the_commit_as_landed() {
+    use memstead_base::backend::{BackendError, MemBackend};
+    let tmp = TempDir::new().unwrap();
+    let (workdir, gitdir) = fresh_non_bare_repo(tmp.path());
+    let backend = GitTreeBackend::new(gitdir.clone(), "refs/heads/main".to_string());
+    MemBackend::write_entity(&backend, Path::new("seed.md"), b"seed").unwrap();
+    MemBackend::commit(&backend, "seed", &ctx_for_test()).unwrap();
+    let before = MemBackend::current_head(&backend).unwrap();
+
+    // A worktree that takes no new file: the commit lands in the
+    // object store, the checkout of its new file cannot.
+    MemBackend::write_entity(&backend, Path::new("fresh.md"), b"fresh").unwrap();
+    set_mode(&workdir, 0o555);
+    if ignores_permissions(&workdir) {
+        set_mode(&workdir, 0o755);
+        eprintln!("skipped: this user writes through read-only directories");
+        return;
+    }
+    let result = MemBackend::commit(&backend, "lands, refresh fails", &ctx_for_test());
+    set_mode(&workdir, 0o755);
+
+    let after = MemBackend::current_head(&backend).unwrap();
+    assert_ne!(after, before, "the commit landed");
+    match result {
+        Err(BackendError::FollowUpFailed { commit, step, .. }) => {
+            assert_eq!(Some(commit), after);
+            assert_eq!(step, "worktree_sync");
+        }
+        other => panic!("expected the landed commit with a failed follow-up, got {other:?}"),
+    }
+    assert_eq!(
+        MemBackend::read_entity(&backend, Path::new("fresh.md")).unwrap(),
+        Some(b"fresh".to_vec())
+    );
+}

@@ -10,7 +10,7 @@ use crate::entity::EntityId;
 use crate::entity::parser::parse_markdown;
 use crate::entity::store_builder::push_entities_into_store;
 use crate::ops::project_incoming;
-use crate::provenance::{Provenance, ProvenanceKind};
+use crate::provenance::ProvenanceKind;
 
 use super::super::make_stub;
 use super::{Actor, ClientId, CreateEntityOutcome, Engine, EngineError, PreparedCreate};
@@ -55,7 +55,6 @@ impl Engine {
             relation_targets,
             type_def,
         } = prepared;
-        let backend = self.mounts[mount_idx].backend.as_ref();
         let commit_subject = format!("memstead: create {id}");
         let ctx = self.commit_context(
             Some("create_entity"),
@@ -63,22 +62,13 @@ impl Engine {
             client.cloned(),
             note.map(String::from),
         );
-        let write_id = backend.commit(&commit_subject, &ctx)?;
-
-        // 9. Append provenance. Folder writes a JSONL line; git-branch
-        //    no-ops (the commit object already carries the data).
-        backend.append_provenance(
-            &Provenance::new(
-                std::time::SystemTime::now(),
-                ProvenanceKind::Create,
-                Some(id.to_string()),
-                actor,
-                client.cloned(),
-                note.map(String::from),
-            )
-            .with_role(self.current_role)
-            .with_identity(self.current_identity.clone()),
-        )?;
+        // 9. The provenance record lands with the commit. Folder writes
+        //    a JSONL line; git-branch drops it (the commit object
+        //    already carries the data).
+        let record = self.provenance_record(ProvenanceKind::Create, &id, actor, client, note);
+        let landed = self.commit_staged(mount_idx, &commit_subject, &ctx, &[record])?;
+        let write_id = landed.write_id;
+        warnings.extend(landed.warnings);
 
         // Self-write bookkeeping: jump `last_known_head` to the SHA
         // we just produced so the next read doesn't surface
@@ -88,43 +78,54 @@ impl Engine {
 
         // 10. Update the in-memory store via re-parse so the store
         //     mirrors the on-disk shape (content_hash, heading_spans).
-        let parse_result = parse_markdown(&markdown, &file_path, type_def.as_ref(), &mem)
-            .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
-        let content_hash = parse_result.entity.content_hash.clone();
+        let applied = self.after_commit(mount_idx, "store_update", &mut warnings, |engine| {
+            let parse_result = parse_markdown(&markdown, &file_path, type_def.as_ref(), &mem)
+                .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
+            let content_hash = parse_result.entity.content_hash.clone();
 
-        // Extract `created_date` from the parsed entity's metadata
-        // before pushing into the store (after push, the entity is
-        // borrowed by the store and re-fetching costs a lookup).
-        // The default schema's auto-timestamp fills `created_date`
-        // with today's ISO date; the field is empty for schemas
-        // that don't declare it.
-        let created_date = parse_result
-            .entity
-            .metadata
-            .get("created_date")
-            .map(|v| v.to_frontmatter_string())
-            .unwrap_or_default();
+            // Extract `created_date` from the parsed entity's metadata
+            // before pushing into the store (after push, the entity is
+            // borrowed by the store and re-fetching costs a lookup).
+            // The default schema's auto-timestamp fills `created_date`
+            // with today's ISO date; the field is empty for schemas
+            // that don't declare it.
+            let created_date = created_date_of(&parse_result.entity);
 
-        let fallback = engine_fallback_type();
-        push_entities_into_store(&mut self.store, vec![parse_result], fallback.as_ref(), None);
-        crate::entity::store_builder::remap_alias_target_edge_sources(
-            &mut self.store,
-            &self.schemas,
-        );
+            let fallback = engine_fallback_type();
+            push_entities_into_store(
+                &mut engine.store,
+                vec![parse_result],
+                fallback.as_ref(),
+                None,
+            );
+            crate::entity::store_builder::remap_alias_target_edge_sources(
+                &mut engine.store,
+                &engine.schemas,
+            );
 
-        // Materialise stubs for any inline-relation targets that
-        // weren't already in the store. Mirrors the relate path's
-        // ensure_target — full's create relies on the
-        // loader stubbing unresolved targets, but the unified
-        // store doesn't auto-stub on push, so the engine does it
-        // explicitly. Skipped when no relations were declared
-        // (the args.relations vec is empty).
-        for target in &relation_targets {
-            if !self.store.contains(target) {
-                let kind = super::super::deferred_verified_stub_kind(self, target)?;
-                self.store.upsert(target.clone(), make_stub(target, kind));
+            // Materialise stubs for any inline-relation targets that
+            // weren't already in the store. Mirrors the relate path's
+            // ensure_target — full's create relies on the
+            // loader stubbing unresolved targets, but the unified
+            // store doesn't auto-stub on push, so the engine does it
+            // explicitly. Skipped when no relations were declared
+            // (the args.relations vec is empty).
+            for target in &relation_targets {
+                if !engine.store.contains(target) {
+                    let kind = super::super::deferred_verified_stub_kind(engine, target)?;
+                    engine.store.upsert(target.clone(), make_stub(target, kind));
+                }
             }
-        }
+            Ok((content_hash, created_date))
+        });
+        // A failed store update reloaded the mem from storage, where
+        // the write is; the receipt reads from that view.
+        let (content_hash, created_date) = applied.unwrap_or_else(|| {
+            self.store
+                .get(&id)
+                .map(|e| (e.content_hash.clone(), created_date_of(e)))
+                .unwrap_or_default()
+        });
 
         self.invalidate_communities();
         // Incremental (flywheel W8/01): the new entity is the whole
@@ -169,4 +170,14 @@ impl Engine {
             relations_declared,
         })
     }
+}
+
+/// `created_date` as the frontmatter renders it; empty for a schema
+/// that does not declare the field.
+fn created_date_of(entity: &crate::entity::Entity) -> String {
+    entity
+        .metadata
+        .get("created_date")
+        .map(|v| v.to_frontmatter_string())
+        .unwrap_or_default()
 }

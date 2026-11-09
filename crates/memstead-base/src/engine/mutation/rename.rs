@@ -9,7 +9,7 @@ use crate::entity::id::validate_and_derive_slug;
 use crate::entity::parser::parse_markdown;
 use crate::entity::store_builder::push_entities_into_store;
 use crate::ops::WarningHint;
-use crate::provenance::{Provenance, ProvenanceKind};
+use crate::provenance::ProvenanceKind;
 use crate::vcs::{Actor, ClientId, CommitContext};
 use crate::workspace::MountCapability;
 
@@ -545,21 +545,20 @@ impl Engine {
             note.map(String::from),
         );
         ctx.logical_operation_id = Some(logical_op_id.as_str());
-        let write_id = backend.commit(&commit_subject, &ctx)?;
-
-        backend.append_provenance(
-            &Provenance::new(
-                std::time::SystemTime::now(),
-                ProvenanceKind::Rename,
-                Some(new_id.to_string()),
-                actor,
-                client.cloned(),
-                note.map(String::from),
-            )
-            .with_role(self.current_role)
-            .with_identity(self.current_identity.clone())
-            .with_logical_operation_id(logical_op_id.clone()),
+        // One record shape for every commit of this rename; each lands
+        // with its mem's commit.
+        let record = self
+            .provenance_record(ProvenanceKind::Rename, &new_id, actor, client, note)
+            .with_logical_operation_id(logical_op_id.clone());
+        let landed = self.commit_staged(
+            mount_idx,
+            &commit_subject,
+            &ctx,
+            std::slice::from_ref(&record),
         )?;
+        let write_id = landed.write_id;
+        let mut follow_up_warnings = landed.warnings;
+        let mut committed_mounts: Vec<usize> = vec![mount_idx];
 
         self.record_self_write(mount_idx, &write_id);
         let stamp_warnings = self.stamp_mutation_versions(mount_idx);
@@ -613,35 +612,30 @@ impl Engine {
             );
             peer_ctx.logical_operation_id = Some(logical_op_id.as_str());
             let expected = peer_snapshots.get(&plan.mem).cloned().unwrap_or(None);
-            let peer_commit_result = peer_backend.commit_with_expected_parent(
+            let peer_commit_result = self.commit_staged_pinned(
+                plan.mount_idx,
                 &peer_commit_subject,
                 &peer_ctx,
+                std::slice::from_ref(&record),
                 expected.as_deref(),
             );
             let peer_write_id = match peer_commit_result {
-                Ok(sha) => sha,
-                Err(crate::backend::BackendError::ParentMismatch { .. }) => {
+                Ok(landed) => {
+                    follow_up_warnings.extend(landed.warnings);
+                    landed.write_id
+                }
+                Err(EngineError::Backend(crate::backend::BackendError::ParentMismatch {
+                    ..
+                })) => {
                     return Err(EngineError::RenamePartialFailure {
                         committed_mems: std::mem::take(&mut committed_mems),
                         failed_mem: plan.mem.clone(),
                         failure_cause: "drift".to_string(),
                     });
                 }
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(e),
             };
-            peer_backend.append_provenance(
-                &Provenance::new(
-                    std::time::SystemTime::now(),
-                    ProvenanceKind::Rename,
-                    Some(new_id.to_string()),
-                    actor,
-                    client.cloned(),
-                    note.map(String::from),
-                )
-                .with_role(self.current_role)
-                .with_identity(self.current_identity.clone())
-                .with_logical_operation_id(logical_op_id.clone()),
-            )?;
+            committed_mounts.push(plan.mount_idx);
             self.record_self_write(plan.mount_idx, &peer_write_id);
             // Per peer mount, not only the source mem: a rename touches every
             // pinned peer, and each one's config write can meet its own
@@ -651,28 +645,39 @@ impl Engine {
         }
 
         // ----- Re-parse and push -----
-        let parse_result = parse_markdown(&markdown, &new_file_path, type_def.as_ref(), &mem)
-            .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
-        let content_hash = parse_result.entity.content_hash.clone();
-
-        let mut parse_results = vec![parse_result];
-        for (ref_markdown, ref_file_path, ref_type_def) in &same_mem_writes {
-            let pr = parse_markdown(ref_markdown, ref_file_path, ref_type_def.as_ref(), &mem)
-                .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
-            parse_results.push(pr);
-        }
-        for plan in peer_plans.values() {
-            for (ref_markdown, ref_file_path, ref_type_def) in &plan.writes {
-                let pr = parse_markdown(
-                    ref_markdown,
-                    ref_file_path,
-                    ref_type_def.as_ref(),
-                    &plan.mem,
-                )
-                .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
-                parse_results.push(pr);
-            }
-        }
+        // A failed re-parse reloads every committed mem from storage,
+        // where the rename is; the store edits below are then already
+        // done by the reload and the receipt reads from that view.
+        let parsed = self.after_commits(
+            &committed_mounts,
+            "store_update",
+            &mut follow_up_warnings,
+            |_engine| {
+                let parse_result =
+                    parse_markdown(&markdown, &new_file_path, type_def.as_ref(), &mem)
+                        .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
+                let mut parse_results = vec![parse_result];
+                for (ref_markdown, ref_file_path, ref_type_def) in &same_mem_writes {
+                    let pr =
+                        parse_markdown(ref_markdown, ref_file_path, ref_type_def.as_ref(), &mem)
+                            .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
+                    parse_results.push(pr);
+                }
+                for plan in peer_plans.values() {
+                    for (ref_markdown, ref_file_path, ref_type_def) in &plan.writes {
+                        let pr = parse_markdown(
+                            ref_markdown,
+                            ref_file_path,
+                            ref_type_def.as_ref(),
+                            &plan.mem,
+                        )
+                        .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
+                        parse_results.push(pr);
+                    }
+                }
+                Ok(parse_results)
+            },
+        );
 
         // Residual-stub demotion for ReadOnly cross-mem referrers.
         // The engine can't rewrite ReadOnly-mount markdown, so the
@@ -687,6 +692,7 @@ impl Engine {
         // When no ReadOnly referrers exist, the old entry is
         // removed cleanly (the existing Write-path behaviour).
         let mut outcome_warnings: Vec<WarningHint> = Vec::new();
+        outcome_warnings.extend(follow_up_warnings);
         outcome_warnings.extend(stamp_warnings);
         outcome_warnings.extend(peer_stamp_warnings);
         // Reload-before-operation drift notice, surfaced first.
@@ -700,48 +706,57 @@ impl Engine {
                 slug: new_slug.clone(),
             });
         }
-        if readonly_referrers.is_empty() {
-            self.store.remove(id);
-        } else {
-            // Sever outgoing edges from the old id (the entity is
-            // gone — its body and relations live at the new id now)
-            // and replace the node with a stub at the same id. The
-            // in_edges from the ReadOnly mount survive untouched.
-            self.store.remove_edges_from(id);
-            self.store.upsert(
-                id.clone(),
-                make_stub(
-                    id,
-                    crate::entity::StubKind::Residual {
-                        since_commit: write_id.clone(),
-                        readonly_referrers: readonly_referrers.clone(),
-                    },
-                ),
+        if let Some(parse_results) = parsed {
+            if readonly_referrers.is_empty() {
+                self.store.remove(id);
+            } else {
+                // Sever outgoing edges from the old id (the entity is
+                // gone — its body and relations live at the new id now)
+                // and replace the node with a stub at the same id. The
+                // in_edges from the ReadOnly mount survive untouched.
+                self.store.remove_edges_from(id);
+                self.store.upsert(
+                    id.clone(),
+                    make_stub(
+                        id,
+                        crate::entity::StubKind::Residual {
+                            since_commit: write_id.clone(),
+                            readonly_referrers: readonly_referrers.clone(),
+                        },
+                    ),
+                );
+            }
+
+            let fallback = engine_fallback_type();
+            // Incremental (flywheel W8/01): the touched set is the OLD id
+            // (its document must leave the index) plus every re-parsed
+            // entity — the renamed entity at its new id and each rewritten
+            // referrer.
+            let mut touched: Vec<crate::EntityId> = parse_results
+                .iter()
+                .map(|pr| pr.entity.id.clone())
+                .collect();
+            touched.push(id.clone());
+            push_entities_into_store(&mut self.store, parse_results, fallback.as_ref(), None);
+            crate::entity::store_builder::remap_alias_target_edge_sources(
+                &mut self.store,
+                &self.schemas,
             );
+
+            self.invalidate_communities();
+            self.maintain_search_indexes(&touched);
+        }
+        if !readonly_referrers.is_empty() {
             outcome_warnings.push(WarningHint::ResidualStubForReadOnlyReferrers {
                 id: id.clone(),
                 referrers: readonly_referrers,
             });
         }
-
-        let fallback = engine_fallback_type();
-        // Incremental (flywheel W8/01): the touched set is the OLD id
-        // (its document must leave the index) plus every re-parsed
-        // entity — the renamed entity at its new id and each rewritten
-        // referrer.
-        let mut touched: Vec<crate::EntityId> = parse_results
-            .iter()
-            .map(|pr| pr.entity.id.clone())
-            .collect();
-        touched.push(id.clone());
-        push_entities_into_store(&mut self.store, parse_results, fallback.as_ref(), None);
-        crate::entity::store_builder::remap_alias_target_edge_sources(
-            &mut self.store,
-            &self.schemas,
-        );
-
-        self.invalidate_communities();
-        self.maintain_search_indexes(&touched);
+        let content_hash = self
+            .store
+            .get(&new_id)
+            .map(|e| e.content_hash.clone())
+            .unwrap_or_default();
 
         // `require_notes` provenance nudge — single engine-level
         // enforcement point. Only reached on the real-rename path; the

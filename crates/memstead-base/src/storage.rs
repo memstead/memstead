@@ -15,6 +15,7 @@
 pub mod archive;
 pub mod filesystem;
 pub mod in_memory;
+pub(crate) mod path_lock;
 
 pub use archive::ArchiveBackend;
 pub use filesystem::FilesystemBackend;

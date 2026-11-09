@@ -21,6 +21,7 @@ pub(super) use batch::{batch_empty, batch_receipt, batch_refusal};
 mod batch;
 pub mod create;
 pub mod delete;
+mod landing;
 pub mod mem_sweep;
 pub mod parse_recovery;
 pub mod proposal_merge;
@@ -462,10 +463,16 @@ impl super::Engine {
             Some("record_anchor_observed_hashes"),
             note.map(String::from),
         );
-        let write_id = backend.commit(
-            &format!("memstead: anchor-hash backfill ({written} anchor(s))"),
-            &ctx,
-        )?;
+        // The count this returns has no channel for a follow-up warning
+        // either; the write id is all it takes from the landed commit.
+        let write_id = self
+            .commit_staged(
+                mount_idx,
+                &format!("memstead: anchor-hash backfill ({written} anchor(s))"),
+                &ctx,
+                &[],
+            )?
+            .write_id;
         self.record_self_write(mount_idx, &write_id);
         // Anchor-hash backfill returns a count, not an agent-facing response,
         // so an intervention report has nowhere to ride. Discarded knowingly:
@@ -568,10 +575,14 @@ impl super::Engine {
         backend.write_anchors_sidecar(&sidecar.to_bytes())?;
         let ctx =
             self.session_commit_context(Some("record_anchor_observations"), note.map(String::from));
-        let write_id = backend.commit(
-            &format!("memstead: anchor observations recorded ({written} row(s))"),
-            &ctx,
-        )?;
+        let write_id = self
+            .commit_staged(
+                mount_idx,
+                &format!("memstead: anchor observations recorded ({written} row(s))"),
+                &ctx,
+                &[],
+            )?
+            .write_id;
         self.record_self_write(mount_idx, &write_id);
         let _intervention_has_no_channel_here = self.stamp_mutation_versions(mount_idx);
         Ok(written)

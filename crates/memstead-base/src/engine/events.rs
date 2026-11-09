@@ -561,7 +561,15 @@ mod tests {
         // delta is well under a millisecond (1000µs). Loose bound so
         // CI noise doesn't flake; the order-of-magnitude check is the
         // real signal.
-        let (mut engine, _tmp) = writable_specs_engine();
+        //
+        // On an in-memory mem: the fanout is the same on every backend,
+        // and a folder commit syncs to disk, whose timing varies by more
+        // than the whole bound from one write to the next.
+        let mut engine = crate::engine::Engine::from_mounts(vec![(
+            crate::engine::test_helpers::in_memory_mount("specs"),
+            Box::new(crate::storage::InMemoryBackend::new()) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
         let (actor, client) = cli_actor();
 
         // Warm up the mutation pipeline once so the first-write cost

@@ -12,12 +12,38 @@
 //! `Delete(from)` + `Upsert(to, bytes)` pair — bytes come from the
 //! pending buffer when present, otherwise from the live file on disk.
 //!
-//! ## Atomicity
+//! ## One commit point
 //!
-//! Per-file writes are atomic via write-to-temp + rename. Multi-op
-//! commits are *not* transactional: a failure partway through leaves
-//! earlier ops landed and later ops untouched. Single-writer is
-//! assumed; concurrent writers against the same mem are out of scope.
+//! A commit is all of its files and its ledger lines, or none of them.
+//! It runs in two halves around one commit point:
+//!
+//! 1. **Before.** Every new file content is written to a temp file
+//!    beside its target and synced, the directories that name the
+//!    temps are synced, and the ledger lines of the staged provenance
+//!    records are rendered. Then a commit record naming every file
+//!    operation and every ledger line is written under `.memstead/`
+//!    (temp, sync, rename). The rename that puts the record in place
+//!    is the commit point; syncing `.memstead/` makes it durable.
+//! 2. **After.** The temps are renamed into place, the deletes are
+//!    applied, the touched directories are synced, the ledger lines
+//!    are appended and synced, the record is removed and `.memstead/`
+//!    is synced. Only then does the commit return success.
+//!
+//! A failure before the commit point removes what the attempt wrote
+//! and returns the IO error: storage is what it was. A failure after
+//! it returns [`BackendError::CommitNotApplied`]: the commit is decided,
+//! and [`MemBackend::complete_interrupted_commit`] finishes it from the
+//! record at the next load. The same call removes the temps of an
+//! attempt that died before its commit point. Nothing has to be undone
+//! in either case, because nothing is moved into place before every
+//! content is safely beside its target.
+//!
+//! All of it runs through the [`io::FolderIo`] seam, so tests record
+//! the order of the steps and fail or cut off any one of them.
+//!
+//! Writers are serialised by the engine's cross-process write lock
+//! ([`MemBackend::write_lock_path`]); the backend itself assumes one
+//! writer at a time.
 //!
 //! ## CommitId
 //!
@@ -27,13 +53,16 @@
 //! per-commit token but no CAS guarantee — there is no parent state to
 //! compare against.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use self::io::{FolderIo, RealIo};
 use super::CommitId;
+use super::path_lock;
 use crate::backend::BackendError;
+use crate::backend::CompletedCommit;
 use crate::backend::MemBackend;
 use crate::filesystem::changelog::{
     self, ChangeEntry, MutationKind, changelog_path, parse_rfc3339_utc,
@@ -50,29 +79,87 @@ enum PendingState {
     Delete,
 }
 
-/// In-flight mutation buffer. Cleared on a successful commit.
+/// In-flight mutation buffer: the staged file operations and the
+/// provenance records that belong to the same commit. Emptied by every
+/// exit of a commit, successful or not, and by a discard.
 struct Pending {
     ops: HashMap<String, PendingState>,
+    records: Vec<Provenance>,
 }
 
 impl Pending {
     fn new() -> Self {
         Self {
             ops: HashMap::new(),
+            records: Vec::new(),
         }
     }
 
     fn clear(&mut self) {
         self.ops.clear();
+        self.records.clear();
     }
 }
 
+/// Mem-relative path of the commit record: present from a commit's
+/// commit point until the commit is fully applied, absent otherwise.
+pub(crate) const COMMIT_RECORD_REL: &str = ".memstead/commit.json";
+
+/// The drift cursor a mem reports while a commit record is on disk.
+/// No ledger timestamp ever equals it, so the engine's staleness probe
+/// sees a change and reloads, and the reload completes the commit.
+const COMMIT_PENDING_HEAD: &str = "commit-pending";
+
+/// One file operation of a commit, as its record names it. Paths are
+/// mem-relative with forward slashes.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "lowercase")]
+enum RecordOp {
+    /// `tmp` holds the synced new content and is renamed onto `path`.
+    Upsert {
+        path: String,
+        tmp: String,
+    },
+    Delete {
+        path: String,
+    },
+}
+
+impl RecordOp {
+    fn path(&self) -> &str {
+        match self {
+            RecordOp::Upsert { path, .. } | RecordOp::Delete { path } => path,
+        }
+    }
+}
+
+/// The commit record: everything needed to finish a decided commit
+/// without the process that decided it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct CommitRecord {
+    v: u32,
+    /// File operations, in path order.
+    ops: Vec<RecordOp>,
+    /// The commit's ledger lines, in order, without their newline.
+    ledger: Vec<String>,
+}
+
+/// What one commit attempt has put on disk before its commit point,
+/// so a failed attempt can take all of it away again.
+#[derive(Default)]
+struct Attempt {
+    /// Temp files written, the record's temp included.
+    temps: Vec<PathBuf>,
+    /// Directories created, outermost first.
+    created_dirs: Vec<PathBuf>,
+}
+
 /// Filesystem-backed [`MemBackend`]. Mutations buffer in memory until
-/// [`Self::commit`]; commit replays them against the directory at
-/// `root` with per-file write-to-temp + rename atomicity.
+/// [`Self::commit`], which lands them as one commit (module docs).
 pub struct FilesystemBackend {
     root: PathBuf,
     pending: Mutex<Pending>,
+    io: Box<dyn FolderIo>,
 }
 
 impl FilesystemBackend {
@@ -82,7 +169,305 @@ impl FilesystemBackend {
         Self {
             root,
             pending: Mutex::new(Pending::new()),
+            io: Box::new(RealIo),
         }
+    }
+
+    /// [`Self::new`] over a caller-supplied IO, for tests that trace
+    /// or fault the steps of a commit.
+    #[cfg(test)]
+    pub(crate) fn with_io(root: PathBuf, io: impl FolderIo + 'static) -> Self {
+        Self {
+            root,
+            pending: Mutex::new(Pending::new()),
+            io: Box::new(io),
+        }
+    }
+
+    fn meta_dir(&self) -> PathBuf {
+        self.root.join(crate::mem::MEM_META_DIR)
+    }
+
+    fn record_path(&self) -> PathBuf {
+        self.root.join(COMMIT_RECORD_REL)
+    }
+
+    /// Create `dir` and every missing directory above it, noting each
+    /// one created so a failed attempt can remove it again.
+    fn ensure_dir(&self, dir: &Path, attempt: &mut Attempt) -> std::io::Result<()> {
+        let mut missing: Vec<PathBuf> = Vec::new();
+        let mut cursor = Some(dir);
+        while let Some(d) = cursor {
+            if d.as_os_str().is_empty() || self.io.exists(d)? {
+                break;
+            }
+            missing.push(d.to_path_buf());
+            cursor = d.parent();
+        }
+        for d in missing.into_iter().rev() {
+            self.io.create_dir(&d)?;
+            attempt.created_dirs.push(d);
+        }
+        Ok(())
+    }
+
+    /// Render the ledger lines of `records`, each with a timestamp
+    /// strictly after the ledger's last line and after the line before
+    /// it: the last line's `ts` is the drift cursor, and two lines that
+    /// shared one would hide the second from every reader.
+    fn render_ledger(&self, records: &[Provenance]) -> std::io::Result<Vec<String>> {
+        if records.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut last = self
+            .io
+            .read_tail(&changelog_path(&self.root), 4096)?
+            .and_then(|tail| changelog::last_ts_in_tail(&tail));
+        let mut lines = Vec::with_capacity(records.len());
+        for record in records {
+            let ts = changelog::monotonic_ts(last, record.timestamp);
+            let line = changelog::render_change_line(&change_entry(record), ts)
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+            lines.push(line.trim_end_matches('\n').to_string());
+            last = Some(ts);
+        }
+        Ok(lines)
+    }
+
+    /// Everything before the commit point: contents beside their
+    /// targets and synced, then the record in place. Returns the
+    /// record once its rename has happened; an error means the rename
+    /// has not, and `attempt` lists what to remove.
+    fn prepare_commit(
+        &self,
+        ops: &[(String, PendingState)],
+        records: &[Provenance],
+        attempt: &mut Attempt,
+    ) -> std::io::Result<CommitRecord> {
+        self.ensure_dir(&self.meta_dir(), attempt)?;
+
+        let mut record_ops = Vec::with_capacity(ops.len());
+        for (key, state) in ops {
+            match state {
+                PendingState::Upsert(bytes) => {
+                    let target = self.root.join(key);
+                    if let Some(parent) = target.parent() {
+                        self.ensure_dir(parent, attempt)?;
+                    }
+                    let tmp = make_tmp_path(&target);
+                    attempt.temps.push(tmp.clone());
+                    self.io.write(&tmp, bytes)?;
+                    self.io.sync_file(&tmp)?;
+                    record_ops.push(RecordOp::Upsert {
+                        path: key.clone(),
+                        tmp: sibling_key(key, &tmp),
+                    });
+                }
+                PendingState::Delete => record_ops.push(RecordOp::Delete { path: key.clone() }),
+            }
+        }
+
+        // The names must be as durable as the contents: a record that
+        // survives a power loss while a temp's directory entry does not
+        // would name a content that is gone.
+        let mut dirs: BTreeSet<PathBuf> = BTreeSet::new();
+        for path in attempt.temps.iter().chain(attempt.created_dirs.iter()) {
+            if let Some(parent) = path.parent() {
+                dirs.insert(parent.to_path_buf());
+            }
+        }
+        for dir in &dirs {
+            self.io.sync_dir(dir)?;
+        }
+
+        let record = CommitRecord {
+            v: 1,
+            ops: record_ops,
+            ledger: self.render_ledger(records)?,
+        };
+        let bytes =
+            serde_json::to_vec(&record).map_err(|e| std::io::Error::other(e.to_string()))?;
+        let record_path = self.record_path();
+        let record_tmp = make_tmp_path(&record_path);
+        attempt.temps.push(record_tmp.clone());
+        self.io.write(&record_tmp, &bytes)?;
+        self.io.sync_file(&record_tmp)?;
+        self.io.rename(&record_tmp, &record_path)?;
+        Ok(record)
+    }
+
+    /// Take away what an attempt that never reached its commit point
+    /// put on disk. Best effort: a temp that stays is removed by the
+    /// next load, and an empty directory that stays changes nothing.
+    fn abandon(&self, attempt: &Attempt) {
+        for tmp in &attempt.temps {
+            let _ = self.io.remove_file(tmp);
+        }
+        for dir in attempt.created_dirs.iter().rev() {
+            let _ = self.io.remove_dir(dir);
+        }
+    }
+
+    /// Everything after the commit point, written so that running it
+    /// again from any cut-off point ends in the same state: a temp
+    /// still present is renamed, a temp already gone means its file is
+    /// in place, a ledger line already written is not written twice.
+    /// Shared by the commit itself and by the completion at load.
+    fn apply_record(&self, record: &CommitRecord) -> std::io::Result<()> {
+        let mut dirs: BTreeSet<PathBuf> = BTreeSet::new();
+        for op in &record.ops {
+            let target = self.root.join(op.path());
+            let changed = match op {
+                RecordOp::Upsert { path, tmp } => {
+                    let tmp = self.root.join(tmp);
+                    if self.io.exists(&tmp)? {
+                        self.io.rename(&tmp, &target)?;
+                    } else if !self.io.exists(&target)? {
+                        return Err(std::io::Error::other(format!(
+                            "commit record names {path}, and neither its staged content \
+                             nor the file is on disk"
+                        )));
+                    }
+                    true
+                }
+                RecordOp::Delete { .. } => match self.io.remove_file(&target) {
+                    Ok(()) => true,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(e) => return Err(e),
+                },
+            };
+            if changed && let Some(parent) = target.parent() {
+                dirs.insert(parent.to_path_buf());
+            }
+        }
+        for dir in &dirs {
+            self.io.sync_dir(dir)?;
+        }
+
+        if !record.ledger.is_empty() {
+            let log = changelog_path(&self.root);
+            // The commit's lines, if any are there, are the last thing
+            // in the ledger, so a tail that can hold all of them is
+            // enough to see which are missing.
+            let span: u64 = record.ledger.iter().map(|l| l.len() as u64 + 1).sum();
+            let tail = self.io.read_tail(&log, span + 8192)?.unwrap_or_default();
+            let tail_text = String::from_utf8_lossy(&tail);
+            let present: HashSet<&str> = tail_text.lines().collect();
+            let mut out = String::new();
+            // A cut-off append leaves a line without its newline. Close
+            // it, so it stays one unparseable line (which every reader
+            // skips) and cannot swallow the line written after it.
+            if !tail.is_empty() && !tail.ends_with(b"\n") {
+                out.push('\n');
+            }
+            let mut missing = false;
+            for line in &record.ledger {
+                if !present.contains(line.as_str()) {
+                    out.push_str(line);
+                    out.push('\n');
+                    missing = true;
+                }
+            }
+            if missing {
+                self.io.append(&log, out.as_bytes())?;
+            }
+            self.io.sync_file(&log)?;
+        }
+
+        // The removal is not synced: if a power loss brings the record
+        // back, the next load runs this again and finds every step done.
+        match self.io.remove_file(&self.record_path()) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Remove the temp files of attempts that never reached their
+    /// commit point. Walks where entities and the sidecars live; the
+    /// lock directory is another process's business.
+    fn sweep_leftovers(&self) -> std::io::Result<()> {
+        let locks = self.meta_dir().join("locks");
+        let mut stack = vec![self.root.clone()];
+        while let Some(dir) = stack.pop() {
+            for entry in self.io.list_dir(&dir)? {
+                let path = dir.join(&entry.name);
+                if entry.is_dir {
+                    if path != locks {
+                        stack.push(path);
+                    }
+                } else if is_temp_name(&entry.name) {
+                    match self.io.remove_file(&path) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Is a temp file of an abandoned attempt on disk? The read-only
+    /// half of [`Self::sweep_leftovers`], so a mem with nothing to
+    /// remove is never locked or written for the asking.
+    fn has_leftovers(&self) -> bool {
+        let locks = self.meta_dir().join("locks");
+        let mut stack = vec![self.root.clone()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = self.io.list_dir(&dir) else {
+                continue;
+            };
+            for entry in entries {
+                let path = dir.join(&entry.name);
+                if entry.is_dir {
+                    if path != locks {
+                        stack.push(path);
+                    }
+                } else if is_temp_name(&entry.name) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Finish the commit whose record is on disk. The caller holds the
+    /// mem's write lock. `Ok(None)` when a live writer finished it
+    /// while this call waited for the lock.
+    fn complete_decided_commit(&self) -> Result<Option<CompletedCommit>, BackendError> {
+        let record_path = self.record_path();
+        let Some(bytes) = self.io.read(&record_path).map_err(BackendError::Io)? else {
+            return Ok(None);
+        };
+        let unreadable = |why: String| {
+            BackendError::Other(format!(
+                "commit record {} cannot be read ({why}); the mem holds a decided commit \
+                 that cannot be completed",
+                record_path.display()
+            ))
+        };
+        let record: CommitRecord =
+            serde_json::from_slice(&bytes).map_err(|e| unreadable(e.to_string()))?;
+        if record.v != 1 {
+            return Err(unreadable(format!("unknown record version {}", record.v)));
+        }
+        // The record is input from disk: hold its paths to the same
+        // rules as a staged path before anything is moved or removed.
+        for op in &record.ops {
+            normalise_rel_path(Path::new(op.path())).map_err(|e| unreadable(e.to_string()))?;
+            if let RecordOp::Upsert { tmp, .. } = op {
+                normalise_rel_path(Path::new(tmp)).map_err(|e| unreadable(e.to_string()))?;
+            }
+        }
+        self.apply_record(&record)
+            .map_err(|e| BackendError::CommitNotApplied {
+                detail: e.to_string(),
+            })?;
+        let _ = self.sweep_leftovers();
+        Ok(Some(CompletedCommit {
+            files: record.ops.iter().map(|op| op.path().to_string()).collect(),
+        }))
     }
 
     /// Read the current bytes at `rel_key` from the buffered op log if
@@ -159,7 +544,8 @@ impl crate::backend::MemBackend for FilesystemBackend {
         Ok(out)
     }
 
-    /// Folder-mem drift cursor: the changelog's last-line `ts` — the
+    /// Folder-mem drift cursor: the changelog's last-line `ts` (or the
+    /// commit-pending marker while a decided commit is unapplied) — the
     /// same RFC3339-millisecond dialect `folder_changes_since` accepts
     /// as its cursor, so drift heads feed straight into delta reads.
     /// Every mutation appends a changelog line (in this process or a
@@ -172,6 +558,12 @@ impl crate::backend::MemBackend for FilesystemBackend {
     /// separate processes can momentarily share a cursor value —
     /// detection then rides the next append.
     fn current_head(&self) -> Result<Option<String>, BackendError> {
+        // A commit record on disk is a decided commit not yet applied:
+        // report a cursor no ledger line carries, so the staleness
+        // probe reloads the mem and the reload completes the commit.
+        if std::fs::symlink_metadata(self.record_path()).is_ok() {
+            return Ok(Some(COMMIT_PENDING_HEAD.to_string()));
+        }
         let log_path = crate::filesystem::changelog::changelog_path(&self.root);
         let raw = match std::fs::read_to_string(&log_path) {
             Ok(s) => s,
@@ -313,9 +705,8 @@ impl crate::backend::MemBackend for FilesystemBackend {
     }
 
     fn discard_pending(&self) -> Result<(), BackendError> {
-        // Drop the in-memory op buffer without replaying it. The
-        // atomic batch path calls this to roll back staged writes when
-        // a later item refuses the whole batch.
+        // Drop the staged operations and their provenance records
+        // without replaying them: nothing staged has touched disk.
         let mut pending = self.pending.lock().map_err(|_| {
             BackendError::Other("filesystem writer pending state poisoned".to_string())
         })?;
@@ -327,21 +718,88 @@ impl crate::backend::MemBackend for FilesystemBackend {
         let mut pending = self.pending.lock().map_err(|_| {
             BackendError::Path("filesystem writer pending state poisoned".to_string())
         })?;
-
-        for (key, state) in pending.ops.iter() {
-            let target = self.root.join(key);
-            match state {
-                PendingState::Upsert(bytes) => atomic_write(&target, bytes)?,
-                PendingState::Delete => match std::fs::remove_file(&target) {
-                    Ok(()) => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(BackendError::Io(e)),
-                },
-            }
+        // Taken out before anything can fail: whatever this commit
+        // comes to, nothing stays staged behind it, so no later read
+        // can serve a write that never landed.
+        let staged = std::mem::replace(&mut *pending, Pending::new());
+        if staged.ops.is_empty() && staged.records.is_empty() {
+            return Ok(make_commit_id());
         }
 
-        pending.clear();
+        // A record already on disk is an earlier commit, decided and
+        // not yet applied. Putting a new record over it would lose it.
+        match self.io.exists(&self.record_path()) {
+            Ok(false) => {}
+            Ok(true) => {
+                return Err(BackendError::Other(
+                    "an earlier commit of this mem is decided and not yet applied; \
+                     the mem must be loaded, which completes it, before it is written again"
+                        .to_string(),
+                ));
+            }
+            Err(e) => return Err(BackendError::Io(e)),
+        }
+
+        // Path order, so the commit's steps and its record read the
+        // same on every run.
+        let mut ops: Vec<(String, PendingState)> = staged.ops.into_iter().collect();
+        ops.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Failure handling is spelled out here rather than left to a
+        // drop guard: a process that dies mid-commit runs none of it,
+        // and the recovery at load must cope with exactly that.
+        let mut attempt = Attempt::default();
+        let record = match self.prepare_commit(&ops, &staged.records, &mut attempt) {
+            Ok(record) => record,
+            Err(e) => {
+                self.abandon(&attempt);
+                return Err(BackendError::Io(e));
+            }
+        };
+
+        // The record is in place: the commit is decided. From here an
+        // error leaves a commit that the next load completes, never a
+        // failed write.
+        let not_applied = |e: std::io::Error| BackendError::CommitNotApplied {
+            detail: e.to_string(),
+        };
+        self.io.sync_dir(&self.meta_dir()).map_err(not_applied)?;
+        self.apply_record(&record).map_err(not_applied)?;
         Ok(make_commit_id())
+    }
+
+    /// Recovery writes, so it excludes a live writer first: the record
+    /// it applies and the temps it removes belong to a writer that is
+    /// gone only if no one holds the mem's write lock. A record on disk
+    /// waits for that lock (a live writer finishes its own commit and
+    /// the record is gone by then); leftover temps are removed only if
+    /// the lock is free at once, since they are invisible to readers
+    /// and a load must not wait on hygiene. A mem with nothing to
+    /// recover is not touched at all, lock file included.
+    fn complete_interrupted_commit(&self) -> Result<Option<CompletedCommit>, BackendError> {
+        let lock = self.root.join(".memstead").join("locks").join("write.lock");
+        if self
+            .io
+            .exists(&self.record_path())
+            .map_err(BackendError::Io)?
+        {
+            // A lock that cannot be taken (a read-only location) is not
+            // a reason to serve the mem half applied: the completion
+            // below then fails with its own error.
+            let locked = path_lock::acquire(&lock).is_ok();
+            let result = self.complete_decided_commit();
+            if locked {
+                path_lock::release(&lock);
+            }
+            return result;
+        }
+        // Best effort from here: a temp that stays is removed by a
+        // later load and changes nothing a reader sees.
+        if self.has_leftovers() && matches!(path_lock::try_acquire(&lock), Ok(true)) {
+            let _ = self.sweep_leftovers();
+            path_lock::release(&lock);
+        }
+        Ok(None)
     }
 
     fn read_mem_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
@@ -468,23 +926,29 @@ impl crate::backend::MemBackend for FilesystemBackend {
         )
     }
 
+    fn stage_provenance(&self, record: &Provenance) -> Result<(), BackendError> {
+        let mut pending = self.pending.lock().map_err(|_| {
+            BackendError::Other("filesystem writer pending state poisoned".to_string())
+        })?;
+        pending.records.push(record.clone());
+        Ok(())
+    }
+
     fn append_provenance(&self, record: &Provenance) -> Result<(), BackendError> {
-        let kind: MutationKind = record.kind.into();
-        let entry = ChangeEntry {
-            kind,
-            entity: record.entity.as_deref(),
-            actor: record.actor,
-            client: record.client.as_ref(),
-            note: record.note.as_deref(),
-            logical_operation_id: record.logical_operation_id.as_deref(),
-            role: record.role,
-            identity: record.identity.as_deref(),
-        };
+        let log = changelog_path(&self.root);
+        let existed = log.exists();
         // Monotonic variant: the last-line `ts` is this backend's
-        // drift cursor (`current_head()`), so same-millisecond commits
+        // drift cursor (`current_head()`), so same-millisecond lines
         // must still advance it — see `append_change_monotonic`.
-        changelog::append_change_monotonic(&self.root, &entry, record.timestamp)
-            .map_err(|e| BackendError::Other(format!("changelog append: {e}")))
+        changelog::append_change_monotonic(&self.root, &change_entry(record), record.timestamp)
+            .map_err(|e| BackendError::Other(format!("changelog append: {e}")))?;
+        // A line reported as written must survive a power loss, and a
+        // ledger this call created needs its name synced too.
+        self.io.sync_file(&log).map_err(BackendError::Io)?;
+        if !existed && let Some(parent) = log.parent() {
+            self.io.sync_dir(parent).map_err(BackendError::Io)?;
+        }
+        Ok(())
     }
 
     fn read_provenance(&self, cursor: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
@@ -594,23 +1058,48 @@ fn walk_for_md(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Ba
     Ok(())
 }
 
-/// Write `bytes` to `target` atomically: write to a sibling temp file
-/// then rename. Creates parent directories as needed. The temp file
-/// shares the target's parent so the rename is same-fs (atomic on
-/// POSIX). On rename failure, the temp file is best-effort removed.
-fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), BackendError> {
-    if let Some(parent) = target.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent).map_err(BackendError::Io)?;
+/// The ledger entry a provenance record writes.
+fn change_entry(record: &Provenance) -> ChangeEntry<'_> {
+    let kind: MutationKind = record.kind.into();
+    ChangeEntry {
+        kind,
+        entity: record.entity.as_deref(),
+        actor: record.actor,
+        client: record.client.as_ref(),
+        note: record.note.as_deref(),
+        logical_operation_id: record.logical_operation_id.as_deref(),
+        role: record.role,
+        identity: record.identity.as_deref(),
     }
-    let tmp = make_tmp_path(target);
-    std::fs::write(&tmp, bytes).map_err(BackendError::Io)?;
-    if let Err(e) = std::fs::rename(&tmp, target) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(BackendError::Io(e));
+}
+
+/// The mem-relative key of `tmp`, the temp file beside the target at
+/// `key`: same directory, the temp's file name.
+fn sibling_key(key: &str, tmp: &Path) -> String {
+    let name = tmp
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    match key.rsplit_once('/') {
+        Some((dir, _)) => format!("{dir}/{name}"),
+        None => name,
     }
-    Ok(())
+}
+
+/// Is `name` a temp file of this backend ([`make_tmp_path`]):
+/// `.<target>.tmp.<hex>-<hex>`?
+fn is_temp_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix('.') else {
+        return false;
+    };
+    let Some((target, suffix)) = rest.rsplit_once(".tmp.") else {
+        return false;
+    };
+    let Some((nanos, counter)) = suffix.split_once('-') else {
+        return false;
+    };
+    let hex = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_hexdigit());
+    !target.is_empty() && hex(nanos) && hex(counter)
 }
 
 /// Build a sibling temp path of the form `.<name>.tmp.<suffix>` next
@@ -656,6 +1145,11 @@ pub(crate) fn make_commit_id() -> CommitId {
 }
 
 #[cfg(test)]
+mod commit_point_tests;
+#[cfg(test)]
+pub(crate) mod fault_io;
+#[cfg(test)]
 mod folder_drift_tests;
+pub(crate) mod io;
 #[cfg(test)]
 mod tests;

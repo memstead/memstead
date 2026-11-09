@@ -661,6 +661,18 @@ pub enum EngineError {
         failed_mem: String,
         failure_cause: String,
     },
+    /// A folder mem's commit is decided and not yet applied: its commit
+    /// record is durable, and an error cut off the move of its files
+    /// into place. The write is neither failed nor finished, so no
+    /// existing code reports it truthfully: resending the call would
+    /// write twice, and the store does not show the write yet. The
+    /// next operation on the mem completes the commit before it does
+    /// anything else and names the completed files in an
+    /// `INTERRUPTED_COMMIT_COMPLETED` warning.
+    #[error(
+        "the write to mem `{mem}` is decided and not yet applied ({detail}) — do not resend it; the next operation on the mem completes it first"
+    )]
+    CommitNotApplied { mem: String, detail: String },
     /// `memstead_relate` source is a stub — stubs have no `entity_type`
     /// and cannot author edges. The agent must promote the stub to a
     /// real entity via `memstead_create` (stub adoption preserves any
@@ -1563,6 +1575,7 @@ impl EngineError {
                 "RENAME_BLOCKED_BY_CROSS_MEM_POLICY"
             }
             EngineError::RenamePartialFailure { .. } => "RENAME_PARTIAL_FAILURE",
+            EngineError::CommitNotApplied { .. } => "COMMIT_NOT_APPLIED",
             EngineError::RelationHasBodyLinks { .. } => "RELATION_HAS_BODY_LINKS",
             EngineError::WikiLinkWithoutRelation { .. } => "WIKILINK_WITHOUT_RELATION",
             EngineError::StubCannotRelate { .. } => "STUB_CANNOT_RELATE",

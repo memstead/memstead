@@ -340,6 +340,9 @@ impl MemBackend for ManualHeadBackend {
     ) -> Result<crate::storage::CommitId, BackendError> {
         Ok("synthetic".to_string())
     }
+    fn stage_provenance(&self, _: &Provenance) -> Result<(), BackendError> {
+        Ok(())
+    }
     fn append_provenance(&self, _: &Provenance) -> Result<(), BackendError> {
         Ok(())
     }
@@ -376,6 +379,9 @@ impl MemBackend for SharedHeadBackend {
         c: &CommitContext<'_>,
     ) -> Result<crate::storage::CommitId, BackendError> {
         self.0.commit(m, c)
+    }
+    fn stage_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
+        self.0.stage_provenance(r)
     }
     fn append_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
         self.0.append_provenance(r)
@@ -604,6 +610,9 @@ fn reload_if_stale_emits_mem_reloaded_when_head_advances() {
         ) -> Result<crate::storage::CommitId, BackendError> {
             self.0.commit(m, c)
         }
+        fn stage_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
+            self.0.stage_provenance(r)
+        }
         fn append_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
             self.0.append_provenance(r)
         }
@@ -689,6 +698,9 @@ fn mem_drifted_tracks_sibling_advance_until_reload() {
         ) -> Result<crate::storage::CommitId, BackendError> {
             self.0.commit(m, c)
         }
+        fn stage_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
+            self.0.stage_provenance(r)
+        }
         fn append_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
             self.0.append_provenance(r)
         }
@@ -768,6 +780,9 @@ fn reload_one_mem_report_head_before_is_prior_cursor_and_advances() {
         ) -> Result<crate::storage::CommitId, BackendError> {
             self.0.commit(m, c)
         }
+        fn stage_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
+            self.0.stage_provenance(r)
+        }
         fn append_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
             self.0.append_provenance(r)
         }
@@ -840,6 +855,9 @@ fn reload_if_stale_fires_every_call_no_throttle() {
             c: &CommitContext<'_>,
         ) -> Result<crate::storage::CommitId, BackendError> {
             self.0.commit(m, c)
+        }
+        fn stage_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
+            self.0.stage_provenance(r)
         }
         fn append_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
             self.0.append_provenance(r)

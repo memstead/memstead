@@ -135,7 +135,7 @@ impl Engine {
                 .and_then(|bytes| crate::check::SealedChecks::from_archive_bytes(&bytes).ok());
             mounted.push(MountedBackend {
                 mount,
-                backend,
+                backend: backend.into(),
                 last_known_head,
                 mem_config,
                 archive_provenance,
@@ -416,24 +416,28 @@ impl Engine {
                 continue;
             }
 
-            let (entries, read_errors) = match collect_source_entries(m.backend.as_ref()) {
-                Ok(pair) => pair,
-                Err(e) => {
-                    // Backend read failure: quarantine this mem, serve
-                    // the rest. An archive whose file is gone reads as
-                    // the missing-storage case, with its own repair.
-                    let (reason_code, reason_message) =
-                        instantiate_failure_reason(&m.mount, e.code(), e.to_string());
-                    quarantined.push(crate::engine::QuarantinedMem {
-                        mount: m.mount.clone(),
-                        reason_code,
-                        reason_message,
-                    });
-                    quarantined_idx.insert(m_idx);
-                    schemas.remove(&m.mount.mem);
-                    continue;
-                }
-            };
+            let (entries, read_errors) =
+                match collect_source_entries(&m.mount.mem, m.backend.as_ref()) {
+                    Ok(read) => {
+                        load_warnings.extend(read.completed_commit);
+                        (read.entries, read.read_errors)
+                    }
+                    Err(e) => {
+                        // Backend read failure: quarantine this mem, serve
+                        // the rest. An archive whose file is gone reads as
+                        // the missing-storage case, with its own repair.
+                        let (reason_code, reason_message) =
+                            instantiate_failure_reason(&m.mount, e.code(), e.to_string());
+                        quarantined.push(crate::engine::QuarantinedMem {
+                            mount: m.mount.clone(),
+                            reason_code,
+                            reason_message,
+                        });
+                        quarantined_idx.insert(m_idx);
+                        schemas.remove(&m.mount.mem);
+                        continue;
+                    }
+                };
             // Storage that is GONE quarantines rather than serving an empty
             // graph (04/05). "Configured but cannot serve" is exactly what
             // quarantine already means, its three sibling causes already
@@ -1118,9 +1122,30 @@ pub(super) fn unbacked_mount_warning(
     None
 }
 
+/// What one whole-mem read produced: the entries, the per-path read
+/// failures, and the warning for an interrupted commit the read
+/// completed first.
+pub(super) struct SourceRead {
+    pub(super) entries: Vec<SourceEntry>,
+    pub(super) read_errors: Vec<SourceReadError>,
+    pub(super) completed_commit: Option<WarningHint>,
+}
+
+/// Read every entity of `mem` for a load. The one funnel boot, reload
+/// and a runtime mount share, so the storage recovery in front of the
+/// read cannot be left out by one of them: a commit that was decided
+/// and cut off is completed before a byte is read, and a mem is never
+/// loaded with part of a commit visible.
 pub(super) fn collect_source_entries(
+    mem: &str,
     backend: &dyn MemBackend,
-) -> Result<(Vec<SourceEntry>, Vec<SourceReadError>), EngineError> {
+) -> Result<SourceRead, EngineError> {
+    let completed_commit = backend.complete_interrupted_commit()?.map(|commit| {
+        WarningHint::InterruptedCommitCompleted {
+            mem: mem.to_string(),
+            files: commit.files,
+        }
+    });
     // One backend pass for the whole mem: the git-branch backend
     // answers with a single tree walk, where the per-path route
     // re-inflated the root tree once per entity (quadratic in the
@@ -1148,7 +1173,11 @@ pub(super) fn collect_source_entries(
             }),
         }
     }
-    Ok((entries, errors))
+    Ok(SourceRead {
+        entries,
+        read_errors: errors,
+        completed_commit,
+    })
 }
 
 #[cfg(test)]

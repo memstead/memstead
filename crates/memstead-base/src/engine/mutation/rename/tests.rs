@@ -969,6 +969,9 @@ impl crate::backend::MemBackend for DriftingBackend {
             self.inner.commit(m, c)
         }
     }
+    fn stage_provenance(&self, r: &crate::Provenance) -> Result<(), crate::backend::BackendError> {
+        self.inner.stage_provenance(r)
+    }
     fn append_provenance(&self, r: &crate::Provenance) -> Result<(), crate::backend::BackendError> {
         self.inner.append_provenance(r)
     }

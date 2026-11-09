@@ -74,6 +74,8 @@ impl WarningHint {
             Self::UnanchoredMention { .. } => "UNANCHORED_MENTION",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
             Self::MountUnbacked { .. } => "MOUNT_UNBACKED",
+            Self::InterruptedCommitCompleted { .. } => "INTERRUPTED_COMMIT_COMPLETED",
+            Self::WriteFollowUpFailed { .. } => "WRITE_FOLLOW_UP_FAILED",
             Self::EngineVersionSkew { .. } => "ENGINE_VERSION_SKEW",
             Self::SchemaGenerationsBehind { .. } => "SCHEMA_GENERATIONS_BEHIND",
             Self::SchemaHeadingRoundtripViolation { .. } => "SCHEMA_HEADING_ROUNDTRIP_VIOLATION",
@@ -116,6 +118,8 @@ impl WarningHint {
             Self::DuplicateSectionHeading { entity_id, .. } => Some(entity_id.mem()),
             Self::SchemaPinMismatch { mem, .. } => Some(mem.as_str()),
             Self::MountUnbacked { mem, .. } => Some(mem.as_str()),
+            Self::InterruptedCommitCompleted { mem, .. } => Some(mem.as_str()),
+            Self::WriteFollowUpFailed { mem, .. } => Some(mem.as_str()),
             Self::SchemaHeadingRoundtripViolation { mem, .. } => Some(mem.as_str()),
             Self::SectionHeadingDivergence { entity_id, .. } => Some(entity_id.mem()),
             Self::MemReloaded { mem, .. } => Some(mem.as_str()),
@@ -311,6 +315,15 @@ impl WarningHint {
                 mem: "institute".into(),
                 reason: MountUnbackedReason::MissingRef,
                 location: "refs/heads/institute".into(),
+            },
+            WarningHint::InterruptedCommitCompleted {
+                mem: "notes".into(),
+                files: vec!["alpha.md".into(), ".memstead/anchors.json".into()],
+            },
+            WarningHint::WriteFollowUpFailed {
+                mem: "notes".into(),
+                step: "worktree_sync".into(),
+                detail: "checkout of alpha.md failed".into(),
             },
             WarningHint::InlineWikiLinkAutoStubbed {
                 from: EntityId("specs--demo".into()),
@@ -847,6 +860,15 @@ impl WarningHint {
                 "mem": mem,
                 "reason": reason.as_str(),
                 "location": location,
+            }),
+            Self::InterruptedCommitCompleted { mem, files } => serde_json::json!({
+                "mem": mem,
+                "files": files,
+            }),
+            Self::WriteFollowUpFailed { mem, step, detail } => serde_json::json!({
+                "mem": mem,
+                "step": step,
+                "detail": detail,
             }),
             Self::SchemaHeadingRoundtripViolation {
                 mem,

@@ -176,6 +176,10 @@ impl crate::backend::MemBackend for ArchiveBackend {
         Err(BackendError::Sealed)
     }
 
+    fn stage_provenance(&self, _record: &Provenance) -> Result<(), BackendError> {
+        Err(BackendError::Sealed)
+    }
+
     fn append_provenance(&self, _record: &Provenance) -> Result<(), BackendError> {
         Err(BackendError::Sealed)
     }

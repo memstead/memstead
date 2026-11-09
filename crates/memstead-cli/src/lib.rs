@@ -616,6 +616,10 @@ impl CliError {
                     "failure_cause": failure_cause,
                 })),
             ),
+            CommitNotApplied { mem, detail } => (
+                ExitKind::Generic,
+                Some(serde_json::json!({ "mem": mem, "detail": detail })),
+            ),
             MemUnmounted { mem } => (ExitKind::NotFound, Some(serde_json::json!({ "mem": mem }))),
             MemQuarantined {
                 mem,

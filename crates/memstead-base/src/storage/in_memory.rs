@@ -67,6 +67,9 @@ struct State {
     /// Staged mutations not yet committed. Cleared on commit or
     /// [`discard_pending`](MemBackend::discard_pending).
     pending: HashMap<String, PendingState>,
+    /// Provenance records staged for the next commit; they land in
+    /// `provenance` with it and are dropped with a discard.
+    pending_provenance: Vec<Provenance>,
     /// Append-only provenance log. The folder backend persists this as
     /// JSONL under `.memstead/changes.jsonl`; here it is a `Vec` in RAM.
     provenance: Vec<Provenance>,
@@ -195,6 +198,7 @@ impl MemBackend for InMemoryBackend {
     fn discard_pending(&self) -> Result<(), BackendError> {
         let mut state = self.lock()?;
         state.pending.clear();
+        state.pending_provenance.clear();
         Ok(())
     }
 
@@ -211,7 +215,15 @@ impl MemBackend for InMemoryBackend {
                 }
             }
         }
+        let records = std::mem::take(&mut state.pending_provenance);
+        state.provenance.extend(records);
         Ok(make_commit_id())
+    }
+
+    fn stage_provenance(&self, record: &Provenance) -> Result<(), BackendError> {
+        let mut state = self.lock()?;
+        state.pending_provenance.push(record.clone());
+        Ok(())
     }
 
     fn append_provenance(&self, record: &Provenance) -> Result<(), BackendError> {

@@ -789,6 +789,32 @@ pub enum WarningHint {
         /// the archive path, for the operator's repair.
         location: String,
     },
+    /// A folder mem's last commit was decided and then cut off (a
+    /// crash, a kill, an IO error) before every file was in place, and
+    /// this load finished it before reading anything. The mem is whole:
+    /// the named files carry the content of that commit and the change
+    /// ledger carries its line. Emitted by the load that did the
+    /// completing, at boot or on reload.
+    InterruptedCommitCompleted {
+        /// The mem whose commit was completed.
+        mem: String,
+        /// Mem-relative paths the commit covered.
+        files: Vec<String>,
+    },
+    /// A write is in storage and a step after its commit failed: the
+    /// refresh of a checked-out worktree, the update of the engine's
+    /// in-memory view. The call still reports success, because the
+    /// write landed and resending it would write twice. Where the
+    /// failed step was the engine's own view, the engine reloaded the
+    /// mem from storage, so its view is level with what was written.
+    WriteFollowUpFailed {
+        /// The mem the write landed in.
+        mem: String,
+        /// The step that failed (`worktree_sync`, `store_update`, ...).
+        step: String,
+        /// The failure, as the step reported it.
+        detail: String,
+    },
     /// A mutation wrote a section whose emitted heading differs from a
     /// heading already present in the file that derives to the same
     /// section key. The write still commits — refusing would strand

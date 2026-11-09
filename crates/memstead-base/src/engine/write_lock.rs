@@ -11,88 +11,97 @@
 //! committed and then reloads, sees the new content, and gets its honest
 //! `HASH_MISMATCH`.
 //!
-//! The lock is reentrant per thread: a mutation that calls another
-//! mutation entry point (a batch over single-item paths, a merge over
-//! creates) takes the same lock again without blocking on itself. Two
-//! threads, or two engines on two threads, still exclude each other,
-//! because each takes its own open file description and OS file locks
-//! conflict between those even inside one process.
+//! The lock is reentrant per thread ([`crate::storage::path_lock`]): a
+//! mutation that calls another mutation entry point (a batch over
+//! single-item paths, a merge over creates) takes the same lock again
+//! without blocking on itself. Two threads, or two engines on two
+//! threads, still exclude each other.
+//!
+//! The guard is also the one exit every mutation shares for its staged
+//! writes. A mutation stages bytes into the backend and commits them
+//! later; an error between the two (a refused sidecar write, a failed
+//! commit, a `?` in any verb) used to leave the staged bytes in the
+//! backend, where the next read served them as content that never
+//! landed. When the outermost guard of a thread drops, it discards
+//! whatever is still staged on the mems it locked. After a commit
+//! nothing is staged and the discard is a no-op, so a call site has no
+//! failure path to remember: holding the lock is the cleanup.
 //!
 //! [`MemBackend::write_lock_path`]: crate::backend::MemBackend::write_lock_path
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use crate::backend::BackendError;
+use crate::backend::{BackendError, MemBackend};
+use crate::storage::path_lock;
 
 use super::{Engine, EngineError};
 
-thread_local! {
-    /// Locks this thread holds, by lock-file path, with a nesting count.
-    static HELD: RefCell<HashMap<PathBuf, (File, usize)>> = RefCell::new(HashMap::new());
-}
-
-/// Held for the duration of one mutation; dropping it releases every
-/// lock it took (the OS lock goes when the last nested holder drops).
+/// Held for the duration of one mutation; dropping it discards the
+/// writes still staged on the mems it covers and releases every lock
+/// it took (both when the last nested holder drops).
 #[must_use = "the write lock is released as soon as the guard drops"]
 pub struct MemWriteGuard {
-    paths: Vec<PathBuf>,
+    /// Each covered mem's backend with its lock-file path. A backend
+    /// with no shared on-disk state has no path and takes no OS lock,
+    /// but its staged writes are discarded like any other's.
+    held: Vec<(Option<PathBuf>, Arc<dyn MemBackend>)>,
+}
+
+thread_local! {
+    /// How many guards of this thread cover a backend, by its address.
+    /// Only the outermost one discards: an inner guard dropping must
+    /// not empty a staged set the outer mutation is still building.
+    static COVERED: RefCell<HashMap<usize, usize>> = RefCell::new(HashMap::new());
+}
+
+fn backend_key(backend: &Arc<dyn MemBackend>) -> usize {
+    Arc::as_ptr(backend) as *const () as usize
+}
+
+impl MemWriteGuard {
+    fn empty() -> Self {
+        Self { held: Vec::new() }
+    }
+
+    fn cover(&mut self, path: Option<PathBuf>, backend: Arc<dyn MemBackend>) {
+        COVERED.with(|c| *c.borrow_mut().entry(backend_key(&backend)).or_insert(0) += 1);
+        self.held.push((path, backend));
+    }
 }
 
 impl Drop for MemWriteGuard {
     fn drop(&mut self) {
-        HELD.with(|held| {
-            let mut held = held.borrow_mut();
-            for path in self.paths.iter().rev() {
-                let release = match held.get_mut(path) {
-                    Some((_, count)) => {
+        for (path, backend) in self.held.iter().rev() {
+            let outermost = COVERED.with(|c| {
+                let mut covered = c.borrow_mut();
+                let key = backend_key(backend);
+                match covered.get_mut(&key) {
+                    Some(count) if *count > 1 => {
                         *count -= 1;
-                        *count == 0
+                        false
                     }
-                    None => false,
-                };
-                if release && let Some((file, _)) = held.remove(path) {
-                    // Closing the descriptor releases the lock too; the
-                    // explicit unlock just makes the release immediate.
-                    let _ = file.unlock();
+                    _ => {
+                        covered.remove(&key);
+                        true
+                    }
                 }
+            });
+            // Discard before the lock goes, so no other writer can
+            // stage between the two. A discard that fails has nothing
+            // better to fall back to; the backends end their own
+            // transaction on a failed commit, which covers the case
+            // that matters.
+            if outermost {
+                let _ = backend.discard_pending();
             }
-        });
-    }
-}
-
-fn acquire(path: &PathBuf) -> Result<(), BackendError> {
-    let already = HELD.with(|held| {
-        if let Some((_, count)) = held.borrow_mut().get_mut(path) {
-            *count += 1;
-            true
-        } else {
-            false
-        }
-    });
-    if already {
-        return Ok(());
-    }
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-        // Self-ignoring, like the findings and friction stores: a lock
-        // file inside a tracked folder mem never shows up as git noise.
-        let gitignore = dir.join(".gitignore");
-        if !gitignore.exists() {
-            let _ = std::fs::write(&gitignore, "*\n");
+            if let Some(path) = path {
+                path_lock::release(path);
+            }
         }
     }
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)?;
-    file.lock()?;
-    HELD.with(|held| held.borrow_mut().insert(path.clone(), (file, 1)));
-    Ok(())
 }
 
 impl Engine {
@@ -108,7 +117,7 @@ impl Engine {
         if writes {
             self.lock_mems_for_write(mems)
         } else {
-            Ok(MemWriteGuard { paths: Vec::new() })
+            Ok(MemWriteGuard::empty())
         }
     }
 
@@ -116,30 +125,31 @@ impl Engine {
     /// order (so two multi-mem writers can never deadlock), and hold it
     /// until the returned guard drops. Call it before the
     /// reload-before-operation probe of a mutation and keep the guard
-    /// alive past the commit. Mems that are not mounted, or whose
-    /// backend has no shared state, are skipped: the mutation's own
-    /// lookup reports an unknown mem with its usual error.
+    /// alive past the commit. Mems that are not mounted are skipped:
+    /// the mutation's own lookup reports an unknown mem with its usual
+    /// error. A backend with no shared state takes no OS lock and is
+    /// still covered for the staged-write discard.
     pub fn lock_mems_for_write<S: AsRef<str>>(
         &self,
         mems: &[S],
     ) -> Result<MemWriteGuard, EngineError> {
-        let mut paths: Vec<PathBuf> = mems
+        let mut locks: Vec<(Option<PathBuf>, Arc<dyn MemBackend>)> = mems
             .iter()
             .filter_map(|name| {
-                self.mounts
-                    .iter()
-                    .find(|m| m.mount.mem == name.as_ref())
-                    .and_then(|m| m.backend.write_lock_path())
+                let m = self.mounts.iter().find(|m| m.mount.mem == name.as_ref())?;
+                Some((m.backend.write_lock_path(), Arc::clone(&m.backend)))
             })
             .collect();
-        paths.sort();
-        paths.dedup();
-        let mut guard = MemWriteGuard {
-            paths: Vec::with_capacity(paths.len()),
-        };
-        for path in paths {
-            acquire(&path).map_err(EngineError::Backend)?;
-            guard.paths.push(path);
+        // Sorted by lock path so two multi-mem writers take their locks
+        // in one order; pathless backends take no lock and sort first.
+        locks.sort_by(|a, b| a.0.cmp(&b.0));
+        locks.dedup_by(|a, b| backend_key(&a.1) == backend_key(&b.1));
+        let mut guard = MemWriteGuard::empty();
+        for (path, backend) in locks {
+            if let Some(path) = &path {
+                path_lock::acquire(path).map_err(|e| EngineError::Backend(BackendError::Io(e)))?;
+            }
+            guard.cover(path, backend);
         }
         Ok(guard)
     }

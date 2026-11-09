@@ -159,6 +159,8 @@ impl Engine {
                 (Some(old), Some(new)) if old != new => {
                     match self.reload_one_mem(&name) {
                         Ok(report) => {
+                            let new = self.head_after_reload(&name, new);
+                            warnings.extend(self.interrupted_commit_notice(&name));
                             warnings.push(crate::ops::WarningHint::MemReloaded {
                                 mem: name.clone(),
                                 old_head: old.clone(),
@@ -212,6 +214,8 @@ impl Engine {
                 // probe standing over entities the branch now holds.
                 (None, Some(new)) => match self.reload_one_mem(&name) {
                     Ok(report) => {
+                        let new = self.head_after_reload(&name, new);
+                        warnings.extend(self.interrupted_commit_notice(&name));
                         warnings.push(crate::ops::WarningHint::MemReloaded {
                             mem: name.clone(),
                             old_head: String::new(),
@@ -258,6 +262,33 @@ impl Engine {
         }
 
         warnings
+    }
+
+    /// The head to record after a reload of `mem`. A load can move the
+    /// head itself: it completes a commit that was cut off, and the
+    /// cursor probed before the reload named the unfinished commit.
+    /// Recording that stale cursor would make the next operation see
+    /// drift again and reload a second time.
+    fn head_after_reload(&self, mem: &str, probed: String) -> String {
+        self.mounts
+            .iter()
+            .find(|m| m.mount.mem == mem)
+            .and_then(|m| m.backend.current_head().ok().flatten())
+            .unwrap_or(probed)
+    }
+
+    /// The warning of the reload that just ran for `mem`, when that
+    /// reload completed an interrupted commit: the operation that
+    /// triggered the reload carries it, beside the standing copy among
+    /// the load warnings.
+    fn interrupted_commit_notice(&self, mem: &str) -> Vec<crate::ops::WarningHint> {
+        self.load_warnings
+            .iter()
+            .filter(|w| {
+                matches!(w, crate::ops::WarningHint::InterruptedCommitCompleted { mem: m, .. } if m == mem)
+            })
+            .cloned()
+            .collect()
     }
 
     /// Mark `mount_idx`'s on-disk head as advanced by *this* engine's

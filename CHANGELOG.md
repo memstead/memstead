@@ -24,8 +24,62 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   that invented its own handle therefore landed its checks under that
   handle instead of the operator's declaration.
 
+### Changed
+
+- **A folder mem's write is durable, and costs disk syncs.** A commit to
+  a folder mem now has one commit point. Before it, every new file
+  content is written beside its target and synced, together with a
+  commit record (`.memstead/commit.json`) that names the commit's files
+  and its ledger lines; after it the engine only moves the files into
+  place, appends the ledger lines and removes the record. Success is
+  returned after the contents, the record and the directory entries
+  that name them are synced. A write to a folder mem therefore takes
+  tens of milliseconds where it took one (about 60 ms on macOS, where a
+  sync flushes the drive). The ledger line of a write now lands with
+  its commit instead of after it. For implementers of `MemBackend`: the
+  trait gains the required `stage_provenance` (a record that lands with
+  the next commit), `complete_interrupted_commit` (default: nothing to
+  do), and the errors `CommitNotApplied` and `FollowUpFailed`;
+  `Engine::unregister_writable_mem` and `unregister_read_mount` return
+  the backend as an `Arc`.
+
 ### Fixed
 
+- **A failed write leaves nothing behind.** A mutation that failed
+  between staging its bytes and committing them (a refused sidecar
+  write, a failed commit) left the staged bytes in the backend, and the
+  next read or reload served them as content that never landed: single
+  `create` and `update` never discarded them, the folder backend
+  returned from a failed commit with files half written and the rest
+  still staged, and the git-branch backend kept its staged set when it
+  could not open the repository, write an object, or when it refused a
+  parent mismatch. Every mutation verb now shares one exit: the write
+  lock it already holds discards what is still staged when it is
+  released, and both backends end their own transaction on every exit
+  of a commit. After a failed call, storage is byte for byte what it
+  was and the same call sent again is a first call.
+- **A write that landed is never reported as failed.** A step that
+  failed after the commit (the ledger line of a folder mem, the refresh
+  of a checked-out worktree, the update of the engine's own view) used
+  to return an error for a write that was in storage, so a caller that
+  retried wrote twice, and `delete` could leave the engine's view behind
+  the files. Such a call now succeeds with the new warning
+  `WRITE_FOLLOW_UP_FAILED` (`details.mem`, `details.step`,
+  `details.detail`), and where the engine's own view was the step that
+  failed, the engine reloads the mem from storage first. A batch whose
+  commit to a second mem fails reloads the mems it had already
+  committed, instead of rolling its view back behind them.
+- **A folder commit that is cut off is completed, never served half
+  applied.** A crash, a kill or an IO error between two files of one
+  commit used to leave the first file written, the second not, and no
+  trace of it. Loading the mem is now the recovery: an attempt that
+  never reached its commit point is removed, a commit that reached it
+  is completed before anything is read, and the load carries the new
+  warning `INTERRUPTED_COMMIT_COMPLETED` (`details.mem`,
+  `details.files`). A call that hits an IO error after the commit point
+  returns the new code `COMMIT_NOT_APPLIED` (`details.mem`,
+  `details.detail`): the write is decided and must not be resent, and
+  the next operation on the mem completes it first.
 - **`memstead rename` rewrites a self-prefixed link inside a hierarchical
   mem.** Inside mem `library/a`, a body link spelled by the full id
   (`[[library/a--first-note]]`) is accepted at write (the resolver strips

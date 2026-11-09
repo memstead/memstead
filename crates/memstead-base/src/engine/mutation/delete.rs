@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::entity::EntityId;
 use crate::ops::WarningHint;
-use crate::provenance::{Provenance, ProvenanceKind};
+use crate::provenance::ProvenanceKind;
 use crate::vcs::{Actor, ClientId, CommitContext};
 use crate::workspace::MountCapability;
 
@@ -207,7 +207,12 @@ impl Engine {
         // for stubs; provenance still records the explicit drop so
         // memstead_changes_since consumers see the event.
         let backend = self.mounts[mount_idx].backend.as_ref();
+        let record = self.provenance_record(ProvenanceKind::Delete, id, actor, client, note);
+        let mut warnings: Vec<WarningHint> = Vec::new();
         let write_id = if entity_is_stub {
+            // No file, so no commit: the record of the drop is the
+            // whole write and is appended on its own.
+            backend.append_provenance(&record)?;
             String::new()
         } else {
             backend.delete_entity(Path::new(&file_path))?;
@@ -222,21 +227,12 @@ impl Engine {
                 client.cloned(),
                 note.map(String::from),
             );
-            backend.commit(&commit_subject, &ctx)?
+            // The record lands with the commit, so a delete that is in
+            // storage can no longer fail on its provenance afterwards.
+            let landed = self.commit_staged(mount_idx, &commit_subject, &ctx, &[record])?;
+            warnings.extend(landed.warnings);
+            landed.write_id
         };
-
-        backend.append_provenance(
-            &Provenance::new(
-                std::time::SystemTime::now(),
-                ProvenanceKind::Delete,
-                Some(id.to_string()),
-                actor,
-                client.cloned(),
-                note.map(String::from),
-            )
-            .with_role(self.current_role)
-            .with_identity(self.current_identity.clone()),
-        )?;
 
         let mut stamp_warnings: Vec<WarningHint> = Vec::new();
         if !write_id.is_empty() {
@@ -244,7 +240,6 @@ impl Engine {
             stamp_warnings = self.stamp_mutation_versions(mount_idx);
         }
 
-        let mut warnings: Vec<WarningHint> = Vec::new();
         warnings.extend(std::mem::take(&mut stamp_warnings));
         // Reload-before-operation drift notice, surfaced first.
         warnings.append(&mut drift_warnings);

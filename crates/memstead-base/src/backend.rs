@@ -15,8 +15,11 @@
 //!
 //! ## Per-backend write semantics
 //!
-//! - **Folder** — writes go to the workspace's mem subdirectory;
-//!   commit is a no-op CAS-token mint (no history).
+//! - **Folder** — writes buffer in memory; commit lands them in the
+//!   mem's directory behind one commit point (contents synced beside
+//!   their targets, then a durable commit record, then the moves into
+//!   place) and returns a synthetic id (no history). A commit that is
+//!   cut off after its commit point is completed by the next load.
 //! - **Git-branch** — writes buffer in memory, commit produces a real
 //!   git commit on the per-mem branch with the trailer block.
 //! - **Archive** — writes return [`BackendError::Sealed`] without
@@ -193,10 +196,40 @@ pub trait MemBackend: Send + Sync {
         self.commit(message, ctx)
     }
 
-    /// Append a [`Provenance`] record to the backend's mutation log.
+    /// Stage a [`Provenance`] record so it lands with the next
+    /// [`Self::commit`] and never without it: the record of a write
+    /// belongs to that write. Pending like the entity writes, and
+    /// dropped by [`Self::discard_pending`] and by a failed commit.
+    ///
+    /// Required, with no default, so a wrapping backend cannot forward
+    /// the entity writes and silently keep the record to itself.
+    /// Persistence form differs per backend: the folder backend lands
+    /// the ledger line inside the commit, the git-branch backend
+    /// accepts and drops the record because its commit object already
+    /// carries the same data.
+    fn stage_provenance(&self, record: &Provenance) -> Result<(), BackendError>;
+
+    /// Append a [`Provenance`] record to the backend's mutation log at
+    /// once, outside any commit: the form for an event that writes no
+    /// file (dropping a stub, a review mark). A record that describes a
+    /// commit goes through [`Self::stage_provenance`] instead.
     /// Persistence form differs per backend — JSONL line, commit
     /// trailer, etc. — but the in-memory shape is identical.
     fn append_provenance(&self, record: &Provenance) -> Result<(), BackendError>;
+
+    /// Bring storage to a whole state before it is read: finish a
+    /// commit that was decided and then cut off before every file was
+    /// in place, and remove what an attempt that never reached its
+    /// commit point left behind. Every load calls it first, so loading
+    /// a mem is the recovery and no half-applied commit is ever served.
+    ///
+    /// `Ok(Some(_))` names the commit that was completed; `Ok(None)`
+    /// means storage was whole already. The default is `Ok(None)`: a
+    /// backend whose commit is one indivisible step (the git-branch
+    /// ref update, the in-memory swap) has nothing to finish.
+    fn complete_interrupted_commit(&self) -> Result<Option<CompletedCommit>, BackendError> {
+        Ok(None)
+    }
 
     /// Read provenance entries since `cursor` (opaque,
     /// backend-defined: a commit SHA for git-branch, an RFC-3339
@@ -466,6 +499,13 @@ pub trait MemBackend: Send + Sync {
     }
 }
 
+/// A commit [`MemBackend::complete_interrupted_commit`] finished: the
+/// mem-relative paths it brought into place, in the commit's order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletedCommit {
+    pub files: Vec<String>,
+}
+
 /// Errors surfaced by [`MemBackend`].
 ///
 /// The `Sealed` variant is the typed read-only signal — backends
@@ -524,4 +564,22 @@ pub enum BackendError {
         "parent-ref mismatch: expected {expected}, found {actual} — sibling writer advanced the mem"
     )]
     ParentMismatch { expected: String, actual: String },
+    /// The commit is decided and not yet applied: its record is durable,
+    /// and moving its files into place was cut off. Neither a failed
+    /// write (resending it would write twice) nor a finished one. The
+    /// next load of the mem completes it
+    /// ([`MemBackend::complete_interrupted_commit`]).
+    #[error(
+        "commit is decided and not yet applied; the next load of the mem completes it: {detail}"
+    )]
+    CommitNotApplied { detail: String },
+    /// The commit is in storage and a step the backend runs after it
+    /// failed (the git-branch backend's worktree refresh). The caller
+    /// reports the write as done and names the step.
+    #[error("commit {commit} landed; follow-up step {step} failed: {detail}")]
+    FollowUpFailed {
+        commit: CommitId,
+        step: &'static str,
+        detail: String,
+    },
 }

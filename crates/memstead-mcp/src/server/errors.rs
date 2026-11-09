@@ -990,6 +990,15 @@ pub(super) fn engine_err_unified(
                 }),
             ),
         ),
+        E::CommitNotApplied { mem, detail } => tool_error_with_payload(
+            "COMMIT_NOT_APPLIED",
+            &message,
+            envelope(
+                "COMMIT_NOT_APPLIED",
+                message.clone(),
+                serde_json::json!({ "mem": mem, "detail": detail }),
+            ),
+        ),
         E::DuplicateMem(name) => tool_error_with_payload(
             "DUPLICATE_MEM",
             &message,

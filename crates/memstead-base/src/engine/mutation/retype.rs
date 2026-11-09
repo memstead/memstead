@@ -36,7 +36,7 @@ use crate::entity::EntityId;
 use crate::entity::parser::parse_markdown;
 use crate::entity::store_builder::push_entities_into_store;
 use crate::ops::WarningHint;
-use crate::provenance::{Provenance, ProvenanceKind};
+use crate::provenance::ProvenanceKind;
 use crate::runtime_validator::{
     CatchAllContext, CrossMemRelCheck, READ_ONLY_METADATA_KEYS, ValidationError,
     missing_required_fields, missing_required_sections, parse_metadata_value,
@@ -469,35 +469,43 @@ impl Engine {
             client.cloned(),
             note.map(String::from),
         );
-        let write_id = backend.commit(&commit_subject, &ctx)?;
-        backend.append_provenance(
-            &Provenance::new(
-                std::time::SystemTime::now(),
-                ProvenanceKind::Retype,
-                Some(id.to_string()),
-                actor,
-                client.cloned(),
-                note.map(String::from),
-            )
-            .with_role(self.current_role)
-            .with_identity(self.current_identity.clone()),
-        )?;
+        let record = self.provenance_record(ProvenanceKind::Retype, id, actor, client, note);
+        let landed = self.commit_staged(mount_idx, &commit_subject, &ctx, &[record])?;
+        let write_id = landed.write_id;
+        let mut outcome_warnings = landed.warnings;
         self.record_self_write(mount_idx, &write_id);
         let stamp_warnings = self.stamp_mutation_versions(mount_idx);
 
-        let parse_result = parse_markdown(&markdown, &entity.file_path, target_def.as_ref(), &mem)
-            .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
-        let content_hash = parse_result.entity.content_hash.clone();
-        let fallback = engine_fallback_type();
-        push_entities_into_store(&mut self.store, vec![parse_result], fallback.as_ref(), None);
-        crate::entity::store_builder::remap_alias_target_edge_sources(
-            &mut self.store,
-            &self.schemas,
-        );
+        // A failed store update reloaded the mem from storage, where the
+        // write is; the receipt reads from that view.
+        let content_hash = self
+            .after_commit(mount_idx, "store_update", &mut outcome_warnings, |engine| {
+                let parse_result =
+                    parse_markdown(&markdown, &entity.file_path, target_def.as_ref(), &mem)
+                        .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
+                let content_hash = parse_result.entity.content_hash.clone();
+                let fallback = engine_fallback_type();
+                push_entities_into_store(
+                    &mut engine.store,
+                    vec![parse_result],
+                    fallback.as_ref(),
+                    None,
+                );
+                crate::entity::store_builder::remap_alias_target_edge_sources(
+                    &mut engine.store,
+                    &engine.schemas,
+                );
+                Ok(content_hash)
+            })
+            .unwrap_or_else(|| {
+                self.store
+                    .get(id)
+                    .map(|e| e.content_hash.clone())
+                    .unwrap_or_default()
+            });
         self.invalidate_communities();
         self.maintain_search_indexes(std::slice::from_ref(id));
 
-        let mut outcome_warnings = Vec::new();
         outcome_warnings.append(&mut drift_warnings);
         outcome_warnings.extend(stamp_warnings);
         outcome_warnings.extend(warnings);

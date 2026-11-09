@@ -111,6 +111,16 @@ impl GitTreeBackend {
         }
     }
 
+    /// Move the staged set out of the backend, leaving it empty. The
+    /// one way a commit takes its ops, so no exit of the commit path
+    /// can leave them staged.
+    fn take_pending(&self) -> Result<Pending, BackendError> {
+        let mut pending = self.pending.lock().map_err(|_| {
+            BackendError::Path("git-tree writer pending state poisoned".to_string())
+        })?;
+        Ok(std::mem::replace(&mut *pending, Pending::new()))
+    }
+
     fn open_repo(&self) -> Result<gix::Repository, BackendError> {
         gix::open(&self.gitdir).map_err(|e| {
             BackendError::Path(format!(
@@ -538,6 +548,15 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
     }
 
     fn commit(&self, message: &str, ctx: &CommitContext<'_>) -> Result<CommitId, BackendError> {
+        // The staged set leaves the backend before anything fallible
+        // runs, so every exit below ends the transaction: success, a
+        // CAS conflict, or a failure opening the repository, writing a
+        // blob or writing the tree. `read_entity` prefers pending over
+        // the committed tip, so a staged op that outlived a failed
+        // commit would be served as content that never landed (and
+        // pulled into the in-memory store by a later reload).
+        let mut pending = self.take_pending()?;
+
         // Serialise commits against the same target ref at process
         // scope. Different refs under the same gitdir proceed in
         // parallel — that is the whole point of the per-branch key.
@@ -550,10 +569,6 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
             ))
         })?;
         let repo = self.open_repo()?;
-
-        let mut pending = self.pending.lock().map_err(|_| {
-            BackendError::Path("git-tree writer pending state poisoned".to_string())
-        })?;
 
         // Make sure we have a parent snapshot even if the caller went
         // straight to commit() without any mutations — exercises the
@@ -648,15 +663,6 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
             tree_id,
             parents,
         );
-        // The staged ops were fully replayed into `tree_id` above, so
-        // `pending` is no longer needed regardless of the commit outcome.
-        // Clear it here so EVERY exit ends the transaction — success, CAS
-        // conflict, or any other commit failure. Leaving it populated on a
-        // failed commit is a coherence bug: `read_entity` prefers pending
-        // over the committed tip, so an orphaned op would be served as
-        // phantom truth (and pulled into the in-memory store by a later
-        // `reload_one_mem`) until the process restarts.
-        pending.clear();
         let commit_id = match commit_result {
             Ok(id) => id,
             Err(e) if is_ref_cas_conflict(&e) => {
@@ -698,7 +704,17 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         // otherwise misread the engine's tree-editor commits as a
         // pending "delete" diff. No-op for bare repos and for writes
         // to a ref that is not the checked-out branch.
-        sync_index_and_worktree(&repo, &self.ref_name)?;
+        //
+        // The ref has moved by now: a failure here is a failed follow-up
+        // of a commit that landed, and reporting it as a failed write
+        // would have the caller resend a write that is in storage.
+        if let Err(e) = sync_index_and_worktree(&repo, &self.ref_name) {
+            return Err(BackendError::FollowUpFailed {
+                commit: sha_hex,
+                step: "worktree_sync",
+                detail: e.to_string(),
+            });
+        }
 
         Ok(sha_hex)
     }
@@ -732,6 +748,8 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
             ))
         })?;
 
+        // A refusal here ends the transaction like a failed commit
+        // does: the staged set is dropped, never left to be read back.
         let actual = match gix::open(&self.gitdir) {
             Ok(repo) => match repo.try_find_reference(&self.ref_name) {
                 Ok(Some(mut r)) => r
@@ -740,6 +758,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
                     .map(|id| id.detach().to_hex().to_string()),
                 Ok(None) => None,
                 Err(e) => {
+                    let _ = self.take_pending();
                     return Err(memstead_base::backend::BackendError::Other(format!(
                         "git-tree writer: resolve ref {} for parent check: {e}",
                         self.ref_name
@@ -747,6 +766,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
                 }
             },
             Err(e) => {
+                let _ = self.take_pending();
                 return Err(memstead_base::backend::BackendError::Other(format!(
                     "git-tree writer: open repo at {} for parent check: {e}",
                     self.gitdir.display()
@@ -755,6 +775,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         };
         let actual_str = actual.unwrap_or_default();
         if actual_str != expected {
+            let _ = self.take_pending();
             return Err(memstead_base::backend::BackendError::ParentMismatch {
                 expected: expected.to_string(),
                 actual: actual_str,
@@ -763,6 +784,15 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
 
         drop(guard);
         <Self as MemBackend>::commit(self, message, ctx)
+    }
+
+    fn stage_provenance(
+        &self,
+        _record: &memstead_base::Provenance,
+    ) -> Result<(), memstead_base::backend::BackendError> {
+        // Accepted and dropped: the commit object carries the record
+        // (see `append_provenance` below).
+        Ok(())
     }
 
     fn append_provenance(

@@ -1276,6 +1276,12 @@ mod tests {
             ) -> Result<crate::storage::CommitId, crate::backend::BackendError> {
                 self.inner.commit(m, c)
             }
+            fn stage_provenance(
+                &self,
+                r: &crate::provenance::Provenance,
+            ) -> Result<(), crate::backend::BackendError> {
+                self.inner.stage_provenance(r)
+            }
             fn append_provenance(
                 &self,
                 r: &crate::provenance::Provenance,

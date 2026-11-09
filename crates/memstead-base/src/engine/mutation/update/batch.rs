@@ -251,6 +251,7 @@ impl Engine {
             }
         }
         let mut mount_commits: Vec<(usize, String)> = Vec::with_capacity(distinct_mounts.len());
+        let mut batch_warnings: Vec<WarningHint> = short_hints;
         for &m in &distinct_mounts {
             let entity_ids: Vec<String> = prepared
                 .iter()
@@ -280,45 +281,59 @@ impl Engine {
                 },
             );
             ctx.entity_ids = Some(entity_ids);
-            match self.mounts[m].backend.commit(&subject, &ctx) {
-                Ok(sha) => mount_commits.push((m, sha)),
+            // One provenance record per item, landing with the mem's
+            // commit.
+            let records: Vec<Provenance> = prepared
+                .iter()
+                .zip(notes.iter())
+                .filter(|(p, _)| p.mount_idx == m)
+                .map(|(p, note)| {
+                    self.provenance_record(
+                        ProvenanceKind::Update,
+                        &p.id,
+                        actor,
+                        client,
+                        note.as_deref(),
+                    )
+                })
+                .collect();
+            match self.commit_staged(m, &subject, &ctx, &records) {
+                Ok(landed) => {
+                    batch_warnings.extend(landed.warnings);
+                    mount_commits.push((m, landed.write_id));
+                }
                 Err(e) => {
                     // A commit failed. Roll back the store and any
                     // still-pending backends. Mems already committed
-                    // in this loop stay committed (per-mem atomicity).
+                    // in this loop stay committed (per-mem atomicity),
+                    // so the view of each is reloaded from storage.
                     self.store = store_snapshot;
                     self.discard_all_pending();
-                    return Err(e.into());
+                    self.level_committed_mounts(&mount_commits);
+                    return Err(e);
                 }
             }
         }
 
-        // Provenance + store application per item, now that the commits
-        // landed. `record_self_write` marks the commit as engine-self
-        // so drift detection ignores it.
-        let mut batch_warnings: Vec<WarningHint> = short_hints;
-        for (p, note) in prepared.iter().zip(notes.iter()) {
-            let write_id = mount_commits
-                .iter()
-                .find(|(m, _)| *m == p.mount_idx)
-                .map(|(_, s)| s.clone())
-                .unwrap_or_default();
-            self.mounts[p.mount_idx].backend.append_provenance(
-                &Provenance::new(
-                    std::time::SystemTime::now(),
-                    ProvenanceKind::Update,
-                    Some(p.id.to_string()),
-                    actor,
-                    client.cloned(),
-                    note.clone(),
-                )
-                .with_role(self.current_role)
-                .with_identity(self.current_identity.clone()),
-            )?;
-            self.record_self_write(p.mount_idx, &write_id);
-            batch_warnings.extend(self.stamp_mutation_versions(p.mount_idx));
-            self.apply_prepared_to_store(p)?;
+        // Store application per item, now that the commits landed.
+        // `record_self_write` marks the commit as engine-self so drift
+        // detection ignores it.
+        for (m, write_id) in &mount_commits {
+            self.record_self_write(*m, write_id);
+            batch_warnings.extend(self.stamp_mutation_versions(*m));
         }
+        let committed_mounts: Vec<usize> = mount_commits.iter().map(|(m, _)| *m).collect();
+        self.after_commits(
+            &committed_mounts,
+            "store_update",
+            &mut batch_warnings,
+            |engine| {
+                for p in &prepared {
+                    engine.apply_prepared_to_store(p)?;
+                }
+                Ok(())
+            },
+        );
 
         self.invalidate_communities();
         self.invalidate_search_indexes();

@@ -270,7 +270,6 @@ impl Engine {
             }
         }
 
-        let backend = self.mounts[prepared.mount_idx].backend.as_ref();
         let commit_subject = format!("memstead: relate {}", prepared.from);
         let ctx = self.commit_context(
             Some("relate_entity"),
@@ -278,25 +277,30 @@ impl Engine {
             client.cloned(),
             note.map(String::from),
         );
-        let write_id = backend.commit(&commit_subject, &ctx)?;
-
-        backend.append_provenance(
-            &Provenance::new(
-                std::time::SystemTime::now(),
-                ProvenanceKind::Relate,
-                Some(prepared.from.to_string()),
-                actor,
-                client.cloned(),
-                note.map(String::from),
-            )
-            .with_role(self.current_role)
-            .with_identity(self.current_identity.clone()),
-        )?;
+        let record =
+            self.provenance_record(ProvenanceKind::Relate, &prepared.from, actor, client, note);
+        let landed = self.commit_staged(prepared.mount_idx, &commit_subject, &ctx, &[record])?;
+        let write_id = landed.write_id;
+        let mut follow_up_warnings = landed.warnings;
 
         self.record_self_write(prepared.mount_idx, &write_id);
         let stamp_warnings = self.stamp_mutation_versions(prepared.mount_idx);
 
-        let content_hash = self.apply_prepared_relate_to_store(&prepared)?;
+        // A failed store update reloaded the mem from storage, where the
+        // write is; the receipt reads from that view.
+        let content_hash = self
+            .after_commit(
+                prepared.mount_idx,
+                "store_update",
+                &mut follow_up_warnings,
+                |engine| engine.apply_prepared_relate_to_store(&prepared),
+            )
+            .unwrap_or_else(|| {
+                self.store
+                    .get(&prepared.from)
+                    .map(|e| e.content_hash.clone())
+                    .unwrap_or_default()
+            });
 
         // On the `--remove` path, the edge we just dropped may
         // have been the last incoming edge to a stub. The orphan-stub
@@ -333,6 +337,7 @@ impl Engine {
             ..
         } = prepared;
 
+        warnings.extend(follow_up_warnings);
         warnings.extend(stamp_warnings);
 
         // Signal crossings ride the out-of-band warning channel beside
@@ -412,10 +417,14 @@ impl Engine {
             client.cloned(),
             note.map(String::from),
         );
-        let write_id = backend.commit(
+        let landed = self.commit_staged(
+            mount_idx,
             &format!("memstead: derivation re-baseline {}", outcome.from),
             &ctx,
+            &[],
         )?;
+        let write_id = landed.write_id;
+        outcome.warnings.extend(landed.warnings);
         self.record_self_write(mount_idx, &write_id);
         // `relate_entity` returns early into this path, so the stamp call on
         // the ordinary path never runs and its report has to be collected
@@ -1293,6 +1302,7 @@ impl Engine {
             }
         }
         let mut mount_commits: Vec<(usize, String)> = Vec::with_capacity(distinct_mounts.len());
+        let mut batch_warnings: Vec<WarningHint> = short_hints;
         for &m in &distinct_mounts {
             // Distinct source ids for this mount (an entity may carry
             // several edge changes in one batch).
@@ -1327,42 +1337,45 @@ impl Engine {
                 },
             );
             ctx.entity_ids = Some(entity_ids);
-            match self.mounts[m].backend.commit(&subject, &ctx) {
-                Ok(sha) => mount_commits.push((m, sha)),
+            // One provenance record per entry, landing with the mem's
+            // commit.
+            let records: Vec<Provenance> = prepared
+                .iter()
+                .zip(notes.iter())
+                .filter(|(p, _)| p.mount_idx == m)
+                .map(|(p, note)| {
+                    self.provenance_record(
+                        ProvenanceKind::Relate,
+                        &p.from,
+                        actor,
+                        client,
+                        note.as_deref(),
+                    )
+                })
+                .collect();
+            match self.commit_staged(m, &subject, &ctx, &records) {
+                Ok(landed) => {
+                    batch_warnings.extend(landed.warnings);
+                    mount_commits.push((m, landed.write_id));
+                }
                 Err(e) => {
                     // A commit failed: roll back the store and any
                     // still-pending backends. Mems already committed
                     // in this loop stay committed (the family's
-                    // per-mem atomicity).
+                    // per-mem atomicity), so the view of each is
+                    // reloaded from storage.
                     self.store = store_snapshot;
                     self.discard_all_pending();
-                    return Err(e.into());
+                    self.level_committed_mounts(&mount_commits);
+                    return Err(e);
                 }
             }
         }
 
-        // Provenance per entry, self-write markers per mount.
-        let mut batch_warnings: Vec<WarningHint> = short_hints;
-        for (p, note) in prepared.iter().zip(notes.iter()) {
-            let write_id = mount_commits
-                .iter()
-                .find(|(m, _)| *m == p.mount_idx)
-                .map(|(_, s)| s.clone())
-                .unwrap_or_default();
-            self.mounts[p.mount_idx].backend.append_provenance(
-                &Provenance::new(
-                    std::time::SystemTime::now(),
-                    ProvenanceKind::Relate,
-                    Some(p.from.to_string()),
-                    actor,
-                    client.cloned(),
-                    note.clone(),
-                )
-                .with_role(self.current_role)
-                .with_identity(self.current_identity.clone()),
-            )?;
-            self.record_self_write(p.mount_idx, &write_id);
-            batch_warnings.extend(self.stamp_mutation_versions(p.mount_idx));
+        // Self-write markers per mount.
+        for (m, write_id) in &mount_commits {
+            self.record_self_write(*m, write_id);
+            batch_warnings.extend(self.stamp_mutation_versions(*m));
         }
 
         // Orphan-stub GC over every removed edge's target — same

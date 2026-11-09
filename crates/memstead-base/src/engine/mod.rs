@@ -83,7 +83,10 @@ pub use lifecycle::SchemaStaging;
 /// can name it in its signature — never re-exported.
 pub(crate) struct MountedBackend {
     mount: Mount,
-    backend: Box<dyn MemBackend>,
+    /// Shared so the write-lock guard can hold the backends it locked
+    /// and discard their staged writes when it drops
+    /// ([`write_lock::MemWriteGuard`]).
+    backend: std::sync::Arc<dyn MemBackend>,
     /// Last cursor returned by `backend.current_head()`. Seeded in
     /// [`Engine::from_mounts`]; refreshed by
     /// [`Engine::reload_if_stale`] after a successful reload.

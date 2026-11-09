@@ -303,7 +303,7 @@ impl Engine {
         self.schemas_insert(mem.to_string(), schema);
         self.mounts.push(crate::engine::MountedBackend {
             mount,
-            backend,
+            backend: backend.into(),
             last_known_head,
             mem_config,
             archive_provenance,
@@ -381,7 +381,9 @@ impl Engine {
         // Walk the backend; surface read-time errors instead of
         // mutating the store on a failed reload.
         let backend = self.mounts[mount_idx].backend.as_ref();
-        let (entries, read_errors) = collect_source_entries(backend)?;
+        let read = collect_source_entries(mem, backend)?;
+        let completed_commit = read.completed_commit;
+        let (entries, read_errors) = (read.entries, read.read_errors);
         // The unbacked-mount probe rides the reload like the other
         // load-time warnings: a branch that appeared (or vanished) since
         // boot changes the answer, and the sink's per-mem replace below
@@ -404,6 +406,7 @@ impl Engine {
 
         // Failure fence above; below this point the store is mutated.
         self.store.remove_entities_by_mem(mem);
+        warnings_sink.extend(completed_commit);
         if let Some(w) = unbacked {
             warnings_sink.push(w);
         }

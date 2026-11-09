@@ -10,7 +10,7 @@ use crate::engine_fallback_type;
 use crate::entity::EntityId;
 use crate::entity::parser::parse_markdown;
 use crate::entity::store_builder::push_entities_into_store;
-use crate::provenance::{Provenance, ProvenanceKind};
+use crate::provenance::ProvenanceKind;
 
 use super::{Actor, ClientId, Engine, EngineError, PreparedUpdate, UpdateEntityOutcome};
 
@@ -73,7 +73,6 @@ impl Engine {
         // way a refused check stops a record, and nothing is on disk.
         self.carry_prepared_self_checks(&prepared)?;
         self.stage_prepared_update(&prepared)?;
-        let backend = self.mounts[prepared.mount_idx].backend.as_ref();
         // Anchor-only commits carry the distinct `anchor` verb so their
         // otherwise-invisible sidecar change is legible in the note log;
         // every other update keeps `update`. The verb is a subject-only
@@ -90,23 +89,35 @@ impl Engine {
             client.cloned(),
             note.map(String::from),
         );
-        let write_id = backend.commit(&commit_subject, &ctx)?;
-        backend.append_provenance(
-            &Provenance::new(
-                std::time::SystemTime::now(),
-                ProvenanceKind::Update,
-                Some(prepared.id.to_string()),
-                actor,
-                client.cloned(),
-                note.map(String::from),
-            )
-            .with_role(self.current_role)
-            .with_identity(self.current_identity.clone()),
-        )?;
+        let record =
+            self.provenance_record(ProvenanceKind::Update, &prepared.id, actor, client, note);
+        let landed = self.commit_staged(prepared.mount_idx, &commit_subject, &ctx, &[record])?;
+        let write_id = landed.write_id;
+        let mut follow_up_warnings = landed.warnings;
         self.record_self_write(prepared.mount_idx, &write_id);
         let stamp_warnings = self.stamp_mutation_versions(prepared.mount_idx);
 
-        let applied = self.apply_prepared_to_store(&prepared)?;
+        // A failed store update reloaded the mem from storage, where the
+        // write is; the receipt reads from that view.
+        let applied = self
+            .after_commit(
+                prepared.mount_idx,
+                "store_update",
+                &mut follow_up_warnings,
+                |engine| engine.apply_prepared_to_store(&prepared),
+            )
+            .unwrap_or_else(|| {
+                let (content_hash, title) = self
+                    .store
+                    .get(&prepared.id)
+                    .map(|e| (e.content_hash.clone(), e.title.clone()))
+                    .unwrap_or_default();
+                AppliedWrite {
+                    content_hash,
+                    title,
+                    orphan_stubs_removed: Vec::new(),
+                }
+            });
 
         self.invalidate_communities();
         // Incremental (flywheel W8/01): the updated entity is the
@@ -118,6 +129,7 @@ impl Engine {
         // enforcement point. Only reached on the real-commit path; the
         // no-op and dry-run prepare outcomes never demand a note.
         let mut warnings = prepared.warnings;
+        warnings.extend(follow_up_warnings);
         warnings.extend(stamp_warnings);
         // Signal crossings — out-of-band beside the success payload,
         // never error-shaped.

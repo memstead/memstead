@@ -282,6 +282,46 @@ fn pending_buffer_clears_on_commit() {
     assert_eq!(std::fs::read(tmp.path().join("a.md")).unwrap(), b"a");
 }
 
+/// A commit that fails partway ends its transaction: nothing staged
+/// stays readable, nothing staged is on disk, and the next commit
+/// carries only what was staged after the failure. The failure is a
+/// real one: a file sits where the second write needs a directory.
+#[test]
+fn a_failed_commit_leaves_no_staged_write_readable() {
+    let tmp = TempDir::new().unwrap();
+    let writer = FilesystemBackend::new(tmp.path().to_path_buf());
+    std::fs::write(tmp.path().join("blocker"), b"a file, not a directory").unwrap();
+
+    writer.write_entity(Path::new("a.md"), b"staged").unwrap();
+    writer
+        .write_entity(Path::new("blocker/child.md"), b"staged")
+        .unwrap();
+    assert!(writer.commit("fails", &ctx_for_test()).is_err());
+
+    assert_eq!(
+        writer.read_entity(Path::new("a.md")).unwrap(),
+        None,
+        "a write that never landed is not served"
+    );
+    assert!(!tmp.path().join("a.md").exists());
+
+    writer.write_entity(Path::new("b.md"), b"b").unwrap();
+    writer.commit("next", &ctx_for_test()).unwrap();
+    assert_eq!(std::fs::read(tmp.path().join("b.md")).unwrap(), b"b");
+    assert!(
+        !tmp.path().join("a.md").exists(),
+        "the failed commit's write does not ride the next commit"
+    );
+    let names: Vec<String> = std::fs::read_dir(tmp.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names.iter().all(|n| !n.contains(".tmp.")),
+        "no temp of the failed commit remains: {names:?}"
+    );
+}
+
 // --- MemBackend impl ----------------------------------------
 
 /// Folder backend's `write_mem_config` writes

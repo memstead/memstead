@@ -180,17 +180,7 @@ pub fn append_change_monotonic(
     entry: &ChangeEntry<'_>,
     now: std::time::SystemTime,
 ) -> Result<(), ChangelogError> {
-    // Compare at the cursor's own granularity — the formatted
-    // millisecond string — not raw `SystemTime`: `now` carries
-    // sub-millisecond nanos that make it "later" than the parsed
-    // last-line ts even when both format to the same millisecond,
-    // which is exactly the collision the clamp exists to prevent.
-    let effective = match last_line_ts(&changelog_path(workspace_root)) {
-        Some(last) if format_rfc3339_utc(now) <= format_rfc3339_utc(last) => {
-            last + std::time::Duration::from_millis(1)
-        }
-        _ => now,
-    };
+    let effective = monotonic_ts(last_line_ts(&changelog_path(workspace_root)), now);
     append_change_at(workspace_root, entry, effective)
 }
 
@@ -208,9 +198,18 @@ fn last_line_ts(path: &Path) -> Option<std::time::SystemTime> {
     file.seek(SeekFrom::Start(start)).ok()?;
     let mut buf = Vec::new();
     file.read_to_end(&mut buf).ok()?;
-    // Lossy: a seek that lands mid-UTF-8-char only garbles the first
-    // (incomplete) line of the tail, which the rev() scan never needs.
-    let tail = String::from_utf8_lossy(&buf);
+    last_ts_in_tail(&buf)
+}
+
+/// The `ts` of the last line in `tail` that carries a parseable one,
+/// where `tail` is the end of a changelog (any length from the last
+/// line up). The parse half of the monotonic clamp, apart from the
+/// read, so a caller that reads the ledger through its own IO seam
+/// applies the same rule.
+pub(crate) fn last_ts_in_tail(tail: &[u8]) -> Option<std::time::SystemTime> {
+    // Lossy: a tail that starts mid-UTF-8-char only garbles the first
+    // (incomplete) line, which the rev() scan never needs.
+    let tail = String::from_utf8_lossy(tail);
     tail.lines()
         .rev()
         .map(str::trim)
@@ -224,6 +223,26 @@ fn last_line_ts(path: &Path) -> Option<std::time::SystemTime> {
             parse_rfc3339_utc(&ts)
         })
         .next()
+}
+
+/// The timestamp a line appended at `now` must carry so the ledger's
+/// last-line `ts` strictly advances past `last` (see
+/// [`append_change_monotonic`] for why it must).
+pub(crate) fn monotonic_ts(
+    last: Option<std::time::SystemTime>,
+    now: std::time::SystemTime,
+) -> std::time::SystemTime {
+    // Compare at the cursor's own granularity, the formatted
+    // millisecond string, not raw `SystemTime`: `now` carries
+    // sub-millisecond nanos that make it "later" than the parsed
+    // last-line ts even when both format to the same millisecond,
+    // which is exactly the collision the clamp exists to prevent.
+    match last {
+        Some(last) if format_rfc3339_utc(now) <= format_rfc3339_utc(last) => {
+            last + std::time::Duration::from_millis(1)
+        }
+        _ => now,
+    }
 }
 
 /// Variant of [`append_change`] that takes the timestamp explicitly.
@@ -242,6 +261,33 @@ pub fn append_change_at(
         })?;
     }
 
+    let line = render_change_line(entry, now)?;
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&target)
+        .map_err(|e| ChangelogError::Io {
+            path: target.clone(),
+            source: e,
+        })?;
+    file.write_all(line.as_bytes())
+        .map_err(|e| ChangelogError::Io {
+            path: target,
+            source: e,
+        })?;
+    Ok(())
+}
+
+/// Render the one line `entry` appends at timestamp `now`, newline
+/// included, without touching the file. The folder backend renders the
+/// lines of a commit ahead of its commit point, so the commit's record
+/// can name them and an interrupted commit can still append exactly
+/// the lines it decided on.
+pub(crate) fn render_change_line(
+    entry: &ChangeEntry<'_>,
+    now: std::time::SystemTime,
+) -> Result<String, ChangelogError> {
     let ts = format_rfc3339_utc(now);
     let note = entry
         .note
@@ -280,21 +326,7 @@ pub fn append_change_at(
         logical_operation_id: entry.logical_operation_id,
     })?;
     line.push('\n');
-
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&target)
-        .map_err(|e| ChangelogError::Io {
-            path: target.clone(),
-            source: e,
-        })?;
-    file.write_all(line.as_bytes())
-        .map_err(|e| ChangelogError::Io {
-            path: target,
-            source: e,
-        })?;
-    Ok(())
+    Ok(line)
 }
 
 /// Format a `SystemTime` as RFC 3339 with millisecond precision and

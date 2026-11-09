@@ -37,6 +37,16 @@ impl fmt::Display for WarningHint {
                      (an empty mem serves nothing); author into it or remove the mount"
                 ),
             },
+            WarningHint::InterruptedCommitCompleted { mem, files } => write!(
+                f,
+                "mem '{mem}': the last commit was cut off before every file was in place                  and has been completed on this load ({} file(s): {}); the mem is whole,                  nothing needs resending",
+                files.len(),
+                files.join(", ")
+            ),
+            WarningHint::WriteFollowUpFailed { mem, step, detail } => write!(
+                f,
+                "mem '{mem}': the write landed, and the step after it ({step}) failed:                  {detail}; do not resend the write"
+            ),
             WarningHint::SectionHeadingDivergence {
                 entity_id,
                 section_key,
