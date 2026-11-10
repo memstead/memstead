@@ -119,7 +119,18 @@ fn the_method_list_is_the_trait() {
     let end = body.find("\n}\n").expect("the trait block closes");
     let in_trait: BTreeSet<&str> = body[..end]
         .lines()
-        .filter_map(|line| line.strip_prefix("    fn "))
+        // A method is declared at the trait's own indentation, with
+        // or without `unsafe`, `async` or `const` in front.
+        .filter_map(|line| line.strip_prefix("    "))
+        .filter_map(|mut rest| {
+            while let Some(after) = ["async ", "const ", "unsafe "]
+                .iter()
+                .find_map(|q| rest.strip_prefix(q))
+            {
+                rest = after;
+            }
+            rest.strip_prefix("fn ")
+        })
         .filter_map(|rest| rest.split(['(', '<']).next())
         .collect();
     let in_matrix: BTreeSet<&str> = Method::ALL.iter().map(|m| m.name()).collect();
@@ -809,27 +820,44 @@ const WRITE_HELPERS: &[&str] = &[
 
 /// Every function of the engine that writes to a mem (it calls a
 /// mutating storage method or one of the write helpers) and belongs to
-/// a mutation verb, with the matrix verbs that drive it.
+/// a mutation verb, with the matrix verbs that drive it. A function is
+/// named by its file and its name, so a second function of the same
+/// name elsewhere is a writer of its own.
 const VERBS: &[(&str, &[Verb])] = &[
     (
-        "create_entity",
+        "engine/mutation/create/mod.rs::create_entity",
         &[Verb::Create, Verb::CreateIntoDeferredMem],
     ),
     (
-        "commit_prepared_create",
+        "engine/mutation/create/commit.rs::commit_prepared_create",
         &[Verb::Create, Verb::CreateIntoDeferredMem],
     ),
     (
-        "stage_prepared_create",
+        "engine/mutation/create/stage.rs::stage_prepared_create",
         &[Verb::Create, Verb::CreateIntoDeferredMem, Verb::BatchCreate],
     ),
-    ("batch_create", &[Verb::BatchCreate]),
-    ("update_entity", &[Verb::Update]),
-    ("commit_prepared_update", &[Verb::Update]),
-    ("stage_prepared_update", &[Verb::Update, Verb::BatchUpdate]),
-    ("batch_update", &[Verb::BatchUpdate]),
     (
-        "stage_anchors_sidecar",
+        "engine/mutation/create/batch.rs::batch_create",
+        &[Verb::BatchCreate],
+    ),
+    (
+        "engine/mutation/update/mod.rs::update_entity",
+        &[Verb::Update],
+    ),
+    (
+        "engine/mutation/update/commit.rs::commit_prepared_update",
+        &[Verb::Update],
+    ),
+    (
+        "engine/mutation/update/stage.rs::stage_prepared_update",
+        &[Verb::Update, Verb::BatchUpdate],
+    ),
+    (
+        "engine/mutation/update/batch.rs::batch_update",
+        &[Verb::BatchUpdate],
+    ),
+    (
+        "engine/mutation/mod.rs::stage_anchors_sidecar",
         &[
             Verb::Create,
             Verb::BatchCreate,
@@ -838,32 +866,65 @@ const VERBS: &[(&str, &[Verb])] = &[
         ],
     ),
     (
-        "stage_derivation_sidecar",
+        "engine/mutation/mod.rs::stage_derivation_sidecar",
         &[Verb::Create, Verb::Update, Verb::Relate],
     ),
-    ("delete_entity", &[Verb::Delete, Verb::DeleteStub]),
-    ("delete_entity_with_ctx", &[Verb::Delete, Verb::DeleteStub]),
-    ("stage_anchors_removal", &[Verb::Delete]),
-    ("relate_entity", &[Verb::Relate]),
-    ("stage_prepared_relate", &[Verb::Relate, Verb::BatchRelate]),
-    ("batch_relate", &[Verb::BatchRelate]),
-    ("retype_entity", &[Verb::Retype]),
-    ("stage_proposal_marks_retype", &[Verb::Retype]),
-    ("rename_entity", &[Verb::Rename]),
-    ("stage_anchors_rename", &[Verb::Rename]),
-    ("stage_proposal_marks_rename", &[Verb::Rename]),
-    ("stage_proposal_marks_rehash", &[Verb::Rename]),
     (
-        "discard_all_pending",
+        "engine/mutation/delete.rs::delete_entity",
+        &[Verb::Delete, Verb::DeleteStub],
+    ),
+    (
+        "engine/mutation/delete.rs::delete_entity_with_ctx",
+        &[Verb::Delete, Verb::DeleteStub],
+    ),
+    (
+        "engine/mutation/mod.rs::stage_anchors_removal",
+        &[Verb::Delete],
+    ),
+    ("engine/mutation/relate.rs::relate_entity", &[Verb::Relate]),
+    (
+        "engine/mutation/relate.rs::stage_prepared_relate",
+        &[Verb::Relate, Verb::BatchRelate],
+    ),
+    (
+        "engine/mutation/relate.rs::batch_relate",
+        &[Verb::BatchRelate],
+    ),
+    ("engine/mutation/retype.rs::retype_entity", &[Verb::Retype]),
+    (
+        "engine/mutation/mod.rs::stage_proposal_marks_retype",
+        &[Verb::Retype],
+    ),
+    ("engine/mutation/rename.rs::rename_entity", &[Verb::Rename]),
+    (
+        "engine/mutation/mod.rs::stage_anchors_rename",
+        &[Verb::Rename],
+    ),
+    (
+        "engine/mutation/mod.rs::stage_proposal_marks_rename",
+        &[Verb::Rename],
+    ),
+    (
+        "engine/mutation/mod.rs::stage_proposal_marks_rehash",
+        &[Verb::Rename],
+    ),
+    (
+        "engine/mutation/update/batch.rs::discard_all_pending",
         &[Verb::BatchCreate, Verb::BatchUpdate, Verb::BatchRelate],
     ),
     // The write lock and the one commit call, shared by every verb.
-    ("lock_mems_for_write_if", EVERY_VERB),
-    ("drop", EVERY_VERB),
-    ("commit_staged", EVERY_VERB),
-    ("commit_staged_pinned", EVERY_VERB),
-    ("settle", EVERY_VERB),
-    ("append_record", &[Verb::DeleteStub]),
+    ("engine/write_lock.rs::lock_mems_for_write_if", EVERY_VERB),
+    ("engine/write_lock.rs::drop", EVERY_VERB),
+    ("engine/mutation/landing.rs::commit_staged", EVERY_VERB),
+    (
+        "engine/mutation/landing.rs::commit_staged_pinned",
+        EVERY_VERB,
+    ),
+    ("engine/mutation/landing.rs::settle", EVERY_VERB),
+    (
+        "engine/mutation/landing.rs::append_record",
+        &[Verb::DeleteStub],
+    ),
 ];
 
 /// Every verb of the matrix, for the functions all of them share.
@@ -885,99 +946,141 @@ const EVERY_VERB: &[Verb] = &[
 /// mem's entities, each with the reason it stays out of the matrix.
 const NOT_VERBS: &[(&str, &str)] = &[
     (
-        "set_mem_version",
+        "engine/lifecycle/mem_settings.rs::set_mem_version",
         "writes the mem's config, which no entity commit carries",
     ),
-    ("set_mem_description", "the mem's config"),
-    ("set_mem_title", "the mem's config"),
-    ("set_mem_subject", "the mem's config"),
-    ("set_mem_internal", "the mem's config"),
-    ("set_mem_process_mem", "the mem's config"),
-    ("set_mem_sync_state", "the mem's config"),
-    ("write_mem_config_merged", "the mem's config"),
     (
-        "commit_with_expected_parent",
+        "engine/lifecycle/mem_settings.rs::set_mem_description",
+        "the mem's config",
+    ),
+    (
+        "engine/lifecycle/mem_settings.rs::set_mem_title",
+        "the mem's config",
+    ),
+    (
+        "engine/lifecycle/mem_settings.rs::set_mem_subject",
+        "the mem's config",
+    ),
+    (
+        "engine/lifecycle/mem_settings.rs::set_mem_internal",
+        "the mem's config",
+    ),
+    (
+        "engine/lifecycle/mem_settings.rs::set_mem_process_mem",
+        "the mem's config",
+    ),
+    (
+        "engine/lifecycle/mem_settings.rs::set_mem_sync_state",
+        "the mem's config",
+    ),
+    (
+        "engine/lifecycle/schema_pin.rs::write_mem_config_merged",
+        "the mem's config",
+    ),
+    (
+        "backend.rs::commit_with_expected_parent",
         "a default method of the storage trait, a backend delegating to itself",
     ),
     (
-        "write_mem_config_cas",
+        "backend.rs::write_mem_config_cas",
         "a default method of the storage trait, a backend delegating to itself",
     ),
     (
-        "bump_backend_schema_pin",
+        "engine/lifecycle/schema_pin.rs::bump_backend_schema_pin",
         "the mem's config: the schema pin",
     ),
     (
-        "set_review_mark",
+        "engine/review.rs::set_review_mark",
         "a review mark is a provenance line of its own, with no entity write",
     ),
     (
-        "record_anchor_observed_hashes",
+        "engine/mutation/mod.rs::record_anchor_observed_hashes",
         "the verify pass's observation record on the anchors sidecar, not an entity verb",
     ),
     (
-        "record_anchor_observations",
+        "engine/mutation/mod.rs::record_anchor_observations",
         "the verify pass's observation record on the anchors sidecar, not an entity verb",
     ),
     (
-        "record_pipeline_edit_provenance",
+        "engine/lifecycle/export.rs::record_pipeline_edit_provenance",
         "the provenance mirror of a pipeline-config edit, not an entity write",
     ),
     (
-        "refresh_derivation_baseline_on_noop",
+        "engine/mutation/relate.rs::refresh_derivation_baseline_on_noop",
         "a relate that finds its edge present and refreshes a derivation baseline: it needs a \
          schema that declares a derivation relation, which no built-in schema does; it commits \
          through the verbs' one commit call",
     ),
     (
-        "stage_anchors_replace",
+        "engine/mutation/mod.rs::stage_anchors_replace",
         "the merge of a proposal replaces an entity's anchors; no verb does",
     ),
     (
-        "publish_checks",
+        "engine/checks_transport.rs::publish_checks",
         "writes check records to the check-ledger ref, not to a mem's entities",
     ),
     (
-        "resolve_merge_conflict",
+        "engine/conflicts.rs::resolve_merge_conflict",
         "the resolution of a pull's conflict, an operation over a merge",
     ),
     (
-        "rewrite_mem_references",
+        "engine/mutation/mem_sweep.rs::rewrite_mem_references",
         "the sweep after a mem is renamed, an operation over several mems",
     ),
     (
-        "proposal_merge",
+        "engine/mutation/proposal_merge.rs::proposal_merge",
         "the merge of a proposal, an operation over several commits",
     ),
-    ("retarget_fork_tree", "the fork of a mem"),
-    ("fork_mem", "the fork of a mem"),
-    ("roll_back", "the rollback of a fork that failed"),
     (
-        "pull",
+        "mem_management/fork.rs::retarget_fork_tree",
+        "the fork of a mem",
+    ),
+    ("mem_management/fork.rs::fork_mem", "the fork of a mem"),
+    (
+        "mem_management/fork.rs::roll_back",
+        "the rollback of a fork that failed",
+    ),
+    (
+        "engine/drift.rs::pull",
         "transport: brings a remote's commits into a mem's branch",
     ),
     (
-        "fast_forward_ref",
+        "engine/drift.rs::fast_forward_ref",
         "transport: moves a branch to a fetched commit",
     ),
-    ("branch_reset", "resets a mem's branch to an earlier commit"),
     (
-        "export_markdown",
+        "engine/drift.rs::branch_reset",
+        "resets a mem's branch to an earlier commit",
+    ),
+    (
+        "engine/lifecycle/export.rs::export_markdown",
         "writes every entity of a folder mem back to its files from the store, a whole-mem \
          export; it writes the files itself and not through the backend",
     ),
-    ("install_schema", "writes a schema, not a mem's entities"),
     (
-        "write_to_local_schema_source",
+        "engine/lifecycle/schema.rs::install_schema",
         "writes a schema, not a mem's entities",
     ),
     (
-        "prune_orphan_config",
+        "engine/lifecycle/schema.rs::write_to_local_schema_source",
+        "writes a schema, not a mem's entities",
+    ),
+    (
+        "mem_management/lifecycle.rs::prune_orphan_config",
         "removes the config of a mem that is gone",
     ),
-    ("create_mem", "the creation of a mem"),
-    ("delete_mem", "the deletion of a mem"),
-    ("rename_mem", "the renaming of a mem"),
+    (
+        "mem_management/lifecycle.rs::create_mem",
+        "the creation of a mem",
+    ),
+    (
+        "mem_management/lifecycle.rs::delete_mem",
+        "the deletion of a mem",
+    ),
+    (
+        "mem_management/lifecycle.rs::rename_mem",
+        "the renaming of a mem",
+    ),
 ];
 
 fn all_verbs() -> Vec<Verb> {
@@ -990,6 +1093,302 @@ fn all_verbs() -> Vec<Verb> {
     verbs
 }
 
+/// The name a line declares, if it declares a function.
+fn declared_fn(line: &str) -> Option<String> {
+    let mut rest = line.trim_start();
+    if let Some(after) = rest.strip_prefix("pub") {
+        rest = after.trim_start();
+        if rest.starts_with('(') {
+            rest = rest[rest.find(')')? + 1..].trim_start();
+        }
+    }
+    while let Some(after) = ["async ", "const ", "unsafe "]
+        .iter()
+        .find_map(|q| rest.strip_prefix(q))
+    {
+        rest = after.trim_start();
+    }
+    let name: String = rest
+        .strip_prefix("fn ")?
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    (!name.is_empty()).then_some(name)
+}
+
+/// Does the line call a mutating storage method or a write helper?
+fn writes(line: &str) -> bool {
+    // A method is called on a value (`backend.commit(…)`) or by
+    // path (`MemBackend::commit(backend, …)`).
+    let method_call = Method::ALL.iter().filter(|m| m.mutates()).any(|m| {
+        [".", "::"].iter().any(|prefix| {
+            match line.find(&format!("{prefix}{}(", m.name())) {
+                // The search index's argument-less `commit()` is its
+                // own and no backend's.
+                Some(at) if *m == Method::Commit => !line[at..].starts_with(".commit()"),
+                Some(_) => true,
+                None => false,
+            }
+        })
+    });
+    method_call
+        || WRITE_HELPERS
+            .iter()
+            .any(|helper| line.contains(&format!("{helper}(")))
+        // A hook is a function pointer in a field: `(ops.pull)(…)`.
+        || HOOKS
+            .iter()
+            .any(|(hook, writes)| *writes && line.contains(&format!(".{hook})(")))
+}
+
+/// The line without its string and character literals, so a brace
+/// inside one is not taken for a block's.
+fn without_literals(line: &str) -> String {
+    let mut out = String::new();
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                while let Some(d) = chars.next() {
+                    match d {
+                        '\\' => {
+                            chars.next();
+                        }
+                        '"' => break,
+                        _ => {}
+                    }
+                }
+            }
+            // A character literal: `'x'` or `'\x'`. A lifetime has
+            // no closing quote two or three characters on.
+            '\'' => {
+                let rest: String = chars.clone().take(3).collect();
+                let len = if rest.starts_with('\\') { 3 } else { 2 };
+                if rest.chars().nth(len - 1) == Some('\'') {
+                    for _ in 0..len {
+                        chars.next();
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// The writers declared in one source file: every function, outside
+/// test modules and test functions, with a line that writes.
+fn writers_in(file: &str, text: &str, found: &mut BTreeSet<String>) {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut current: Option<String> = None;
+    let mut next_is_a_test = false;
+    // Depth inside an inline test module, whose lines are
+    // skipped; production code can follow such a module.
+    let mut test_module_depth: Option<i32> = None;
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if let Some(depth) = test_module_depth.as_mut() {
+            if !trimmed.starts_with("//") {
+                let code = without_literals(line);
+                *depth += code.matches('{').count() as i32;
+                *depth -= code.matches('}').count() as i32;
+            }
+            if *depth <= 0 {
+                test_module_depth = None;
+                current = None;
+            }
+            continue;
+        }
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        if trimmed == "#[cfg(test)]"
+            && lines.get(i + 1).is_some_and(|next| {
+                let next = next.trim();
+                next.contains("mod ") && next.ends_with('{')
+            })
+        {
+            test_module_depth = Some(0);
+            continue;
+        }
+        if trimmed == "#[test]" {
+            next_is_a_test = true;
+            continue;
+        }
+        if let Some(name) = declared_fn(line) {
+            // A test calls verbs; it is not a writer of the
+            // engine.
+            current = (!next_is_a_test).then(|| format!("{file}::{name}"));
+            next_is_a_test = false;
+            // A function written on one line has its body here.
+            let body = line
+                .split_once(&format!("fn {name}"))
+                .map_or("", |(_, b)| b);
+            if writes(body)
+                && let Some(name) = &current
+            {
+                found.insert(name.clone());
+            }
+            continue;
+        }
+        if writes(line)
+            && let Some(name) = &current
+        {
+            found.insert(name.clone());
+        }
+    }
+}
+
+fn scan(root: &Path, dir: &Path, skip: &[std::path::PathBuf], found: &mut BTreeSet<String>) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        if skip.contains(&path) {
+            continue;
+        }
+        if path.is_dir() {
+            // A `tests` directory holds test modules, which call
+            // verbs and are no writers of the engine.
+            if name != "tests" {
+                scan(root, &path, skip, found);
+            }
+            continue;
+        }
+        if !name.ends_with(".rs") || name.ends_with("tests.rs") {
+            continue;
+        }
+        let file = path
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        let text = std::fs::read_to_string(&path).unwrap();
+        writers_in(&file, &text, found);
+    }
+}
+
+/// The scan that finds the engine's writers, held against the ways a
+/// writer can be written. Each probe is a source file as a writer added
+/// later might look; the scan must name the writer in each, and must
+/// name nothing in the files that hold none.
+#[test]
+fn the_writers_scan_sees_every_way_a_writer_is_written() {
+    let found_in = |file: &str, text: &str| {
+        let mut found = BTreeSet::new();
+        writers_in(file, text, &mut found);
+        found.into_iter().collect::<Vec<_>>()
+    };
+    let writer = |file: &str, name: &str| vec![format!("{file}::{name}")];
+
+    let probes: &[(&str, &str, &str)] = &[
+        (
+            "a storage method called on a value",
+            "pub fn w(b: &dyn MemBackend) {\n    b.write_entity(p, x);\n}\n",
+            "w",
+        ),
+        (
+            "a storage method called by path",
+            "fn w(b: &dyn MemBackend) {\n    let _ = MemBackend::commit(b, m, c);\n}\n",
+            "w",
+        ),
+        (
+            "a qualified path call",
+            "fn w(b: &B) {\n    <B as MemBackend>::delete_entity(b, p);\n}\n",
+            "w",
+        ),
+        (
+            "a writing hook of the git table",
+            "fn w(&self) {\n    (ops.update_ref)(dir, r, sha);\n}\n",
+            "w",
+        ),
+        (
+            "an engine write helper",
+            "fn w(&mut self) {\n    let _g = self.lock_mems_for_write(&[m])?;\n}\n",
+            "w",
+        ),
+        (
+            "an async function",
+            "pub(crate) async fn w(b: &B) {\n    b.append_provenance(r);\n}\n",
+            "w",
+        ),
+        (
+            "a const unsafe function with a scoped visibility",
+            "pub(in crate::engine) const unsafe fn w(b: &B) {\n    b.discard_pending();\n}\n",
+            "w",
+        ),
+        (
+            "a function written on one line",
+            "pub fn w(b: &dyn MemBackend) { let _ = b.discard_pending(); }\n",
+            "w",
+        ),
+        (
+            "a writer after an inline test module",
+            "fn reads() {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {\n        b.commit(&m, &c);\n    }\n}\n\npub fn w(b: &B) {\n    b.write_anchors_sidecar(x);\n}\n",
+            "w",
+        ),
+        (
+            "a writer after a test module with braces in its literals",
+            "#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {\n        assert!(\"a{b\".contains('{'));\n        let s = \"}}}\";\n    }\n}\n\npub fn w(b: &B) {\n    b.move_entity(a, c);\n}\n",
+            "w",
+        ),
+        (
+            "a writer after a test function",
+            "#[test]\nfn t() {\n    b.commit(&m, &c);\n}\n\nfn w(b: &B) {\n    b.stage_provenance(r);\n}\n",
+            "w",
+        ),
+        (
+            "a method of an impl, a drop among them",
+            "impl Drop for G {\n    fn drop(&mut self) {\n        let _ = self.0.discard_pending();\n    }\n}\n",
+            "drop",
+        ),
+    ];
+    for (what, text, name) in probes {
+        assert_eq!(
+            found_in("engine/probe.rs", text),
+            writer("engine/probe.rs", name),
+            "{what}"
+        );
+    }
+
+    // The same name in another file is another writer.
+    assert_ne!(
+        found_in("engine/a.rs", probes[11].1),
+        found_in("engine/b.rs", probes[11].1)
+    );
+
+    let quiet: &[(&str, &str)] = &[
+        (
+            "a function that reads",
+            "fn r(b: &B) {\n    b.read_entity(p);\n    b.current_head();\n}\n",
+        ),
+        (
+            "the search index's own commit",
+            "fn r(idx: &mut I) {\n    idx.commit();\n}\n",
+        ),
+        (
+            "a write named in a comment",
+            "fn r() {\n    // b.write_entity(p, x) is what a verb does\n}\n",
+        ),
+        (
+            "a test function",
+            "#[test]\nfn t() {\n    b.write_entity(p, x);\n}\n",
+        ),
+        (
+            "an inline test module",
+            "#[cfg(test)]\nmod tests {\n    fn helper(b: &B) {\n        b.commit(&m, &c);\n    }\n}\n",
+        ),
+    ];
+    for (what, text) in quiet {
+        assert_eq!(
+            found_in("engine/probe.rs", text),
+            Vec::<String>::new(),
+            "{what}"
+        );
+    }
+}
+
 /// The matrix's verb list is the engine's list of writers. Read from
 /// the engine's source: every function that calls a mutating method of
 /// the storage trait, a writing git hook, or one of the engine's write
@@ -998,121 +1397,6 @@ fn all_verbs() -> Vec<Verb> {
 /// is placed.
 #[test]
 fn the_verb_list_is_the_engines_writers() {
-    /// The name a line declares, if it declares a function.
-    fn declared_fn(line: &str) -> Option<String> {
-        let mut rest = line.trim_start();
-        if let Some(after) = rest.strip_prefix("pub") {
-            rest = after.trim_start();
-            if rest.starts_with('(') {
-                rest = rest[rest.find(')')? + 1..].trim_start();
-            }
-        }
-        while let Some(after) = ["async ", "const ", "unsafe "]
-            .iter()
-            .find_map(|q| rest.strip_prefix(q))
-        {
-            rest = after.trim_start();
-        }
-        let name: String = rest
-            .strip_prefix("fn ")?
-            .chars()
-            .take_while(|c| c.is_alphanumeric() || *c == '_')
-            .collect();
-        (!name.is_empty()).then_some(name)
-    }
-
-    /// Does the line call a mutating storage method or a write helper?
-    fn writes(line: &str) -> bool {
-        // A method is called on a value (`backend.commit(…)`) or by
-        // path (`MemBackend::commit(backend, …)`).
-        let method_call = Method::ALL.iter().filter(|m| m.mutates()).any(|m| {
-            [".", "::"].iter().any(|prefix| {
-                match line.find(&format!("{prefix}{}(", m.name())) {
-                    // The search index's argument-less `commit()` is its
-                    // own and no backend's.
-                    Some(at) if *m == Method::Commit => !line[at..].starts_with(".commit()"),
-                    Some(_) => true,
-                    None => false,
-                }
-            })
-        });
-        method_call
-            || WRITE_HELPERS
-                .iter()
-                .any(|helper| line.contains(&format!("{helper}(")))
-            // A hook is a function pointer in a field: `(ops.pull)(…)`.
-            || HOOKS
-                .iter()
-                .any(|(hook, writes)| *writes && line.contains(&format!(".{hook})(")))
-    }
-
-    fn scan(dir: &Path, skip: &[std::path::PathBuf], found: &mut BTreeSet<String>) {
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            let name = path.file_name().unwrap().to_string_lossy().to_string();
-            if skip.contains(&path) {
-                continue;
-            }
-            if path.is_dir() {
-                // A `tests` directory holds test modules, which call
-                // verbs and are no writers of the engine.
-                if name != "tests" {
-                    scan(&path, skip, found);
-                }
-                continue;
-            }
-            if !name.ends_with(".rs") || name.ends_with("tests.rs") {
-                continue;
-            }
-            let text = std::fs::read_to_string(&path).unwrap();
-            let lines: Vec<&str> = text.lines().collect();
-            let mut current: Option<String> = None;
-            let mut next_is_a_test = false;
-            // Depth inside an inline test module, whose lines are
-            // skipped; production code can follow such a module.
-            let mut test_module_depth: Option<i32> = None;
-            for (i, line) in lines.iter().enumerate() {
-                let trimmed = line.trim();
-                if let Some(depth) = test_module_depth.as_mut() {
-                    *depth += line.matches('{').count() as i32;
-                    *depth -= line.matches('}').count() as i32;
-                    if *depth <= 0 {
-                        test_module_depth = None;
-                        current = None;
-                    }
-                    continue;
-                }
-                if trimmed.starts_with("//") {
-                    continue;
-                }
-                if trimmed == "#[cfg(test)]"
-                    && lines.get(i + 1).is_some_and(|next| {
-                        let next = next.trim();
-                        next.contains("mod ") && next.ends_with('{')
-                    })
-                {
-                    test_module_depth = Some(0);
-                    continue;
-                }
-                if trimmed == "#[test]" {
-                    next_is_a_test = true;
-                    continue;
-                }
-                if let Some(name) = declared_fn(line) {
-                    // A test calls verbs; it is not a writer of the
-                    // engine.
-                    current = (!next_is_a_test).then_some(name);
-                    next_is_a_test = false;
-                    continue;
-                }
-                if writes(line)
-                    && let Some(name) = &current
-                {
-                    found.insert(name.clone());
-                }
-            }
-        }
-    }
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../memstead-base/src");
 
     // The hook list is the hook table's field list.
@@ -1139,7 +1423,7 @@ fn the_verb_list_is_the_engines_writers() {
     // are left out.
     let skip = [source.join("storage"), source.join("search_index")];
     let mut in_engine = BTreeSet::new();
-    scan(&source, &skip, &mut in_engine);
+    scan(&source, &source, &skip, &mut in_engine);
     let placed: BTreeSet<String> = VERBS
         .iter()
         .map(|(name, _)| name.to_string())
