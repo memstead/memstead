@@ -26,8 +26,10 @@
 //!    is the commit point; syncing `.memstead/` makes it durable.
 //! 2. **After.** The temps are renamed into place, the deletes are
 //!    applied, the touched directories are synced, the ledger lines
-//!    are appended and synced, the record is removed and `.memstead/`
-//!    is synced. Only then does the commit return success.
+//!    are appended and synced, and the record is removed. Only then
+//!    does the commit return success. The removal is not synced: a
+//!    record a power loss brings back is applied again by the next
+//!    load, which finds every step done.
 //!
 //! A failure before the commit point removes what the attempt wrote
 //! and returns the IO error: storage is what it was. A failure after
@@ -368,10 +370,16 @@ impl FilesystemBackend {
                     missing = true;
                 }
             }
+            // A ledger this commit creates gets its name synced too:
+            // `.memstead/` was last synced before the file existed.
+            let created = missing && !self.io.exists(&log)?;
             if missing {
                 self.io.append(&log, out.as_bytes())?;
             }
             self.io.sync_file(&log)?;
+            if created {
+                self.io.sync_dir(&self.meta_dir())?;
+            }
         }
 
         // The removal is not synced: if a power loss brings the record

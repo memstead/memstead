@@ -662,8 +662,9 @@ pub enum EngineError {
         failure_cause: String,
     },
     /// A folder mem's commit is decided and not yet applied: its commit
-    /// record is durable, and an error cut off the move of its files
-    /// into place. The write is neither failed nor finished, so no
+    /// record is durable, an error cut off the move of its files into
+    /// place, and completing it at once failed as well (the fault
+    /// persists). The write is neither failed nor finished, so no
     /// existing code reports it truthfully: resending the call would
     /// write twice, and the store does not show the write yet. The
     /// next operation on the mem completes the commit before it does

@@ -13,7 +13,8 @@ use super::test_fault;
 use crate::backend::MemBackend;
 use crate::engine::test_helpers::{cli_actor, empty_create_args, folder_mount};
 use crate::engine::{
-    Engine, RelateEntityArgs, RenameEntityArgs, RetypeEntityArgs, UpdateEntityArgs,
+    DeleteEntityArgs, Engine, RelateEntityArgs, RenameEntityArgs, RetypeEntityArgs,
+    UpdateEntityArgs,
 };
 use crate::entity::EntityId;
 use crate::storage::FilesystemBackend;
@@ -109,8 +110,20 @@ const VERBS: &[&str] = &[
     "batch_update",
 ];
 
-/// Run one verb and return the warning codes of its receipt, with the
-/// `details` of every follow-up warning.
+/// Every verb that writes to one mem.
+const ALL_VERBS: &[&str] = &[
+    "create",
+    "update",
+    "delete",
+    "relate",
+    "retype",
+    "rename",
+    "batch_create",
+    "batch_update",
+    "batch_relate",
+];
+
+/// Run one verb and return the warnings of its receipt.
 fn run(
     verb: &str,
     engine: &mut Engine,
@@ -127,10 +140,24 @@ fn run(
             let args = update_args(engine, "alpha", "rewritten purpose");
             engine.update_entity(args, actor, client, None)?.warnings
         }
+        "delete" => {
+            let args = DeleteEntityArgs {
+                id: id("gamma"),
+                expected_hash: hash_of(engine, "gamma"),
+            };
+            engine.delete_entity(args, actor, client, None)?.warnings
+        }
         "relate" => {
             engine
                 .relate_entity(relate_args("gamma", "alpha"), actor, client, None)?
                 .warnings
+        }
+        "batch_relate" => {
+            let relates = vec![
+                (relate_args("gamma", "alpha"), None),
+                (relate_args("gamma", "beta"), None),
+            ];
+            engine.batch_relate(relates, actor, client, false)?.warnings
         }
         "retype" => {
             let args = RetypeEntityArgs {
@@ -276,10 +303,84 @@ fn a_failed_store_update_is_a_warning_on_a_landed_write() {
     }
 }
 
-/// A folder commit cut off by an IO error after its commit point: the
-/// call returns the typed condition, nothing of the commit is served
-/// meanwhile, and the next operation on the mem completes it first and
-/// names the completed files.
+fn faulted_engine(dir: &Path, io: &FaultIo) -> Engine {
+    Engine::from_mounts(vec![(
+        folder_mount(MEM, dir.to_path_buf()),
+        Box::new(FilesystemBackend::with_io(dir.to_path_buf(), io.clone())) as Box<dyn MemBackend>,
+    )])
+    .expect("engine boots")
+}
+
+/// A folder commit hit by an IO error after its commit point, on every
+/// verb and at every step: the commit is decided, so the engine
+/// completes it at once. The call reports success and names the step,
+/// and the running engine shows what a freshly loaded engine shows.
+#[test]
+fn an_io_error_after_the_commit_point_is_a_warning_on_a_landed_write() {
+    let template = seeded();
+    let mut cells = 0;
+    for verb in ALL_VERBS {
+        // The undisturbed call: its result, and where its commit point
+        // falls among its IO steps.
+        let control_dir = TempDir::new().unwrap();
+        copy_dir(template.path(), control_dir.path());
+        let io = FaultIo::new();
+        let mut control = faulted_engine(control_dir.path(), &io);
+        io.reset();
+        run(verb, &mut control).unwrap_or_else(|e| panic!("{verb} undisturbed: {e:?}"));
+        let commit_point = io.commit_point().expect("the verb commits");
+        let steps = io.op_count();
+        assert!(steps > commit_point + 1, "{verb}");
+
+        for step in commit_point + 1..steps {
+            let dir = TempDir::new().unwrap();
+            copy_dir(template.path(), dir.path());
+            let io = FaultIo::new();
+            let mut engine = faulted_engine(dir.path(), &io);
+            io.reset();
+            io.arm_fail_at(step);
+            let warnings = run(verb, &mut engine).unwrap_or_else(|e| {
+                panic!("{verb} step {step}: a decided commit was reported as failed: {e:?}")
+            });
+            io.reset();
+
+            assert!(
+                warnings.iter().any(|w| matches!(
+                    w,
+                    crate::ops::WarningHint::WriteFollowUpFailed { mem, step, .. }
+                        if mem == MEM && step == "commit_apply"
+                )),
+                "{verb} step {step}: no warning names the failed step: {warnings:?}"
+            );
+            assert_eq!(
+                view(&engine, true),
+                view(&engine_over(dir.path()), true),
+                "{verb} step {step}: the engine's view differs from a fresh load"
+            );
+            assert_eq!(
+                view(&engine, false),
+                view(&control, false),
+                "{verb} step {step}: the landed write is missing from the engine's view"
+            );
+            assert!(
+                !dir.path().join(".memstead/commit.json").exists(),
+                "{verb} step {step}: the record of an applied commit remains"
+            );
+            assert!(
+                engine.reload_if_stale(Some(MEM)).is_empty(),
+                "{verb} step {step}: the engine's own landed write reads as drift"
+            );
+            cells += 1;
+        }
+    }
+    assert!(cells > 0);
+}
+
+/// A folder commit cut off after its commit point by a fault that
+/// persists, so the engine cannot complete it at once: the call returns
+/// the typed condition, nothing of the commit is served meanwhile, and
+/// once storage works again the next operation on the mem completes it
+/// first and names the completed files.
 #[test]
 fn a_folder_commit_cut_off_after_its_commit_point_is_completed_by_the_next_operation() {
     let template = seeded();
@@ -319,7 +420,7 @@ fn a_folder_commit_cut_off_after_its_commit_point_is_completed_by_the_next_opera
         let before = view(&engine, true);
 
         io.reset();
-        io.arm_fail_at(step);
+        io.arm_fail_from(step);
         let err = run("rename", &mut engine).expect_err("the cut-off commit is not a success");
         assert_eq!(err.code(), "COMMIT_NOT_APPLIED", "step {step}: {err}");
         io.reset();
@@ -391,7 +492,7 @@ fn a_boot_completes_a_cut_off_folder_commit_and_reports_it() {
     )])
     .unwrap();
     io.reset();
-    io.arm_fail_at(commit_point + 2);
+    io.arm_fail_from(commit_point + 2);
     run("update", &mut engine).expect_err("cut off");
     drop(engine);
 

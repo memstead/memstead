@@ -14,8 +14,10 @@
 //!   level with storage by reloading the mem and reports success with
 //!   a `WRITE_FOLLOW_UP_FAILED` warning that names the step.
 //! - **Decided, not applied.** A folder commit whose record is durable
-//!   and whose files are not all in place yet. Reported as
-//!   `COMMIT_NOT_APPLIED`; the next load of the mem completes it.
+//!   and whose files are not all in place yet. The engine completes it
+//!   at once and reports it as committed with a failed follow-up; if
+//!   the completion fails as well, the call returns
+//!   `COMMIT_NOT_APPLIED` and the next load of the mem completes it.
 //!
 //! Every mutation verb commits through [`Engine::commit_staged`], so
 //! the three reports are made in one place.
@@ -105,10 +107,28 @@ impl Engine {
                     detail,
                 }],
             }),
-            Err(BackendError::CommitNotApplied { detail }) => Err(EngineError::CommitNotApplied {
-                mem: state.mount.mem.clone(),
-                detail,
-            }),
+            // Decided and cut off. The write is the commit's from here on,
+            // so the engine finishes it at once rather than leave its
+            // view behind storage until the next operation: the same
+            // completion a load runs, under the write lock this
+            // mutation holds. Only when that fails too (the fault
+            // persists) does the caller get the not-applied condition.
+            Err(BackendError::CommitNotApplied { detail }) => {
+                match backend.complete_interrupted_commit() {
+                    Ok(_) => Ok(Landed {
+                        write_id: crate::storage::filesystem::make_commit_id(),
+                        warnings: vec![WarningHint::WriteFollowUpFailed {
+                            mem: state.mount.mem.clone(),
+                            step: "commit_apply".to_string(),
+                            detail,
+                        }],
+                    }),
+                    Err(again) => Err(EngineError::CommitNotApplied {
+                        mem: state.mount.mem.clone(),
+                        detail: format!("{detail}; completing it at once failed as well: {again}"),
+                    }),
+                }
+            }
             Err(e) => {
                 // Nothing landed. The backends end their own
                 // transaction on a failed commit; a failure that struck

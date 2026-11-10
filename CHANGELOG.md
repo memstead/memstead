@@ -59,8 +59,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   of a commit. After a failed call, storage is byte for byte what it
   was and the same call sent again is a first call.
 - **A write that landed is never reported as failed.** A step that
-  failed after the commit (the ledger line of a folder mem, the refresh
-  of a checked-out worktree, the update of the engine's own view) used
+  failed after the commit (the ledger line or a file move of a folder
+  mem, the refresh of a checked-out worktree, the update of the
+  engine's own view) used
   to return an error for a write that was in storage, so a caller that
   retried wrote twice, and `delete` could leave the engine's view behind
   the files. Such a call now succeeds with the new warning
@@ -77,9 +78,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   is completed before anything is read, and the load carries the new
   warning `INTERRUPTED_COMMIT_COMPLETED` (`details.mem`,
   `details.files`). A call that hits an IO error after the commit point
-  returns the new code `COMMIT_NOT_APPLIED` (`details.mem`,
-  `details.detail`): the write is decided and must not be resent, and
-  the next operation on the mem completes it first.
+  has the engine complete the commit at once and succeeds with
+  `WRITE_FOLLOW_UP_FAILED` (`details.step: commit_apply`). Only when
+  that completion fails as well does the call return the new code
+  `COMMIT_NOT_APPLIED` (`details.mem`, `details.detail`): the write is
+  decided and must not be resent, and the next operation on the mem
+  completes it first.
 - **`memstead rename` rewrites a self-prefixed link inside a hierarchical
   mem.** Inside mem `library/a`, a body link spelled by the full id
   (`[[library/a--first-note]]`) is accepted at write (the resolver strips

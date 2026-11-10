@@ -810,7 +810,9 @@ pub enum WarningHint {
     WriteFollowUpFailed {
         /// The mem the write landed in.
         mem: String,
-        /// The step that failed (`worktree_sync`, `store_update`, ...).
+        /// The step that failed: `commit_apply` (a folder commit was cut
+        /// off after its commit point and completed at once),
+        /// `worktree_sync`, `store_update`.
         step: String,
         /// The failure, as the step reported it.
         detail: String,

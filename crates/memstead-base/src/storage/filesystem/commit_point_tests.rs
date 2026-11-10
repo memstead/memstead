@@ -637,3 +637,55 @@ fn only_this_backends_temp_names_are_swept() {
     assert_eq!(after.files.len(), before.files.len() - 2);
     assert!(after.files.contains_key("notes/.hidden"));
 }
+
+/// The first commit of a mem creates its ledger. The ledger's name is
+/// synced like every other name the commit makes: `.memstead/` is
+/// synced once more after the file exists, before success is returned.
+#[test]
+fn a_ledger_the_commit_creates_has_its_name_synced() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    let io = FaultIo::new();
+    let backend = FilesystemBackend::with_io(root.clone(), io.clone());
+    stage(&backend);
+    backend.commit("first", &CommitContext::internal()).unwrap();
+
+    let trace = io.trace();
+    let ledger = changelog_path(&root);
+    let appended = trace
+        .iter()
+        .position(|op| op == &IoOp::Append(ledger.clone()))
+        .expect("the commit appends its ledger lines");
+    let meta = root.join(".memstead");
+    assert!(
+        trace[appended..]
+            .iter()
+            .any(|op| op == &IoOp::SyncDir(meta.clone())),
+        "the new ledger's directory entry is not synced: {:?}",
+        &trace[appended..]
+    );
+
+    // A later commit finds the ledger in place and has no name to sync.
+    io.reset();
+    backend
+        .write_entity(Path::new("notes/old.md"), FRESH)
+        .unwrap();
+    backend
+        .stage_provenance(&record(at(1_700_000_020), ProvenanceKind::Update, "m--old"))
+        .unwrap();
+    backend
+        .commit("second", &CommitContext::internal())
+        .unwrap();
+    let trace = io.trace();
+    let appended = trace
+        .iter()
+        .position(|op| op == &IoOp::Append(ledger.clone()))
+        .unwrap();
+    assert!(
+        !trace[appended..]
+            .iter()
+            .any(|op| op == &IoOp::SyncDir(meta.clone())),
+        "{:?}",
+        &trace[appended..]
+    );
+}

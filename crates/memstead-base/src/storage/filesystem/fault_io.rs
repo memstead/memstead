@@ -39,6 +39,7 @@ pub(crate) enum IoOp {
 struct State {
     trace: Vec<IoOp>,
     fail_at: Option<usize>,
+    fail_from: Option<usize>,
     kill_at: Option<usize>,
 }
 
@@ -86,12 +87,20 @@ impl FaultIo {
         let mut state = self.lock();
         state.trace.clear();
         state.fail_at = None;
+        state.fail_from = None;
         state.kill_at = None;
     }
 
     /// Arm [`Self::fail_at`] on an existing handle.
     pub(crate) fn arm_fail_at(&self, n: usize) {
         self.lock().fail_at = Some(n);
+    }
+
+    /// From step `n` (zero-based) on, every step returns an IO error:
+    /// a fault that persists (a full disk, a lost mount) where
+    /// [`Self::fail_at`] is a fault that passes.
+    pub(crate) fn arm_fail_from(&self, n: usize) {
+        self.lock().fail_from = Some(n);
     }
 
     /// Arm [`Self::kill_at`] on an existing handle.
@@ -118,7 +127,12 @@ impl FaultIo {
         let (index, fail, kill) = {
             let mut state = self.lock();
             state.trace.push(op);
-            (state.trace.len() - 1, state.fail_at, state.kill_at)
+            let index = state.trace.len() - 1;
+            let fail = match state.fail_from {
+                Some(from) if index >= from => Some(index),
+                _ => state.fail_at,
+            };
+            (index, fail, state.kill_at)
         };
         if kill == Some(index) {
             panic!("fault io: killed at step {index}");
