@@ -2135,9 +2135,14 @@ fn seed_binding_mirror(engine: &mut crate::Engine, mem: &str, note: Option<&str>
 /// grammar, collision, allowlists) fires before the first write — a
 /// refused call leaves the workspace byte-identical.
 ///
-/// **Interruption:** the sweep commits per-mem; a crash mid-sweep
-/// leaves stale `<old>--` references that surface as stubs in health,
-/// and re-issuing the same `rename_mem` completes the operation. When
+/// **Locking:** the rename holds the write lock of every writable mem
+/// from its first write to its last.
+///
+/// **Interruption:** the sweep commits per-mem, peers first and the
+/// renamed mem last, and the identity flip follows it. A sweep that
+/// fails after a mem committed returns `RENAME_PARTIAL_FAILURE`, which
+/// states what landed; the mount still carries the old name, so
+/// re-issuing the same `rename_mem` completes the operation. When
 /// the identity flip has already happened (old gone, new present) the
 /// call runs in *resumption mode*: only the idempotent halves execute.
 ///
@@ -2299,6 +2304,15 @@ pub fn rename_mem(
             }
         }
     }
+
+    // Every write from here on, the sweep's commits, the config write
+    // and the storage flip, is made under the write lock of every
+    // writable mem: the rename writes whichever mem holds a reference,
+    // and no step of it may land while another process holds a lock.
+    // The sweep takes the same locks again and nests.
+    let (_write_lock, _reloaded) = engine
+        .lock_workspace_for_write_if(true)
+        .map_err(FullEngineError::from)?;
 
     // ---- Step 3: reference sweep (idempotent; both modes) ----
     let sweep = engine

@@ -93,6 +93,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `ENTITY_ALREADY_EXISTS`: the rename brings the entity the forward
   references were waiting for.
 
+- **A mem rename holds every writable mem's lock, and its sweep can
+  be completed after a partial failure.** The sweep that rewrites the
+  references to a renamed mem wrote every peer mem without the write
+  lock, guarded by the head pin alone, which the folder backend
+  ignores: an update a second process made to a referrer in a folder
+  mem was written over. It appended no ledger line, so a second process
+  on a folder mem never learned of the rewrite, and it left the running
+  engine serving the references as they were before. The rename now
+  holds the write lock of every writable mem from its first write to
+  its last and reloads every mem under it. The sweep commits through
+  the engine's one commit call, with one provenance record per
+  rewritten entity; it commits the peers first and the renamed mem
+  itself last, and reloads every mem it committed. A commit that fails
+  after another landed returns `RENAME_PARTIAL_FAILURE` for a storage
+  failure as for a moved head, with `details.mems[]` stating what
+  landed; a failure before any commit landed fails the rename as a
+  whole. The mount still carries the old name in both cases, and the
+  same `mem rename` sent again completes it.
+
 - **A delete and a retype check their referrers against every mem as it
   is now.** Both verbs guard on the edges that point at the entity, and
   such an edge can come from any mem. They reloaded their own mem only

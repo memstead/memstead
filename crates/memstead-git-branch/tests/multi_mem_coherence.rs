@@ -816,6 +816,8 @@ enum Waiter {
     Retype,
     /// Renames `left--beta`; waits on `right`'s lock too.
     Rename,
+    /// Renames the mem `left`; waits on `right`'s lock too.
+    MemRename,
     /// One item per mem.
     BatchCreate,
     BatchUpdate,
@@ -849,6 +851,23 @@ fn run_waiter(waiter: Waiter, engine: &mut Engine) -> Report {
                     .map(|o| o.warnings),
             )
         }
+        Waiter::MemRename => memstead_base::mem_management::rename_mem(
+            engine,
+            memstead_base::mem_management::MemRenameParams {
+                old: LEFT.to_string(),
+                new: "lefty".to_string(),
+                operator_mode: true,
+                note: None,
+            },
+        )
+        .map(|response| {
+            response
+                .warnings
+                .iter()
+                .map(|w| w.code().to_string())
+                .collect()
+        })
+        .map_err(|e| format!("{e:?}")),
         Waiter::BatchCreate => batch_report(engine.batch_create(
             vec![
                 (create_args(LEFT, "Delta", &[]), None),
@@ -961,7 +980,11 @@ fn assert_waits_on_the_peers_lock(waiters: &[Waiter]) {
                 "{context}: the verb ended while another process held the lock"
             );
             assert!(outcome.is_ok(), "{context}: {outcome:?}");
-            assert_level_with_storage(&ws, &mut ws.engine(), &context);
+            // After a mem rename the workspace handle's mounts name a
+            // mem that is gone; the check is for the other verbs.
+            if !matches!(waiter, Waiter::MemRename) {
+                assert_level_with_storage(&ws, &mut ws.engine(), &context);
+            }
         }
     }
 }
@@ -973,6 +996,14 @@ fn assert_waits_on_the_peers_lock(waiters: &[Waiter]) {
 #[test]
 fn a_delete_a_retype_and_a_rename_wait_on_the_lock_of_a_mem_they_only_read() {
     assert_waits_on_the_peers_lock(&[Waiter::Delete, Waiter::Retype, Waiter::Rename]);
+}
+
+/// A mem rename writes whichever mem holds a reference to the renamed
+/// one, so it holds every writable mem's lock from its first write to
+/// its last.
+#[test]
+fn a_mem_rename_waits_on_the_lock_of_every_writable_mem() {
+    assert_waits_on_the_peers_lock(&[Waiter::MemRename]);
 }
 
 /// A batch holds the lock of every mem its items name before it lands
@@ -1381,5 +1412,206 @@ fn a_rename_that_fails_after_a_peer_landed_reports_what_landed_and_the_same_call
             "{context}: the completed rename equals an undisturbed one"
         );
         assert_level_with_storage(&ws, &mut engine, &context);
+    }
+}
+
+// ---------------------------------------------------------------------
+// Mem rename: the sweep over the peers
+// ---------------------------------------------------------------------
+
+/// References to `left` in both mems: `right--gamma` links to
+/// `left--alpha`, and `left--beta` links to it by its full id.
+fn link_both_mems_to_alpha(ws: &Workspace) {
+    link_gamma_to_alpha(ws);
+    let mut engine = ws.engine();
+    let args = update_args(
+        &engine,
+        &id(LEFT, "beta"),
+        "Beta purpose, see [[left--alpha]]",
+    );
+    engine
+        .update_entity(args, Actor::Cli, None, None)
+        .expect("the self-reference lands");
+}
+
+fn purpose(engine: &Engine, target: &EntityId) -> String {
+    engine
+        .get_entity(target)
+        .and_then(|e| e.sections.get("purpose").cloned())
+        .unwrap_or_default()
+}
+
+/// The sweep of a mem rename is held at its first commit and a second
+/// process rewrites the peer's referrer the sweep is about to rewrite.
+/// The sweep holds that mem's lock, so the second write waits and is
+/// judged against the referrer as the sweep left it; it is never
+/// written over.
+#[test]
+fn an_update_to_a_referrer_while_a_mem_renames_sweep_is_held_at_its_commit_is_not_lost() {
+    for pair in PAIRS {
+        let context = format!("{pair:?}");
+        let ws = Workspace::new(pair);
+        link_both_mems_to_alpha(&ws);
+        let (swept, window, mut engine) = hold_at_commit(
+            &ws,
+            |second, ready| {
+                let args = update_args(
+                    second,
+                    &id(RIGHT, "gamma"),
+                    "Gamma purpose, second, see [[left--alpha]]",
+                );
+                ready();
+                report(
+                    second
+                        .update_entity(args, Actor::Cli, None, None)
+                        .map(|o| o.warnings),
+                )
+            },
+            |engine| {
+                engine
+                    .rewrite_mem_references(LEFT, "lefty", None)
+                    .map(|outcome| outcome.rewritten_mems)
+                    .map_err(|e| e.code().to_string())
+            },
+        );
+        assert_eq!(
+            swept,
+            Ok(vec![RIGHT.to_string(), LEFT.to_string()]),
+            "{context}: the peer is swept first, the renamed mem last"
+        );
+        assert!(
+            window.both_locked,
+            "{context}: the sweep holds the write lock of every writable mem at its first commit"
+        );
+        let fresh = ws.engine();
+        let gamma = purpose(&fresh, &id(RIGHT, "gamma"));
+        assert!(
+            gamma.contains("[[lefty--alpha]]"),
+            "{context}: the referrer points at the new mem name: {gamma}"
+        );
+        match &window.second {
+            Ok(_) => assert!(
+                gamma.contains("second"),
+                "{context}: the second process's update was acknowledged and is gone: {gamma}"
+            ),
+            Err(code) => assert_eq!(code, "HASH_MISMATCH", "{context}"),
+        }
+        assert_level_with_storage(&ws, &mut engine, &context);
+    }
+}
+
+/// A storage failure at the sweep's last commit, into the renamed mem
+/// itself, after the peer's commit landed. The sweep returns the
+/// partial-failure envelope; the engine serves what storage holds; and
+/// the same sweep sent again finds the peer done and completes into
+/// the state an undisturbed sweep produces.
+#[test]
+fn a_mem_renames_sweep_that_fails_after_a_peer_landed_reports_what_landed_and_completes_when_resent()
+ {
+    for pair in PAIRS {
+        let context = format!("{pair:?}");
+        let undisturbed = {
+            let ws = Workspace::new(pair);
+            link_both_mems_to_alpha(&ws);
+            ws.engine()
+                .rewrite_mem_references(LEFT, "lefty", None)
+                .expect("an undisturbed sweep lands");
+            shape(&ws.engine())
+        };
+
+        let ws = Workspace::new(pair);
+        link_both_mems_to_alpha(&ws);
+        let failed = Arc::new(AtomicBool::new(false));
+        let tap: Tap = {
+            let failed = Arc::clone(&failed);
+            Arc::new(move |mem: &str, method: &str| {
+                matches!(method, "commit" | "commit_with_expected_parent")
+                    && mem == LEFT
+                    && !failed.swap(true, Ordering::SeqCst)
+            })
+        };
+        let mut engine = ws.tapped_engine(tap);
+        let beta_before = engine
+            .get_entity(&id(LEFT, "beta"))
+            .map(|e| e.content_hash.clone());
+
+        let err = engine
+            .rewrite_mem_references(LEFT, "lefty", None)
+            .expect_err("the injected failure fails the sweep");
+        let EngineError::RenamePartialFailure {
+            committed_mems,
+            failed_mem,
+            failure_cause,
+            mems,
+        } = &err
+        else {
+            panic!("{context}: expected the partial-failure envelope, got {err:?}");
+        };
+        assert_eq!(committed_mems, &vec![RIGHT.to_string()], "{context}");
+        assert_eq!(failed_mem, LEFT, "{context}");
+        assert_eq!(failure_cause, "storage", "{context}");
+
+        // The envelope against storage.
+        let fresh = ws.engine();
+        assert!(
+            purpose(&fresh, &id(RIGHT, "gamma")).contains("[[lefty--alpha]]"),
+            "{context}: the peer's commit landed"
+        );
+        assert!(
+            purpose(&fresh, &id(LEFT, "beta")).contains("[[left--alpha]]"),
+            "{context}: the renamed mem's own part did not land"
+        );
+        assert_eq!(
+            fresh
+                .get_entity(&id(LEFT, "beta"))
+                .map(|e| e.content_hash.clone()),
+            beta_before,
+            "{context}"
+        );
+        let reported: Vec<String> = mems
+            .iter()
+            .map(|m| {
+                let items: Vec<String> = m
+                    .items
+                    .iter()
+                    .map(|i| format!("{} landed={}", i.id, i.landed))
+                    .collect();
+                format!(
+                    "{} landed={} error={} [{}]",
+                    m.mem,
+                    m.landed,
+                    m.error.is_some(),
+                    items.join(", ")
+                )
+            })
+            .collect();
+        assert_eq!(
+            reported,
+            vec![
+                "right landed=true error=false [right--gamma landed=true]",
+                "left landed=false error=true [left--beta landed=false]",
+            ],
+            "{context}: every mem and every entity the sweep writes is named"
+        );
+        for item in mems.iter().flat_map(|m| &m.items) {
+            let (mem, slug) = item.id.split_once("--").unwrap();
+            assert_eq!(
+                item.current_hash,
+                fresh
+                    .get_entity(&id(mem, slug))
+                    .map(|e| e.content_hash.clone()),
+                "{context}: {item:?}"
+            );
+        }
+        // The running engine's view, as it is, equals a fresh load's.
+        assert_eq!(view(&engine), view(&fresh), "{context}");
+
+        // The same sweep again: the peer is done, the renamed mem lands.
+        let again = engine
+            .rewrite_mem_references(LEFT, "lefty", None)
+            .unwrap_or_else(|e| panic!("{context}: the same sweep sent again: {e:?}"));
+        assert_eq!(again.rewritten_mems, vec![LEFT.to_string()], "{context}");
+        assert_eq!(shape(&ws.engine()), undisturbed, "{context}");
+        assert_eq!(view(&engine), view(&ws.engine()), "{context}");
     }
 }

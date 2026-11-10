@@ -1080,6 +1080,10 @@ const NOT_VERBS: &[(&str, &str)] = &[
         "the sweep after a mem is renamed, an operation over several mems",
     ),
     (
+        "engine/mutation/mem_sweep.rs::land_mem_sweep",
+        "one mem's commit of that sweep",
+    ),
+    (
         "engine/mutation/proposal_merge.rs::proposal_merge",
         "the merge of a proposal, an operation over several commits",
     ),
