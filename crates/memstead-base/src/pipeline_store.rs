@@ -283,6 +283,86 @@ pub struct BindingConfigs {
     pub quarantined: Vec<QuarantinedBinding>,
 }
 
+/// A binding id this workspace serves no binding for: quarantined (its file
+/// failed the load), or absent. The refusal every binding-keyed command
+/// gives, so each reports the state alike.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum BindingLookupError {
+    #[error(
+        "binding `{binding}` is quarantined — its stored file failed the load and it serves \
+         no operations until repaired: [{reason_code}] {reason_message}"
+    )]
+    Quarantined {
+        binding: String,
+        reason_code: String,
+        reason_message: String,
+        path: String,
+    },
+    #[error("no binding `{binding}` in this workspace")]
+    NotFound {
+        binding: String,
+        available: Vec<String>,
+    },
+}
+
+impl BindingLookupError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            BindingLookupError::Quarantined { .. } => "PROJECTION_QUARANTINED",
+            BindingLookupError::NotFound { .. } => "PROJECTION_NOT_FOUND",
+        }
+    }
+
+    pub fn details(&self) -> serde_json::Value {
+        match self {
+            BindingLookupError::Quarantined {
+                binding,
+                reason_code,
+                reason_message,
+                path,
+            } => serde_json::json!({
+                "binding": binding,
+                "reason_code": reason_code,
+                "reason_message": reason_message,
+                "path": path,
+            }),
+            BindingLookupError::NotFound { binding, available } => serde_json::json!({
+                "binding": binding,
+                "available": available,
+            }),
+        }
+    }
+}
+
+impl BindingConfigs {
+    /// Why `binding_id` names no serving binding here: the quarantine entry
+    /// when its file failed the load, else not found with the ids there are.
+    pub fn lookup_error(&self, binding_id: &str) -> BindingLookupError {
+        if let Some(q) = self
+            .quarantined
+            .iter()
+            .find(|q| format!("{}/{}", q.mem, q.name) == binding_id)
+        {
+            return BindingLookupError::Quarantined {
+                binding: binding_id.to_string(),
+                reason_code: q.reason_code.clone(),
+                reason_message: q.reason_message.clone(),
+                path: q.path.clone(),
+            };
+        }
+        let mut available: Vec<String> = self
+            .bindings
+            .iter()
+            .map(|r| format!("{}/{}", r.mem, r.name))
+            .collect();
+        available.sort();
+        BindingLookupError::NotFound {
+            binding: binding_id.to_string(),
+            available,
+        }
+    }
+}
+
 /// One quarantined binding: the store file that failed the v2
 /// version gate or parse, with its typed reason.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]

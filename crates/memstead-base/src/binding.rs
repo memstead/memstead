@@ -1043,6 +1043,117 @@ pub fn scaffold_binding(params: ScaffoldParams<'_>) -> ScaffoldedBinding {
     }
 }
 
+/// A binding refused for the operations it declares: an operation it lacks
+/// (and whether its medium could carry one), or one it already has.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum OperationStateError {
+    #[error(
+        "binding `{binding}` has no {operation} operation, and this medium cannot carry one: {gap}"
+    )]
+    CapabilityUnsupported {
+        binding: String,
+        operation: &'static str,
+        gap: String,
+    },
+    #[error(
+        "binding `{binding}` has no sync operation — enable it with \
+         `memstead projection enable sync {binding}`"
+    )]
+    SyncNotEnabled { binding: String },
+    #[error("operation `{operation}` is already enabled on binding `{binding}` — nothing to do")]
+    AlreadyEnabled {
+        binding: String,
+        operation: &'static str,
+    },
+}
+
+impl OperationStateError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            OperationStateError::CapabilityUnsupported { .. } => {
+                "PROJECTION_CAPABILITY_UNSUPPORTED"
+            }
+            OperationStateError::SyncNotEnabled { .. } => "PROJECTION_SYNC_NOT_ENABLED",
+            OperationStateError::AlreadyEnabled { .. } => "PROJECTION_OP_ALREADY_ENABLED",
+        }
+    }
+
+    pub fn details(&self) -> serde_json::Value {
+        match self {
+            OperationStateError::CapabilityUnsupported {
+                binding, operation, ..
+            }
+            | OperationStateError::AlreadyEnabled { binding, operation } => serde_json::json!({
+                "binding": binding,
+                "operation": operation,
+            }),
+            OperationStateError::SyncNotEnabled { binding } => serde_json::json!({
+                "binding": binding,
+                "remedy": { "cli": format!("memstead projection enable sync {binding}") },
+            }),
+        }
+    }
+}
+
+impl Binding {
+    /// Whether this binding's medium could carry `operation`: the refusal
+    /// `enable` would meet, from validating a candidate that carries it
+    /// (validating the record as it stands answers nothing, since the
+    /// operation is absent). `None` for `build`, which every medium carries.
+    pub fn operation_capability_gap(&self, operation: &'static str) -> Option<String> {
+        let mut candidate = self.clone();
+        let batch_size = candidate
+            .operations
+            .build
+            .as_ref()
+            .map_or(20, |b| b.batch_size);
+        match operation {
+            "sync" => {
+                candidate.operations.sync = Some(SyncOperation {
+                    trigger: IngestTrigger::Manual,
+                    batch_size,
+                });
+            }
+            "verify" => {
+                candidate.operations.verify = Some(VerifyOperation {
+                    trigger: IngestTrigger::Manual,
+                    batch_size,
+                    adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                    full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+                });
+            }
+            _ => return None,
+        }
+        validate_binding(&candidate).err().and_then(|refusals| {
+            refusals
+                .iter()
+                .find(|r| {
+                    matches!(
+                        r,
+                        CapabilityError::OperationOutOfScope { operation: op, .. } if *op == operation
+                    )
+                })
+                .map(|gap| gap.to_string())
+        })
+    }
+
+    /// The refusal for a binding that declares no `sync` operation: the
+    /// capability gap where its medium cannot carry one (so the remedy never
+    /// points at an `enable` that would refuse too), else the enable remedy.
+    pub fn absent_sync_error(&self, binding_id: &str) -> OperationStateError {
+        match self.operation_capability_gap("sync") {
+            Some(gap) => OperationStateError::CapabilityUnsupported {
+                binding: binding_id.to_string(),
+                operation: "sync",
+                gap,
+            },
+            None => OperationStateError::SyncNotEnabled {
+                binding: binding_id.to_string(),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod scaffold_tests;
 #[cfg(test)]

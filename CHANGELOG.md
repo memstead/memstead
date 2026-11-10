@@ -121,7 +121,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   edit refusal names its code in the engine (`PipelineEditError::code`):
   on the CLI an edit that would create a binding whose name is taken now
   refuses `PROJECTION_EXISTS` (exit 5) where it fell to
-  `PROJECTION_EDIT_FAILED` (exit 1).
+  `PROJECTION_EDIT_FAILED` (exit 1). The binding lookup and
+  operation-state refusals are the engine's too
+  (`BindingConfigs::lookup_error`, `Binding::absent_sync_error`); a binding
+  that does not exist now lists `details.available` on every command that
+  looks one up.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

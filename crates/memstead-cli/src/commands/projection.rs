@@ -594,55 +594,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
 }
 
-/// The capability gap that would stop `projection enable <operation>`, if
-/// there is one.
-///
-/// Asks the question `enable` asks: validate a CANDIDATE record carrying the
-/// operation. Validating the record as it stands answers nothing — the
-/// operation is absent, so there is no declaration for the matrix to refuse,
-/// and the gap stays invisible exactly where a caller needs it.
-fn operation_capability_gap(
-    binding: &memstead_base::binding::Binding,
-    operation: &'static str,
-) -> Option<String> {
-    let mut candidate = binding.clone();
-    let batch_size = candidate
-        .operations
-        .build
-        .as_ref()
-        .map_or(20, |b| b.batch_size);
-    match operation {
-        "sync" => {
-            candidate.operations.sync = Some(SyncOperation {
-                trigger: IngestTrigger::Manual,
-                batch_size,
-            });
-        }
-        "verify" => {
-            candidate.operations.verify = Some(VerifyOperation {
-                trigger: IngestTrigger::Manual,
-                batch_size,
-                adjudication_cap: DEFAULT_ADJUDICATION_CAP,
-                full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
-            });
-        }
-        // `build` is carried by every medium — no capability row refuses it,
-        // so the enable remedy is always honest for it.
-        _ => return None,
-    }
-    validate_binding(&candidate).err().and_then(|refusals| {
-        refusals
-            .iter()
-            .find(|r| {
-                matches!(
-                    r,
-                    CapabilityError::OperationOutOfScope { operation: op, .. } if *op == operation
-                )
-            })
-            .map(|gap| gap.to_string())
-    })
-}
-
 /// The refusal for a binding that declares no `sync` operation.
 ///
 /// `projection enable sync <binding>` is the remedy — but only where the
@@ -655,29 +606,17 @@ fn operation_capability_gap(
 /// Both codes are spelled as literals here, at their construction sites, so
 /// the generated error index (xtask) keeps finding them.
 fn absent_sync_error(binding_id: &str, binding: &memstead_base::binding::Binding) -> CliError {
-    if let Some(gap) = operation_capability_gap(binding, "sync") {
-        return CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_CAPABILITY_UNSUPPORTED",
-            format!(
-                "binding `{binding_id}` has no sync operation, and this medium \
-                 cannot carry one: {gap}"
-            ),
-        )
-        .with_details(json!({ "binding": binding_id, "operation": "sync" }));
+    operation_state_error(binding.absent_sync_error(binding_id))
+}
+
+/// The engine's operation-state refusal, at exit `Validation`.
+fn operation_state_error(err: memstead_base::binding::OperationStateError) -> CliError {
+    CliError {
+        kind: ExitKind::Validation,
+        code: err.code(),
+        details: Some(err.details()),
+        message: err.to_string(),
     }
-    CliError::new(
-        ExitKind::Validation,
-        "PROJECTION_SYNC_NOT_ENABLED",
-        format!(
-            "binding `{binding_id}` has no sync operation — enable it with \
-             `memstead projection enable sync {binding_id}`"
-        ),
-    )
-    .with_details(json!({
-        "binding": binding_id,
-        "remedy": { "cli": format!("memstead projection enable sync {binding_id}") },
-    }))
 }
 
 /// Map a [`RenderBriefError`] to a typed CLI error (D12). Not-found bindings /
@@ -1116,35 +1055,23 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
 /// file names `memstead projection init` as the way back). Healthy-miss
 /// keeps the historical `PROJECTION_NOT_FOUND`.
 fn binding_miss_error(configs: &memstead_base::BindingConfigs, binding_id: &str) -> CliError {
-    if let Some(q) = configs
-        .quarantined
-        .iter()
-        .find(|q| format!("{}/{}", q.mem, q.name) == binding_id)
-    {
-        return CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_QUARANTINED",
-            format!(
-                "binding `{binding_id}` is quarantined — its stored file failed the load and \
-                 it serves no operations until repaired: [{}] {}",
-                q.reason_code, q.reason_message
-            ),
-        )
-        .with_details(json!({
-            "binding": binding_id,
-            "reason_code": q.reason_code,
-            "reason_message": q.reason_message,
-            "path": q.path,
-        }));
+    // Code, payload and message are the engine's; the exit kind and the
+    // `projection init` pointer are this command's.
+    let err = configs.lookup_error(binding_id);
+    let (kind, hint) = match &err {
+        memstead_base::pipeline_store::BindingLookupError::Quarantined { .. } => {
+            (ExitKind::Validation, "")
+        }
+        memstead_base::pipeline_store::BindingLookupError::NotFound { .. } => {
+            (ExitKind::NotFound, " — scaffold one with `projection init`")
+        }
+    };
+    CliError {
+        kind,
+        code: err.code(),
+        details: Some(err.details()),
+        message: format!("{err}{hint}"),
     }
-    CliError::new(
-        ExitKind::NotFound,
-        "PROJECTION_NOT_FOUND",
-        format!(
-            "no binding `{binding_id}` in this workspace — scaffold one with `projection init`"
-        ),
-    )
-    .with_details(json!({ "binding": binding_id }))
 }
 
 /// A malformed binding id (not `<mem>/<stem>`, a mem that is not a mem path,
@@ -1239,15 +1166,12 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
         EnableOperationArg::Verify => binding.operations.verify.is_some(),
     };
     if already {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_OP_ALREADY_ENABLED",
-            format!(
-                "operation `{}` is already enabled on binding `{binding_id}` — nothing to do",
-                op.name()
-            ),
+        return Err(operation_state_error(
+            memstead_base::binding::OperationStateError::AlreadyEnabled {
+                binding: binding_id.clone(),
+                operation: op.name(),
+            },
         )
-        .with_details(json!({ "binding": binding_id, "operation": op.name() }))
         .into());
     }
 
