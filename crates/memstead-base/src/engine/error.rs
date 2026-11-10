@@ -1101,6 +1101,13 @@ pub enum EngineError {
     /// length, malformed path, etc.) is the message text.
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// A type selection naming types the schema does not declare.
+    #[error("unknown entity type(s): [{}]; declared types: [{}]", unknown.join(", "), declared.join(", "))]
+    UnknownTypes {
+        schema_ref: String,
+        unknown: Vec<String>,
+        declared: Vec<String>,
+    },
     /// A schema asked for by name that no mounted, workspace-installed or
     /// built-in schema carries.
     #[error("schema not found: {name:?}")]
@@ -1680,6 +1687,7 @@ impl EngineError {
             EngineError::MemNameCollision { .. } => "MEM_NAME_COLLISION",
             EngineError::ProcessMemNotEligible { .. } => "PROCESS_MEM_NOT_ELIGIBLE",
             EngineError::InvalidInput(_) => "INVALID_INPUT",
+            EngineError::UnknownTypes { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::UnknownSchema { .. } => "SCHEMA_NOT_FOUND",
             EngineError::InvalidTargetSchema { .. } => "INVALID_INPUT",
             EngineError::MergeConflictUnsupportedBackend { .. } => {
@@ -2282,6 +2290,15 @@ impl EngineError {
                 "name": name,
                 "known_mems": known_mems,
                 "writable_mems": writable_mems,
+            }),
+            EngineError::UnknownTypes {
+                schema_ref,
+                unknown,
+                declared,
+            } => serde_json::json!({
+                "schema_ref": schema_ref,
+                "unknown": unknown,
+                "declared": declared,
             }),
             EngineError::UnknownSchema { name, available } => serde_json::json!({
                 "name": name,

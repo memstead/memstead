@@ -1806,6 +1806,17 @@ pub struct UnknownSchemaTypes {
     pub known: Vec<String>,
 }
 
+impl UnknownSchemaTypes {
+    /// The engine error this refusal is: the one value both surfaces render.
+    pub fn into_engine_error(self, schema_ref: String) -> crate::EngineError {
+        crate::EngineError::UnknownTypes {
+            schema_ref,
+            unknown: self.unknown,
+            declared: self.known,
+        }
+    }
+}
+
 /// Token estimate for a serialized JSON payload — routed through the
 /// house heuristic ([`crate::chunking::estimate_tokens`]) so "fits the
 /// pipe" is judged by the same yardstick every budgeted surface uses.

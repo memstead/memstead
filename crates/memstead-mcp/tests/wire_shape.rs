@@ -485,7 +485,7 @@ fn full_schema_type_selection_serves_named_prose_under_budget() {
     assert_eq!(structured["code"], "UNKNOWN_ENTITY_TYPE");
     assert_eq!(structured["details"]["unknown"], json!(["galaxy-brain"]));
     assert!(
-        structured["details"]["known_types"]
+        structured["details"]["declared"]
             .as_array()
             .is_some_and(|k| k.iter().any(|v| v == "actor")),
         "refusal names the valid types: {structured}"

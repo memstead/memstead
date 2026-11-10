@@ -669,23 +669,11 @@ impl McpServer {
         ) {
             Ok(v) => v,
             Err(unknown) => {
-                let msg = format!(
-                    "unknown entity type(s) in `types`: [{}] — valid types: [{}]",
-                    unknown.unknown.join(", "),
-                    unknown.known.join(", ")
-                );
+                let schema_ref = format!("{}@{}", schema.manifest.name, schema.manifest.version);
                 return attach_drift_to_error(
-                    tool_error_with_payload(
-                        "UNKNOWN_ENTITY_TYPE",
-                        &msg,
-                        envelope(
-                            "UNKNOWN_ENTITY_TYPE",
-                            msg.clone(),
-                            serde_json::json!({
-                                "unknown": unknown.unknown,
-                                "known_types": unknown.known,
-                            }),
-                        ),
+                    engine_err_with_surface_hint(
+                        unknown.into_engine_error(schema_ref),
+                        "Fix the `types` parameter.",
                     ),
                     &drift_warnings,
                     mem_changed_notices,

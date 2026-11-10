@@ -88,7 +88,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `details.name` on `UNKNOWN_MEM` (the retired `details.mem`, with
   `known_mems` and `writable_mems` added) and the quarantine reason under
   `details.reason_message` on `MEM_QUARANTINED` (the retired
-  `details.reason`).
+  `details.reason`). An unknown name in `memstead_schema`'s `types`
+  selection is the engine's `UNKNOWN_ENTITY_TYPE` with `details.unknown`,
+  `details.declared` (the retired `details.known_types`) and
+  `details.schema_ref`, the engine's message and a sentence naming the
+  parameter. `INVALID_TITLE` on `memstead create --from` and
+  `batch-create` with a template id carries the engine's payload
+  (`details.reason`, `details.input`, and the slug facts) where it carried
+  none; `batch-create` names the entry in a sentence after the message.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

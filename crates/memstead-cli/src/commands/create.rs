@@ -257,7 +257,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // tolerated and ignored (nothing exists yet to compare against).
     if let Some(template_id) = payload.id.as_deref() {
         let derived = memstead_base::entity::id::validate_and_derive_slug(&payload.title)
-            .map_err(|e| CliError::new(ExitKind::Validation, "INVALID_TITLE", e.to_string()))?;
+            .map_err(|e| CliError::from_engine_op(memstead_base::EngineError::InvalidTitle(e)))?;
         let derived_slug = derived.slug;
         let slug_part = template_id
             .rsplit_once("--")

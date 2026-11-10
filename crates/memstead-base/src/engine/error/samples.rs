@@ -702,6 +702,14 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
         ),
         ("InvalidInput".into(), EngineError::InvalidInput(s("bad"))),
         (
+            "UnknownTypes".into(),
+            EngineError::UnknownTypes {
+                schema_ref: s("software@0.4.0"),
+                unknown: v(&["galaxy-brain"]),
+                declared: v(&["actor", "spec"]),
+            },
+        ),
+        (
             "UnknownSchema".into(),
             EngineError::UnknownSchema {
                 name: s("nope"),
@@ -1006,6 +1014,7 @@ fn covered(e: &EngineError) {
         | EngineError::InvalidInput(_)
         | EngineError::InvalidTargetSchema { .. }
         | EngineError::UnknownSchema { .. }
+        | EngineError::UnknownTypes { .. }
         | EngineError::MergeConflictUnsupportedBackend { .. }
         | EngineError::NotConflicted { .. }
         | EngineError::UnknownRemote(_)

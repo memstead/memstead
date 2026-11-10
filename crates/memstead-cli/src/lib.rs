@@ -262,6 +262,7 @@ impl CliError {
             | InvalidInput { .. }
             | InvalidTargetSchema { .. }
             | UnknownSchema { .. }
+            | UnknownTypes { .. }
             | RenameSimilarityOutOfRange { .. }
             | MarkdownExportUnsupportedBackend { .. }
             | EmptyUpdate { .. }
