@@ -558,3 +558,183 @@ mod code_vocabulary_tests {
         );
     }
 }
+
+/// Which codes a surface (the CLI, the MCP server) may raise by itself.
+///
+/// The rule: a surface builds a code of its own only for a defect in the
+/// syntax of its own input, or for a failure of its own operation that is
+/// not workspace, mem or entity state (a network call, a key file, the
+/// server process). An error about workspace, mem or entity state is the
+/// engine's to raise. Every code the scan finds at a surface and not in
+/// the engine is in exactly one list below; a new one fails the test until
+/// it is placed, and `MOVE_TO_ENGINE` lists the state errors still built at
+/// a surface, which the error-payload convergence empties.
+#[cfg(test)]
+mod surface_codes {
+    use super::{Surface, scan};
+    use std::collections::BTreeSet;
+
+    /// A defect in the syntax of the surface's own input.
+    const INPUT_SYNTAX: &[&str] = &[
+        "CHUNK_OUT_OF_RANGE",
+        "INVALID_CHECK_KIND",
+        "INVALID_DOMAIN",
+        "INVALID_IDENTITY",
+        "INVALID_ROLE",
+        "INVALID_VERDICT",
+        "INVALID_VERSION",
+        "PROJECTION_EDIT_INVALID_JSON",
+        "PROJECTION_INVALID_DISPOSITIONS",
+        "PROJECTION_INVALID_EXCLUSIONS",
+        "PROJECTION_INVALID_NAME",
+    ];
+
+    /// A failure of the surface's own operation, not workspace, mem or
+    /// entity state: network and registry calls, signing keys, the archive
+    /// file a command reads or writes, the server process, the outcome
+    /// envelope of a command.
+    const SURFACE_OPERATION: &[&str] = &[
+        "ARCHIVE_ASSEMBLY_FAILED",
+        "ARCHIVE_INVALID",
+        "ARCHIVE_READ_FAILED",
+        "ARCHIVE_VALIDATION_FAILED",
+        "BATCH_REFUSED",
+        "DOMAIN_KEYGEN_FAILED",
+        "DOMAIN_KEY_NOT_FOUND",
+        "ENGINE_LOCK_POISONED",
+        "HEALTH_STRICT_VIOLATIONS",
+        "INTERNAL",
+        "INTERNAL_IO_ERROR",
+        "LOGIN_FAILED",
+        "NETWORK_ERROR",
+        "NOT_AUTHENTICATED",
+        "REGISTRY_AUTH_CONFIG_UNAVAILABLE",
+        "REGISTRY_ERROR",
+        "REGISTRY_MALFORMED_RESPONSE",
+        "REGISTRY_NOT_CONFIGURED",
+        "REMOTE_STALE",
+        "TOOL_DISABLED",
+    ];
+
+    /// Workspace, mem or entity state still built at a surface: each moves
+    /// into the engine.
+    const MOVE_TO_ENGINE: &[&str] = &[
+        "AMBIGUOUS_MEM",
+        "AMBIGUOUS_QUERY",
+        "ANCHORS_SIDECAR_UNREADABLE",
+        "CONTEXT_NOT_COMPUTABLE",
+        "FINDINGS_STORE_ERROR",
+        "FOREIGN_MEMSTEAD_DIR",
+        "MEM_NOT_READ_ONLY",
+        "NO_ACTIVE_BINDING",
+        "NO_WORKSPACE",
+        "NO_WRITABLE_MEM",
+        "PROJECTION_ADVANCE_ANCHORS_DRIFTED",
+        "PROJECTION_ADVANCE_EXCLUSION_HELD",
+        "PROJECTION_ADVANCE_FAILED",
+        "PROJECTION_ADVANCE_UNKNOWN_ARTIFACT",
+        "PROJECTION_BRIEF_BINDING_REQUIRED",
+        "PROJECTION_BUILD_NOT_ENABLED",
+        "PROJECTION_CAPABILITY_UNSUPPORTED",
+        "PROJECTION_EDIT_FAILED",
+        "PROJECTION_EDIT_REFUSED",
+        "PROJECTION_ENABLE_FAILED",
+        "PROJECTION_EXCLUDE_AMBIGUOUS_ARTIFACT",
+        "PROJECTION_EXCLUDE_FAILED",
+        "PROJECTION_EXCLUDE_NOT_DESTINATION_ENTITY",
+        "PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER",
+        "PROJECTION_EXCLUDE_PARTIAL_ENUMERATION",
+        "PROJECTION_EXISTS",
+        "PROJECTION_FINDINGS_READ_FAILED",
+        "PROJECTION_INIT_FAILED",
+        "PROJECTION_LOAD_FAILED",
+        "PROJECTION_NOT_FOUND",
+        "PROJECTION_OP_ALREADY_ENABLED",
+        "PROJECTION_QUARANTINED",
+        "PROJECTION_SCOPE_UNINTERPRETABLE",
+        "PROJECTION_SYNC_NOT_ENABLED",
+        "PROJECTION_VERIFY_BACKFILL_FAILED",
+        "PROJECTION_VERIFY_BASELINE_FAILED",
+        "PROJECTION_VERIFY_FAILED",
+        "PROJECTION_VERIFY_FINDINGS",
+        "PROJECTION_VERIFY_INCONCLUSIVE",
+        "READ_MEM_SHADOWS_WRITABLE",
+        "SCHEMA_MIGRATE_FAILED",
+        "SCHEMA_PACKAGE_EXISTS",
+        "SOURCE_UNREACHABLE",
+        "TARGET_NOT_EMPTY",
+        "WORKSPACE_ALREADY_EXISTS_ABOVE",
+        "WORKSPACE_ALREADY_INITIALISED",
+        "WORKSPACE_CONFIG_READ_FAILED",
+    ];
+
+    /// Engine codes a surface still builds by hand at some site instead of
+    /// raising the engine's value: each site moves to the engine's value
+    /// (or, for INVALID_INPUT, is a defect in the surface's own input
+    /// syntax spelled with the engine's code).
+    const ENGINE_CODE_BUILT_AT_SURFACE: &[&str] = &[
+        "BINDING_INTENT_UNKNOWN_RELATIONSHIP",
+        "EMBEDDED_SCHEMA_INVALID",
+        "INVALID_INPUT",
+        "INVALID_OBSERVATION",
+        "IO_ERROR",
+        "SCHEMA_NOT_FOUND",
+        "SCHEMA_VALIDATION_FAILED",
+        "UNKNOWN_ENTITY_TYPE",
+        "UNKNOWN_MEM",
+        "WORKSPACE_NOT_INITIALISED",
+    ];
+
+    #[test]
+    fn engine_codes_built_by_hand_at_a_surface_are_exactly_the_listed_ones() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let codes = scan(&root).unwrap();
+        let found: BTreeSet<&str> = codes
+            .iter()
+            .filter(|(_, occ)| {
+                occ.iter().any(|o| o.surface == Surface::Engine)
+                    && occ.iter().any(|o| o.surface != Surface::Engine)
+            })
+            .map(|(c, _)| c.as_str())
+            .collect();
+        let listed: BTreeSet<&str> = ENGINE_CODE_BUILT_AT_SURFACE.iter().copied().collect();
+        assert_eq!(
+            found, listed,
+            "an engine code built by hand at a surface: raise the engine's value instead"
+        );
+    }
+
+    #[test]
+    fn every_surface_built_code_is_placed_and_every_placed_code_exists() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let codes = scan(&root).unwrap();
+        let surface_only: BTreeSet<&str> = codes
+            .iter()
+            .filter(|(_, occ)| {
+                occ.iter().all(|o| o.surface != Surface::Engine)
+                    && occ.iter().any(|o| o.surface != Surface::Engine)
+            })
+            .map(|(c, _)| c.as_str())
+            .collect();
+        let lists = [INPUT_SYNTAX, SURFACE_OPERATION, MOVE_TO_ENGINE];
+        let mut placed: BTreeSet<&str> = BTreeSet::new();
+        for list in lists {
+            for code in list {
+                assert!(placed.insert(code), "{code} is in two lists");
+            }
+        }
+        let unplaced: Vec<_> = surface_only.difference(&placed).collect();
+        assert!(
+            unplaced.is_empty(),
+            "a surface builds a code of its own that no list places: {unplaced:?}. \
+             A defect in the surface's own input syntax goes in INPUT_SYNTAX, its own \
+             operation in SURFACE_OPERATION; workspace, mem or entity state is the engine's."
+        );
+        let stale: Vec<_> = placed.difference(&surface_only).collect();
+        assert!(
+            stale.is_empty(),
+            "listed codes no surface builds by itself any more (moved into the engine, \
+             or gone): {stale:?}; drop them from the lists"
+        );
+    }
+}
