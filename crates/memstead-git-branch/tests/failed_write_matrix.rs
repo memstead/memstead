@@ -373,6 +373,72 @@ impl MemBackend for FaultBackend {
     }
 }
 
+/// Every listed method is gated by the wrapper: with the fault armed on
+/// its first call, the call returns the injected error and never
+/// reaches the wrapped backend. The dispatch below is exhaustive over
+/// the method list, so a method that joins the list without a gate in
+/// the wrapper fails here.
+#[test]
+fn every_listed_method_is_gated_by_the_wrapper() {
+    let faults = Arc::new(Faults::default());
+    let backend = FaultBackend {
+        inner: Arc::new(memstead_base::storage::InMemoryBackend::new()),
+        faults: Arc::clone(&faults),
+    };
+    let ctx = CommitContext::internal();
+    let path = Path::new("a.md");
+    let record = Provenance::new(
+        std::time::SystemTime::now(),
+        memstead_base::provenance::ProvenanceKind::Create,
+        None,
+        Actor::Cli,
+        None,
+        None,
+    );
+    for &method in Method::ALL {
+        faults.arm(method, 1);
+        let failed = match method {
+            Method::ListEntities => backend.list_entities().is_err(),
+            Method::ReadEntity => backend.read_entity(path).is_err(),
+            Method::EntityExists => backend.entity_exists(path).is_err(),
+            Method::ReadAllEntities => backend.read_all_entities().is_err(),
+            Method::StoragePresent => backend.storage_present().is_err(),
+            Method::WriteEntity => backend.write_entity(path, b"x").is_err(),
+            Method::DeleteEntity => backend.delete_entity(path).is_err(),
+            Method::MoveEntity => backend.move_entity(path, Path::new("b.md")).is_err(),
+            Method::DiscardPending => backend.discard_pending().is_err(),
+            Method::Commit => backend.commit("m", &ctx).is_err(),
+            Method::CommitWithExpectedParent => backend
+                .commit_with_expected_parent("m", &ctx, None)
+                .is_err(),
+            Method::StageProvenance => backend.stage_provenance(&record).is_err(),
+            Method::AppendProvenance => backend.append_provenance(&record).is_err(),
+            Method::CompleteInterruptedCommit => backend.complete_interrupted_commit().is_err(),
+            Method::ReadProvenance => backend.read_provenance(None).is_err(),
+            Method::CurrentHead => backend.current_head().is_err(),
+            // Infallible by signature: recorded, never failed.
+            Method::WriteLockPath => {
+                backend.write_lock_path();
+                faults.fired()
+            }
+            Method::ReadMemConfig => backend.read_mem_config().is_err(),
+            Method::ReadArchiveProvenance => backend.read_archive_provenance().is_err(),
+            Method::ReadArchiveChecks => backend.read_archive_checks().is_err(),
+            Method::ReadProposalRecord => backend.read_proposal_record().is_err(),
+            Method::WriteMemConfig => backend.write_mem_config(b"{}", &ctx).is_err(),
+            Method::WriteMemConfigCas => backend.write_mem_config_cas(None, b"{}", &ctx).is_err(),
+            Method::RecordPipelineEdit => backend
+                .record_pipeline_edit("mediums", &[], &ctx, "set")
+                .is_err(),
+            Method::ReadAnchorsSidecar => backend.read_anchors_sidecar().is_err(),
+            Method::WriteAnchorsSidecar => backend.write_anchors_sidecar(b"{}").is_err(),
+            Method::DeleteArtifacts => backend.delete_artifacts(&ctx).is_err(),
+        };
+        assert!(failed, "{} is not gated by the wrapper", method.name());
+        assert!(faults.fired(), "{}: the fault never fired", method.name());
+    }
+}
+
 // ---------------------------------------------------------------------
 // The two backends
 // ---------------------------------------------------------------------
