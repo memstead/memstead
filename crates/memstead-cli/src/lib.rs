@@ -287,6 +287,7 @@ impl CliError {
             | AnchorsSidecarUnreadable { .. }
             | AmbiguousQuery { .. }
             | MemNotReadOnly { .. }
+            | NotGitBacked { .. }
             | EntityIdTooLong { .. }
             | RenameSimilarityOutOfRange { .. }
             | MarkdownExportUnsupportedBackend { .. }

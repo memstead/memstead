@@ -109,15 +109,13 @@ fn remote_add(ctx: &CliContext, args: RemoteAddArgs) -> anyhow::Result<()> {
             .remote_add(&args.name, &absolutize_local_url(&args.url))
             .map_err(CliError::from_engine_op)?,
         crate::setup::CliEngine::Filesystem(_) => {
-            return Err(CliError {
-                code: "INVALID_INPUT",
-                kind: ExitKind::Validation,
-                message: "this workspace is not git-backed — `memstead mem-repo remote-add` \
-                          requires a mem-repo workspace"
-                    .to_string(),
-                details: None,
-            }
-            .into());
+            return Err(
+                CliError::from_engine_op(memstead_base::EngineError::NotGitBacked {
+                    mem: None,
+                    operation: "memstead mem-repo remote-add".to_string(),
+                })
+                .into(),
+            );
         }
     };
     if ctx.json {

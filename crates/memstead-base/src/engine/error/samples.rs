@@ -915,6 +915,13 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
             EngineError::MemNotReadOnly { mem: s("specs") },
         ),
         (
+            "NotGitBacked".into(),
+            EngineError::NotGitBacked {
+                mem: Some(s("specs")),
+                operation: s("memstead push"),
+            },
+        ),
+        (
             "AmbiguousMem".into(),
             EngineError::AmbiguousMem {
                 mems: v(&["a", "b"]),
@@ -1082,6 +1089,7 @@ fn covered(e: &EngineError) {
         | EngineError::AmbiguousQuery { .. }
         | EngineError::ContextNotComputable { .. }
         | EngineError::MemNotReadOnly { .. }
+        | EngineError::NotGitBacked { .. }
         | EngineError::AmbiguousMem { .. }
         | EngineError::MarkdownExportUnsupportedBackend { .. }
         | EngineError::InvalidAnchor(_)

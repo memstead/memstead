@@ -109,12 +109,14 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
 
     if target.exists() {
         if !target.is_dir() {
-            return Err(CliError {
-                code: "INVALID_INPUT",
-                message: format!("target {} exists but is not a directory", target.display()),
-                kind: ExitKind::Validation,
-                details: None,
-            }
+            return Err(CliError::from_workspace_create(
+                memstead_base::workspace_create::WorkspaceCreateError::TargetNotEmpty {
+                    path: target.clone(),
+                    found: vec![target.display().to_string()],
+                    retry: None,
+                },
+                "It exists as a file: point at a folder.",
+            )
             .into());
         }
         ensure_empty(&target)?;

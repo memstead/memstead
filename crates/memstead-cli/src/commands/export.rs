@@ -962,27 +962,9 @@ fn resolve_single_mem(
     if let Some(m) = requested {
         return Ok(m.to_string());
     }
-    let writables: Vec<String> = engine
-        .writable_mem_names()
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    match writables.as_slice() {
-        [one] => Ok(one.clone()),
-        [] => Err(CliError::new(
-            ExitKind::Validation,
-            "INVALID_INPUT",
-            "no writable mem loaded — pass --mem <name>",
-        )),
-        _ => Err(CliError::new(
-            ExitKind::Validation,
-            "INVALID_INPUT",
-            format!(
-                "multiple writable mems loaded ({}) — pass --mem <name>",
-                writables.join(", ")
-            ),
-        )),
-    }
+    engine
+        .sole_writable_mem()
+        .map_err(|e| CliError::from_engine_with_hint(e, "Pass --mem <name>."))
 }
 
 /// `--format html` — one self-contained HTML file per mem (the read
@@ -1002,35 +984,7 @@ fn run_html(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .map(|r| memstead_base::EntityId::canonical(r).mem().to_string());
     let mem = match args.mem_name.as_ref().or(implied_mem.as_ref()) {
         Some(m) => m.clone(),
-        None => {
-            let writables: Vec<String> = engine
-                .writable_mem_names()
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            match writables.as_slice() {
-                [one] => one.clone(),
-                [] => {
-                    return Err(CliError::new(
-                        ExitKind::Validation,
-                        "INVALID_INPUT",
-                        "no writable mem loaded — pass --mem <name>",
-                    )
-                    .into());
-                }
-                _ => {
-                    return Err(CliError::new(
-                        ExitKind::Validation,
-                        "INVALID_INPUT",
-                        format!(
-                            "multiple writable mems loaded ({}) — pass --mem <name>",
-                            writables.join(", ")
-                        ),
-                    )
-                    .into());
-                }
-            }
-        }
+        None => resolve_single_mem(engine, None)?,
     };
     let now = time::OffsetDateTime::now_utc();
     let export_date = format!(

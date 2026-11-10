@@ -66,11 +66,13 @@ fn engine_diff_folder_mount_refuses_with_invalid_input() {
     // typed `INVALID_INPUT` code rather than collapsing through
     // the backend layer.
     let err = engine.diff("specs", "a", "b", None).unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
     match err {
-        EngineError::InvalidInput(msg) => {
-            assert!(msg.contains("not git-backed"), "unexpected msg: {msg}");
+        EngineError::NotGitBacked { mem, operation } => {
+            assert_eq!(mem.as_deref(), Some("specs"));
+            assert_eq!(operation, "memstead_diff");
         }
-        other => panic!("expected InvalidInput, got {other:?}"),
+        other => panic!("expected NotGitBacked, got {other:?}"),
     }
 }
 

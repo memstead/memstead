@@ -207,14 +207,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     if target.exists() && !target.is_dir() {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "INVALID_INPUT",
-            format!(
-                "target {} exists but is not a directory — point at a folder: \
-                 memstead quickstart my-graph",
-                target.display(),
-            ),
+        return Err(CliError::from_workspace_create(
+            memstead_base::workspace_create::WorkspaceCreateError::TargetNotEmpty {
+                path: target.clone(),
+                found: vec![target.display().to_string()],
+                retry: Some("memstead quickstart my-graph".to_string()),
+            },
+            "It exists as a file: point at a folder: memstead quickstart my-graph",
         )
         .into());
     }

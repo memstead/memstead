@@ -33,16 +33,13 @@ pub fn run(ctx: &CliContext, args: BranchResetArgs) -> anyhow::Result<()> {
             // Folder mounts have no git refs — same refusal the
             // engine surface emits, but the CLI catches it before
             // wiring an irrelevant call.
-            return Err(CliError {
-                code: "INVALID_INPUT",
-                kind: crate::output::ExitKind::Validation,
-                message: format!(
-                    "mem '{}' is not git-backed — `memstead branch-reset` requires a git-branch mount",
-                    args.mem,
-                ),
-                details: None,
-            }
-            .into());
+            return Err(
+                CliError::from_engine_op(memstead_base::EngineError::NotGitBacked {
+                    mem: Some(args.mem.clone()),
+                    operation: "memstead branch-reset".to_string(),
+                })
+                .into(),
+            );
         }
     };
 

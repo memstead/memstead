@@ -1124,6 +1124,17 @@ pub enum EngineError {
     /// A call that acts on installed read-mems only, given a writable one.
     #[error("`{mem}` is a writable mem, not an installed read-mem")]
     MemNotReadOnly { mem: String },
+    /// A git operation on a mem, or a workspace, with no git branch behind
+    /// it: a folder or archive mount, or a workspace with no git-branch
+    /// mems at all (`mem` absent).
+    #[error("{}", match mem {
+        Some(m) => format!("mem '{m}' is not git-backed: `{operation}` requires a git-branch mount"),
+        None => format!("this workspace has no git-branch mems: `{operation}` requires a mem-repo workspace"),
+    })]
+    NotGitBacked {
+        mem: Option<String>,
+        operation: String,
+    },
     /// A call that needs a writable mem, in a workspace that mounts none.
     #[error("no writable mem loaded")]
     NoWritableMem,
@@ -1722,6 +1733,7 @@ impl EngineError {
             EngineError::AmbiguousQuery { .. } => "AMBIGUOUS_QUERY",
             EngineError::ContextNotComputable { .. } => "CONTEXT_NOT_COMPUTABLE",
             EngineError::MemNotReadOnly { .. } => "MEM_NOT_READ_ONLY",
+            EngineError::NotGitBacked { .. } => "INVALID_INPUT",
             EngineError::AmbiguousMem { .. } => "AMBIGUOUS_MEM",
             EngineError::UnknownTypes { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::UnknownSchema { .. } => "SCHEMA_NOT_FOUND",
@@ -2528,6 +2540,9 @@ impl EngineError {
             }),
             EngineError::ContextNotComputable { id } => serde_json::json!({ "id": id }),
             EngineError::MemNotReadOnly { mem } => serde_json::json!({ "mem": mem }),
+            EngineError::NotGitBacked { mem, operation } => {
+                serde_json::json!({ "mem": mem, "operation": operation })
+            }
         }
     }
 

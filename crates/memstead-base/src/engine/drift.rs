@@ -724,9 +724,10 @@ impl Engine {
         let m = self.find_mount(mem)?;
         match &m.mount.storage {
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
-                Err(EngineError::InvalidInput(format!(
-                    "mem '{mem}' is not git-backed — `memstead_fetch` requires a git-branch mount",
-                )))
+                Err(EngineError::NotGitBacked {
+                    mem: Some(mem.to_string()),
+                    operation: "memstead_fetch".to_string(),
+                })
             }
             MountStorage::GitBranch { gitdir, .. } => match self.git_branch_ops.as_ref() {
                 Some(hook) => {
@@ -774,9 +775,10 @@ impl Engine {
             .ok_or_else(|| self.unknown_mem_error(mem))?;
         let (gitdir, branch) = match &self.mounts[mount_idx].mount.storage {
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
-                return Err(EngineError::InvalidInput(format!(
-                    "mem '{mem}' is not git-backed — `memstead_pull` requires a git-branch mount",
-                )));
+                return Err(EngineError::NotGitBacked {
+                    mem: Some(mem.to_string()),
+                    operation: "memstead_pull".to_string(),
+                });
             }
             MountStorage::GitBranch { gitdir, branch } => (gitdir.clone(), branch.clone()),
         };
@@ -874,9 +876,10 @@ impl Engine {
         let m = self.find_mount(mem)?;
         let (gitdir, branch) = match &m.mount.storage {
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
-                return Err(EngineError::InvalidInput(format!(
-                    "mem '{mem}' is not git-backed — `memstead_push` requires a git-branch mount",
-                )));
+                return Err(EngineError::NotGitBacked {
+                    mem: Some(mem.to_string()),
+                    operation: "memstead_push".to_string(),
+                });
             }
             MountStorage::GitBranch { gitdir, branch } => (gitdir.clone(), branch.clone()),
         };
@@ -1993,9 +1996,10 @@ impl Engine {
 
         let outcome = match &self.mounts[mount_idx].mount.storage {
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
-                return Err(EngineError::InvalidInput(format!(
-                    "mem '{mem}' is not git-backed — `memstead_branch_reset` requires a git-branch mount",
-                )));
+                return Err(EngineError::NotGitBacked {
+                    mem: Some(mem.to_string()),
+                    operation: "memstead_branch_reset".to_string(),
+                });
             }
             MountStorage::GitBranch { gitdir, branch } => match self.git_branch_ops.as_ref() {
                 Some(hook) => (hook.branch_reset)(gitdir, branch, target_sha, expected_head)
@@ -2176,9 +2180,10 @@ impl Engine {
 
         match &m.mount.storage {
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
-                Err(EngineError::InvalidInput(format!(
-                    "mem '{mem}' is not git-backed — `memstead_diff` requires a git-branch mount",
-                )))
+                Err(EngineError::NotGitBacked {
+                    mem: Some(mem.to_string()),
+                    operation: "memstead_diff".to_string(),
+                })
             }
             MountStorage::GitBranch { gitdir, branch } => match self.git_branch_ops.as_ref() {
                 Some(hook) => {

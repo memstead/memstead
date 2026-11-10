@@ -197,15 +197,13 @@ fn run_push_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
     let outcome = match ctx.cli_engine()? {
         CliEngine::MemRepo(engine) => engine.push_all(remote).map_err(CliError::from_engine_op)?,
         CliEngine::Filesystem(_) => {
-            return Err(CliError {
-                code: "INVALID_INPUT",
-                kind: ExitKind::Validation,
-                message: "this workspace has no git-branch mems — `memstead push --all` \
-                          requires a mem-repo workspace"
-                    .to_string(),
-                details: None,
-            }
-            .into());
+            return Err(
+                CliError::from_engine_op(memstead_base::EngineError::NotGitBacked {
+                    mem: None,
+                    operation: "memstead push --all".to_string(),
+                })
+                .into(),
+            );
         }
     };
     if ctx.json {
@@ -281,15 +279,13 @@ fn run_pull_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
             engine.pull_all(remote).map_err(CliError::from_engine_op)?
         }
         CliEngine::Filesystem(_) => {
-            return Err(CliError {
-                code: "INVALID_INPUT",
-                kind: ExitKind::Validation,
-                message: "this workspace has no git-branch mems — `memstead pull --all` \
-                          requires a mem-repo workspace"
-                    .to_string(),
-                details: None,
-            }
-            .into());
+            return Err(
+                CliError::from_engine_op(memstead_base::EngineError::NotGitBacked {
+                    mem: None,
+                    operation: "memstead pull --all".to_string(),
+                })
+                .into(),
+            );
         }
     };
     if ctx.json {
@@ -403,11 +399,9 @@ fn run_pull_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
 }
 
 fn folder_refusal(op: &str, mem: &str) -> anyhow::Error {
-    CliError {
-        code: "INVALID_INPUT",
-        kind: ExitKind::Validation,
-        message: format!("mem '{mem}' is not git-backed — `{op}` requires a git-branch mount",),
-        details: None,
-    }
+    CliError::from_engine_op(memstead_base::EngineError::NotGitBacked {
+        mem: Some(mem.to_string()),
+        operation: op.to_string(),
+    })
     .into()
 }

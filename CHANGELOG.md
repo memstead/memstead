@@ -191,7 +191,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   as quickstart does, where it refused `IO_ERROR`. `WORKSPACE_NOT_INITIALISED`
   from the CLI's workspace walk carries the engine's payload, adding
   `details.path`. `memstead pull --all` exits with the refused ref's own
-  code where an unlisted code became `INTERNAL`.
+  code where an unlisted code became `INTERNAL`. Three state refusals
+  spelled as input errors are engine values: a git operation on a folder
+  mem or a workspace without git-branch mems (`fetch`, `pull`, `push`,
+  `branch-reset`, `diff`, `push --all`, `pull --all`, `mem-repo
+  remote-add`, on MCP and the CLI) stays `INVALID_INPUT` and now carries
+  `details.mem` and `details.operation` (`EngineError::NotGitBacked`);
+  `export --format llms-txt|html` without `--mem` and with no or several
+  writable mems refuses `NO_WRITABLE_MEM` or `AMBIGUOUS_MEM` (with
+  `details.mems`) where it refused `INVALID_INPUT`; and `init` or
+  `quickstart` pointed at a file refuses `TARGET_NOT_EMPTY` (with
+  `details.path` and `details.found`) where it refused `INVALID_INPUT`.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype
