@@ -82,7 +82,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   registry does not carry, so the CLI's refusal now has `details.name` and
   `details.available` where it had no details; the built-in names leave
   its message for `details.available`, and the hint to pass a path or a
-  pin stays as its own sentence.
+  pin stays as its own sentence. The `projection verify` and brief
+  refusals for a destination mem this workspace does not serve carry the
+  engine's payload beside `details.binding`: the mem is under
+  `details.name` on `UNKNOWN_MEM` (the retired `details.mem`, with
+  `known_mems` and `writable_mems` added) and the quarantine reason under
+  `details.reason_message` on `MEM_QUARANTINED` (the retired
+  `details.reason`).
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

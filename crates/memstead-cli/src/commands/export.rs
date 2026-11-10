@@ -770,14 +770,11 @@ fn run_mem_filesystem(
     if let Some(name) = args.mem_name.as_deref()
         && name != workspace_mem
     {
-        return Err(CliError::new(
-                ExitKind::NotFound,
-                "UNKNOWN_MEM",
-                format!(
-                    "filesystem-mem is single-mem: workspace mem is `{workspace_mem}`, --mem `{name}` does not match"
-                ),
-            )
-            .into());
+        return Err(CliError::from_engine_with_hint(
+            engine.unknown_mem(name),
+            &format!("A filesystem workspace holds one mem, `{workspace_mem}`."),
+        )
+        .into());
     }
 
     // Export through the ENGINE, which reads whatever layout it

@@ -697,25 +697,19 @@ fn unserved_destination_error(
     message: String,
     unserved: &UnservedDestination,
 ) -> CliError {
-    match &unserved.error {
-        memstead_base::EngineError::MemQuarantined {
-            reason_code,
-            reason_message,
-            ..
-        } => CliError::new(ExitKind::Validation, "MEM_QUARANTINED", message).with_details(json!({
-            "binding": binding_id,
-            "mem": unserved.mem,
-            // The same vocabulary every other surface reports for this
-            // condition: code plus the boot reason.
-            "reason_code": reason_code,
-            "reason": reason_message,
-        })),
-        memstead_base::EngineError::MemUnmounted { .. } => {
-            CliError::new(ExitKind::NotFound, "MEM_UNMOUNTED", message)
-                .with_details(json!({ "binding": binding_id, "mem": unserved.mem }))
-        }
-        _ => CliError::new(ExitKind::NotFound, "UNKNOWN_MEM", message)
-            .with_details(json!({ "binding": binding_id, "mem": unserved.mem })),
+    // The engine's code and payload; the binding rides beside them, a
+    // fact of the request. The exit kinds are this command's own.
+    let kind = match &unserved.error {
+        memstead_base::EngineError::MemQuarantined { .. } => ExitKind::Validation,
+        _ => ExitKind::NotFound,
+    };
+    let mut details = unserved.error.details();
+    details["binding"] = json!(binding_id);
+    CliError {
+        kind,
+        code: unserved.error.code(),
+        message,
+        details: Some(details),
     }
 }
 

@@ -3123,7 +3123,7 @@ fn verify_refuses_a_destination_mem_that_does_not_exist() {
             .clone();
         let env: Value = serde_json::from_slice(&out).expect("the refusal is a JSON envelope");
         assert_eq!(env["code"], "UNKNOWN_MEM", "{flags:?}: {env}");
-        assert_eq!(env["details"]["mem"], "absent-mem", "{flags:?}: {env}");
+        assert_eq!(env["details"]["name"], "absent-mem", "{flags:?}: {env}");
         assert_eq!(
             env["details"]["binding"], "absent-mem/code",
             "{flags:?}: {env}"
