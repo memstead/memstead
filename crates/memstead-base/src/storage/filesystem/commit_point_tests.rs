@@ -1024,3 +1024,119 @@ fn a_commit_into_a_directory_a_cut_off_attempt_left_behind_names_it_durably() {
         );
     }
 }
+
+/// The real filesystem, with one action run just before the first
+/// directory listing: the step a load takes after it looked for a
+/// commit record and found none.
+struct BeforeFirstListing {
+    action: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+impl BeforeFirstListing {
+    fn new(action: impl FnOnce() + Send + 'static) -> Self {
+        Self {
+            action: std::sync::Mutex::new(Some(Box::new(action))),
+        }
+    }
+}
+
+impl FolderIo for BeforeFirstListing {
+    fn exists(&self, path: &Path) -> std::io::Result<bool> {
+        RealIo.exists(path)
+    }
+    fn read(&self, path: &Path) -> std::io::Result<Option<Vec<u8>>> {
+        RealIo.read(path)
+    }
+    fn read_tail(&self, path: &Path, max: u64) -> std::io::Result<Option<Vec<u8>>> {
+        RealIo.read_tail(path, max)
+    }
+    fn list_dir(&self, path: &Path) -> std::io::Result<Vec<super::io::DirEntry>> {
+        if let Some(action) = self.action.lock().unwrap().take() {
+            action();
+        }
+        RealIo.list_dir(path)
+    }
+    fn create_dir(&self, path: &Path) -> std::io::Result<()> {
+        RealIo.create_dir(path)
+    }
+    fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        RealIo.write(path, bytes)
+    }
+    fn append(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        RealIo.append(path, bytes)
+    }
+    fn sync_file(&self, path: &Path) -> std::io::Result<()> {
+        RealIo.sync_file(path)
+    }
+    fn sync_dir(&self, path: &Path) -> std::io::Result<()> {
+        RealIo.sync_dir(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        RealIo.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+        RealIo.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> std::io::Result<()> {
+        RealIo.remove_dir(path)
+    }
+}
+
+/// A load looks for a commit record, finds none, and goes on to sweep
+/// the temps a dead attempt left. A sibling writer that passes its
+/// commit point and dies between that look and the sweep leaves a
+/// record whose contents are those temps: the load looks again once it
+/// holds the lock and completes the commit. Sweeping would delete the
+/// decided contents and leave a record no load can ever apply.
+#[test]
+fn a_commit_decided_between_a_loads_look_and_its_sweep_is_completed_not_swept() {
+    let control = control(seed);
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    seed(&root);
+
+    // The sibling, cut off at the step that would put its record in
+    // place: every temp is written and synced, the record's included.
+    let sibling = FilesystemBackend::with_io(root.clone(), FaultIo::kill_at(control.commit_point));
+    stage(&sibling);
+    let died = catch_unwind(AssertUnwindSafe(|| {
+        let _ = sibling.commit("under test", &CommitContext::internal());
+    }));
+    assert!(died.is_err());
+    drop(sibling);
+    let meta = root.join(".memstead");
+    let record_temp = std::fs::read_dir(&meta)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| is_record_temp(p))
+        .expect("the cut-off attempt left its record as a temp");
+    assert!(!root.join(COMMIT_RECORD_REL).exists());
+
+    // The load. After its first look the sibling's rename happens: the
+    // commit is decided, and the sibling is gone.
+    let record = root.join(COMMIT_RECORD_REL);
+    let load = FilesystemBackend::with_io(
+        root.clone(),
+        BeforeFirstListing::new(move || std::fs::rename(&record_temp, &record).unwrap()),
+    );
+    let completed = load
+        .complete_interrupted_commit()
+        .expect("the load completes the decided commit");
+    assert_eq!(
+        completed.map(|c| c.files),
+        Some(COMMIT_FILES.iter().map(|s| s.to_string()).collect()),
+        "the completion names the commit's files"
+    );
+    assert_eq!(
+        tree(&root),
+        control.after,
+        "the decided commit is applied whole"
+    );
+    assert_eq!(
+        FilesystemBackend::new(root.clone())
+            .complete_interrupted_commit()
+            .unwrap(),
+        None,
+        "nothing is left for a later load"
+    );
+}

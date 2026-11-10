@@ -69,6 +69,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A load no longer sweeps the files of a commit that was decided a
+  moment before.** A load of a folder mem that found no commit record
+  went on to remove leftover temp files. A writer in another process
+  that passed its commit point and died between that look and the
+  sweep left a record whose contents were those temp files; the sweep
+  deleted them, and every later load of the mem failed on a record it
+  could not apply. The load now looks for the record again once it
+  holds the mem's lock and completes the commit.
+
 - **A failed write leaves nothing behind.** A mutation that failed
   between staging its bytes and committing them (a refused sidecar
   write, a failed commit) left the staged bytes in the backend, and the

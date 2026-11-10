@@ -954,8 +954,22 @@ impl crate::backend::MemBackend for FilesystemBackend {
         // Best effort from here: a temp that stays is removed by a
         // later load and changes nothing a reader sees.
         if self.has_leftovers() && matches!(path_lock::try_acquire(&lock), Ok(true)) {
-            let _ = self.sweep_leftovers();
+            // Look again under the lock: a sibling writer may have
+            // passed its commit point and died since the first look.
+            // Its temps are then the contents of a decided commit, to
+            // be moved into place and never swept.
+            let result = if self
+                .io
+                .exists(&self.record_path())
+                .map_err(BackendError::Io)?
+            {
+                self.complete_decided_commit()
+            } else {
+                let _ = self.sweep_leftovers();
+                Ok(None)
+            };
             path_lock::release(&lock);
+            return result;
         }
         Ok(None)
     }
