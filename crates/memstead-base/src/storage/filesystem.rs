@@ -144,6 +144,12 @@ struct CommitRecord {
     ops: Vec<RecordOp>,
     /// The commit's ledger lines, in order, without their newline.
     ledger: Vec<String>,
+    /// The ledger file did not exist when the commit was decided, so
+    /// applying it creates the file and must sync the name. Recorded,
+    /// because a completion that runs after the file was created can
+    /// no longer tell.
+    #[serde(default)]
+    ledger_new: bool,
 }
 
 /// What one commit attempt has put on disk before its commit point,
@@ -282,10 +288,13 @@ impl FilesystemBackend {
             self.io.sync_dir(dir)?;
         }
 
+        let ledger = self.render_ledger(records)?;
+        let ledger_new = !ledger.is_empty() && !self.io.exists(&changelog_path(&self.root))?;
         let record = CommitRecord {
             v: 1,
             ops: record_ops,
-            ledger: self.render_ledger(records)?,
+            ledger,
+            ledger_new,
         };
         let bytes =
             serde_json::to_vec(&record).map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -319,7 +328,7 @@ impl FilesystemBackend {
         let mut dirs: BTreeSet<PathBuf> = BTreeSet::new();
         for op in &record.ops {
             let target = self.root.join(op.path());
-            let changed = match op {
+            match op {
                 RecordOp::Upsert { path, tmp } => {
                     let tmp = self.root.join(tmp);
                     if self.io.exists(&tmp)? {
@@ -330,15 +339,18 @@ impl FilesystemBackend {
                              nor the file is on disk"
                         )));
                     }
-                    true
                 }
                 RecordOp::Delete { .. } => match self.io.remove_file(&target) {
-                    Ok(()) => true,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                     Err(e) => return Err(e),
                 },
-            };
-            if changed && let Some(parent) = target.parent() {
+            }
+            // Every operation's directory is synced on every run, also
+            // where this run found the move already made: an earlier
+            // run may have been cut off between the move and its sync,
+            // and this one cannot tell.
+            if let Some(parent) = target.parent() {
                 dirs.insert(parent.to_path_buf());
             }
         }
@@ -370,14 +382,13 @@ impl FilesystemBackend {
                     missing = true;
                 }
             }
-            // A ledger this commit creates gets its name synced too:
-            // `.memstead/` was last synced before the file existed.
-            let created = missing && !self.io.exists(&log)?;
             if missing {
                 self.io.append(&log, out.as_bytes())?;
             }
             self.io.sync_file(&log)?;
-            if created {
+            // A ledger this commit creates gets its name synced too:
+            // `.memstead/` was last synced before the file existed.
+            if record.ledger_new {
                 self.io.sync_dir(&self.meta_dir())?;
             }
         }

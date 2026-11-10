@@ -140,6 +140,8 @@ struct Control {
     after: Tree,
     trace: Vec<IoOp>,
     commit_point: usize,
+    /// The mem root the trace's paths sit under.
+    root: PathBuf,
 }
 
 fn control(setup: fn(&Path)) -> Control {
@@ -166,6 +168,7 @@ fn control(setup: fn(&Path)) -> Control {
         after,
         trace: io.trace(),
         commit_point: io.commit_point().expect("the trace holds a commit"),
+        root: tmp.path().to_path_buf(),
     }
 }
 
@@ -688,4 +691,71 @@ fn a_ledger_the_commit_creates_has_its_name_synced() {
         "{:?}",
         &trace[appended..]
     );
+}
+
+/// A sync that fails once after the commit point is made up for by the
+/// completion: every sync the undisturbed commit runs after its commit
+/// point has run successfully by the time the commit is complete, on a
+/// seeded mem and on a mem's first commit. A completion that finds a
+/// move already made cannot know whether its sync happened, so it
+/// syncs again.
+#[test]
+fn a_completion_redoes_every_sync_the_cut_off_commit_owed() {
+    for setup in [seed as fn(&Path), no_seed as fn(&Path)] {
+        let control = control(setup);
+        let is_sync = |op: &IoOp| matches!(op, IoOp::SyncDir(_) | IoOp::SyncFile(_));
+        // The syncs the commit owes after its commit point. The first
+        // step after the point syncs the record's own name, which no
+        // longer matters once the record is applied and removed.
+        let after_point = control.commit_point + 2;
+        let owed: Vec<(PathBuf, bool)> = control.trace[after_point..]
+            .iter()
+            .filter(|op| is_sync(op))
+            .map(|op| match op {
+                IoOp::SyncDir(p) => (p.clone(), true),
+                IoOp::SyncFile(p) => (p.clone(), false),
+                _ => unreachable!(),
+            })
+            .collect();
+        assert!(!owed.is_empty());
+
+        for n in after_point..control.trace.len() {
+            let tmp = TempDir::new().unwrap();
+            setup(tmp.path());
+            let io = FaultIo::fail_at(n);
+            let backend = FilesystemBackend::with_io(tmp.path().to_path_buf(), io.clone());
+            // Paths in the control trace sit under the control's own
+            // directory; compare by path relative to each mem root.
+            let rel = |p: &Path, root: &Path| p.strip_prefix(root).unwrap().to_path_buf();
+            stage(&backend);
+            backend
+                .commit("under test", &CommitContext::internal())
+                .expect_err("the commit is cut off");
+            backend
+                .complete_interrupted_commit()
+                .unwrap_or_else(|e| panic!("step {n}: completion failed: {e}"));
+
+            let trace = io.trace();
+            let done: Vec<(PathBuf, bool)> = trace
+                .iter()
+                .enumerate()
+                .skip(control.commit_point + 1)
+                .filter(|(i, op)| *i != n && is_sync(op))
+                .map(|(_, op)| match op {
+                    IoOp::SyncDir(p) => (rel(p, tmp.path()), true),
+                    IoOp::SyncFile(p) => (rel(p, tmp.path()), false),
+                    _ => unreachable!(),
+                })
+                .collect();
+            for (path, is_dir) in &owed {
+                let want = (rel(path, &control.root), *is_dir);
+                assert!(
+                    done.contains(&want),
+                    "step {n} ({:?}): the sync of {:?} was never made good",
+                    control.trace[n],
+                    want.0
+                );
+            }
+        }
+    }
 }
