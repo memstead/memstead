@@ -226,9 +226,10 @@ impl Engine {
     /// schema BEFORE anything is written — resolution never launders an
     /// invalid entity into the mem. On success the resolved content is
     /// written through the mem's backend, committed with an attributed
-    /// [`CommitContext`] (note included when given), recorded in the
-    /// provenance ledger, and the mem is reloaded so the entity reads
-    /// validly and the conflict load-error clears.
+    /// [`CommitContext`] (note included when given) together with its
+    /// provenance record, and the mem is reloaded so the entity reads
+    /// validly and the conflict load-error clears. The mem's write lock
+    /// is held throughout.
     pub fn resolve_merge_conflict(
         &mut self,
         id: &EntityId,
@@ -238,6 +239,11 @@ impl Engine {
         note: Option<&str>,
     ) -> Result<ResolveConflictOutcome, EngineError> {
         let mem = id.mem().to_string();
+        // The mem's write lock is held from before the conflicted file
+        // is read until its resolution is committed, like any other
+        // write: a second process cannot change the file in between.
+        let (_write_lock, mut warnings) = self.lock_for_write(true, &[&mem])?;
+        warnings.extend(self.level_for_write(&[&mem]));
         let (mount_idx, root) = self.folder_mount(&mem)?;
 
         // Locate the file whose path derives to the requested id. The
@@ -321,24 +327,27 @@ impl Engine {
             client.cloned(),
             note.map(String::from),
         );
-        let write_id = backend.commit(
+        // The record lands with the commit, through the one commit call.
+        let record = Provenance::new(
+            std::time::SystemTime::now(),
+            ProvenanceKind::Update,
+            Some(id.to_string()),
+            actor,
+            client.cloned(),
+            note.map(String::from),
+        )
+        .with_role(self.current_role)
+        .with_identity(self.current_identity.clone());
+        let landed = self.commit_staged(
+            mount_idx,
             &format!("memstead: resolve-conflict {id} (side: {})", side.as_wire()),
             &ctx,
+            std::slice::from_ref(&record),
         )?;
-        backend.append_provenance(
-            &Provenance::new(
-                std::time::SystemTime::now(),
-                ProvenanceKind::Update,
-                Some(id.to_string()),
-                actor,
-                client.cloned(),
-                note.map(String::from),
-            )
-            .with_role(self.current_role)
-            .with_identity(self.current_identity.clone()),
-        )?;
+        let write_id = landed.write_id;
+        warnings.extend(landed.warnings);
         self.record_self_write(mount_idx, &write_id);
-        let stamp_warnings = self.stamp_mutation_versions(mount_idx);
+        warnings.extend(self.stamp_mutation_versions(mount_idx));
 
         // Reload so the resolved entity enters the store and the
         // conflict load-error clears — the caller's next read sees a
@@ -346,7 +355,7 @@ impl Engine {
         self.reload_each_writable_mem()?;
 
         Ok(ResolveConflictOutcome {
-            warnings: stamp_warnings,
+            warnings,
             id: id.clone(),
             side: side.as_wire(),
             write_id,

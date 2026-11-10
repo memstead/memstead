@@ -112,6 +112,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   whole. The mount still carries the old name in both cases, and the
   same `mem rename` sent again completes it.
 
+- **A proposal merge and a conflict resolution commit under the write
+  lock.** Both committed to their mem without taking its write lock. An
+  update that had locked the mem, reloaded and passed its hash compare
+  could be followed, before its own commit, by a merge that landed in
+  between, and then commit over what the merge wrote; two resolutions
+  of one conflicted entity could both be acknowledged with one of them
+  written over. A merge now holds the write lock of every writable mem
+  (a deletion it carries is guarded by referrers in any mem) and takes
+  its picture of the target under it, so a write in progress is
+  finished first and the merge then refuses a tip that moved with
+  `PROPOSAL_STALE`. A conflict resolution holds its mem's lock from
+  before it reads the conflicted file, and its provenance record lands
+  with its commit.
+
 - **A delete and a retype check their referrers against every mem as it
   is now.** Both verbs guard on the edges that point at the entity, and
   such an edge can come from any mem. They reloaded their own mem only

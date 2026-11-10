@@ -22,24 +22,28 @@
 //! Either way the order of the two writes is decided before the
 //! operation goes on.
 
+mod common;
+
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use indexmap::IndexMap;
-use memstead_base::backend::{BackendError, CompletedCommit, EntityRead, MemBackend};
-use memstead_base::storage::CommitId;
-use memstead_base::vcs::{Actor, CommitContext};
+use memstead_base::backend::MemBackend;
+use memstead_base::engine::conflicts::ConflictSide;
+use memstead_base::vcs::Actor;
 use memstead_base::{
     CreateEntityArgs, DeleteEntityArgs, Engine, EngineError, EntityId, Mount, MountCapability,
-    MountLifecycle, MountStorage, Provenance, RelateEntityArgs, RenameEntityArgs, RetypeEntityArgs,
+    MountLifecycle, MountStorage, RelateEntityArgs, RenameEntityArgs, RetypeEntityArgs,
     UpdateEntityArgs,
 };
 use memstead_git_branch::storage::instantiate_full_backend;
 use memstead_git_branch::test_support::init_real_mem_repo;
 use tempfile::TempDir;
+
+use common::{Tap, Tapped, lands, lock_is_free};
 
 const LEFT: &str = "left";
 const RIGHT: &str = "right";
@@ -58,176 +62,6 @@ const PAIRS: [(Kind, Kind); 4] = [
     (Kind::Folder, Kind::GitBranch),
     (Kind::GitBranch, Kind::Folder),
 ];
-
-// ---------------------------------------------------------------------
-// The tap: a backend wrapper that reports every call before it runs
-// ---------------------------------------------------------------------
-
-/// Called with the mem and the storage method's name before the method
-/// runs, on the thread that runs it. `true` fails the call in place of
-/// running it: a storage error at that step.
-type Tap = Arc<dyn Fn(&str, &str) -> bool + Send + Sync>;
-
-struct Tapped {
-    inner: Box<dyn MemBackend>,
-    mem: &'static str,
-    tap: Tap,
-}
-
-impl Tapped {
-    fn on(&self, method: &str) -> Result<(), BackendError> {
-        if (self.tap)(self.mem, method) {
-            Err(BackendError::Other(format!(
-                "injected failure of {method} on {}",
-                self.mem
-            )))
-        } else {
-            Ok(())
-        }
-    }
-}
-
-/// The storage methods that land a write.
-fn lands(method: &str) -> bool {
-    matches!(
-        method,
-        "commit"
-            | "commit_with_expected_parent"
-            | "append_provenance"
-            | "write_mem_config"
-            | "write_mem_config_cas"
-            | "record_pipeline_edit"
-            | "delete_artifacts"
-    )
-}
-
-impl MemBackend for Tapped {
-    fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
-        self.on("list_entities")?;
-        self.inner.list_entities()
-    }
-    fn read_entity(&self, rel_path: &Path) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_entity")?;
-        self.inner.read_entity(rel_path)
-    }
-    fn entity_exists(&self, rel_path: &Path) -> Result<bool, BackendError> {
-        self.on("entity_exists")?;
-        self.inner.entity_exists(rel_path)
-    }
-    fn read_all_entities(&self) -> Result<Vec<EntityRead>, BackendError> {
-        self.on("read_all_entities")?;
-        self.inner.read_all_entities()
-    }
-    fn storage_present(&self) -> Result<bool, BackendError> {
-        self.on("storage_present")?;
-        self.inner.storage_present()
-    }
-    fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), BackendError> {
-        self.on("write_entity")?;
-        self.inner.write_entity(rel_path, content)
-    }
-    fn delete_entity(&self, rel_path: &Path) -> Result<(), BackendError> {
-        self.on("delete_entity")?;
-        self.inner.delete_entity(rel_path)
-    }
-    fn move_entity(&self, from: &Path, to: &Path) -> Result<(), BackendError> {
-        self.on("move_entity")?;
-        self.inner.move_entity(from, to)
-    }
-    fn discard_pending(&self) -> Result<(), BackendError> {
-        self.on("discard_pending")?;
-        self.inner.discard_pending()
-    }
-    fn commit(&self, message: &str, ctx: &CommitContext<'_>) -> Result<CommitId, BackendError> {
-        self.on("commit")?;
-        self.inner.commit(message, ctx)
-    }
-    fn commit_with_expected_parent(
-        &self,
-        message: &str,
-        ctx: &CommitContext<'_>,
-        expected_parent: Option<&str>,
-    ) -> Result<CommitId, BackendError> {
-        self.on("commit_with_expected_parent")?;
-        self.inner
-            .commit_with_expected_parent(message, ctx, expected_parent)
-    }
-    fn stage_provenance(&self, record: &Provenance) -> Result<(), BackendError> {
-        self.on("stage_provenance")?;
-        self.inner.stage_provenance(record)
-    }
-    fn append_provenance(&self, record: &Provenance) -> Result<(), BackendError> {
-        self.on("append_provenance")?;
-        self.inner.append_provenance(record)
-    }
-    fn complete_interrupted_commit(&self) -> Result<Option<CompletedCommit>, BackendError> {
-        self.on("complete_interrupted_commit")?;
-        self.inner.complete_interrupted_commit()
-    }
-    fn read_provenance(&self, cursor: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
-        self.on("read_provenance")?;
-        self.inner.read_provenance(cursor)
-    }
-    fn current_head(&self) -> Result<Option<String>, BackendError> {
-        self.on("current_head")?;
-        self.inner.current_head()
-    }
-    fn write_lock_path(&self) -> Option<PathBuf> {
-        let _ = self.on("write_lock_path");
-        self.inner.write_lock_path()
-    }
-    fn read_mem_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_mem_config")?;
-        self.inner.read_mem_config()
-    }
-    fn read_archive_provenance(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_archive_provenance")?;
-        self.inner.read_archive_provenance()
-    }
-    fn read_archive_checks(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_archive_checks")?;
-        self.inner.read_archive_checks()
-    }
-    fn read_proposal_record(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_proposal_record")?;
-        self.inner.read_proposal_record()
-    }
-    fn write_mem_config(&self, bytes: &[u8], ctx: &CommitContext<'_>) -> Result<(), BackendError> {
-        self.on("write_mem_config")?;
-        self.inner.write_mem_config(bytes, ctx)
-    }
-    fn write_mem_config_cas(
-        &self,
-        expected: Option<&[u8]>,
-        bytes: &[u8],
-        ctx: &CommitContext<'_>,
-    ) -> Result<bool, BackendError> {
-        self.on("write_mem_config_cas")?;
-        self.inner.write_mem_config_cas(expected, bytes, ctx)
-    }
-    fn record_pipeline_edit(
-        &self,
-        kind: &str,
-        edits: &[(String, Option<Vec<u8>>)],
-        ctx: &CommitContext<'_>,
-        verb: &str,
-    ) -> Result<(), BackendError> {
-        self.on("record_pipeline_edit")?;
-        self.inner.record_pipeline_edit(kind, edits, ctx, verb)
-    }
-    fn read_anchors_sidecar(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_anchors_sidecar")?;
-        self.inner.read_anchors_sidecar()
-    }
-    fn write_anchors_sidecar(&self, bytes: &[u8]) -> Result<(), BackendError> {
-        self.on("write_anchors_sidecar")?;
-        self.inner.write_anchors_sidecar(bytes)
-    }
-    fn delete_artifacts(&self, ctx: &CommitContext<'_>) -> Result<(), BackendError> {
-        self.on("delete_artifacts")?;
-        self.inner.delete_artifacts(ctx)
-    }
-}
 
 // ---------------------------------------------------------------------
 // The workspace
@@ -365,27 +199,6 @@ impl Workspace {
     ) -> JoinHandle<T> {
         let ws = self.clone();
         std::thread::spawn(move || write(&mut ws.engine()))
-    }
-}
-
-/// Whether nobody holds the lock at `path`, asked through an open file
-/// of this probe's own: it conflicts with every holder, a holder on the
-/// calling thread included.
-fn lock_is_free(path: &Path) -> bool {
-    let Ok(file) = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-    else {
-        // No lock file yet: nobody ever took the lock.
-        return true;
-    };
-    match file.try_lock() {
-        Ok(()) => {
-            let _ = file.unlock();
-            true
-        }
-        Err(_) => false,
     }
 }
 
@@ -568,13 +381,25 @@ fn hold_at_commit<R, T: Send + 'static>(
     second: impl FnOnce(&mut Engine, &dyn Fn()) -> T + Send + 'static,
     operation: impl FnOnce(&mut Engine) -> R,
 ) -> (R, Window<T>, Engine) {
+    hold_at_commit_probing(ws, &[LEFT, RIGHT], second, operation)
+}
+
+/// [`hold_at_commit`] for an operation that owes the lock of `must_hold`
+/// only (it writes one mem and reads no other): the probe asks for
+/// those locks, and `Window::both_locked` reports them.
+fn hold_at_commit_probing<R, T: Send + 'static>(
+    ws: &Workspace,
+    must_hold: &[&str],
+    second: impl FnOnce(&mut Engine, &dyn Fn()) -> T + Send + 'static,
+    operation: impl FnOnce(&mut Engine) -> R,
+) -> (R, Window<T>, Engine) {
     enum Stage<T> {
         Armed(Box<dyn FnOnce() -> JoinHandle<T> + Send>),
         Finished { both_locked: bool, second: T },
         Running(JoinHandle<T>),
         Taken,
     }
-    let locks = [ws.lock_path(LEFT), ws.lock_path(RIGHT)];
+    let locks: Vec<PathBuf> = must_hold.iter().map(|mem| ws.lock_path(mem)).collect();
     let (ready, is_ready) = std::sync::mpsc::channel::<()>();
     let is_ready = Mutex::new(is_ready);
     let spawn = {
@@ -818,6 +643,8 @@ enum Waiter {
     Rename,
     /// Renames the mem `left`; waits on `right`'s lock too.
     MemRename,
+    /// Resolves the conflicted `left--alpha`; waits on `left`'s lock.
+    ResolveConflict,
     /// One item per mem.
     BatchCreate,
     BatchUpdate,
@@ -868,6 +695,11 @@ fn run_waiter(waiter: Waiter, engine: &mut Engine) -> Report {
                 .collect()
         })
         .map_err(|e| format!("{e:?}")),
+        Waiter::ResolveConflict => report(
+            engine
+                .resolve_merge_conflict(&id(LEFT, "alpha"), ConflictSide::Ours, actor, None, None)
+                .map(|o| o.warnings),
+        ),
         Waiter::BatchCreate => batch_report(engine.batch_create(
             vec![
                 (create_args(LEFT, "Delta", &[]), None),
@@ -912,11 +744,19 @@ fn run_waiter(waiter: Waiter, engine: &mut Engine) -> Report {
 /// asked for `right`'s lock, or has ended without asking (which is
 /// then a verb that did not wait).
 fn assert_waits_on_the_peers_lock(waiters: &[Waiter]) {
-    for pair in PAIRS {
+    assert_waits_on_the_lock_of(RIGHT, &PAIRS, waiters);
+}
+
+/// The same for the lock of `held_mem`, on the given pairings.
+fn assert_waits_on_the_lock_of(held_mem: &'static str, pairs: &[(Kind, Kind)], waiters: &[Waiter]) {
+    for &pair in pairs {
         for &waiter in waiters {
             let context = format!("{pair:?} {waiter:?}");
             let ws = Workspace::new(pair);
-            let lock_path = ws.lock_path(RIGHT);
+            if matches!(waiter, Waiter::ResolveConflict) {
+                conflict_alpha(&ws);
+            }
+            let lock_path = ws.lock_path(held_mem);
             std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
             let lock = std::fs::OpenOptions::new()
                 .read(true)
@@ -937,7 +777,7 @@ fn assert_waits_on_the_peers_lock(waiters: &[Waiter]) {
                     Arc::clone(&landed_early),
                 );
                 Arc::new(move |mem: &str, method: &str| {
-                    if mem == RIGHT && method == "write_lock_path" {
+                    if mem == held_mem && method == "write_lock_path" {
                         asked.store(true, Ordering::SeqCst);
                     }
                     if lands(method) && held.load(Ordering::SeqCst) {
@@ -1613,5 +1453,102 @@ fn a_mem_renames_sweep_that_fails_after_a_peer_landed_reports_what_landed_and_co
         assert_eq!(again.rewritten_mems, vec![LEFT.to_string()], "{context}");
         assert_eq!(shape(&ws.engine()), undisturbed, "{context}");
         assert_eq!(view(&engine), view(&ws.engine()), "{context}");
+    }
+}
+
+// ---------------------------------------------------------------------
+// Conflict resolution: one folder mem
+// ---------------------------------------------------------------------
+
+/// The pairings whose `left` is a folder mem: a merge conflict in an
+/// entity file is a folder mem's state.
+const LEFT_IS_A_FOLDER: [(Kind, Kind); 2] = [
+    (Kind::Folder, Kind::Folder),
+    (Kind::Folder, Kind::GitBranch),
+];
+
+/// Leave `left--alpha` as a git merge left it: both sides in the file,
+/// between conflict markers. Written as a file, as the merge would.
+fn conflict_alpha(ws: &Workspace) {
+    let MountStorage::Folder { path } = &ws.mounts[0].storage else {
+        panic!("a conflicted entity file needs `left` on the folder backend");
+    };
+    std::fs::write(
+        path.join("alpha.md"),
+        "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n\n\
+         # Alpha\n\n## Identity\n\n<<<<<<< HEAD\nours identity\n=======\ntheirs identity\n\
+         >>>>>>> theirs\n\n## Purpose\n\nAlpha purpose\n",
+    )
+    .unwrap();
+}
+
+/// A conflict resolution commits to its mem under that mem's lock.
+#[test]
+fn a_conflict_resolution_waits_on_the_lock_of_the_mem_it_commits_to() {
+    assert_waits_on_the_lock_of(LEFT, &LEFT_IS_A_FOLDER, &[Waiter::ResolveConflict]);
+}
+
+/// A resolution is held at its commit and a second process resolves
+/// the same entity to the other side. The second resolution is never
+/// written over: the first holds the mem's lock, so the second waits
+/// and then finds the entity resolved.
+#[test]
+fn a_second_resolution_while_a_conflict_resolution_is_held_at_its_commit_is_not_written_over() {
+    for pair in LEFT_IS_A_FOLDER {
+        let context = format!("{pair:?}");
+        let ws = Workspace::new(pair);
+        conflict_alpha(&ws);
+        let alpha = id(LEFT, "alpha");
+        let (first, window, mut engine) = hold_at_commit_probing(
+            &ws,
+            &[LEFT],
+            {
+                let alpha = alpha.clone();
+                move |second, ready| {
+                    ready();
+                    report(
+                        second
+                            .resolve_merge_conflict(
+                                &alpha,
+                                ConflictSide::Theirs,
+                                Actor::Cli,
+                                None,
+                                None,
+                            )
+                            .map(|o| o.warnings),
+                    )
+                }
+            },
+            |engine| {
+                report(
+                    engine
+                        .resolve_merge_conflict(&alpha, ConflictSide::Ours, Actor::Cli, None, None)
+                        .map(|o| o.warnings),
+                )
+            },
+        );
+        assert!(first.is_ok(), "{context}: {first:?}");
+        assert!(
+            window.both_locked,
+            "{context}: the resolution holds its mem's write lock at its commit"
+        );
+        let fresh = ws.engine();
+        let identity = fresh
+            .get_entity(&alpha)
+            .and_then(|e| e.sections.get("identity").cloned())
+            .unwrap_or_default();
+        // An acknowledged second resolution is what storage holds; a
+        // refused one found the entity already resolved.
+        match &window.second {
+            Ok(_) => assert!(
+                identity.contains("theirs"),
+                "{context}: the second resolution was acknowledged and is gone: {identity}"
+            ),
+            Err(code) => {
+                assert_eq!(code, "NOT_CONFLICTED", "{context}");
+                assert!(identity.contains("ours"), "{context}: {identity}");
+            }
+        }
+        assert_level_with_storage(&ws, &mut engine, &context);
     }
 }

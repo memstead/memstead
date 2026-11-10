@@ -186,6 +186,15 @@ impl Engine {
             )));
         }
 
+        // A merge commits to the target mem, and a deletion it carries
+        // is guarded by the referrers in every mem. So it holds every
+        // writable mem's write lock, and takes its picture under it: a
+        // write that locked the target, reloaded and passed its hash
+        // compare has committed before the merge reads the target's
+        // tip, and the merge cannot land between that write's compare
+        // and its commit.
+        let (_write_lock, _reloaded) = self.lock_workspace_for_write_if(true)?;
+
         // ---- The picture as it stands, and the file against it ----
         let brief = self.proposal_brief(fork)?;
         let target = brief.target.clone();

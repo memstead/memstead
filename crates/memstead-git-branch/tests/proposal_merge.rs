@@ -11,6 +11,8 @@
 //! two successive proposals against one target so the record marks a
 //! re-proposal, travels into an archive and is read off an archive.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -2638,4 +2640,199 @@ fn an_all_reject_merge_lands_the_record_alone_under_the_merger() {
         beta.re_proposal
     );
     drop(tmp);
+}
+
+// ---------------------------------------------------------------------
+// The merge and a second writer
+// ---------------------------------------------------------------------
+
+/// The write lock's file of the target mem.
+fn target_lock_path(engine: &memstead_base::Engine) -> PathBuf {
+    let mount = engine.mount("specs").expect("the target is mounted");
+    memstead_git_branch::storage::instantiate_full_backend(mount)
+        .expect("backend instantiates")
+        .write_lock_path()
+        .expect("a git-branch mem has a write lock")
+}
+
+/// While another process holds the target mem's write lock, a merge
+/// lands nothing and does not return; it lands once the lock is
+/// released.
+///
+/// The other process is an open file on the lock, held by a second
+/// thread. That thread releases it when the merge has returned (which
+/// is then a merge that did not wait) or after half a second, and notes
+/// the target's tip at that moment.
+#[test]
+fn a_merge_waits_on_the_write_lock_of_the_mem_it_commits_to() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let (tmp, mut engine) = staged();
+    let gitdir = gitdir_of(tmp.path());
+    let file = filled(&mut engine);
+    let tip_before = sha_of(&gitdir, "refs/heads/specs");
+
+    let lock_path = target_lock_path(&engine);
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .unwrap();
+    lock.lock().unwrap();
+
+    let returned = Arc::new(AtomicBool::new(false));
+    let holder = {
+        let (returned, gitdir) = (Arc::clone(&returned), gitdir.clone());
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+            while !returned.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            let returned_while_held = returned.load(Ordering::SeqCst);
+            let tip_while_held = sha_of(&gitdir, "refs/heads/specs");
+            lock.unlock().unwrap();
+            (returned_while_held, tip_while_held)
+        })
+    };
+
+    let merged = engine.proposal_merge("specs-fork", &file, Actor::Cli, None, None);
+    returned.store(true, Ordering::SeqCst);
+    let (returned_while_held, tip_while_held) = holder.join().unwrap();
+
+    assert!(
+        !returned_while_held,
+        "the merge returned while another process held the target's write lock"
+    );
+    assert_eq!(
+        tip_while_held, tip_before,
+        "the merge landed while another process held the target's write lock"
+    );
+    merged.expect("the merge lands once the lock is released");
+    assert_ne!(sha_of(&gitdir, "refs/heads/specs"), tip_before);
+}
+
+/// A merge is held at its first commit and a second process updates an
+/// entity the merge adopts. The update is never written over: the merge
+/// holds the target's write lock, so the update waits and is judged
+/// against the entity as the merge left it.
+#[test]
+fn an_update_to_an_adopted_entity_while_a_merge_is_held_at_its_commit_is_not_lost() {
+    use std::sync::{Arc, Mutex};
+
+    use common::{Tap, Tapped, lands, lock_is_free};
+
+    enum Stage {
+        Armed,
+        /// The second writer ran to its end inside the window.
+        Inside(Result<(), String>),
+        /// The second writer is behind the merge.
+        Behind(std::thread::JoinHandle<Result<(), String>>),
+    }
+
+    let (tmp, mut engine) = staged();
+    let file = filled(&mut engine);
+    let root = tmp.path().to_path_buf();
+    let lock_path = target_lock_path(&engine);
+
+    let stage = Arc::new(Mutex::new(Stage::Armed));
+    let tap: Tap = {
+        let stage = Arc::clone(&stage);
+        Arc::new(move |_mem: &str, method: &str| {
+            let mut stage = stage.lock().unwrap();
+            if !lands(method) || !matches!(*stage, Stage::Armed) {
+                return false;
+            }
+            // Asked before the second writer exists, so a held lock is
+            // the merge's own.
+            let locked = !lock_is_free(&lock_path);
+            let (ready, is_ready) = std::sync::mpsc::channel::<()>();
+            let root = root.clone();
+            let second = std::thread::spawn(move || {
+                let mut second = engine_from_workspace_root(&root).expect("second engine boots");
+                let beta = EntityId::new("specs", "beta");
+                let args = UpdateEntityArgs {
+                    id: beta.clone(),
+                    expected_hash: second.get_entity(&beta).map(|e| e.content_hash.clone()),
+                    sections: [(
+                        "purpose".to_string(),
+                        "the second process's purpose".to_string(),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    append_sections: Default::default(),
+                    patch_sections: Default::default(),
+                    sections_unset: Vec::new(),
+                    metadata: Default::default(),
+                    metadata_unset: Vec::new(),
+                    dry_run: false,
+                    declare_relations: Vec::new(),
+                    anchors: Vec::new(),
+                    anchors_unset: Vec::new(),
+                    relations_unset: Vec::new(),
+                };
+                let _ = ready.send(());
+                second
+                    .update_entity(args, Actor::Cli, None, None)
+                    .map(|_| ())
+                    .map_err(|e| e.code().to_string())
+            });
+            *stage = if locked {
+                is_ready
+                    .recv()
+                    .expect("the second writer reaches its write");
+                Stage::Behind(second)
+            } else {
+                Stage::Inside(second.join().expect("the second writer does not panic"))
+            };
+            false
+        })
+    };
+
+    // The target mem again, with its storage calls tapped.
+    let mount = engine.mount("specs").unwrap().clone();
+    engine.unregister_writable_mem("specs").unwrap();
+    let tapped = Tapped {
+        inner: memstead_git_branch::storage::instantiate_full_backend(&mount).unwrap(),
+        mem: "specs",
+        tap,
+    };
+    engine
+        .register_writable_mem(
+            mount,
+            Box::new(tapped) as Box<dyn MemBackend>,
+            memstead_base::MemOrigin::RuntimeCreated {
+                at: std::time::SystemTime::now(),
+                by_tool: "test",
+            },
+        )
+        .unwrap();
+
+    let merged = engine.proposal_merge("specs-fork", &file, Actor::Cli, None, None);
+    let (locked, second) = match std::mem::replace(&mut *stage.lock().unwrap(), Stage::Armed) {
+        Stage::Inside(result) => (false, result),
+        Stage::Behind(handle) => (true, handle.join().unwrap()),
+        Stage::Armed => panic!("the merge never reached a commit: {merged:?}"),
+    };
+    assert!(
+        locked,
+        "the merge holds the target's write lock at its first commit"
+    );
+    merged.expect("the merge lands");
+
+    let fresh = engine_from_workspace_root(tmp.path()).expect("fresh engine boots");
+    let purpose = fresh
+        .get_entity(&EntityId::new("specs", "beta"))
+        .and_then(|e| e.sections.get("purpose").cloned())
+        .unwrap_or_default();
+    match second {
+        Ok(()) => assert!(
+            purpose.contains("second process"),
+            "the second process's update was acknowledged and is gone: {purpose}"
+        ),
+        Err(code) => assert_eq!(code, "HASH_MISMATCH"),
+    }
 }
