@@ -394,8 +394,9 @@ pub struct DeleteParams {
     // in the parser, so an omitted hash reaches the engine and is refused
     // there with EXPECTED_HASH_REQUIRED like on every other verb, instead of
     // an uncoded parameter error.
+    // No `serde(default)`: it would drop the field from the schema's
+    // `required` list; a missing `Option` field parses as `None` anyway.
     #[schemars(required)]
-    #[serde(default)]
     pub expected_hash: Option<String>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
@@ -417,8 +418,9 @@ pub struct RenameParams {
         description = "Hash from memstead_entity (_hash). Required; omitted refuses EXPECTED_HASH_REQUIRED. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash."
     )]
     // Required in the schema, optional in the parser: see DeleteParams.
+    // No `serde(default)`: it would drop the field from the schema's
+    // `required` list; a missing `Option` field parses as `None` anyway.
     #[schemars(required)]
-    #[serde(default)]
     pub expected_hash: Option<String>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,

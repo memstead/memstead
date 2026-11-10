@@ -1286,6 +1286,50 @@ mod hash_rule {
     }
 
     #[test]
+    fn every_content_shape_needs_a_hash() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine(&tmp);
+        let (id, _) = seed(&mut engine, "Alpha");
+        let bare = || UpdateEntityArgs {
+            sections: IndexMap::new(),
+            ..update(&id, ExpectedHash::Missing, "")
+        };
+        let shapes: Vec<(&str, UpdateEntityArgs)> = vec![
+            (
+                "sections_unset",
+                UpdateEntityArgs {
+                    sections_unset: vec!["purpose".into()],
+                    ..bare()
+                },
+            ),
+            (
+                "metadata",
+                UpdateEntityArgs {
+                    metadata: IndexMap::from_iter([("level".to_string(), "M1".to_string())]),
+                    ..bare()
+                },
+            ),
+            (
+                "relations_unset",
+                UpdateEntityArgs {
+                    relations_unset: vec![crate::ops::RelationUnsetArg {
+                        rel_type: "USES".to_string(),
+                        target: crate::EntityId::new("specs", "other"),
+                    }],
+                    ..bare()
+                },
+            ),
+        ];
+        for (shape, args) in shapes {
+            let r = engine.update_entity(args, crate::vcs::Actor::Cli, None, None);
+            assert!(
+                matches!(r, Err(EngineError::ExpectedHashRequired { .. })),
+                "{shape} without a hash: {r:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_batch_entry_marked_dry_run_is_still_compared() {
         let tmp = TempDir::new().unwrap();
         let mut engine = engine(&tmp);

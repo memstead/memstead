@@ -443,6 +443,27 @@ fn memstead_delete_schema_requires_expected_hash() {
     );
 }
 
+/// The `required` array itself, not a substring: delete and rename list
+/// `expected_hash` there although the parser accepts an omission (so the
+/// engine, not the parser, refuses it). A substring check passed while the
+/// field had dropped out of the array.
+#[test]
+fn delete_and_rename_list_expected_hash_in_the_required_array() {
+    for tool in ["memstead_delete", "memstead_rename"] {
+        let schema: serde_json::Value = serde_json::from_str(&schema_for(tool)).unwrap();
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{tool}: no required array: {schema}"))
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(
+            required.contains(&"expected_hash"),
+            "{tool}: required = {required:?}"
+        );
+    }
+}
+
 /// #10: relationship type is case-insensitive on input and stored canonically
 /// as UPPER_SNAKE_CASE. The JSON-Schema `pattern` accepts the broader
 /// alphabet so lowercase/mixed-case inputs are admitted (and echoed back in
