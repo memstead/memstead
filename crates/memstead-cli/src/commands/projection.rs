@@ -981,7 +981,7 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // commit in the destination mem carries the session's provenance
     // and the note. The id-collision refusal above already guaranteed a
     // fresh binding, so this path only runs on a clean scaffold; a store
-    // IO failure surfaces the typed `PROJECTION_INIT_FAILED`.
+    // failure surfaces the binding edit's or the store's own code.
     cli_engine
         .base_mut()
         .write_projection_record(&mem, &stem, &binding, "add", args.note.as_deref())
@@ -1069,9 +1069,9 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
     let mem = mem.to_string();
     let stem = stem.to_string();
 
-    // Missing binding file → PROJECTION_NOT_FOUND (NotFound exit). A present-
-    // but-unparseable file is kept apart (→ PROJECTION_ENABLE_FAILED) by this
-    // existence pre-check.
+    // Missing binding file: the engine's lookup refusal (NotFound exit). A
+    // present but unparseable file is kept apart (the store's own code) by
+    // this existence pre-check.
     let binding_path = root
         .join(".memstead")
         .join("projections")
