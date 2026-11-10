@@ -52,7 +52,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   becomes `{ name, known_mems, writable_mems }`, `EngineError::NotFound`
   gains `suggestions` (both filled where raised: `Engine::unknown_mem`,
   `Engine::not_found`), `EngineError::InvalidTargetSchema` is new, and the
-  compose errors convert through `into_engine_error`.
+  compose errors convert through `into_engine_error`. Two declared
+  retirements: the CLI's `MEM_NOT_FOUND` (`memstead anchors --mem` on a
+  mem the workspace does not mount) is `UNKNOWN_MEM`, with the mem under
+  `details.name` instead of `details.mem` and `known_mems` kept; and the
+  hand-built `ENTITY_NOT_FOUND` of `memstead_entity`, `memstead entity`
+  and `memstead relations` is the engine's, so its message reads `entity
+  not found: <id>` (then `Did you mean: ...` when there are suggestions)
+  instead of `Entity not found: ...`, and the CLI ones gain
+  `details.suggestions`.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

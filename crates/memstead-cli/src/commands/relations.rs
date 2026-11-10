@@ -5,7 +5,7 @@ use memstead_base::Store;
 use memstead_base::render;
 
 use crate::CliError;
-use crate::output::{ExitKind, print_json, print_markdown};
+use crate::output::{print_json, print_markdown};
 use crate::setup::{CliContext, CliEngine};
 
 /// List typed edges for an entity.
@@ -66,13 +66,13 @@ fn relations_from_store(
     store: &Store,
 ) -> anyhow::Result<(Vec<memstead_base::Edge>, Vec<memstead_base::InEdge>)> {
     if store.get(id).is_none() {
-        return Err(CliError::new(
-            ExitKind::NotFound,
-            "ENTITY_NOT_FOUND",
-            format!("Entity not found: {id_for_err}"),
-        )
-        .with_details(serde_json::json!({ "id": id_for_err }))
-        .into());
+        return Err(
+            CliError::from_engine_op(memstead_base::EngineError::NotFound {
+                id: id_for_err.to_string(),
+                suggestions: memstead_base::engine::error::suggest_similar(store, id_for_err),
+            })
+            .into(),
+        );
     }
     Ok((store.outgoing(id).to_vec(), store.incoming(id).to_vec()))
 }

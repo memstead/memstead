@@ -59,12 +59,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         if engine.quarantine_reason(id.mem()).is_some() || engine.recently_unmounted(id.mem()) {
             return CliError::from_engine_op(engine.unknown_mem_error(id.mem()));
         }
-        CliError::new(
-            ExitKind::NotFound,
-            "ENTITY_NOT_FOUND",
-            format!("Entity not found: {}", args.id),
-        )
-        .with_details(serde_json::json!({ "id": args.id }))
+        CliError::from_engine_op(engine.not_found(&args.id))
     };
     // Snapshot the store's outgoing edges alongside the entity so the
     // JSON envelope can resolve each relationship's `source` label after

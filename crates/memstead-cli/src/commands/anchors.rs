@@ -90,7 +90,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             if let Some(mem) = args.mem.as_deref()
                 && !engine.mem_names().contains(&mem)
             {
-                return Err(unknown_mem(mem, engine.mem_names()).into());
+                return Err(CliError::from_engine_op(engine.unknown_mem(mem)).into());
             }
             (collect(&engine, &args), unreadable_sidecars(&engine, &args))
         }
@@ -98,7 +98,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             if let Some(mem) = args.mem.as_deref()
                 && !engine.mem_names().contains(&mem)
             {
-                return Err(unknown_mem(mem, engine.mem_names()).into());
+                return Err(CliError::from_engine_op(engine.unknown_mem(mem)).into());
             }
             (collect(&engine, &args), unreadable_sidecars(&engine, &args))
         }
@@ -223,17 +223,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         print_markdown(&body);
     }
     Ok(())
-}
-
-/// `--mem` naming a mem the workspace does not mount: a refusal with the
-/// roster, never an empty roster that reads as "no anchors".
-fn unknown_mem(mem: &str, known: Vec<&str>) -> CliError {
-    CliError::new(
-        ExitKind::NotFound,
-        "MEM_NOT_FOUND",
-        format!("mem `{mem}` is not mounted in this workspace"),
-    )
-    .with_details(serde_json::json!({ "mem": mem, "known_mems": known }))
 }
 
 /// A mem whose anchors sidecar could not be read this pass.

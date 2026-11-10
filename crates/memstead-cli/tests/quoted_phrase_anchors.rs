@@ -277,7 +277,7 @@ fn the_roster_lists_one_mems_anchors_and_narrows_by_grain() {
         .args(["anchors", "--mem", "nope", "--quiet"])
         .assert()
         .code(3)
-        .stderr(predicates::str::contains("MEM_NOT_FOUND"));
+        .stderr(predicates::str::contains("UNKNOWN_MEM"));
     // An unknown grain refuses with the allowed set.
     memstead()
         .current_dir(ws.path())

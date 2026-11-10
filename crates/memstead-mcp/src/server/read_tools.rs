@@ -80,7 +80,7 @@ impl McpServer {
                     );
                 }
                 return attach_drift_to_error(
-                    not_found_error(engine.store(), &id),
+                    engine_err_unified(engine.not_found(id.as_ref()), &engine),
                     &drift_warnings,
                     mem_changed_notices,
                 );

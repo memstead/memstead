@@ -2465,6 +2465,11 @@ impl EngineError {
             // The writable mems are the recovery set for a call that
             // writes; the text channel names them as the overview and
             // health refusals always did.
+            // The ids that look like the one asked for, inline, so a reader
+            // of the text channel alone can retry.
+            EngineError::NotFound { suggestions, .. } if !suggestions.is_empty() => {
+                format!("{self}. Did you mean: {}", suggestions.join(", "))
+            }
             EngineError::UnknownMem { writable_mems, .. } if !writable_mems.is_empty() => {
                 format!("{self}. Writable mems: [{}]", writable_mems.join(", "))
             }

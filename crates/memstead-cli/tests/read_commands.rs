@@ -376,7 +376,7 @@ fn entity_not_found_exit_code_3() {
         .assert()
         .failure()
         .code(3)
-        .stderr(contains("Entity not found"));
+        .stderr(contains("entity not found"));
 }
 
 /// A missing/unmatched `--mem` is a not-found condition — exit 3 on
@@ -428,7 +428,7 @@ fn entity_not_found_json_envelope() {
         envelope["message"]
             .as_str()
             .unwrap()
-            .contains("Entity not found")
+            .contains("entity not found")
     );
 }
 

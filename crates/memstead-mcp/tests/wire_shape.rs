@@ -300,12 +300,11 @@ fn full_memstead_entity_emits_typed_envelope_for_missing_id() {
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool("memstead_entity", json!({ "id": "specs--does-not-exist" }));
-    // The mapper formats with capital "Entity not found", unlike the
-    // engine's Display ("entity not found"). Recorded; not fixed here.
+    // The message is the engine's, the same on MCP and the CLI.
     assert_error_envelope(
         &result,
         "ENTITY_NOT_FOUND",
-        "Entity not found: specs--does-not-exist",
+        "entity not found: specs--does-not-exist",
     );
 }
 
@@ -937,7 +936,7 @@ fn full_memstead_delete_succeeds_and_entity_becomes_unreadable() {
     assert_error_envelope(
         &read,
         "ENTITY_NOT_FOUND",
-        &format!("Entity not found: {id}"),
+        &format!("entity not found: {id}"),
     );
 }
 
