@@ -301,8 +301,11 @@ impl Engine {
         // view (new mem included) so cross-mem references
         // targeting the new mem resolve correctly during this
         // load.
-        let read = collect_source_entries(&mount.mem, backend.as_ref())?;
-        self.load_warnings.extend(read.completed_commit);
+        let mut completed = None;
+        let read = collect_source_entries(&mount.mem, backend.as_ref(), &mut completed);
+        self.load_warnings.extend(completed);
+        let read = read?;
+        let incomplete = read.incomplete();
         let (entries, read_errors) = (read.entries, read.read_errors);
         if let Some(w) = crate::engine::boot::unbacked_mount_warning(
             &mount,
@@ -384,7 +387,7 @@ impl Engine {
             archive_checks: None,
             // Registered live and loaded in this call — never deferred.
             deferred: false,
-            reload_failure: None,
+            reload_failure: incomplete,
         });
 
         // Step 7: COW snapshot swap on mem_router, branched on the

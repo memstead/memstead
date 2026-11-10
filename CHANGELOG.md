@@ -95,7 +95,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   engine's own cut-off commit) had put there. A write whose mem could
   not be reloaded is now refused with the new code `MEM_VIEW_STALE`
   (`details.mem`, `details.detail`) and nothing is written; the next
-  operation retries the reload.
+  operation retries the reload. A reload that could not read every file
+  counts as failed and keeps the view it had: it used to load without
+  the unread entity, and a write of that id then landed over the file.
+  A mem that booted with an unreadable file serves what was read and
+  takes no write until a reload reads all of it.
 - **`memstead rename` rewrites a self-prefixed link inside a hierarchical
   mem.** Inside mem `library/a`, a body link spelled by the full id
   (`[[library/a--first-note]]`) is accepted at write (the resolver strips

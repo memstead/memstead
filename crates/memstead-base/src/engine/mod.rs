@@ -417,6 +417,11 @@ pub struct Engine {
     /// dropped scope clears again, so no operation inherits another's
     /// notice and nothing on the engine hands them out on demand.
     pending_mem_changed: Vec<crate::ops::MemChangedNotice>,
+    /// Warnings for interrupted commits a load completed, waiting for
+    /// the next operation's response. Kept apart from the load warnings
+    /// of the reload that did the completing: that reload can still
+    /// fail after it, and the completion happened all the same.
+    completed_commits: Vec<crate::ops::WarningHint>,
     /// The mount roster as last reconciled (`roster.rs`): `None` until the
     /// first observation captures the baseline.
     roster_fingerprint: Option<roster::RosterFingerprint>,

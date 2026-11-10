@@ -16,9 +16,10 @@
 //!
 //! Both lists are checked against the engine's source. A method added
 //! to the storage trait fails `the_method_list_is_the_trait` until it
-//! joins the matrix, and a function that takes the write lock or
-//! commits to a backend fails `the_verb_list_is_the_engines_writers`
-//! until it is a matrix verb or is named with the reason it is not one.
+//! joins the matrix and is classified as reading or writing, and a
+//! function of the engine that calls a writing method fails
+//! `the_verb_list_is_the_engines_writers` until it is part of a matrix
+//! verb or is named with the reason it is not.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -722,9 +723,59 @@ impl Verb {
     }
 }
 
-/// Every function of the engine that writes to a mem (it takes the
-/// per-mem write lock, or it commits to a backend), each with the
-/// matrix verbs that drive it.
+impl Method {
+    /// Does the method change what the backend holds or has staged?
+    /// Exhaustive, so a method added to the trait is classified before
+    /// this file compiles; the writers' check below scans for calls of
+    /// every method that answers yes.
+    fn mutates(self) -> bool {
+        match self {
+            Method::WriteEntity
+            | Method::DeleteEntity
+            | Method::MoveEntity
+            | Method::DiscardPending
+            | Method::Commit
+            | Method::CommitWithExpectedParent
+            | Method::StageProvenance
+            | Method::AppendProvenance
+            | Method::WriteMemConfig
+            | Method::WriteMemConfigCas
+            | Method::RecordPipelineEdit
+            | Method::WriteAnchorsSidecar
+            | Method::DeleteArtifacts => true,
+            // Completing a cut-off commit writes, and belongs to every
+            // load; a load is not a writer of its own.
+            Method::CompleteInterruptedCommit
+            | Method::ListEntities
+            | Method::ReadEntity
+            | Method::EntityExists
+            | Method::ReadAllEntities
+            | Method::StoragePresent
+            | Method::ReadProvenance
+            | Method::CurrentHead
+            | Method::WriteLockPath
+            | Method::ReadMemConfig
+            | Method::ReadArchiveProvenance
+            | Method::ReadArchiveChecks
+            | Method::ReadProposalRecord
+            | Method::ReadAnchorsSidecar => false,
+        }
+    }
+}
+
+/// The engine's own write helpers, which a writer may call instead of
+/// a storage method: the write lock and the one commit call.
+const WRITE_HELPERS: &[&str] = &[
+    "lock_mems_for_write",
+    "lock_mems_for_write_if",
+    "commit_staged",
+    "commit_staged_pinned",
+    "append_record",
+];
+
+/// Every function of the engine that writes to a mem (it calls a
+/// mutating storage method or one of the write helpers) and belongs to
+/// a mutation verb, with the matrix verbs that drive it.
 const VERBS: &[(&str, &[Verb])] = &[
     (
         "create_entity",
@@ -734,15 +785,44 @@ const VERBS: &[(&str, &[Verb])] = &[
         "commit_prepared_create",
         &[Verb::Create, Verb::CreateIntoDeferredMem],
     ),
+    (
+        "stage_prepared_create",
+        &[Verb::Create, Verb::CreateIntoDeferredMem, Verb::BatchCreate],
+    ),
     ("batch_create", &[Verb::BatchCreate]),
     ("update_entity", &[Verb::Update]),
     ("commit_prepared_update", &[Verb::Update]),
+    ("stage_prepared_update", &[Verb::Update, Verb::BatchUpdate]),
     ("batch_update", &[Verb::BatchUpdate]),
+    (
+        "stage_anchors_sidecar",
+        &[
+            Verb::Create,
+            Verb::BatchCreate,
+            Verb::Update,
+            Verb::BatchUpdate,
+        ],
+    ),
+    (
+        "stage_derivation_sidecar",
+        &[Verb::Create, Verb::Update, Verb::Relate],
+    ),
     ("delete_entity", &[Verb::Delete, Verb::DeleteStub]),
+    ("delete_entity_with_ctx", &[Verb::Delete, Verb::DeleteStub]),
+    ("stage_anchors_removal", &[Verb::Delete]),
     ("relate_entity", &[Verb::Relate]),
+    ("stage_prepared_relate", &[Verb::Relate, Verb::BatchRelate]),
     ("batch_relate", &[Verb::BatchRelate]),
     ("retype_entity", &[Verb::Retype]),
+    ("stage_proposal_marks_retype", &[Verb::Retype]),
     ("rename_entity", &[Verb::Rename]),
+    ("stage_anchors_rename", &[Verb::Rename]),
+    ("stage_proposal_marks_rename", &[Verb::Rename]),
+    ("stage_proposal_marks_rehash", &[Verb::Rename]),
+    (
+        "discard_all_pending",
+        &[Verb::BatchCreate, Verb::BatchUpdate, Verb::BatchRelate],
+    ),
 ];
 
 /// Functions that write to a mem and are not a mutation verb on one
@@ -758,6 +838,11 @@ const NOT_VERBS: &[(&str, &str)] = &[
     ("set_mem_internal", "the mem's config"),
     ("set_mem_process_mem", "the mem's config"),
     ("set_mem_sync_state", "the mem's config"),
+    ("write_mem_config_merged", "the mem's config"),
+    (
+        "bump_backend_schema_pin",
+        "the mem's config: the schema pin",
+    ),
     (
         "set_review_mark",
         "a review mark is a provenance line of its own, with no entity write",
@@ -771,10 +856,18 @@ const NOT_VERBS: &[(&str, &str)] = &[
         "the verify pass's observation record on the anchors sidecar, not an entity verb",
     ),
     (
+        "record_pipeline_edit_provenance",
+        "the provenance mirror of a pipeline-config edit, not an entity write",
+    ),
+    (
         "refresh_derivation_baseline_on_noop",
         "a relate that finds its edge present and refreshes a derivation baseline: it needs a \
          schema that declares a derivation relation, which no built-in schema does; it commits \
          through the verbs' one commit call",
+    ),
+    (
+        "stage_anchors_replace",
+        "the merge of a proposal replaces an entity's anchors; no verb does",
     ),
     (
         "publish_checks",
@@ -793,7 +886,10 @@ const NOT_VERBS: &[(&str, &str)] = &[
         "the merge of a proposal, an operation over several commits",
     ),
     ("retarget_fork_tree", "the fork of a mem"),
+    ("fork_mem", "the fork of a mem"),
     ("create_mem", "the creation of a mem"),
+    ("delete_mem", "the deletion of a mem"),
+    ("rename_mem", "the renaming of a mem"),
 ];
 
 fn all_verbs() -> Vec<Verb> {
@@ -807,10 +903,10 @@ fn all_verbs() -> Vec<Verb> {
 }
 
 /// The matrix's verb list is the engine's list of writers. Read from
-/// the engine's source: every function that takes the per-mem write
-/// lock or commits to a backend is either driven by a matrix verb or
-/// named above with the reason it is not one, so a write path added
-/// later fails here until it is placed.
+/// the engine's source: every function that calls a mutating method of
+/// the storage trait, or one of the engine's write helpers, is either
+/// part of a matrix verb or named above with the reason it is not, so
+/// a write path added later fails here until it is placed.
 #[test]
 fn the_verb_list_is_the_engines_writers() {
     /// The name a line declares, if it declares a function.
@@ -830,30 +926,21 @@ fn the_verb_list_is_the_engines_writers() {
         (!name.is_empty()).then_some(name)
     }
 
-    /// Does the line take the write lock or commit to a backend? A
-    /// backend commit passes its subject by reference, which tells it
-    /// from the search index's argument-less `commit()`.
-    fn writes(line: &str, next: Option<&str>) -> bool {
-        if [
-            "lock_mems_for_write(",
-            "lock_mems_for_write_if(",
-            "commit_staged(",
-            "commit_staged_pinned(",
-            "commit_with_expected_parent(",
-        ]
-        .iter()
-        .any(|call| line.contains(call))
-        {
-            return true;
-        }
-        match line.find(".commit(") {
-            Some(at) => {
-                let after = line[at + ".commit(".len()..].trim_start();
-                after.starts_with('&')
-                    || (after.is_empty() && next.is_some_and(|n| n.trim_start().starts_with('&')))
+    /// Does the line call a mutating storage method or a write helper?
+    fn writes(line: &str) -> bool {
+        let method_call = Method::ALL.iter().filter(|m| m.mutates()).any(|m| {
+            match line.find(&format!(".{}(", m.name())) {
+                // The search index's argument-less `commit()` is its
+                // own and no backend's.
+                Some(at) if *m == Method::Commit => !line[at..].starts_with(".commit()"),
+                Some(_) => true,
+                None => false,
             }
-            None => false,
-        }
+        });
+        method_call
+            || WRITE_HELPERS
+                .iter()
+                .any(|helper| line.contains(&format!("{helper}(")))
     }
 
     fn scan(dir: &Path, found: &mut BTreeSet<String>) {
@@ -877,22 +964,35 @@ fn the_verb_list_is_the_engines_writers() {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();
-            // Inline test modules sit at the end of a file.
-            let text = match text.find("#[cfg(test)]\nmod tests {") {
-                Some(at) => &text[..at],
-                None => &text,
-            };
             let lines: Vec<&str> = text.lines().collect();
             let mut current: Option<String> = None;
+            let mut next_is_a_test = false;
             for (i, line) in lines.iter().enumerate() {
-                if line.trim_start().starts_with("//") {
+                let trimmed = line.trim();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                // An inline test module runs to the end of its file.
+                if trimmed == "#[cfg(test)]"
+                    && lines.get(i + 1).is_some_and(|next| {
+                        let next = next.trim();
+                        next.contains("mod ") && next.ends_with('{')
+                    })
+                {
+                    break;
+                }
+                if trimmed == "#[test]" {
+                    next_is_a_test = true;
                     continue;
                 }
                 if let Some(name) = declared_fn(line) {
-                    current = Some(name);
+                    // A test calls verbs; it is not a writer of the
+                    // engine.
+                    current = (!next_is_a_test).then_some(name);
+                    next_is_a_test = false;
+                    continue;
                 }
-                if writes(line, lines.get(i + 1).copied())
-                    && declared_fn(line).is_none()
+                if writes(line)
                     && let Some(name) = &current
                 {
                     found.insert(name.clone());
@@ -1386,6 +1486,40 @@ fn a_failed_commit_is_not_recorded_as_the_engines_own_write() {
             view(&engine, true),
             view(&ws.fresh_engine(Peer::Absent), true),
             "{kind:?}: the engine's view differs from a fresh load"
+        );
+    }
+}
+
+/// A drift probe that fails is not "no drift". A sibling has written to
+/// the mem, this engine's probe before its own write fails, and the
+/// write carries the hash of the view from before the sibling's write:
+/// it must get the honest hash mismatch, not land over the sibling's
+/// write.
+#[test]
+fn a_failed_drift_probe_does_not_let_a_write_land_on_a_stale_view() {
+    for kind in [Kind::Folder, Kind::GitBranch] {
+        let ws = Workspace::template(kind);
+        let (mut engine, faults, _backend) = ws.faulted_engine(Peer::Absent);
+        let stale = update_args(&engine, "alpha", "this engine's rewrite");
+
+        run(Verb::Update, &mut ws.fresh_engine(Peer::Absent)).expect("the sibling's write lands");
+        let after_sibling = view(&ws.fresh_engine(Peer::Absent), true);
+
+        faults.arm(Method::CurrentHead, 1);
+        let err = engine
+            .update_entity(stale, Actor::Cli, None, None)
+            .expect_err("a write from the view before the sibling's write must not land");
+        assert!(faults.fired(), "{kind:?}: the probe was not faulted");
+        assert_eq!(err.code(), "HASH_MISMATCH", "{kind:?}: {err}");
+        assert_eq!(
+            view(&ws.fresh_engine(Peer::Absent), true),
+            after_sibling,
+            "{kind:?}: the refused write changed storage"
+        );
+        assert_eq!(
+            view(&engine, true),
+            after_sibling,
+            "{kind:?}: the engine's view is not level with storage"
         );
     }
 }

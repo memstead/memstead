@@ -201,6 +201,7 @@ impl Engine {
         // needs the mem triggers [`Engine::ensure_mems_loaded`].
         let mut deferred_idx: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
+        let mut incomplete: Vec<(usize, String)> = Vec::new();
         for (m_idx, m) in mounted.iter().enumerate() {
             // An archive mount whose file is gone is the missing-storage
             // case before anything else: its pin may live only inside the
@@ -417,28 +418,36 @@ impl Engine {
                 continue;
             }
 
-            let (entries, read_errors) =
-                match collect_source_entries(&m.mount.mem, m.backend.as_ref()) {
-                    Ok(read) => {
-                        load_warnings.extend(read.completed_commit);
-                        (read.entries, read.read_errors)
+            let mut completed = None;
+            let read = collect_source_entries(&m.mount.mem, m.backend.as_ref(), &mut completed);
+            load_warnings.extend(completed);
+            let (entries, read_errors) = match read {
+                Ok(read) => {
+                    // Boot serves what could be read (one unreadable
+                    // file must not take a whole mem out of reach);
+                    // the mem takes no write until a reload reads
+                    // all of it.
+                    if let Some(reason) = read.incomplete() {
+                        incomplete.push((m_idx, reason));
                     }
-                    Err(e) => {
-                        // Backend read failure: quarantine this mem, serve
-                        // the rest. An archive whose file is gone reads as
-                        // the missing-storage case, with its own repair.
-                        let (reason_code, reason_message) =
-                            instantiate_failure_reason(&m.mount, e.code(), e.to_string());
-                        quarantined.push(crate::engine::QuarantinedMem {
-                            mount: m.mount.clone(),
-                            reason_code,
-                            reason_message,
-                        });
-                        quarantined_idx.insert(m_idx);
-                        schemas.remove(&m.mount.mem);
-                        continue;
-                    }
-                };
+                    (read.entries, read.read_errors)
+                }
+                Err(e) => {
+                    // Backend read failure: quarantine this mem, serve
+                    // the rest. An archive whose file is gone reads as
+                    // the missing-storage case, with its own repair.
+                    let (reason_code, reason_message) =
+                        instantiate_failure_reason(&m.mount, e.code(), e.to_string());
+                    quarantined.push(crate::engine::QuarantinedMem {
+                        mount: m.mount.clone(),
+                        reason_code,
+                        reason_message,
+                    });
+                    quarantined_idx.insert(m_idx);
+                    schemas.remove(&m.mount.mem);
+                    continue;
+                }
+            };
             // Storage that is GONE quarantines rather than serving an empty
             // graph (04/05). "Configured but cannot serve" is exactly what
             // quarantine already means, its three sibling causes already
@@ -524,6 +533,9 @@ impl Engine {
         // renumbers the vector.
         for idx in &deferred_idx {
             mounted[*idx].deferred = true;
+        }
+        for (idx, reason) in incomplete {
+            mounted[idx].reload_failure = Some(reason);
         }
 
         // Drop quarantined mounts from the serving roster: a
@@ -625,6 +637,7 @@ impl Engine {
                 crate::engine::events::SubscriberRegistry::new(),
             )),
             pending_mem_changed: Vec::new(),
+            completed_commits: Vec::new(),
             roster_fingerprint: None,
             roster_subscribers: Arc::new(std::sync::Mutex::new((0, Vec::new()))),
             recently_unmounted: std::collections::HashSet::new(),
@@ -1129,7 +1142,25 @@ pub(super) fn unbacked_mount_warning(
 pub(super) struct SourceRead {
     pub(super) entries: Vec<SourceEntry>,
     pub(super) read_errors: Vec<SourceReadError>,
-    pub(super) completed_commit: Option<WarningHint>,
+    /// Files storage listed and could not deliver (an IO failure, not a
+    /// file that reads and does not decode). A view built without them
+    /// is incomplete in a way nothing in it shows: the entity is simply
+    /// absent, and a write of that id would land over the unread file.
+    pub(super) unread: Vec<String>,
+}
+
+impl SourceRead {
+    /// Why a view built from this read must take no write, if it must
+    /// not.
+    pub(super) fn incomplete(&self) -> Option<String> {
+        (!self.unread.is_empty()).then(|| {
+            format!(
+                "{} file(s) could not be read from storage: {}",
+                self.unread.len(),
+                self.unread.join(", ")
+            )
+        })
+    }
 }
 
 /// Read every entity of `mem` for a load. The one funnel boot, reload
@@ -1137,11 +1168,16 @@ pub(super) struct SourceRead {
 /// read cannot be left out by one of them: a commit that was decided
 /// and cut off is completed before a byte is read, and a mem is never
 /// loaded with part of a commit visible.
+///
+/// `completed` receives the warning for an interrupted commit this call
+/// completed, as soon as it is completed: the read that follows can
+/// still fail, and the completion happened all the same.
 pub(super) fn collect_source_entries(
     mem: &str,
     backend: &dyn MemBackend,
+    completed: &mut Option<WarningHint>,
 ) -> Result<SourceRead, EngineError> {
-    let completed_commit = backend.complete_interrupted_commit()?.map(|commit| {
+    *completed = backend.complete_interrupted_commit()?.map(|commit| {
         WarningHint::InterruptedCommitCompleted {
             mem: mem.to_string(),
             files: commit.files,
@@ -1155,6 +1191,7 @@ pub(super) fn collect_source_entries(
     let reads = backend.read_all_entities()?;
     let mut entries: Vec<SourceEntry> = Vec::with_capacity(reads.len());
     let mut errors: Vec<SourceReadError> = Vec::new();
+    let mut unread: Vec<String> = Vec::new();
     for (path, read) in reads {
         match read {
             Ok(bytes) => match String::from_utf8(bytes) {
@@ -1168,16 +1205,19 @@ pub(super) fn collect_source_entries(
                     error: std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
                 }),
             },
-            Err(e) => errors.push(SourceReadError {
-                source_path: path,
-                error: std::io::Error::other(e.to_string()),
-            }),
+            Err(e) => {
+                unread.push(path.to_string_lossy().into_owned());
+                errors.push(SourceReadError {
+                    source_path: path,
+                    error: std::io::Error::other(e.to_string()),
+                });
+            }
         }
     }
     Ok(SourceRead {
         entries,
         read_errors: errors,
-        completed_commit,
+        unread,
     })
 }
 

@@ -385,9 +385,29 @@ impl Engine {
 
         // Walk the backend; surface read-time errors instead of
         // mutating the store on a failed reload.
+        let mut completed_commit = None;
+        let read = collect_source_entries(
+            mem,
+            self.mounts[mount_idx].backend.as_ref(),
+            &mut completed_commit,
+        );
+        // Reported on the next response whatever becomes of this reload.
+        self.completed_commits.extend(completed_commit.clone());
+        let read = read?;
+        // A reload replaces a whole view with what it reads. A file that
+        // could not be read would leave its entity out of the new view
+        // with nothing to show for it, and a write of that id would then
+        // land over the file. The view in place is behind and whole;
+        // keep it and report the reload as failed.
+        if let Some(reason) = read.incomplete() {
+            return Err(EngineError::Mem(format!(
+                "reload of mem `{mem}` is incomplete: {reason}"
+            )));
+        }
+        // Everything was read: the view this reload builds is level
+        // with storage, whoever asked for it.
+        self.mounts[mount_idx].reload_failure = None;
         let backend = self.mounts[mount_idx].backend.as_ref();
-        let read = collect_source_entries(mem, backend)?;
-        let completed_commit = read.completed_commit;
         let (entries, read_errors) = (read.entries, read.read_errors);
         // The unbacked-mount probe rides the reload like the other
         // load-time warnings: a branch that appeared (or vanished) since

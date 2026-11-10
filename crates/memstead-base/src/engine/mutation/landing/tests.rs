@@ -157,7 +157,7 @@ fn run(
                 (relate_args("gamma", "alpha"), None),
                 (relate_args("gamma", "beta"), None),
             ];
-            engine.batch_relate(relates, actor, client, false)?.warnings
+            applied(engine.batch_relate(relates, actor, client, false)?)?
         }
         "retype" => {
             let args = RetypeEntityArgs {
@@ -186,17 +186,34 @@ fn run(
                 (empty_create_args(MEM, "Delta"), None),
                 (empty_create_args(MEM, "Epsilon"), None),
             ];
-            engine.batch_create(creates, actor, client, false)?.warnings
+            applied(engine.batch_create(creates, actor, client, false)?)?
         }
         "batch_update" => {
             let updates = vec![
                 (update_args(engine, "alpha", "batch purpose"), None),
                 (update_args(engine, "gamma", "batch purpose"), None),
             ];
-            engine.batch_update(updates, actor, client, false)?.warnings
+            applied(engine.batch_update(updates, actor, client, false)?)?
         }
         other => unreachable!("unknown verb {other}"),
     })
+}
+
+/// A batch reports a refusal in its receipt, not as an error: read a
+/// receipt that did not apply as the refusal it is.
+fn applied(
+    result: crate::ops::BatchResult,
+) -> Result<Vec<crate::ops::WarningHint>, crate::EngineError> {
+    if result.applied {
+        return Ok(result.warnings);
+    }
+    Err(crate::EngineError::Mem(
+        result
+            .results
+            .iter()
+            .find_map(|entry| entry.error.as_ref().map(|e| e.code.clone()))
+            .unwrap_or_else(|| "BATCH_NOT_APPLIED".to_string()),
+    ))
 }
 
 /// The engine's view of the mem: every entity with its hash and its
@@ -710,4 +727,181 @@ fn an_unfinished_commit_is_finished_before_the_next_write_lands() {
             );
         }
     }
+}
+
+/// One failing storage step in the reload before the next operation,
+/// at every step in turn, after a sibling's write and after a commit of
+/// this engine that is applied but not finished. Whatever the step, the
+/// next operation either lands on a view that is level with storage or
+/// is refused with storage untouched; no entity goes missing from the
+/// view, nothing on disk is overwritten, and a commit the reload
+/// finished is reported by the time the view is level.
+#[test]
+fn a_fault_in_the_next_operations_reload_loses_neither_a_write_nor_a_report() {
+    let template = seeded();
+
+    // How many steps the unfinished-commit scenario's update takes.
+    let probe_dir = TempDir::new().unwrap();
+    copy_dir(template.path(), probe_dir.path());
+    let io = FaultIo::new();
+    let mut probe = faulted_engine(probe_dir.path(), &io);
+    io.reset();
+    run("update", &mut probe).unwrap();
+    let last_step = io.op_count() - 1;
+
+    for unfinished_commit in [false, true] {
+        for next in ALL_VERBS {
+            for failing_step in 0..10 {
+                let label = format!(
+                    "unfinished commit: {unfinished_commit}, next: {next}, step {failing_step}"
+                );
+                let dir = TempDir::new().unwrap();
+                copy_dir(template.path(), dir.path());
+                let io = FaultIo::new();
+                let mut engine = faulted_engine(dir.path(), &io);
+                if unfinished_commit {
+                    io.reset();
+                    io.arm_fail_from(last_step);
+                    let err = run("update", &mut engine).expect_err("the removal sync is owed");
+                    assert_eq!(err.code(), "COMMIT_NOT_APPLIED", "{label}");
+                } else {
+                    run("update", &mut engine_over(dir.path())).unwrap();
+                }
+
+                io.reset();
+                io.arm_fail_at(failing_step);
+                let before = view(&engine_over(dir.path()), true);
+                let outcome = run(next, &mut engine);
+                io.reset();
+                let mut reported: Vec<String> = Vec::new();
+                match &outcome {
+                    Ok(warnings) => {
+                        reported.extend(warnings.iter().map(|w| w.code().to_string()));
+                        assert_eq!(
+                            view(&engine, true),
+                            view(&engine_over(dir.path()), true),
+                            "{label}: the write landed and the engine's view differs from a \
+                             fresh load"
+                        );
+                    }
+                    Err(_) => assert_eq!(
+                        view(&engine_over(dir.path()), true),
+                        before,
+                        "{label}: a refused call changed storage"
+                    ),
+                }
+                // The first update is still on disk, whatever came next.
+                let on_disk = std::fs::read_to_string(dir.path().join("alpha.md")).unwrap();
+                if !(outcome.is_ok() && *next == "batch_update") {
+                    assert!(
+                        on_disk.contains("rewritten purpose"),
+                        "{label}: the first write was overwritten"
+                    );
+                }
+
+                reported.extend(
+                    engine
+                        .reload_if_stale(Some(MEM))
+                        .iter()
+                        .map(|w| w.code().to_string()),
+                );
+                assert_eq!(
+                    view(&engine, true),
+                    view(&engine_over(dir.path()), true),
+                    "{label}: after the next operation the engine's view differs from a \
+                     fresh load"
+                );
+                // The report rides the response of the operation whose
+                // reload finished the commit. When that operation then
+                // fails for a reason of its own, its response carries
+                // the error; the report stands among the load warnings.
+                if unfinished_commit {
+                    let standing = engine
+                        .load_warnings()
+                        .iter()
+                        .any(|w| w.code() == "INTERRUPTED_COMMIT_COMPLETED");
+                    assert!(
+                        standing,
+                        "{label}: the finished commit is not among the load warnings"
+                    );
+                    assert!(
+                        outcome.is_err()
+                            || reported.iter().any(|c| c == "INTERRUPTED_COMMIT_COMPLETED"),
+                        "{label}: the finished commit was never reported: {reported:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A mem that boots with a file it could not read serves what it read
+/// and takes no write: the unread entity is missing from the view with
+/// nothing to show for it. The reload before the next write either
+/// reads the whole mem, and the write lands on a view level with
+/// storage, or fails again, and the write is refused with nothing
+/// written.
+#[test]
+fn a_mem_that_booted_without_a_file_takes_no_write_until_it_is_whole() {
+    let template = seeded();
+    let whole = view(&engine_over(template.path()), true);
+    let (actor, client) = cli_actor();
+
+    let (mut partial_boots, mut refused_stale) = (0, 0);
+    for boot_step in 0..12 {
+        for reload_step in 0..12 {
+            let dir = TempDir::new().unwrap();
+            copy_dir(template.path(), dir.path());
+            let io = FaultIo::fail_at(boot_step);
+            let mut engine = faulted_engine(dir.path(), &io);
+            // A step that fails the listing quarantines the mem at boot
+            // (it serves nothing and takes no write); a step past the
+            // last read changes nothing. The steps between cost the
+            // view one entity.
+            let booted = view(&engine, true);
+            if booted == whole || !booted.keys().any(|k| k.starts_with(MEM)) {
+                break;
+            }
+            if reload_step == 0 {
+                partial_boots += 1;
+            }
+            let label = format!("boot step {boot_step}, reload step {reload_step}");
+
+            io.reset();
+            io.arm_fail_at(reload_step);
+            let outcome =
+                engine.create_entity(empty_create_args(MEM, "Delta"), actor, Some(&client), None);
+            io.reset();
+            match outcome {
+                Ok(_) => assert_eq!(
+                    view(&engine, true),
+                    view(&engine_over(dir.path()), true),
+                    "{label}: the write landed and the engine's view differs from a fresh load"
+                ),
+                Err(e) => {
+                    if e.code() == "MEM_VIEW_STALE" {
+                        refused_stale += 1;
+                    }
+                    assert_eq!(
+                        view(&engine_over(dir.path()), true),
+                        whole,
+                        "{label}: a refused write changed storage ({e})"
+                    );
+                }
+            }
+
+            // Storage delivers: the next operation sees the whole mem.
+            engine.reload_if_stale(Some(MEM));
+            assert_eq!(
+                view(&engine, true),
+                view(&engine_over(dir.path()), true),
+                "{label}"
+            );
+        }
+    }
+    assert!(partial_boots > 0, "no boot step cost the view an entity");
+    assert!(
+        refused_stale > 0,
+        "no reload step left the view incomplete for the write"
+    );
 }

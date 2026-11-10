@@ -252,9 +252,10 @@ pub trait MemBackend: Send + Sync {
     /// default.
     ///
     /// Returning `Err` is reserved for backend-internal failures
-    /// (refdb hiccup, archive read failure, etc.); the engine logs
-    /// the error and treats it as a transient None — drift detection
-    /// is best-effort and never blocks the read it accompanies.
+    /// (refdb hiccup, archive read failure, etc.). A failed probe never
+    /// fails the read it accompanies, and it is never taken for "no
+    /// drift" either: the engine reloads the mem, and a write waits
+    /// until a reload has succeeded.
     fn current_head(&self) -> Result<Option<String>, BackendError> {
         Ok(None)
     }

@@ -64,8 +64,11 @@ impl Engine {
     /// - cached `None` + on-disk `Some(new)` → silently capture the
     ///   first observed head as the baseline (no warning — there's
     ///   no prior in-memory snapshot to be stale against).
-    /// - cached / on-disk match, on-disk `None` (folder, archive,
-    ///   refdb hiccup), or `current_head` errors → no-op.
+    /// - cached / on-disk match, or on-disk `None` (a backend without a
+    ///   head) → no-op.
+    /// - `current_head` errors, or the mem's last reload failed or was
+    ///   incomplete → reload the mem whatever the head says; until a
+    ///   reload succeeds the mem takes no write.
     ///
     /// Reload errors are warn-logged and the affected mem is
     /// skipped — the caller's response is still served from the (now
@@ -138,29 +141,47 @@ impl Engine {
         }
 
         // Phase 2 — probe every candidate's current head via the
-        // backend. Errors collapse to None so a transient backend
-        // hiccup doesn't surface as a warning; the next operation
-        // retries.
-        let probes: Vec<(String, Option<String>, Option<String>)> = candidates
+        // backend. A probe error surfaces no warning; it marks the
+        // mem's view as unsure, which a reload below settles.
+        let mut probe_failures: Vec<(String, String)> = Vec::new();
+        let probes: Vec<(String, Option<String>, Option<String>, bool)> = candidates
             .iter()
             .filter_map(|name| {
                 let m = self.mounts.iter().find(|m| &m.mount.mem == name)?;
-                let new_head = m.backend.current_head().ok().flatten();
+                // A probe that fails says nothing about drift, and
+                // "nothing" must not read as "none": a write that
+                // followed would be computed from a view a sibling may
+                // have moved past. The mem is marked like one whose
+                // reload failed, and reloaded below regardless of what
+                // the head says.
+                let new_head = match m.backend.current_head() {
+                    Ok(head) => head,
+                    Err(e) => {
+                        probe_failures.push((name.clone(), e.to_string()));
+                        None
+                    }
+                };
                 let cached = m.last_known_head.clone();
-                Some((name.clone(), cached, new_head))
+                let unsure = m.reload_failure.is_some()
+                    || probe_failures.last().is_some_and(|(n, _)| n == name);
+                Some((name.clone(), cached, new_head, unsure))
             })
             .collect();
+        for (name, error) in probe_failures {
+            if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == name) {
+                state.reload_failure = Some(format!("the drift probe failed: {error}"));
+            }
+        }
 
         // Phase 3 — act on each probe. The drift case is the only
         // one that calls `reload_one_mem`; every other arm just
         // (for first-observation) captures the baseline head silently.
-        for (name, cached, new_head) in probes {
+        for (name, cached, new_head, view_incomplete) in probes {
             match (cached, new_head.clone()) {
                 (Some(old), Some(new)) if old != new => {
                     match self.reload_one_mem(&name) {
                         Ok(report) => {
                             let new = self.head_after_reload(&name, new);
-                            warnings.extend(self.interrupted_commit_notice(&name));
                             warnings.push(crate::ops::WarningHint::MemReloaded {
                                 mem: name.clone(),
                                 old_head: old.clone(),
@@ -216,7 +237,6 @@ impl Engine {
                 (None, Some(new)) => match self.reload_one_mem(&name) {
                     Ok(report) => {
                         let new = self.head_after_reload(&name, new);
-                        warnings.extend(self.interrupted_commit_notice(&name));
                         warnings.push(crate::ops::WarningHint::MemReloaded {
                             mem: name.clone(),
                             old_head: String::new(),
@@ -259,10 +279,39 @@ impl Engine {
                         );
                     }
                 },
+                // No drift, and the view in place is known to be
+                // incomplete or behind (its last load could not read
+                // everything): try again, so the mem takes writes again
+                // once storage delivers.
+                _ if view_incomplete => {
+                    if let Err(e) = self.reload_one_mem(&name) {
+                        self.note_reload_failure(&name, &e);
+                    }
+                }
                 _ => {}
             }
         }
 
+        // A commit that a load completed is reported by an operation,
+        // whatever became of that load after it. It waits while its
+        // mem's view is still behind (the operation at hand will be
+        // refused or serve the stale view), and it keeps a standing copy
+        // among the load warnings.
+        let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.completed_commits)
+            .into_iter()
+            .partition(|w| {
+                !self.mounts.iter().any(|m| {
+                    m.reload_failure.is_some() && w.source_mem() == Some(m.mount.mem.as_str())
+                })
+            });
+        self.completed_commits = waiting;
+        for warning in ready {
+            let text = warning.to_string();
+            if !self.load_warnings.iter().any(|w| w.to_string() == text) {
+                self.load_warnings.push(warning.clone());
+            }
+            warnings.push(warning);
+        }
         warnings
     }
 
@@ -286,20 +335,6 @@ impl Engine {
             .find(|m| m.mount.mem == mem)
             .and_then(|m| m.backend.current_head().ok().flatten())
             .unwrap_or(probed)
-    }
-
-    /// The warning of the reload that just ran for `mem`, when that
-    /// reload completed an interrupted commit: the operation that
-    /// triggered the reload carries it, beside the standing copy among
-    /// the load warnings.
-    fn interrupted_commit_notice(&self, mem: &str) -> Vec<crate::ops::WarningHint> {
-        self.load_warnings
-            .iter()
-            .filter(|w| {
-                matches!(w, crate::ops::WarningHint::InterruptedCommitCompleted { mem: m, .. } if m == mem)
-            })
-            .cloned()
-            .collect()
     }
 
     /// Mark `mount_idx`'s on-disk head as advanced by *this* engine's
