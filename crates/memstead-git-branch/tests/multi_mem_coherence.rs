@@ -3664,3 +3664,59 @@ fn mem_delete_guard_sees_a_reference_a_second_process_added() {
         "a mem delete's referrer guard ran on a view from before any lock and missed a committed reference: {failures:?}"
     );
 }
+
+// ---------------------------------------------------------------------
+// A lock that cannot be taken
+// ---------------------------------------------------------------------
+
+/// The deleting engine mounts `right` read-only and cannot open
+/// `right`'s lock file. Its guard reads `right`, and another process
+/// may be writing it; without the lock the delete cannot hold it
+/// still. It is refused and names the mem, and nothing is deleted.
+#[cfg(unix)]
+#[test]
+fn a_delete_is_refused_when_it_cannot_take_the_lock_of_a_mem_it_reads() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for pair in PAIRS {
+        let context = format!("{pair:?}");
+        let ws = Workspace::new(pair);
+        let lock_path = ws.lock_path(RIGHT);
+        std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        std::fs::write(&lock_path, b"").unwrap();
+        std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // A user that opens the file all the same (root) has no such
+        // fault to meet.
+        let openable = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .is_ok();
+
+        let mut read_only_right = ws.clone();
+        read_only_right.mounts[1].capability = MountCapability::ReadOnly;
+        let mut engine = read_only_right.engine();
+        let args = delete_args(&engine, &id(LEFT, "alpha"));
+        let deleted = report(
+            engine
+                .delete_entity(args, Actor::Cli, None, None)
+                .map(|o| o.warnings),
+        );
+        std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        if openable {
+            continue;
+        }
+
+        assert_eq!(
+            deleted,
+            Err("MEM_VIEW_STALE".to_string()),
+            "{context}: the delete does not run on a mem it could not lock"
+        );
+        assert!(
+            ws.engine()
+                .get_entity(&id(LEFT, "alpha"))
+                .is_some_and(|e| !e.stub),
+            "{context}: nothing was deleted"
+        );
+    }
+}

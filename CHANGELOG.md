@@ -218,7 +218,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   readable. A write that locks the whole workspace also takes the lock
   of a mem this engine mounts read-only when it has one, because
   another process may mount the same storage writable: a reference it
-  adds while a delete or a retype is under way now waits for it.
+  adds while a delete or a retype is under way now waits for it. When
+  that lock cannot be taken (the lock file cannot be opened), the
+  operation is refused with `MEM_VIEW_STALE` naming the mem: it would
+  read a mem it cannot hold still.
 
 - **A create or an update takes the lock of every mem it refers to.**
   A delete, a rename or a retype holds the locks of the mems that

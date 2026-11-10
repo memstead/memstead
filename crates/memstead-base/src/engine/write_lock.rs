@@ -531,18 +531,21 @@ impl Engine {
         &self,
         mems: &[S],
     ) -> Result<MemWriteGuard, EngineError> {
-        let mut locks: Vec<(Held, bool)> = mems
+        let mut locks: Vec<(Held, Option<String>)> = mems
             .iter()
             .filter_map(|name| {
                 let m = self.mounts.iter().find(|m| m.mount.mem == name.as_ref())?;
-                let writable = m.mount.capability == crate::workspace::MountCapability::Write;
+                // Named for the refusal below when it is mounted
+                // read-only.
+                let read_only = (m.mount.capability != crate::workspace::MountCapability::Write)
+                    .then(|| m.mount.mem.clone());
                 Some((
                     Held {
                         path: m.backend.write_lock_path(),
                         backend: Arc::clone(&m.backend),
                         strays: Arc::clone(&m.strays),
                     },
-                    writable,
+                    read_only,
                 ))
             })
             .collect();
@@ -551,16 +554,26 @@ impl Engine {
         locks.sort_by(|a, b| a.0.path.cmp(&b.0.path));
         locks.dedup_by(|a, b| backend_key(&a.0.backend) == backend_key(&b.0.backend));
         let mut guard = MemWriteGuard::empty();
-        for (held, writable) in locks {
+        for (held, read_only) in locks {
             if let Some(path) = &held.path {
-                match path_lock::acquire(path) {
-                    Ok(()) => {}
+                match (path_lock::acquire(path), read_only) {
+                    (Ok(()), _) => {}
                     // A mem mounted read-only may sit where this
-                    // process cannot create a lock file. It is locked
-                    // when it can be; no write of this engine goes
-                    // there either way.
-                    Err(_) if !writable => continue,
-                    Err(e) => return Err(EngineError::Backend(BackendError::Io(e))),
+                    // process cannot open its lock file. The operation
+                    // asked for the lock because it reads the mem and
+                    // needs it to hold still, and another process may
+                    // write it; without the lock that cannot be had,
+                    // so the operation is refused and names the mem.
+                    (Err(e), Some(mem)) => {
+                        return Err(EngineError::StaleView {
+                            mem,
+                            detail: format!(
+                                "the mem's write lock cannot be taken here ({e}), so its content \
+                                 cannot be held still for an operation that reads it"
+                            ),
+                        });
+                    }
+                    (Err(e), None) => return Err(EngineError::Backend(BackendError::Io(e))),
                 }
             }
             guard.cover(held);
