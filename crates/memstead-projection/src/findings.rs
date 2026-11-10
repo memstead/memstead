@@ -610,6 +610,49 @@ pub enum FindingsError {
     },
 }
 
+/// A verify whose measurement completed and whose findings stand, but
+/// whose follow-up write failed: the run's answer is already reported, and
+/// this says the run could not finish recording it.
+#[derive(Debug, thiserror::Error)]
+pub enum VerifyRecordError {
+    #[error(
+        "verify completed and findings were recorded for `{binding}` (the report is above), but \
+         recording the prepared-hash backfill onto the anchors sidecar failed: {error}"
+    )]
+    Backfill {
+        binding: String,
+        error: memstead_base::engine::EngineError,
+    },
+    #[error(
+        "verify completed and findings were recorded for `{binding}` (the report is above), but \
+         writing the `#verified` baseline failed: {error} — the next run will treat this binding \
+         as never verified"
+    )]
+    Baseline {
+        binding: String,
+        error: memstead_base::engine::EngineError,
+    },
+}
+
+impl VerifyRecordError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            VerifyRecordError::Backfill { .. } => "PROJECTION_VERIFY_BACKFILL_FAILED",
+            VerifyRecordError::Baseline { .. } => "PROJECTION_VERIFY_BASELINE_FAILED",
+        }
+    }
+
+    pub fn details(&self) -> serde_json::Value {
+        match self {
+            VerifyRecordError::Backfill { binding, error }
+            | VerifyRecordError::Baseline { binding, error } => serde_json::json!({
+                "binding": binding,
+                "error": error.to_string(),
+            }),
+        }
+    }
+}
+
 impl FindingsError {
     /// The wire code of a verify refusal.
     pub fn code(&self) -> &'static str {

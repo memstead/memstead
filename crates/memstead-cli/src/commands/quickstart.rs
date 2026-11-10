@@ -606,13 +606,9 @@ impl GuidedPlan {
             )),
             additional_deny_paths: Vec::new(),
         });
+        // The binding store's own typed refusal.
         write_binding(workspace_root, &mem, &stem, &scaffolded.binding).map_err(|e| {
-            CliError::new(
-                ExitKind::Generic,
-                "PROJECTION_INIT_FAILED",
-                format!("could not scaffold binding `{mem}/{stem}`: {e}"),
-            )
-            .with_details(json!({ "binding": format!("{mem}/{stem}"), "error": e.to_string() }))
+            crate::setup::boot_error_to_cli(workspace_root, memstead_base::BootError::Store(e))
         })?;
         let mut warnings: Vec<String> = scaffolded.warnings;
         warnings.extend(layout_warning);

@@ -874,15 +874,6 @@ fn intent_refusal(binding_id: &str, findings: &[IntentFinding]) -> CliError {
     }
 }
 
-fn init_write_error(binding_id: &str, err: impl std::fmt::Display) -> CliError {
-    CliError::new(
-        ExitKind::Generic,
-        "PROJECTION_INIT_FAILED",
-        format!("could not scaffold binding `{binding_id}`: {err}"),
-    )
-    .with_details(json!({ "binding": binding_id, "error": err.to_string() }))
-}
-
 fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
         workspace_not_initialised_error(
@@ -1020,7 +1011,7 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     cli_engine
         .base_mut()
         .write_projection_record(&mem, &stem, &binding, "add", args.note.as_deref())
-        .map_err(|e| init_write_error(&binding_id, e))?;
+        .map_err(|e| edit_refused(&binding_id, e))?;
 
     let created = vec![format!(".memstead/projections/{mem}/{stem}.json")];
 
@@ -1092,19 +1083,6 @@ fn invalid_binding_id(binding_id: &str) -> CliError {
     .with_details(json!({ "binding": binding_id }))
 }
 
-/// Map a store IO/parse failure while enabling to a typed CLI error. The
-/// missing-binding case is handled separately (existence pre-check →
-/// `PROJECTION_NOT_FOUND`); this covers a present-but-unreadable/unparseable
-/// binding file and write failures.
-fn enable_failed(binding_id: &str, err: impl std::fmt::Display) -> CliError {
-    CliError::new(
-        ExitKind::Generic,
-        "PROJECTION_ENABLE_FAILED",
-        format!("could not enable operation on binding `{binding_id}`: {err}"),
-    )
-    .with_details(json!({ "binding": binding_id, "error": err.to_string() }))
-}
-
 fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
     let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
         workspace_not_initialised_error(
@@ -1154,8 +1132,8 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
     {
         return Err(binding_miss_error(&configs, &binding_id).into());
     }
-    let mut binding =
-        read_binding(&root, &mem, &stem).map_err(|e| enable_failed(&binding_id, e))?;
+    let mut binding = read_binding(&root, &mem, &stem)
+        .map_err(|e| crate::setup::boot_error_to_cli(&root, memstead_base::BootError::Store(e)))?;
 
     // Already present? Refuse without a partial write. Every operation block is
     // optional now (D1/AC4), so `build` is enableable too (the remedy a
@@ -1236,7 +1214,7 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
     ctx.cli_engine_scoped(&mem)?
         .base_mut()
         .write_projection_record(&mem, &stem, &binding, "update", args.note.as_deref())
-        .map_err(|e| enable_failed(&binding_id, e))?;
+        .map_err(|e| edit_refused(&binding_id, e))?;
 
     let mut operations: Vec<&str> = Vec::new();
     if binding.operations.build.is_some() {
@@ -2116,29 +2094,31 @@ remove the sidecar and re-run",
     // A failed write is an operational failure with its own code, never the
     // findings exit: the measurement's own answer is already on stdout above,
     // and this says the run could not finish recording it.
-    if let Err(e) = backfill_result {
-        return Err(CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_VERIFY_BACKFILL_FAILED",
-            format!(
-                "verify completed and findings were recorded for `{binding_id}` (the report is \
-above), but recording the prepared-hash backfill onto the anchors sidecar failed: {e}"
-            ),
+    // The run completed and its findings stand; a failed follow-up write is
+    // the engine's own refusal, never the findings exit.
+    let follow_up = backfill_result
+        .err()
+        .map(
+            |error| memstead_projection::findings::VerifyRecordError::Backfill {
+                binding: binding_id.clone(),
+                error,
+            },
         )
-        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
-        .into());
-    }
-    if let Err(e) = baseline_result {
-        return Err(CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_VERIFY_BASELINE_FAILED",
-            format!(
-                "verify completed and findings were recorded for `{binding_id}` (the report is \
-above), but writing the `#verified` baseline failed: {e} — the next run will treat this \
-binding as never verified"
-            ),
-        )
-        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
+        .or_else(|| {
+            baseline_result.err().map(|error| {
+                memstead_projection::findings::VerifyRecordError::Baseline {
+                    binding: binding_id.clone(),
+                    error,
+                }
+            })
+        });
+    if let Some(e) = follow_up {
+        return Err(CliError {
+            kind: ExitKind::Generic,
+            code: e.code(),
+            details: Some(e.details()),
+            message: e.to_string(),
+        }
         .into());
     }
 

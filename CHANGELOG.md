@@ -142,6 +142,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the engine's, naming no command; each command's own advice follows the
   message), and `TARGET_NOT_EMPTY` carries `details.path` and
   `details.found` on both, `details.retry` where quickstart has one.
+  `PROJECTION_INIT_FAILED` and `PROJECTION_ENABLE_FAILED` retire: a
+  failed binding write under `projection init`, `projection enable` or
+  quickstart's guided mode reports the binding store's or the binding
+  edit's own code (`PROJECTION_EDIT_FAILED`, `PROJECTION_EDIT_REFUSED`
+  with the refusals, the store's `WORKSPACE_STORE_*`), as `projection
+  edit` does for the same write.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype
