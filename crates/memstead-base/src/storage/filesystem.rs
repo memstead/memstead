@@ -550,6 +550,66 @@ impl FilesystemBackend {
         }))
     }
 
+    /// Land one set of file operations and provenance records behind
+    /// one commit point. The body of [`MemBackend::commit`], and of the
+    /// standalone provenance append, which is a commit of ledger lines
+    /// and no file.
+    fn commit_staged_set(
+        &self,
+        ops: HashMap<String, PendingState>,
+        records: &[Provenance],
+    ) -> Result<CommitId, BackendError> {
+        // An earlier commit whose record removal is not synced yet is
+        // not finished either: a load makes it good and reports it.
+        if self.owed().is_some() {
+            return Err(BackendError::Other(
+                "an earlier commit of this mem is applied but not yet durable; \
+                 the mem must be loaded, which finishes it, before it is written again"
+                    .to_string(),
+            ));
+        }
+
+        // A record already on disk is an earlier commit, decided and
+        // not yet applied. Putting a new record over it would lose it.
+        match self.io.exists(&self.record_path()) {
+            Ok(false) => {}
+            Ok(true) => {
+                return Err(BackendError::Other(
+                    "an earlier commit of this mem is decided and not yet applied; \
+                     the mem must be loaded, which completes it, before it is written again"
+                        .to_string(),
+                ));
+            }
+            Err(e) => return Err(BackendError::Io(e)),
+        }
+
+        // Path order, so the commit's steps and its record read the
+        // same on every run.
+        let mut ops: Vec<(String, PendingState)> = ops.into_iter().collect();
+        ops.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Failure handling is spelled out here rather than left to a
+        // drop guard: a process that dies mid-commit runs none of it,
+        // and the recovery at load must cope with exactly that.
+        let mut attempt = Attempt::default();
+        let record = match self.prepare_commit(&ops, records, &mut attempt) {
+            Ok(record) => record,
+            Err(e) => {
+                self.abandon(&attempt);
+                return Err(BackendError::Io(e));
+            }
+        };
+
+        // The record is in place: the commit is decided. From here an
+        // error leaves a commit that the next load completes, never a
+        // failed write.
+        let not_applied = |e: std::io::Error| BackendError::CommitNotApplied {
+            detail: e.to_string(),
+        };
+        self.apply_record(&record).map_err(not_applied)?;
+        Ok(make_commit_id())
+    }
+
     /// Read the current bytes at `rel_key` from the buffered op log if
     /// present, otherwise from disk. Used by `move_entity` to resolve
     /// the source content.
@@ -823,55 +883,7 @@ impl crate::backend::MemBackend for FilesystemBackend {
             return Ok(make_commit_id());
         }
 
-        // An earlier commit whose record removal is not synced yet is
-        // not finished either: a load makes it good and reports it.
-        if self.owed().is_some() {
-            return Err(BackendError::Other(
-                "an earlier commit of this mem is applied but not yet durable; \
-                 the mem must be loaded, which finishes it, before it is written again"
-                    .to_string(),
-            ));
-        }
-
-        // A record already on disk is an earlier commit, decided and
-        // not yet applied. Putting a new record over it would lose it.
-        match self.io.exists(&self.record_path()) {
-            Ok(false) => {}
-            Ok(true) => {
-                return Err(BackendError::Other(
-                    "an earlier commit of this mem is decided and not yet applied; \
-                     the mem must be loaded, which completes it, before it is written again"
-                        .to_string(),
-                ));
-            }
-            Err(e) => return Err(BackendError::Io(e)),
-        }
-
-        // Path order, so the commit's steps and its record read the
-        // same on every run.
-        let mut ops: Vec<(String, PendingState)> = staged.ops.into_iter().collect();
-        ops.sort_by(|a, b| a.0.cmp(&b.0));
-
-        // Failure handling is spelled out here rather than left to a
-        // drop guard: a process that dies mid-commit runs none of it,
-        // and the recovery at load must cope with exactly that.
-        let mut attempt = Attempt::default();
-        let record = match self.prepare_commit(&ops, &staged.records, &mut attempt) {
-            Ok(record) => record,
-            Err(e) => {
-                self.abandon(&attempt);
-                return Err(BackendError::Io(e));
-            }
-        };
-
-        // The record is in place: the commit is decided. From here an
-        // error leaves a commit that the next load completes, never a
-        // failed write.
-        let not_applied = |e: std::io::Error| BackendError::CommitNotApplied {
-            detail: e.to_string(),
-        };
-        self.apply_record(&record).map_err(not_applied)?;
-        Ok(make_commit_id())
+        self.commit_staged_set(staged.ops, &staged.records)
     }
 
     /// Recovery writes, so it excludes a live writer first: the record
@@ -1052,20 +1064,14 @@ impl crate::backend::MemBackend for FilesystemBackend {
     }
 
     fn append_provenance(&self, record: &Provenance) -> Result<(), BackendError> {
-        let log = changelog_path(&self.root);
-        let existed = log.exists();
-        // Monotonic variant: the last-line `ts` is this backend's
-        // drift cursor (`current_head()`), so same-millisecond lines
-        // must still advance it — see `append_change_monotonic`.
-        changelog::append_change_monotonic(&self.root, &change_entry(record), record.timestamp)
-            .map_err(|e| BackendError::Other(format!("changelog append: {e}")))?;
-        // A line reported as written must survive a power loss, and a
-        // ledger this call created needs its name synced too.
-        self.io.sync_file(&log).map_err(BackendError::Io)?;
-        if !existed && let Some(parent) = log.parent() {
-            self.io.sync_dir(parent).map_err(BackendError::Io)?;
-        }
-        Ok(())
+        // A record on its own is a commit of one ledger line and no
+        // file, behind the same commit point as any other: it is
+        // durable when this returns, and a failure after the commit
+        // point is the decided-and-not-applied condition, never a line
+        // that is in the ledger while the caller is told it failed.
+        // Writes staged for a later commit are not touched.
+        self.commit_staged_set(HashMap::new(), std::slice::from_ref(record))
+            .map(|_| ())
     }
 
     fn read_provenance(&self, cursor: Option<&str>) -> Result<Vec<Provenance>, BackendError> {

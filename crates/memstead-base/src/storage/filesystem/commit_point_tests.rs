@@ -870,3 +870,48 @@ fn a_commit_whose_removal_sync_is_owed_stays_unfinished_until_completed() {
     );
     assert_eq!(backend.complete_interrupted_commit().unwrap(), None);
 }
+
+/// A provenance record appended on its own is a commit of one ledger
+/// line: an IO error before its commit point leaves the ledger as it
+/// was, an IO error after it is the decided-and-not-applied condition,
+/// and the completion lands the line exactly once.
+#[test]
+fn a_record_appended_on_its_own_goes_through_the_commit_point() {
+    let line = || record(at(1_700_000_030), ProvenanceKind::Delete, "m--stub");
+    let ledger_of = |root: &Path| std::fs::read(changelog_path(root)).unwrap_or_default();
+
+    let tmp = TempDir::new().unwrap();
+    seed(tmp.path());
+    let before = ledger_of(tmp.path());
+    let io = FaultIo::new();
+    let backend = FilesystemBackend::with_io(tmp.path().to_path_buf(), io.clone());
+    backend.append_provenance(&line()).unwrap();
+    let after = ledger_of(tmp.path());
+    assert_ne!(after, before);
+    let point = io.commit_point().expect("the append has a commit point");
+    let steps = io.op_count();
+
+    for n in 0..steps {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path());
+        let backend = FilesystemBackend::with_io(tmp.path().to_path_buf(), FaultIo::fail_at(n));
+        let result = backend.append_provenance(&line());
+        if n <= point {
+            assert!(
+                matches!(result, Err(BackendError::Io(_))),
+                "step {n}: {result:?}"
+            );
+            assert_eq!(ledger_of(tmp.path()), before, "step {n}");
+            assert!(temp_files(&tree(tmp.path())).is_empty(), "step {n}");
+        } else {
+            assert!(
+                matches!(result, Err(BackendError::CommitNotApplied { .. })),
+                "step {n}: {result:?}"
+            );
+            backend
+                .complete_interrupted_commit()
+                .unwrap_or_else(|e| panic!("step {n}: {e}"));
+            assert_eq!(ledger_of(tmp.path()), after, "step {n}");
+        }
+    }
+}

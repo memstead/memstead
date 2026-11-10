@@ -212,7 +212,7 @@ impl Engine {
         let write_id = if entity_is_stub {
             // No file, so no commit: the record of the drop is the
             // whole write and is appended on its own.
-            backend.append_provenance(&record)?;
+            warnings.extend(self.append_record(mount_idx, &record)?.warnings);
             String::new()
         } else {
             backend.delete_entity(Path::new(&file_path))?;

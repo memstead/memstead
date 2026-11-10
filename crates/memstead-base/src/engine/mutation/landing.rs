@@ -104,6 +104,39 @@ impl Engine {
             .try_for_each(|record| backend.stage_provenance(record));
         let committed = staged
             .and_then(|()| backend.commit_with_expected_parent(subject, ctx, expected_parent));
+        self.settle(mount_idx, committed)
+    }
+
+    /// Append `record` on its own, for a mutation that writes no file
+    /// (the delete of a stub). The record is the whole write, and it
+    /// gets the same three reports a commit gets.
+    pub(in crate::engine) fn append_record(
+        &self,
+        mount_idx: usize,
+        record: &Provenance,
+    ) -> Result<Landed, EngineError> {
+        let state = &self.mounts[mount_idx];
+        if let Some(reason) = &state.reload_failure {
+            return Err(EngineError::StaleView {
+                mem: state.mount.mem.clone(),
+                detail: reason.clone(),
+            });
+        }
+        let appended = state
+            .backend
+            .append_provenance(record)
+            .map(|()| String::new());
+        self.settle(mount_idx, appended)
+    }
+
+    /// The report for what a commit call came to.
+    fn settle(
+        &self,
+        mount_idx: usize,
+        committed: Result<String, BackendError>,
+    ) -> Result<Landed, EngineError> {
+        let state = &self.mounts[mount_idx];
+        let backend = state.backend.as_ref();
         match committed {
             Ok(write_id) => Ok(Landed {
                 write_id,
