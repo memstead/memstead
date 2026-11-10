@@ -208,7 +208,10 @@ impl Engine {
                     crate::engine::write_lock::referred_mems(
                         &named_mem,
                         declared.iter().map(|r| &r.target),
-                        texts.iter().map(String::as_str),
+                        texts
+                            .iter()
+                            .map(String::as_str)
+                            .chain(declared.iter().filter_map(|r| r.description.as_deref())),
                     )
                 },
                 |engine| {

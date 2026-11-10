@@ -237,6 +237,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   mem's lock. Writes that refer to other mems therefore wait for a
   write in progress there.
 
+- **A resolved conflict's links are edges, and a mem's deletion and a
+  fork lock the workspace.** A conflict resolution wrote the chosen
+  side as it stood. A link in its body got no relationship row, so it
+  was no edge, and a later delete of the link's target did not see it
+  and went through. The resolved entity now gets the rows any engine
+  write gives its body links (a side whose links cannot be validated
+  is still written as it stands, so a resolution stays possible).
+  `mem delete` evaluated `MEM_HAS_INCOMING_REFS` on the view the engine
+  had loaded earlier and took no lock: a reference a second process
+  had added was not seen, and the deletion did not wait for a write in
+  progress. It now holds every mem's write lock and reloads every mem
+  first; the mem being deleted may itself be unreadable. A fork copied
+  its source's entities, references included, beside an entity rename
+  or delete under way in another mem; it now waits for it. A link in a
+  relation's description counts among the mems a write refers to.
+
 - **A delete and a retype check their referrers against every mem as it
   is now.** Both verbs guard on the edges that point at the entity, and
   such an edge can come from any mem. They reloaded their own mem only

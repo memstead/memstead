@@ -371,7 +371,14 @@ pub fn delete_mem(
     // the delete would destroy a mem an eager boot refuses to (the
     // third lazy-mount grade demonstrated exactly that). Full load
     // before any destructive adjudication.
-    engine.ensure_mems_loaded(None);
+    // So it holds every mem's write lock and reads every mem under
+    // it, as an entity delete does: a reference a second process added
+    // is in the view the guard reads, and no write lands in the mem
+    // while it is being removed. The mem itself may be unreadable;
+    // that is often why it is deleted.
+    let (_write_lock, _reloaded) = engine
+        .lock_workspace_for_mem_operation(&params.name)
+        .map_err(FullEngineError::from)?;
 
     // ---- Step 1: resolve name ----
     if !engine.mem_router().is_writable(&params.name) {

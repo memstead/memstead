@@ -29,10 +29,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use indexmap::IndexMap;
 use memstead_base::backend::MemBackend;
 use memstead_base::engine::conflicts::ConflictSide;
+use memstead_base::mem_management::{MemDeleteParams, delete_mem};
 use memstead_base::vcs::Actor;
 use memstead_base::{
     CreateEntityArgs, DeleteEntityArgs, Engine, EngineError, EntityId, Mount, MountCapability,
@@ -3128,4 +3130,537 @@ fn a_delete_whose_engine_mounts_the_peer_read_only() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+// ---------------------------------------------------------------------
+// Conflict resolution: the references the chosen side holds
+// ---------------------------------------------------------------------
+
+fn conflict_alpha_with_link(ws: &Workspace) {
+    let MountStorage::Folder { path } = &ws.mounts[0].storage else {
+        panic!()
+    };
+    std::fs::write(
+        path.join("alpha.md"),
+        "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n\n\
+         # Alpha\n\n## Identity\n\n<<<<<<< HEAD\nours identity\n=======\ntheirs identity, see [[right--gamma]]\n\
+         >>>>>>> theirs\n\n## Purpose\n\nAlpha purpose\n",
+    )
+    .unwrap();
+}
+
+fn unconditional(target: &EntityId, purpose: &str) -> UpdateEntityArgs {
+    let mut sections = IndexMap::new();
+    sections.insert("purpose".to_string(), purpose.to_string());
+    UpdateEntityArgs {
+        id: target.clone(),
+        expected_hash: None,
+        sections,
+        append_sections: Default::default(),
+        patch_sections: Default::default(),
+        sections_unset: Vec::new(),
+        metadata: Default::default(),
+        metadata_unset: Vec::new(),
+        dry_run: false,
+        declare_relations: Vec::new(),
+        anchors: Vec::new(),
+        anchors_unset: Vec::new(),
+        relations_unset: Vec::new(),
+    }
+}
+
+#[test]
+fn update_while_resolution_held() {
+    let mut bad = Vec::new();
+    for pair in LEFT_IS_A_FOLDER {
+        for slug in ["beta", "alpha"] {
+            let ws = Workspace::new(pair);
+            conflict_alpha(&ws);
+            let alpha = id(LEFT, "alpha");
+            let target = id(LEFT, slug);
+            let (first, window, mut engine) = hold_at_commit_probing(
+                &ws,
+                &[LEFT],
+                {
+                    let target = target.clone();
+                    move |second, ready| {
+                        let args = unconditional(&target, "second writer was here");
+                        ready();
+                        report(
+                            second
+                                .update_entity(args, Actor::Cli, None, None)
+                                .map(|o| o.warnings),
+                        )
+                    }
+                },
+                |engine| {
+                    report(
+                        engine
+                            .resolve_merge_conflict(
+                                &alpha,
+                                ConflictSide::Ours,
+                                Actor::Cli,
+                                None,
+                                None,
+                            )
+                            .map(|o| o.warnings),
+                    )
+                },
+            );
+            let fresh = ws.engine();
+            let purpose = fresh
+                .get_entity(&target)
+                .and_then(|e| e.sections.get("purpose").cloned())
+                .unwrap_or_default();
+            let identity = fresh
+                .get_entity(&alpha)
+                .and_then(|e| e.sections.get("identity").cloned())
+                .unwrap_or_default();
+            engine.reload_if_stale(None);
+            let level = view(&engine) == view(&ws.engine());
+            let line = format!(
+                "-RES {pair:?} target={slug} first={first:?} locked={} second={:?} purpose={purpose:?} alpha.identity={identity:?} level={level}",
+                window.both_locked, window.second
+            );
+            eprintln!("{line}");
+            let lost = window.second.is_ok() && !purpose.contains("second writer was here");
+            if lost || !first.is_ok() || !identity.contains("ours") || !level {
+                bad.push(line);
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
+#[test]
+fn resolution_adds_link_vs_delete() {
+    let mut bad = Vec::new();
+    for pair in LEFT_IS_A_FOLDER {
+        // (a) delete of right--gamma held at its commit; the resolution that adds the link is the second writer
+        let ws = Workspace::new(pair);
+        conflict_alpha_with_link(&ws);
+        let alpha = id(LEFT, "alpha");
+        let gamma = id(RIGHT, "gamma");
+        let (first, window, mut engine) = hold_at_commit(
+            &ws,
+            {
+                let alpha = alpha.clone();
+                move |second, ready| {
+                    ready();
+                    let r = report(
+                        second
+                            .resolve_merge_conflict(
+                                &alpha,
+                                ConflictSide::Theirs,
+                                Actor::Cli,
+                                None,
+                                None,
+                            )
+                            .map(|o| o.warnings),
+                    );
+                    let real = second
+                        .get_entity(&id(RIGHT, "gamma"))
+                        .is_some_and(|e| !e.stub);
+                    (r, real)
+                }
+            },
+            |engine| {
+                let args = delete_args(engine, &gamma);
+                report(
+                    engine
+                        .delete_entity(args, Actor::Cli, None, None)
+                        .map(|o| o.warnings),
+                )
+            },
+        );
+        let fresh = ws.engine();
+        let real = fresh.get_entity(&gamma).is_some_and(|e| !e.stub);
+        let from: Vec<String> = fresh
+            .store()
+            .incoming(&gamma)
+            .iter()
+            .map(|e| e.from.to_string())
+            .collect();
+        engine.reload_if_stale(None);
+        let level = view(&engine) == view(&ws.engine());
+        let line = format!(
+            "-RESLINK(a) {pair:?} delete={first:?} both_locked={} second={:?} | fresh gamma real={real} incoming={from:?} level={level}",
+            window.both_locked, window.second
+        );
+        eprintln!("{line}");
+        let (added, target_real) = &window.second;
+        if !window.both_locked
+            || (!real && !from.is_empty() && added.is_ok() && *target_real)
+            || !level
+        {
+            bad.push(line);
+        }
+
+        // (b) the resolution held at its commit; the delete is the second writer
+        let ws = Workspace::new(pair);
+        conflict_alpha_with_link(&ws);
+        let (first, window, mut engine) = hold_at_commit(
+            &ws,
+            {
+                let gamma = gamma.clone();
+                move |second, ready| {
+                    let args = delete_args(second, &gamma);
+                    ready();
+                    report(
+                        second
+                            .delete_entity(args, Actor::Cli, None, None)
+                            .map(|o| o.warnings),
+                    )
+                }
+            },
+            |engine| {
+                report(
+                    engine
+                        .resolve_merge_conflict(
+                            &alpha,
+                            ConflictSide::Theirs,
+                            Actor::Cli,
+                            None,
+                            None,
+                        )
+                        .map(|o| o.warnings),
+                )
+            },
+        );
+        let fresh = ws.engine();
+        let real = fresh.get_entity(&gamma).is_some_and(|e| !e.stub);
+        let from: Vec<String> = fresh
+            .store()
+            .incoming(&gamma)
+            .iter()
+            .map(|e| e.from.to_string())
+            .collect();
+        engine.reload_if_stale(None);
+        let level = view(&engine) == view(&ws.engine());
+        let line = format!(
+            "-RESLINK(b) {pair:?} resolution={first:?} both_locked={} second(delete)={:?} | fresh gamma real={real} incoming={from:?} level={level}",
+            window.both_locked, window.second
+        );
+        eprintln!("{line}");
+        if (!real && !from.is_empty()) || !level {
+            bad.push(line);
+        }
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
+fn conflict_alpha_with(ws: &Workspace, row: bool) {
+    let MountStorage::Folder { path } = &ws.mounts[0].storage else {
+        panic!()
+    };
+    let tail = if row {
+        "\n## Relationships\n\n<<<<<<< HEAD\n=======\n- **USES**: [[right:gamma]]\n>>>>>>> theirs\n"
+    } else {
+        ""
+    };
+    let identity = if row {
+        "<<<<<<< HEAD\nours identity\n=======\ntheirs identity\n>>>>>>> theirs"
+    } else {
+        "<<<<<<< HEAD\nours identity\n=======\ntheirs identity, see [[right--gamma]]\n>>>>>>> theirs"
+    };
+    std::fs::write(
+        path.join("alpha.md"),
+        format!("---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n\n# Alpha\n\n## Identity\n\n{identity}\n\n## Purpose\n\nAlpha purpose\n{tail}"),
+    )
+    .unwrap();
+}
+
+fn stored_alpha(ws: &Workspace) -> String {
+    let MountStorage::Folder { path } = &ws.mounts[0].storage else {
+        panic!()
+    };
+    std::fs::read_to_string(path.join("alpha.md")).unwrap_or_default()
+}
+
+/// The second process resolves a conflict in `left--alpha` to the side that
+/// refers to `right--gamma`; then the first engine (loaded before) deletes
+/// `right--gamma`. And the same with the resolution held at its commit and
+/// the delete as the second writer.
+#[test]
+fn delete_guard_vs_reference_added_by_resolution() {
+    let mut bad = Vec::new();
+    for pair in LEFT_IS_A_FOLDER {
+        for row in [false, true] {
+            // order 1: resolution by a second process first, then the delete in an engine loaded before
+            let ws = Workspace::new(pair);
+            conflict_alpha_with(&ws, row);
+            let alpha = id(LEFT, "alpha");
+            let gamma = id(RIGHT, "gamma");
+            let mut first = ws.engine();
+            let resolved = {
+                let alpha = alpha.clone();
+                ws.second_writer(move |second| {
+                    report(
+                        second
+                            .resolve_merge_conflict(
+                                &alpha,
+                                ConflictSide::Theirs,
+                                Actor::Cli,
+                                None,
+                                None,
+                            )
+                            .map(|o| o.warnings),
+                    )
+                })
+                .join()
+                .unwrap()
+            };
+            let args = delete_args(&first, &gamma);
+            let deleted = report(
+                first
+                    .delete_entity(args, Actor::Cli, None, None)
+                    .map(|o| o.warnings),
+            );
+            let fresh = ws.engine();
+            let real = fresh.get_entity(&gamma).is_some_and(|e| !e.stub);
+            let stored = stored_alpha(&ws);
+            let refers = stored.contains("[[right--gamma]]") || stored.contains("[[right:gamma]]");
+            let line = format!(
+                "-GUARD order=resolve-then-delete {pair:?} row={row} resolved={resolved:?} delete={deleted:?} | gamma real={real} alpha.md refers to gamma={refers}"
+            );
+            eprintln!("{line}");
+            if resolved.is_ok() && !real && refers {
+                bad.push(line);
+            }
+
+            // order 2: the resolution held at its commit, the delete is the second writer
+            let ws = Workspace::new(pair);
+            conflict_alpha_with(&ws, row);
+            let (res, window, _engine) = hold_at_commit(
+                &ws,
+                {
+                    let gamma = gamma.clone();
+                    move |second, ready| {
+                        let args = delete_args(second, &gamma);
+                        ready();
+                        report(
+                            second
+                                .delete_entity(args, Actor::Cli, None, None)
+                                .map(|o| o.warnings),
+                        )
+                    }
+                },
+                |engine| {
+                    report(
+                        engine
+                            .resolve_merge_conflict(
+                                &alpha,
+                                ConflictSide::Theirs,
+                                Actor::Cli,
+                                None,
+                                None,
+                            )
+                            .map(|o| o.warnings),
+                    )
+                },
+            );
+            let fresh = ws.engine();
+            let real = fresh.get_entity(&gamma).is_some_and(|e| !e.stub);
+            let stored = stored_alpha(&ws);
+            let refers = stored.contains("[[right--gamma]]") || stored.contains("[[right:gamma]]");
+            let line = format!(
+                "-GUARD order=resolution-held {pair:?} row={row} resolution={res:?} both_locked={} delete={:?} | gamma real={real} alpha.md refers to gamma={refers}",
+                window.both_locked, window.second
+            );
+            eprintln!("{line}");
+            if res.is_ok() && !real && refers {
+                bad.push(line);
+            }
+        }
+    }
+    // control: the same body link written by an update is seen by the guard
+    let ws = Workspace::new((Kind::Folder, Kind::Folder));
+    let mut e = ws.engine();
+    let args = update_args(
+        &e,
+        &id(LEFT, "alpha"),
+        "Alpha purpose, see [[right--gamma]]",
+    );
+    let up = report(
+        e.update_entity(args, Actor::Cli, None, None)
+            .map(|o| o.warnings),
+    );
+    let args = delete_args(&e, &id(RIGHT, "gamma"));
+    let del = report(
+        e.delete_entity(args, Actor::Cli, None, None)
+            .map(|o| o.warnings),
+    );
+    eprintln!(
+        "-GUARD control: update adds the same body link: {up:?}; delete of the target: {del:?}"
+    );
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
+// ---------------------------------------------------------------------
+// Mem delete: its referrer guard and its lock
+// ---------------------------------------------------------------------
+
+fn hold_file(path: &Path) -> std::fs::File {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .unwrap();
+    f.lock().unwrap();
+    f
+}
+
+fn mem_delete_params(name: &str) -> MemDeleteParams {
+    MemDeleteParams {
+        name: name.to_string(),
+        delete_files: true,
+        note: None,
+        actor: Actor::Cli,
+        client: None,
+        operator_mode: true,
+        detach_incoming: false,
+    }
+}
+
+/// Control for the probe below: an entity delete waits while the lock
+/// of the mem is held from outside.
+#[test]
+fn control_entity_delete_waits_on_a_held_lock() {
+    for pair in PAIRS {
+        let ws = Workspace::new(pair);
+        let outside = hold_file(&ws.lock_path(LEFT));
+        let ws2 = ws.clone();
+        let t = std::thread::spawn(move || {
+            let mut engine = ws2.engine();
+            let args = delete_args(&engine, &id(LEFT, "alpha"));
+            engine
+                .delete_entity(args, Actor::Cli, None, None)
+                .map(|_| ())
+                .map_err(|e| e.code().to_string())
+        });
+        std::thread::sleep(Duration::from_millis(1500));
+        let finished_while_held = t.is_finished();
+        outside.unlock().unwrap();
+        drop(outside);
+        let r = t.join().unwrap();
+        eprintln!("CONTROL {pair:?}: finished_while_held={finished_while_held} result={r:?}");
+        assert!(!finished_while_held, "{pair:?}: entity delete waited");
+        assert_eq!(r, Ok(()));
+    }
+}
+
+/// A second process holds the write lock of `left` (it is in the middle
+/// of a write there). Does a mem delete of `left` wait?
+#[test]
+fn mem_delete_while_a_second_process_holds_the_mems_lock() {
+    let mut failures = Vec::new();
+    for pair in PAIRS {
+        let ws = Workspace::new(pair);
+        let lock = ws.lock_path(LEFT);
+        let outside = hold_file(&lock);
+        let ws2 = ws.clone();
+        let t = std::thread::spawn(move || {
+            let mut engine = ws2.engine();
+            delete_mem(&mut engine, mem_delete_params(LEFT))
+                .map(|r| (r.deleted_from_router, r.files_deleted))
+                .map_err(|e| format!("{e}"))
+        });
+        let start = Instant::now();
+        while !t.is_finished() && start.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let finished_while_held = t.is_finished();
+        // What storage holds while the lock is still held from outside.
+        let storage_gone = match &ws.mounts[0].storage {
+            MountStorage::Folder { path } => !path.join("alpha.md").exists() && !path.exists(),
+            MountStorage::GitBranch { .. } => instantiate_full_backend(&ws.mounts[0])
+                .map(|b| b.list_entities().map(|l| l.is_empty()).unwrap_or(true))
+                .unwrap_or(true),
+            _ => unreachable!(),
+        };
+        let still_held = !lock.exists() || !lock_is_free(&lock);
+        outside.unlock().unwrap();
+        drop(outside);
+        let r = t.join().unwrap();
+        eprintln!(
+            "MEMDELETE {pair:?}: finished_while_held={finished_while_held} \
+             storage_gone_while_held={storage_gone} lock_still_held_or_removed={still_held} result={r:?}"
+        );
+        if finished_while_held && storage_gone {
+            failures.push(format!("{pair:?}: {r:?}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "a mem delete removed the mem's storage while a second process held its write lock: {failures:?}"
+    );
+}
+
+/// A second process adds `right--delta USES left--alpha` and commits.
+/// The first engine, loaded before, deletes the mem `left`. Its
+/// incoming-reference guard has to see the reference.
+#[test]
+fn mem_delete_guard_sees_a_reference_a_second_process_added() {
+    let mut failures = Vec::new();
+    for pair in PAIRS {
+        // Control: a view loaded after the reference refuses.
+        let ws = Workspace::new(pair);
+        ws.engine()
+            .create_entity(
+                create_args(RIGHT, "Delta", &[id(LEFT, "alpha")]),
+                Actor::Cli,
+                None,
+                None,
+            )
+            .unwrap();
+        let control = delete_mem(&mut ws.engine(), mem_delete_params(LEFT))
+            .map(|_| ())
+            .map_err(|e| format!("{e}"));
+        eprintln!("GUARD control {pair:?}: {control:?}");
+        assert!(
+            control.is_err(),
+            "control: a current view refuses the mem delete"
+        );
+
+        let ws = Workspace::new(pair);
+        let mut first = ws.engine();
+        ws.engine()
+            .create_entity(
+                create_args(RIGHT, "Delta", &[id(LEFT, "alpha")]),
+                Actor::Cli,
+                None,
+                None,
+            )
+            .unwrap();
+        let r = delete_mem(&mut first, mem_delete_params(LEFT))
+            .map(|r| (r.deleted_from_router, r.files_deleted))
+            .map_err(|e| format!("{e}"));
+        // What storage holds now: right alone, loaded fresh.
+        let right_only = {
+            let mount = ws.mounts[1].clone();
+            let backend = instantiate_full_backend(&mount).unwrap();
+            Engine::from_mounts(vec![(mount, backend)]).unwrap()
+        };
+        let edges: Vec<String> = right_only
+            .store()
+            .outgoing(&id(RIGHT, "delta"))
+            .iter()
+            .map(|e| format!("{}>{}", e.rel_type, e.target))
+            .collect();
+        eprintln!(
+            "GUARD {pair:?}: mem delete on the older view = {r:?}; right--delta edges in storage = {edges:?}"
+        );
+        if r.is_ok() && edges.iter().any(|e| e.contains("left--alpha")) {
+            failures.push(format!(
+                "{pair:?}: deleted {r:?}, right--delta keeps {edges:?}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "a mem delete's referrer guard ran on a view from before any lock and missed a committed reference: {failures:?}"
+    );
 }

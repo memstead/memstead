@@ -203,9 +203,32 @@ impl Engine {
         Ok((guard, warnings))
     }
 
+    /// [`Self::lock_workspace_for_write_if`] for an operation on the
+    /// mem `subject` as a whole (its deletion): `subject` itself may be
+    /// unreadable or out of service, which is often why it is being
+    /// removed, and that does not refuse the operation. Every other
+    /// mem must be readable as for any verb that reads the workspace.
+    pub fn lock_workspace_for_mem_operation(
+        &mut self,
+        subject: &str,
+    ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
+        let mut warnings = self.roster_before_locking();
+        let (guard, reloaded) = self.lock_whole_workspace_except(true, Some(subject))?;
+        warnings.extend(reloaded);
+        Ok((guard, warnings))
+    }
+
     fn lock_whole_workspace(
         &mut self,
         writes: bool,
+    ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
+        self.lock_whole_workspace_except(writes, None)
+    }
+
+    fn lock_whole_workspace_except(
+        &mut self,
+        writes: bool,
+        tolerated: Option<&str>,
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
         // Every mount that has a write lock, the ones this engine mounts
         // read-only included: another process may mount the same
@@ -223,7 +246,11 @@ impl Engine {
                 .collect()
         })?;
         warnings.extend(self.reload_if_stale_content_only(None));
-        if let Some(stale) = self.mounts.iter().find(|m| m.reload_failure.is_some()) {
+        if let Some(stale) = self
+            .mounts
+            .iter()
+            .find(|m| m.reload_failure.is_some() && Some(m.mount.mem.as_str()) != tolerated)
+        {
             return Err(EngineError::StaleView {
                 mem: stale.mount.mem.clone(),
                 detail: stale.reload_failure.clone().unwrap_or_default(),
@@ -232,7 +259,11 @@ impl Engine {
         // A mem that is out of service is in no view at all: one whose
         // deferred load just failed under this lock, or one that never
         // attached. Its referrers are as unread as a stale mem's.
-        if let Some(out) = self.quarantined.first() {
+        if let Some(out) = self
+            .quarantined
+            .iter()
+            .find(|q| Some(q.mount.mem.as_str()) != tolerated)
+        {
             return Err(EngineError::StaleView {
                 mem: out.mount.mem.clone(),
                 detail: format!("the mem is out of service: {}", out.reason_code),
@@ -268,12 +299,21 @@ impl Engine {
         // it is then.
         for _ in 0..3 {
             let guard = self.lock_mems_for_write(&choose(self))?;
-            let changed = self.roster_warnings();
-            if changed.is_empty() {
+            // What counts is whether the mounts changed, not whether
+            // the reconcile had something to say: a mem that keeps
+            // failing to attach is reported every time and changes
+            // nothing.
+            let mounted = |engine: &Self| -> Vec<String> {
+                engine.mounts.iter().map(|m| m.mount.mem.clone()).collect()
+            };
+            let before = mounted(self);
+            let reported = self.roster_warnings();
+            if mounted(self) == before {
+                warnings.extend(reported);
                 return Ok((guard, warnings));
             }
             drop(guard);
-            warnings.extend(changed);
+            warnings.extend(reported);
         }
         Err(EngineError::Backend(BackendError::Other(
             "the workspace's mount roster changed each time this operation had taken its write \

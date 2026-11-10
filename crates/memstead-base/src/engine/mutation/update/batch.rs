@@ -111,7 +111,11 @@ impl Engine {
                         referred.extend(crate::engine::write_lock::referred_mems(
                             a.id.mem(),
                             a.declare_relations.iter().map(|r| &r.target),
-                            texts.iter().map(String::as_str),
+                            texts.iter().map(String::as_str).chain(
+                                a.declare_relations
+                                    .iter()
+                                    .filter_map(|r| r.description.as_deref()),
+                            ),
                         ));
                     }
                     referred.sort();

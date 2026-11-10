@@ -322,6 +322,24 @@ impl Engine {
             catch_all,
         )?;
 
+        // The chosen side is written as the engine writes any entity:
+        // a link in its body gets its relationship row. Without the row
+        // the link is no edge, and the guards that read edges (a
+        // delete's, a retype's) would not see what the resolved entity
+        // refers to. A side whose links the pass refuses is written as
+        // it stands: a resolution must stay possible.
+        let mut entity = parsed.entity;
+        let resolved = match crate::engine::mutation::synthesise_alias_relations(
+            self,
+            &std::collections::HashSet::new(),
+            &mut entity,
+        ) {
+            Ok(outcome) if !outcome.emitted.is_empty() => {
+                crate::engine::mutation::render_for_write(&entity, resolved_type.as_ref())?
+            }
+            _ => resolved,
+        };
+
         let backend = self.mounts[mount_idx].backend.as_ref();
         backend.write_entity(Path::new(&entry.relative_path), resolved.as_bytes())?;
         let ctx = self.commit_context(

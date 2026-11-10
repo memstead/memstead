@@ -238,6 +238,14 @@ pub fn fork_mem(
         params.note.clone(),
     );
 
+    // A fork copies entities with the references they hold, so it
+    // reads its source under every mem's write lock: an entity rename
+    // or a delete under way in another mem is finished first, and the
+    // copy carries the references as that verb left them.
+    let (_write_lock, _reloaded) = engine
+        .lock_workspace_for_write_if(true)
+        .map_err(FullEngineError::from)?;
+
     // ---- Step 1: the source's config bytes and the ref the fork starts from ----
     // Local and remote forms: the ref is the source's tip. Adopt: the
     // config is the local source's, the ref is the fetched fork branch,

@@ -129,10 +129,18 @@ impl Engine {
         let short = named_source.is_empty() || named_target.is_empty();
         let (_write_lock, reloaded) = {
             let (rel_type, adds) = (&args.rel_type, !args.remove);
+            // Both ends' mems, and a mem a link in the description names.
+            let mut locked = crate::engine::write_lock::referred_mems(
+                &named_source,
+                std::iter::empty(),
+                args.description.as_deref(),
+            );
+            locked.push(named_source.clone());
+            locked.push(named_target.clone());
             self.lock_for_verb(
                 !args.dry_run,
-                &[&named_source, &named_target],
-                &[&named_source],
+                &locked,
+                std::slice::from_ref(&named_source),
                 |engine| short || (adds && engine.rel_type_is_acyclic(&named_source, rel_type)),
             )?
         };
@@ -1127,7 +1135,15 @@ impl Engine {
         source_mems.dedup();
         let (_write_lock, drift_warnings) = {
             let items = &relates;
-            self.lock_for_verb(!dry_run, &touched_mems, &source_mems, |engine| {
+            let mut locked = touched_mems.clone();
+            for (a, _) in items {
+                locked.extend(crate::engine::write_lock::referred_mems(
+                    a.source.mem(),
+                    std::iter::empty(),
+                    a.description.as_deref(),
+                ));
+            }
+            self.lock_for_verb(!dry_run, &locked, &source_mems, |engine| {
                 items.iter().any(|(a, _)| {
                     a.source.mem().is_empty()
                         || a.target.mem().is_empty()

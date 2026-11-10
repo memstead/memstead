@@ -81,7 +81,10 @@ impl Engine {
                 locked.extend(crate::engine::write_lock::referred_mems(
                     &a.mem,
                     a.relations.iter().map(|r| &r.target),
-                    a.sections.values().map(String::as_str),
+                    a.sections
+                        .values()
+                        .map(String::as_str)
+                        .chain(a.relations.iter().filter_map(|r| r.description.as_deref())),
                 ));
             }
             self.lock_for_verb(!dry_run, &locked, &touched_mems, |engine| {

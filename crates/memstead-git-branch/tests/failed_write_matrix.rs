@@ -830,6 +830,8 @@ const WRITE_HELPERS: &[&str] = &[
     "lock_for_verb",
     "lock_for_verb_referring",
     "lock_whole_workspace",
+    "lock_whole_workspace_except",
+    "lock_workspace_for_mem_operation",
     "lock_on_a_settled_roster",
     "lock_workspace_for_write_if",
     "commit_staged",
@@ -991,6 +993,10 @@ const VERBS: &[(&str, &[Verb])] = &[
     // when a call names an entity by a bare slug or adds an edge on an
     // acyclic relationship.
     ("engine/write_lock.rs::lock_whole_workspace", EVERY_VERB),
+    (
+        "engine/write_lock.rs::lock_whole_workspace_except",
+        EVERY_VERB,
+    ),
     // The locks every verb takes are held over a roster that did not
     // change while it waited for them.
     ("engine/write_lock.rs::lock_on_a_settled_roster", EVERY_VERB),
@@ -1107,6 +1113,10 @@ const NOT_VERBS: &[(&str, &str)] = &[
     (
         "engine/mutation/mem_sweep.rs::rewrite_mem_references",
         "the sweep after a mem is renamed, an operation over several mems",
+    ),
+    (
+        "engine/write_lock.rs::lock_workspace_for_mem_operation",
+        "the lock of a mem's deletion, an operation on a mem as a whole",
     ),
     (
         "engine/mutation/mem_sweep.rs::land_mem_sweep",

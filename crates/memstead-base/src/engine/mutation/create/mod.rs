@@ -96,7 +96,10 @@ impl Engine {
             let mut locked = crate::engine::write_lock::referred_mems(
                 mem,
                 relations.iter().map(|r| &r.target),
-                args.sections.values().map(String::as_str),
+                args.sections
+                    .values()
+                    .map(String::as_str)
+                    .chain(relations.iter().filter_map(|r| r.description.as_deref())),
             );
             locked.push(mem.clone());
             self.lock_for_verb(
