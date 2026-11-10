@@ -207,11 +207,18 @@ impl Engine {
         &mut self,
         writes: bool,
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
+        // Every mount that has a write lock, the ones this engine mounts
+        // read-only included: another process may mount the same
+        // storage writable, and a guard that reads it needs its writer
+        // to wait like any other.
         let (guard, mut warnings) = self.lock_on_a_settled_roster(writes, |engine| {
             engine
                 .mounts
                 .iter()
-                .filter(|m| m.mount.capability == crate::workspace::MountCapability::Write)
+                .filter(|m| {
+                    m.mount.capability == crate::workspace::MountCapability::Write
+                        || m.backend.write_lock_path().is_some()
+                })
                 .map(|m| m.mount.mem.clone())
                 .collect()
         })?;
@@ -310,9 +317,17 @@ impl Engine {
 
     /// Whether an edge of `rel_type` out of `mem` is guarded against
     /// cycles: the relationship is acyclic, or it is in an acyclic set.
+    ///
+    /// The name is judged in the form the verb will write it in: a
+    /// caller may send `depends_on`, and the lock is decided before the
+    /// verb normalises its arguments. A name that does not normalise is
+    /// refused by the verb, and no edge comes of it.
     pub(in crate::engine) fn rel_type_is_acyclic(&self, mem: &str, rel_type: &str) -> bool {
+        let Ok(rel_type) = crate::entity::id::validate_rel_type(rel_type) else {
+            return false;
+        };
         self.schemas.get(mem).is_some_and(|s| {
-            s.relationship_acyclic(rel_type) || s.acyclic_set_containing(rel_type).is_some()
+            s.relationship_acyclic(&rel_type) || s.acyclic_set_containing(&rel_type).is_some()
         })
     }
 
@@ -419,25 +434,37 @@ impl Engine {
         &self,
         mems: &[S],
     ) -> Result<MemWriteGuard, EngineError> {
-        let mut locks: Vec<Held> = mems
+        let mut locks: Vec<(Held, bool)> = mems
             .iter()
             .filter_map(|name| {
                 let m = self.mounts.iter().find(|m| m.mount.mem == name.as_ref())?;
-                Some(Held {
-                    path: m.backend.write_lock_path(),
-                    backend: Arc::clone(&m.backend),
-                    strays: Arc::clone(&m.strays),
-                })
+                let writable = m.mount.capability == crate::workspace::MountCapability::Write;
+                Some((
+                    Held {
+                        path: m.backend.write_lock_path(),
+                        backend: Arc::clone(&m.backend),
+                        strays: Arc::clone(&m.strays),
+                    },
+                    writable,
+                ))
             })
             .collect();
         // Sorted by lock path so two multi-mem writers take their locks
         // in one order; pathless backends take no lock and sort first.
-        locks.sort_by(|a, b| a.path.cmp(&b.path));
-        locks.dedup_by(|a, b| backend_key(&a.backend) == backend_key(&b.backend));
+        locks.sort_by(|a, b| a.0.path.cmp(&b.0.path));
+        locks.dedup_by(|a, b| backend_key(&a.0.backend) == backend_key(&b.0.backend));
         let mut guard = MemWriteGuard::empty();
-        for held in locks {
+        for (held, writable) in locks {
             if let Some(path) = &held.path {
-                path_lock::acquire(path).map_err(|e| EngineError::Backend(BackendError::Io(e)))?;
+                match path_lock::acquire(path) {
+                    Ok(()) => {}
+                    // A mem mounted read-only may sit where this
+                    // process cannot create a lock file. It is locked
+                    // when it can be; no write of this engine goes
+                    // there either way.
+                    Err(_) if !writable => continue,
+                    Err(e) => return Err(EngineError::Backend(BackendError::Io(e))),
+                }
             }
             guard.cover(held);
         }

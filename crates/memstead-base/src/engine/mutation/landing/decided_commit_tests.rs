@@ -59,9 +59,7 @@ impl TwoFaults {
         let index = self.count.fetch_add(1, Ordering::SeqCst);
         if self.fail.lock().unwrap().contains(&index) {
             self.struck.fetch_add(1, Ordering::SeqCst);
-            return Err(io::Error::other(format!(
-                "grader: injected error at step {index}"
-            )));
+            return Err(io::Error::other(format!("injected error at step {index}")));
         }
         Ok(())
     }
@@ -440,6 +438,291 @@ fn a_decided_commit_that_cannot_be_completed_at_once_is_reported_as_landed() {
             fresh_view.into_keys().collect::<Vec<_>>(),
             undisturbed,
             "{op:?}: the operation is complete in storage"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------
+// A write into one mem and a peer's lock it never took
+// ---------------------------------------------------------------------
+
+mod a_peer_with_a_cut_off_commit {
+    use super::*;
+    use std::time::Duration;
+
+    fn single_update(engine: &mut Engine) -> Result<(), String> {
+        let (actor, client) = cli_actor();
+        let args = update_args(engine, &id(ONE, "alpha"), None, "sibling text");
+        engine
+            .update_entity(args, actor, Some(&client), None)
+            .map(|_| ())
+            .map_err(|e| format!("{e:?}"))
+    }
+
+    fn lock_path(root: &Path, mem: &str) -> PathBuf {
+        std::fs::canonicalize(root.join(mem))
+            .unwrap()
+            .join(".memstead")
+            .join("locks")
+            .join("write.lock")
+    }
+
+    fn hold(path: &Path) -> std::fs::File {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+            .unwrap();
+        f.lock().unwrap();
+        f
+    }
+
+    fn is_free(path: &Path) -> bool {
+        let Ok(f) = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+        else {
+            return true;
+        };
+        match f.try_lock() {
+            Ok(()) => {
+                let _ = f.unlock();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Where the commit point of a single update of one--alpha falls.
+    fn commit_point(template: &Path) -> usize {
+        let probe_dir = TempDir::new().unwrap();
+        copy_dir(template, probe_dir.path());
+        let io = TwoFaults::new();
+        let mut probe = faulted(probe_dir.path(), ONE, &io);
+        io.reset();
+        single_update(&mut probe).expect("undisturbed update lands");
+        io.inner.commit_point().expect("commit point")
+    }
+
+    /// A second engine, on its own thread, updates one--alpha and its
+    /// commit is cut off after the commit point by `faults` IO errors.
+    fn cut_off_commit(root: &Path, cp: usize, faults: usize) -> String {
+        let io = TwoFaults::new();
+        let root = root.to_path_buf();
+        std::thread::spawn(move || {
+            let mut e = faulted(&root, ONE, &io);
+            io.reset();
+            let at: Vec<usize> = (1..=faults).map(|n| cp + n).collect();
+            io.arm(&at);
+            let r = single_update(&mut e);
+            format!("{r:?} struck={}", io.struck.load(Ordering::SeqCst))
+        })
+        .join()
+        .unwrap()
+    }
+
+    fn create_in_two(mut engine: Engine, title: &'static str) -> std::sync::mpsc::Receiver<String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (actor, client) = cli_actor();
+            let r = engine
+                .create_entity(empty_create_args(TWO, title), actor, Some(&client), None)
+                .map(|_| ())
+                .map_err(|e| format!("{e:?}"));
+            let _ = tx.send(format!("{r:?}"));
+        });
+        rx
+    }
+
+    /// (finished while one's lock was held, two's lock free meanwhile, outcome after release)
+    fn waits(with_record: bool) -> (bool, bool, String, String) {
+        let template = seeded();
+        let cp = commit_point(template.path());
+        let dir = TempDir::new().unwrap();
+        copy_dir(template.path(), dir.path());
+        // The writer under test boots before the sibling's commit.
+        let p1 = fresh(dir.path());
+        let sibling = if with_record {
+            cut_off_commit(dir.path(), cp, 2)
+        } else {
+            "none".to_string()
+        };
+        let record = dir.path().join(ONE).join(".memstead/commit.json");
+        assert_eq!(
+            record.exists(),
+            with_record,
+            "commit record on disk; sibling: {sibling}"
+        );
+        // A second process holds one's write lock.
+        let held = hold(&lock_path(dir.path(), ONE));
+        let rx = create_in_two(p1, "Zeta");
+        let early = rx.recv_timeout(Duration::from_secs(4));
+        let two_free = is_free(&lock_path(dir.path(), TWO));
+        drop(held);
+        let late = match &early {
+            Ok(s) => s.clone(),
+            Err(_) => rx
+                .recv_timeout(Duration::from_secs(20))
+                .unwrap_or_else(|_| "never returned".to_string()),
+        };
+        (early.is_ok(), two_free, late, sibling)
+    }
+
+    #[test]
+    fn control_a_create_in_two_does_not_wait_on_ones_lock() {
+        let (early, two_free, late, _) = waits(false);
+        eprintln!("control: early={early} two_free={two_free} late={late}");
+        assert!(early, "{late}");
+    }
+
+    #[test]
+    fn a_create_in_two_holds_twos_lock_and_waits_on_ones() {
+        let (early, two_free, late, sibling) = waits(true);
+        eprintln!(
+            "sibling: {sibling}\nearly={early} two_free_while_waiting={two_free} late={late}"
+        );
+        assert!(
+            early,
+            "a create into `two` did not return while another process held `one`'s lock; \
+             `two`'s lock free meanwhile: {two_free}; after release: {late}; sibling: {sibling}"
+        );
+    }
+
+    /// The whole cycle with two engines on two threads: one creates in
+    /// `two`, the other batch-creates over `one` and `two`.
+    #[test]
+    fn a_single_mem_write_and_a_two_mem_batch_both_complete() {
+        let template = seeded();
+        let cp = commit_point(template.path());
+        for round in 0..3 {
+            let dir = TempDir::new().unwrap();
+            copy_dir(template.path(), dir.path());
+            let p1 = fresh(dir.path());
+            let mut p2 = fresh(dir.path());
+            let sibling = cut_off_commit(dir.path(), cp, 2);
+            assert!(
+                dir.path().join(ONE).join(".memstead/commit.json").exists(),
+                "{sibling}"
+            );
+            // Sequence the two through two's lock.
+            let gate = hold(&lock_path(dir.path(), TWO));
+            let (tx2, rx2) = std::sync::mpsc::channel();
+            let start_batch = move || {
+                std::thread::spawn(move || {
+                    let (actor, client) = cli_actor();
+                    let r = p2
+                        .batch_create(
+                            vec![
+                                (empty_create_args(ONE, "Delta"), None),
+                                (empty_create_args(TWO, "Epsilon"), None),
+                            ],
+                            actor,
+                            Some(&client),
+                            false,
+                        )
+                        .map(|r| r.applied)
+                        .map_err(|e| format!("{e:?}"));
+                    let _ = tx2.send(format!("{r:?}"));
+                });
+            };
+            let rx1;
+            if round % 2 == 0 {
+                rx1 = create_in_two(p1, "Zeta");
+                std::thread::sleep(Duration::from_millis(300));
+                start_batch();
+            } else {
+                start_batch();
+                std::thread::sleep(Duration::from_millis(300));
+                rx1 = create_in_two(p1, "Zeta");
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            let one_held_by_batch = !is_free(&lock_path(dir.path(), ONE));
+            drop(gate);
+            let a = rx1.recv_timeout(Duration::from_secs(8));
+            let b = rx2.recv_timeout(Duration::from_secs(8));
+            eprintln!(
+                "round {round}: one_held_by_batch={one_held_by_batch} create={a:?} batch={b:?}"
+            );
+            assert!(
+                a.is_ok() && b.is_ok(),
+                "round {round}: deadlock: create in two = {a:?}, batch over one+two = {b:?} \
+                 (one's lock held by the batch before the gate opened: {one_held_by_batch})"
+            );
+        }
+    }
+
+    fn delete_on_thread(
+        mut engine: Engine,
+        mem: &'static str,
+        slug: &'static str,
+    ) -> std::sync::mpsc::Receiver<String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (actor, client) = cli_actor();
+            let r = engine
+                .delete_entity(
+                    crate::engine::DeleteEntityArgs {
+                        id: id(mem, slug),
+                        expected_hash: None,
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .map(|_| ())
+                .map_err(|e| format!("{e:?}"));
+            let _ = tx.send(format!("{r:?}"));
+        });
+        rx
+    }
+
+    /// Two deletes, each a verb over every mem, over the same two
+    /// mems; the first engine mounts `one` read-only.
+    #[test]
+    fn two_workspace_wide_deletes_over_the_same_mems_both_complete() {
+        let template = seeded();
+        let cp = commit_point(template.path());
+        let dir = TempDir::new().unwrap();
+        copy_dir(template.path(), dir.path());
+        let (one, two) = dirs(dir.path());
+        let mut ro = folder_mount(ONE, one.clone());
+        ro.capability = crate::workspace::MountCapability::ReadOnly;
+        let mut p1 = Engine::from_mounts(vec![
+            (
+                ro,
+                Box::new(FilesystemBackend::new(one)) as Box<dyn MemBackend>,
+            ),
+            (
+                folder_mount(TWO, two.clone()),
+                Box::new(FilesystemBackend::new(two)) as Box<dyn MemBackend>,
+            ),
+        ])
+        .expect("engine boots");
+        settings(&mut p1);
+        let p2 = fresh(dir.path());
+        let sibling = cut_off_commit(dir.path(), cp, 2);
+        assert!(
+            dir.path().join(ONE).join(".memstead/commit.json").exists(),
+            "{sibling}"
+        );
+        let gate = hold(&lock_path(dir.path(), TWO));
+        // p2 takes one's lock and waits at two's.
+        let rx1 = delete_on_thread(p1, TWO, "gamma");
+        std::thread::sleep(Duration::from_millis(300));
+        let rx2 = delete_on_thread(p2, ONE, "beta");
+        std::thread::sleep(Duration::from_millis(500));
+        let one_held = !is_free(&lock_path(dir.path(), ONE));
+        drop(gate);
+        let a = rx1.recv_timeout(Duration::from_secs(8));
+        let b = rx2.recv_timeout(Duration::from_secs(8));
+        eprintln!("one_held_by_p2={one_held} p1 delete two--gamma={a:?} p2 delete one--beta={b:?}");
+        assert!(
+            a.is_ok() && b.is_ok(),
+            "p1={a:?} p2={b:?} one_held_by_p2={one_held}"
         );
     }
 }

@@ -105,7 +105,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   its last and reloads every mem under it. The sweep commits through
   the engine's one commit call, with one provenance record per
   rewritten entity; it commits the peers first and the renamed mem
-  itself last, and reloads every mem it committed. A commit that fails
+  itself last, and reloads every mem it committed; a reload that fails
+  after the commit landed is a `WRITE_FOLLOW_UP_FAILED` warning on the
+  rename's response. A commit that fails
   after another landed returns `RENAME_PARTIAL_FAILURE` for a storage
   failure as for a moved head, with `details.mems[]` stating what
   landed; a failure before any commit landed fails the rename as a
@@ -134,7 +136,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   next load dropped one edge. A `create`, `update` or `relate` (single
   or batch) that adds an edge on an acyclic relationship now takes the
   write lock of every writable mem and reloads every mem before its
-  guard runs. (2) A bare slug was resolved to its mem before the lock;
+  guard runs; the relationship's name is judged in its normal form, so
+  `depends_on` counts as `DEPENDS_ON` does. (2) A bare slug was resolved to its mem before the lock;
   a second process that had created the same slug in another mem was
   not seen, and the call ran on the first mem where a freshly started
   engine refuses it with `ENTITY_ID_MISSING_MEM`. A call that names an
@@ -202,6 +205,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   so the write is refused with `UNKNOWN_MEM`; and a mem whose storage
   is gone where it had a head before takes no write (`MEM_VIEW_STALE`),
   which covers an engine that has no roster to reconcile.
+
+- **A load under another mem's write lock no longer waits for a lock
+  out of order, and a mem mounted read-only is locked too.** A write
+  reloads the other mems under its own lock. When one of them held a
+  commit that another process had left cut off, that reload waited for
+  the other mem's lock, which is outside the sorted set the write had
+  taken; a second write holding that lock and waiting for the first
+  one's left both waiting for ever. A load or a read that runs under
+  another mem's lock now takes that lock only if it is free, and
+  otherwise leaves the commit to its writer and reports the mem as not
+  readable. A write that locks the whole workspace also takes the lock
+  of a mem this engine mounts read-only when it has one, because
+  another process may mount the same storage writable: a reference it
+  adds while a delete or a retype is under way now waits for it.
 
 - **A delete and a retype check their referrers against every mem as it
   is now.** Both verbs guard on the edges that point at the entity, and

@@ -55,6 +55,13 @@ enum Kind {
     GitBranch,
 }
 
+/// One folder mem and one git-branch mem, either way round: for tests
+/// whose many combinations do not depend on the pairing.
+const ONE_OF_EACH: [(Kind, Kind); 2] = [
+    (Kind::Folder, Kind::GitBranch),
+    (Kind::GitBranch, Kind::Folder),
+];
+
 /// Every pairing of the two backends: both of a kind, and both mixes.
 const PAIRS: [(Kind, Kind); 4] = [
     (Kind::Folder, Kind::Folder),
@@ -2482,7 +2489,7 @@ fn single_verbs_cannot_close_a_cycle_between_two_mems() {
     let mut failures = Vec::new();
     for first in ["update", "relate", "create"] {
         for second_kind in ["update", "relate", "create"] {
-            for pair in PAIRS {
+            for pair in ONE_OF_EACH {
                 let context = format!("{first}/{second_kind} {pair:?}");
                 let ws = Workspace::new(pair);
                 let source = if first == "create" {
@@ -2882,6 +2889,241 @@ fn unconditional_writes_behind_batches_and_the_renamed_entity() {
                 || !level
             {
                 failures.push(line);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+// ---------------------------------------------------------------------
+// The delete's guard over a peer this engine mounts read-only
+// ---------------------------------------------------------------------
+
+#[test]
+fn a_delete_guard_over_a_peer_mounted_read_only_makes_its_writer_wait() {
+    let mut failures = Vec::new();
+    for pair in PAIRS {
+        let ws = Workspace::new(pair);
+        let mut ro = ws.clone();
+        ro.mounts[1].capability = MountCapability::ReadOnly;
+        let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let result: Arc<Mutex<Option<(Report, bool)>>> = Arc::new(Mutex::new(None));
+        let tap: Tap = {
+            let ws = ws.clone();
+            let fired = Arc::clone(&fired);
+            let result = Arc::clone(&result);
+            Arc::new(move |_mem: &str, method: &str| {
+                if !lands(method) || fired.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    return false;
+                }
+                let (tx, rx) = std::sync::mpsc::channel();
+                let ws2 = ws.clone();
+                std::thread::spawn(move || {
+                    let mut second = ws2.engine();
+                    let added = add_link(&mut second, Link::Relation, &|| {});
+                    let real = second
+                        .get_entity(&id(LEFT, "alpha"))
+                        .is_some_and(|e| !e.stub);
+                    let _ = tx.send((added, real));
+                });
+                if let Ok(r) = rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                    *result.lock().unwrap() = Some(r);
+                }
+                false
+            })
+        };
+        let mut engine = ro.tapped_engine(tap);
+        let args = delete_args(&engine, &id(LEFT, "alpha"));
+        let deleted = report(
+            engine
+                .delete_entity(args, Actor::Cli, None, None)
+                .map(|o| o.warnings),
+        );
+        let second = result.lock().unwrap().take();
+        // let a second writer that waited finish
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let (real, from) = links_to_alpha(&ws);
+        let line = format!(
+            "{pair:?}: deleted={deleted:?} second_inside_window={second:?} alpha_real_after={real} referrers_after={from:?}"
+        );
+        eprintln!("{line}");
+        if deleted.is_ok()
+            && !real
+            && !from.is_empty()
+            && let Some((Ok(_), true)) = &second
+        {
+            failures.push(line);
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "dangling references:\n{}",
+        failures.join("\n")
+    );
+}
+
+fn lc_update(engine: &Engine, from: &EntityId, to: &EntityId, rel: &str) -> UpdateEntityArgs {
+    let mut args = depends_update(engine, from, to);
+    args.declare_relations[0].rel_type = rel.to_string();
+    args
+}
+
+fn write_depends(
+    kind: &str,
+    rel: &str,
+    engine: &mut Engine,
+    from: &EntityId,
+    to: &EntityId,
+    ready: &dyn Fn(),
+) -> Report {
+    match kind {
+        "update" => {
+            let args = lc_update(engine, from, to, rel);
+            ready();
+            report(
+                engine
+                    .update_entity(args, Actor::Cli, None, None)
+                    .map(|o| o.warnings),
+            )
+        }
+        "batch_update" => {
+            let args = lc_update(engine, from, to, rel);
+            ready();
+            batch_report(engine.batch_update(vec![(args, None)], Actor::Cli, None, false))
+        }
+        _ => {
+            let mut args = relate_args(from, to);
+            args.rel_type = rel.to_string();
+            ready();
+            report(
+                engine
+                    .relate_entity(args, Actor::Cli, None, None)
+                    .map(|o| o.warnings),
+            )
+        }
+    }
+}
+
+/// The rel type is case-insensitive on input. Two writers, one per mem,
+/// each declaring the acyclic relationship in lower case onto the
+/// other's entity.
+#[test]
+fn a_lower_case_rel_type_cannot_close_a_cycle_between_two_mems() {
+    let (alpha, gamma) = (id(LEFT, "alpha"), id(RIGHT, "gamma"));
+    let mut failures = Vec::new();
+    for rel in ["DEPENDS_ON", "depends_on"] {
+        for kind in ["update", "batch_update", "relate"] {
+            for pair in ONE_OF_EACH {
+                let context = format!("{rel} {kind} {pair:?}");
+                {
+                    let ws = Workspace::new(pair);
+                    let one = write_depends(kind, rel, &mut ws.engine(), &alpha, &gamma, &|| {});
+                    let two = write_depends(kind, rel, &mut ws.engine(), &gamma, &alpha, &|| {});
+                    eprintln!("{context}: sequential control: first={one:?} second={two:?}");
+                    assert!(one.is_ok(), "{context}: {one:?}");
+                    assert_eq!(two, Err("RELATIONSHIP_CYCLE".to_string()), "{context}");
+                }
+                let ws = Workspace::new(pair);
+                let (one, window, engine) = hold_at_commit(
+                    &ws,
+                    {
+                        let (alpha, gamma) = (alpha.clone(), gamma.clone());
+                        move |second, ready| write_depends(kind, rel, second, &gamma, &alpha, ready)
+                    },
+                    |engine| write_depends(kind, rel, engine, &alpha, &gamma, &|| {}),
+                );
+                drop(engine);
+                let fresh = ws.engine();
+                let (out, back) = (
+                    depends_edge(&fresh, &alpha, &gamma),
+                    depends_edge(&fresh, &gamma, &alpha),
+                );
+                let line = format!(
+                    "{context}: interleaved: first={one:?} second={:?} both_locked={} | fresh engine serves alpha>gamma={out} gamma>alpha={back} | storage left/alpha.md: {:?} right/gamma.md: {:?}",
+                    window.second,
+                    window.both_locked,
+                    stored_relationships(&ws, LEFT, "alpha.md"),
+                    stored_relationships(&ws, RIGHT, "gamma.md"),
+                );
+                eprintln!("{line}");
+                if (one.is_ok() && window.second.is_ok())
+                    || (one.is_ok() && !out)
+                    || (window.second.is_ok() && !back)
+                {
+                    failures.push(line);
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The deleting (or retyping) engine mounts `right` read-only; a
+/// second process that mounts it writable adds a reference to the
+/// verb's target while the verb is held at its commit. The verb holds
+/// the lock of every mount that has one, read-only ones included, so
+/// the reference is written afterwards, against the entity as the verb
+/// left it.
+#[test]
+fn a_delete_whose_engine_mounts_the_peer_read_only() {
+    let mut failures = Vec::new();
+    for verb in ["delete", "retype"] {
+        for pair in PAIRS {
+            for link in [Link::Relation, Link::BodyLink] {
+                let context = format!("{verb} {pair:?} {link:?}");
+                let ws = Workspace::new(pair);
+                let mut ro = ws.clone();
+                ro.mounts[1].capability = MountCapability::ReadOnly;
+                let rw = ws.clone();
+                let (done, window, engine) = hold_at_commit(
+                    &ro,
+                    move |_ignored, ready| {
+                        let mut second = rw.engine();
+                        let added = add_link(&mut second, link, ready);
+                        let target = second
+                            .get_entity(&id(LEFT, "alpha"))
+                            .map(|e| format!("stub={} type={}", e.stub, e.entity_type));
+                        (added, target)
+                    },
+                    |engine| {
+                        if verb == "delete" {
+                            let args = delete_args(engine, &id(LEFT, "alpha"));
+                            report(
+                                engine
+                                    .delete_entity(args, Actor::Cli, None, None)
+                                    .map(|o| o.warnings),
+                            )
+                        } else {
+                            let args = retype_args(engine, &id(LEFT, "alpha"));
+                            engine
+                                .retype_entity(args, Actor::Cli, None, None)
+                                .map(|o| vec![format!("edges_rechecked={}", o.edges_rechecked)])
+                                .map_err(|e| e.code().to_string())
+                        }
+                    },
+                );
+                drop(engine);
+                let (real, from) = links_to_alpha(&ws);
+                let line = format!(
+                    "{context}: verb={done:?} second={:?} both_locked={} | fresh: alpha real={real} referrers={from:?}",
+                    window.second, window.both_locked
+                );
+                eprintln!("{line}");
+                let (added, target) = &window.second;
+                let bad = if verb == "delete" {
+                    done.is_ok()
+                        && added.is_ok()
+                        && target.as_deref().is_some_and(|t| t.contains("stub=false"))
+                } else {
+                    // The reference came after the retype: its writer
+                    // must have seen the entity under its new type.
+                    done.is_ok()
+                        && added.is_ok()
+                        && target.as_deref().is_some_and(|t| t.contains("type=spec"))
+                };
+                if bad {
+                    failures.push(line);
+                }
             }
         }
     }

@@ -81,6 +81,18 @@ pub(crate) fn try_acquire(path: &Path) -> io::Result<bool> {
     }
 }
 
+/// Whether this thread holds a lock, and not the one at `path`. A
+/// thread in that position must not wait for `path`: its locks were
+/// taken in one sorted order, a lock taken now is out of that order,
+/// and a second thread waiting the other way round would wait for
+/// ever.
+pub(crate) fn holds_another(path: &Path) -> bool {
+    HELD.with(|held| {
+        let held = held.borrow();
+        !held.is_empty() && !held.contains_key(path)
+    })
+}
+
 /// Give back one hold on `path`; the OS lock goes with the last one.
 pub(crate) fn release(path: &Path) {
     HELD.with(|held| {

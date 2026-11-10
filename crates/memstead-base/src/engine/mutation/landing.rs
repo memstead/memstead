@@ -378,7 +378,14 @@ impl Engine {
     /// fault that passes should not leave a report without its hashes;
     /// one that fails again marks the mem, whose view then takes no
     /// write, and the next operation retries.
-    pub(in crate::engine) fn level_committed_mounts(&mut self, commits: &[(usize, String)]) {
+    ///
+    /// Returns a warning for every mem that could not be reloaded: its
+    /// commit is in storage and the engine's view is not level with it.
+    pub(in crate::engine) fn level_committed_mounts(
+        &mut self,
+        commits: &[(usize, String)],
+    ) -> Vec<WarningHint> {
+        let mut behind = Vec::new();
         for (mount_idx, write_id) in commits {
             if !write_id.is_empty() {
                 self.record_self_write(*mount_idx, write_id);
@@ -395,8 +402,14 @@ impl Engine {
                     "reload after a partly failed operation did not complete; \
                      the next operation retries"
                 );
+                behind.push(WarningHint::WriteFollowUpFailed {
+                    mem,
+                    step: "reload".to_string(),
+                    detail: e.to_string(),
+                });
             }
         }
+        behind
     }
 }
 

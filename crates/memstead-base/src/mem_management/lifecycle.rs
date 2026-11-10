@@ -2471,6 +2471,6 @@ pub fn rename_mem(
         new: params.new,
         rewritten_mems: sweep.rewritten_mems,
         resumed,
-        warnings: note_warning.into_iter().collect(),
+        warnings: sweep.warnings.into_iter().chain(note_warning).collect(),
     })
 }

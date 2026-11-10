@@ -54,6 +54,10 @@ pub struct MemSweepOutcome {
     pub rewritten_mems: Vec<String>,
     /// The shared `logical_operation_id` carried by every commit.
     pub logical_operation_id: String,
+    /// A `WRITE_FOLLOW_UP_FAILED` for every mem whose commit landed and
+    /// whose reload afterwards failed: the engine's view of it is
+    /// behind storage until its next operation reloads it.
+    pub warnings: Vec<crate::ops::WarningHint>,
 }
 
 impl Engine {
@@ -131,10 +135,11 @@ impl Engine {
         }
 
         // The engine's view follows what the sweep wrote.
-        self.level_committed_mounts(&commits);
+        let warnings = self.level_committed_mounts(&commits);
         Ok(MemSweepOutcome {
             rewritten_mems: plans.iter().map(|p| p.mem.clone()).collect(),
             logical_operation_id: logical_op_id,
+            warnings,
         })
     }
 

@@ -513,6 +513,18 @@ impl FilesystemBackend {
             return Ok(());
         }
         let lock = self.lock_file();
+        // A reader that holds another mem's write lock does not wait
+        // here: this lock is not one of the sorted set it took, and a
+        // writer of this mem may be waiting for one of those. It gets
+        // the condition at once and takes no lock.
+        if path_lock::holds_another(&lock) {
+            return Err(BackendError::CommitNotApplied {
+                detail: "the mem holds a commit that is in progress or was cut off, and this \
+                         operation holds another mem's write lock, so it does not wait for it; \
+                         loading the mem completes it"
+                    .to_string(),
+            });
+        }
         if path_lock::acquire(&lock).is_ok() {
             path_lock::release(&lock);
         }
@@ -954,6 +966,26 @@ impl crate::backend::MemBackend for FilesystemBackend {
             .exists(&self.record_path())
             .map_err(BackendError::Io)?
         {
+            // A load that runs under another mem's write lock (the
+            // reload of a peer before a write) does not wait for this
+            // one: the lock is outside the sorted set its operation
+            // took, and a writer of this mem may be waiting for one of
+            // those. It takes the lock if it is free and otherwise
+            // leaves the commit to its writer, or to the next load.
+            if path_lock::holds_another(&lock) {
+                return match path_lock::try_acquire(&lock) {
+                    Ok(true) => {
+                        let result = self.complete_decided_commit();
+                        path_lock::release(&lock);
+                        result
+                    }
+                    _ => Err(BackendError::CommitNotApplied {
+                        detail: "the mem holds a commit in progress and another writer holds \
+                                 its lock; loading the mem completes it once the lock is free"
+                            .to_string(),
+                    }),
+                };
+            }
             // A lock that cannot be taken (a read-only location) is not
             // a reason to serve the mem half applied: the completion
             // below then fails with its own error.
