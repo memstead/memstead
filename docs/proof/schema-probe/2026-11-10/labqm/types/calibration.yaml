@@ -1,0 +1,50 @@
+name: calibration
+description: |
+  One calibration of one piece of equipment, with its certificate.
+when_to_use: |
+  One entity per calibration event.
+sections:
+  - key: notes
+    heading: Notes
+    search_weight: 1.0
+    catch_all: true
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 10.0
+metadata_fields:
+  - key: performed_on
+    required: true
+    description: Date the calibration was performed.
+    field_type: date
+    filterable: range
+  - key: status
+    required: true
+    description: Whether this is the current calibration.
+    field_type: string
+    default_value: current
+    enum_values: [current, superseded]
+    filterable: equality
+  - key: measured_value
+    required: true
+    description: The measured value.
+    field_type: number
+  - key: result
+    required: true
+    description: Outcome.
+    field_type: string
+    enum_values: [passed, failed]
+    filterable: equality
+due:
+  date_field: performed_on
+  offset_days: 365
+  status_field: status
+  open_values: [current]
+title_weight: 100.0
+text_fields: [summary]
+hierarchy_relationship: PART_OF
+updatable_fields: [title, summary, performed_on, status, measured_value, result, tags]
+health_required_fields: [summary]
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep entries factual."

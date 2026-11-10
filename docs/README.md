@@ -84,6 +84,11 @@ The ideas and rationale behind Memstead.
   follow-up to the divergence campaign that holds the corpora fixed and varies
   only the read tools. The apparatus is built and smoke-tested; the full run
   has not started, so there is no result yet.
+- **[Schema probe](proof/schema-probe/README.md)**: three schemas written from
+  the authoring guide for inspection-type work, each run against ten rules
+  given in advance. Ten of thirty rules are carried by a declaration alone,
+  seventeen need an agent to keep something up by hand, three are not
+  carried; one reading is missing in all three fields.
 
 ---
 

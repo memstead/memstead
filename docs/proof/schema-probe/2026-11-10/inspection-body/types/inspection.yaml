@@ -1,0 +1,28 @@
+name: inspection
+description: One inspection carried out on an item.
+when_to_use: One entity per inspection.
+sections:
+  - key: findings
+    heading: Findings
+    required: true
+    search_weight: 5.0
+    catch_all: true
+metadata_fields:
+  - key: result
+    required: true
+    description: Outcome.
+    field_type: string
+    enum_values: [passed, failed]
+    filterable: equality
+  - key: measured_value
+    description: Measured value; declared range 10 to 20.
+    field_type: number
+    value_pattern: '(1[0-9]|20)(\.[0-9]+)?'
+title_weight: 100.0
+text_fields: [findings]
+hierarchy_relationship: PART_OF
+updatable_fields: [title, findings, result, measured_value, tags]
+health_required_fields: [findings]
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep entries factual."

@@ -1,0 +1,34 @@
+name: minor_defect
+description: A minor defect found on an item.
+when_to_use: One per defect.
+sections:
+  - key: description
+    heading: Description
+    required: true
+    search_weight: 5.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    required: true
+    description: Defect state.
+    field_type: string
+    default_value: open
+    enum_values: [open, closed]
+    filterable: equality
+title_weight: 100.0
+text_fields: [description]
+hierarchy_relationship: PART_OF
+updatable_fields: [title, description, status, tags]
+health_required_fields: [description]
+staleness_threshold_days: 3650
+required_outgoing:
+  - relationships: [MINOR_DEFECT_OF]
+    cardinality: at_least_one
+    severity: block
+due:
+  date_field: created_date
+  offset_days: 30
+  status_field: status
+  open_values: [open]
+write_rules:
+  - "Keep entries factual."

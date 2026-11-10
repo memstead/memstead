@@ -1,0 +1,31 @@
+name: catalogue_edition
+description: One edition of the catalogue of criteria.
+when_to_use: One per edition.
+sections:
+  - key: criteria
+    heading: Criteria
+    required: true
+    search_weight: 5.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    required: true
+    description: Edition state.
+    field_type: string
+    default_value: current
+    enum_values: [current, superseded]
+    filterable: equality
+title_weight: 100.0
+text_fields: [criteria]
+hierarchy_relationship: PART_OF
+updatable_fields: [title, criteria, status, tags]
+health_required_fields: [criteria]
+staleness_threshold_days: 3650
+constraints:
+  - kind: status_propagation
+    field: status
+    value: superseded
+    rel_type: INSPECTED_AGAINST
+    direction: incoming
+write_rules:
+  - "Keep entries factual."

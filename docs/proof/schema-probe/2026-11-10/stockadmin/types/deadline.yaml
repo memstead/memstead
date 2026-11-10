@@ -1,0 +1,42 @@
+name: deadline
+description: A fixed calendar deadline that recurs every year.
+when_to_use: One entity per recurring calendar deadline.
+sections:
+  - key: notes
+    heading: Notes
+    catch_all: true
+    search_weight: 1.0
+  - key: duty
+    heading: Duty
+    required: true
+    search_weight: 10.0
+  - key: consequence
+    heading: Consequence
+    required: true
+    search_weight: 8.0
+metadata_fields:
+  - key: status
+    required: true
+    description: Open or done for the current occurrence.
+    field_type: string
+    default_value: open
+    enum_values: [open, done]
+    filterable: equality
+  - key: due_date
+    required: true
+    description: The next occurrence's date.
+    field_type: date
+    filterable: range
+due:
+  date_field: due_date
+  status_field: status
+  open_values: [open]
+  lead_section: consequence
+text_fields: [notes, duty, consequence]
+updatable_fields: [title, notes, duty, consequence, status, due_date, tags]
+health_required_fields: [duty, consequence]
+title_weight: 100.0
+hierarchy_relationship: PART_OF
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep it factual."

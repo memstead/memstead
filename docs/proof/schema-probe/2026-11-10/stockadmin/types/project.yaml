@@ -1,0 +1,34 @@
+name: project
+description: A larger project that needs permits.
+when_to_use: One entity per project.
+sections:
+  - key: notes
+    heading: Notes
+    catch_all: true
+    search_weight: 1.0
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 10.0
+metadata_fields:
+  - key: status
+    required: true
+    description: Project lifecycle.
+    field_type: string
+    default_value: planned
+    enum_values: [planned, approved]
+    filterable: equality
+constraints:
+  - kind: transition_requires_checks
+    field: status
+    to_value: approved
+    relationships: [NEEDS_PERMIT]
+    direction: outgoing
+text_fields: [notes, summary]
+updatable_fields: [title, notes, summary, status, tags]
+health_required_fields: [summary]
+title_weight: 100.0
+hierarchy_relationship: PART_OF
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep it factual."

@@ -1,0 +1,43 @@
+name: duty
+description: A recurring yearly maintenance duty on an installation.
+when_to_use: One entity per recurring duty.
+sections:
+  - key: duty
+    heading: Duty
+    required: true
+    search_weight: 10.0
+  - key: history
+    heading: History
+    catch_all: true
+    search_weight: 1.0
+metadata_fields:
+  - key: status
+    required: true
+    description: Whether the duty is in force.
+    field_type: string
+    default_value: active
+    enum_values: [active, retired]
+    filterable: equality
+  - key: last_completed
+    required: true
+    description: Date of the last confirmed completion.
+    field_type: date
+    filterable: range
+due:
+  date_field: last_completed
+  offset_days: 365
+  status_field: status
+  open_values: [active]
+  unless_open_via:
+    relationships: [BLOCKED_BY]
+    direction: out
+    status_field: status
+    open_values: [open]
+text_fields: [duty, history]
+updatable_fields: [title, duty, history, status, last_completed, tags]
+health_required_fields: [duty]
+title_weight: 100.0
+hierarchy_relationship: PART_OF
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep it factual."

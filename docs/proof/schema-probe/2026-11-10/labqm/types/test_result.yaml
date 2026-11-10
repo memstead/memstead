@@ -1,0 +1,32 @@
+name: test_result
+description: |
+  One test result produced with a piece of equipment.
+when_to_use: |
+  One entity per reported result.
+sections:
+  - key: notes
+    heading: Notes
+    search_weight: 1.0
+    catch_all: true
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 10.0
+metadata_fields:
+  - key: produced_on
+    required: true
+    description: Date produced.
+    field_type: date
+    filterable: range
+required_outgoing:
+  - relationships: [PRODUCED_WITH]
+    cardinality: at_least_one
+    severity: block
+title_weight: 100.0
+text_fields: [summary]
+hierarchy_relationship: PART_OF
+updatable_fields: [title, summary, produced_on, tags]
+health_required_fields: [summary]
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep entries factual."

@@ -1,0 +1,66 @@
+name: deviation
+description: |
+  A deviation from a procedure or requirement.
+when_to_use: |
+  One entity per deviation.
+sections:
+  - key: notes
+    heading: Notes
+    search_weight: 1.0
+    catch_all: true
+  - key: description
+    heading: Description
+    required: true
+    search_weight: 10.0
+  - key: root_cause
+    heading: Root Cause
+    search_weight: 5.0
+  - key: effectiveness_check
+    heading: Effectiveness Check
+    search_weight: 2.0
+metadata_fields:
+  - key: status
+    required: true
+    description: Lifecycle state.
+    field_type: string
+    default_value: open
+    enum_values: [open, closed]
+    filterable: equality
+  - key: closed_on
+    description: Date the deviation was closed (typed by hand).
+    field_type: date
+    filterable: range
+  - key: effectiveness
+    required: true
+    description: Whether the effectiveness check is recorded.
+    field_type: string
+    default_value: pending
+    enum_values: [pending, done]
+    filterable: equality
+  - key: effectiveness_checked_on
+    description: Date of the effectiveness check.
+    field_type: date
+constraints:
+  - kind: requires_when
+    field: root_cause
+    when_field: status
+    when_value: closed
+    severity: block
+  - kind: requires_when
+    field: closed_on
+    when_field: status
+    when_value: closed
+    severity: block
+due:
+  date_field: closed_on
+  offset_days: 90
+  status_field: effectiveness
+  open_values: [pending]
+title_weight: 100.0
+text_fields: [description, root_cause, effectiveness_check]
+hierarchy_relationship: PART_OF
+updatable_fields: [title, description, root_cause, effectiveness_check, status, closed_on, effectiveness, effectiveness_checked_on, tags]
+health_required_fields: [description]
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep entries factual."
