@@ -54,6 +54,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `Engine::unregister_writable_mem` and `unregister_read_mount` return
   the backend as an `Arc`.
 
+### Security
+
+- **pulldown-cmark 0.13.6 and rmcp 3.9.0.** The RustSec gate went red on
+  three advisories published after the last green run: two on
+  pulldown-cmark 0.13.4 (quadratic parsing and exponential event growth
+  with `ENABLE_WIKILINKS`, RUSTSEC-2026-0414 and RUSTSEC-2026-0433) and
+  one on rmcp 3.8.0 (unbounded response buffering in Streamable HTTP
+  clients, RUSTSEC-2026-0462). Neither reaches the engine: it parses
+  markdown with tables enabled and nothing else, and it uses rmcp as a
+  server over stdio. The bumps are taken rather than ignored, because an
+  ignore line outlives its reason. Lockfile only; both are inside the
+  version requirements already declared.
+
 ### Fixed
 
 - **A failed write leaves nothing behind.** A mutation that failed
