@@ -7,10 +7,11 @@
 //! raises each sample through both surfaces' real mappers and records where
 //! the code, the recovery payload or the message differ.
 //!
-//! Inventory mode: the test prints the differences (and writes them as
-//! markdown to `$ERROR_PARITY_OUT` when set) and asserts only that every
-//! sample renders on both surfaces. The convergence work turns each entry
-//! into an equality.
+//! Both surfaces render one engine-side value, so the code and the payload
+//! are equal field for field and each message begins with the engine's.
+//! On a failure the differences are printed (and written as markdown to
+//! `$ERROR_PARITY_OUT` when set; `$ERROR_PARITY_SNAPSHOT` writes every
+//! rendering as JSON).
 
 use memstead_base::engine::error::samples::every_engine_error;
 use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
@@ -99,10 +100,11 @@ fn key_diff(
 }
 
 #[test]
-fn every_engine_error_renders_on_mcp_and_cli_and_the_differences_are_recorded() {
+fn every_engine_error_carries_the_same_code_payload_and_message_on_mcp_and_cli() {
     let tmp = tempfile::TempDir::new().unwrap();
     let engine = engine(tmp.path());
     let mut rows = Vec::new();
+    let mut snapshot = serde_json::Map::new();
     let mut agree = 0usize;
     // EngineError is not Clone (it can carry an io::Error); the list is
     // built twice, deterministically, once per surface.
@@ -116,6 +118,14 @@ fn every_engine_error_renders_on_mcp_and_cli_and_the_differences_are_recorded() 
         let c = cli(e2);
         assert!(!m.code.is_empty(), "{label}: MCP rendered no code");
         assert!(!c.code.is_empty(), "{label}: CLI rendered no code");
+        snapshot.insert(
+            label.clone(),
+            serde_json::json!({
+                "mcp": { "code": m.code, "message": m.message, "details": m.details },
+                "cli": { "code": c.code, "message": c.message, "details": c.details },
+                "engine": { "code": engine_code, "message": engine_message, "details": engine_details },
+            }),
+        );
         let mut notes = Vec::new();
         if m.code != c.code || m.code != engine_code {
             notes.push(format!(
@@ -162,7 +172,15 @@ fn every_engine_error_renders_on_mcp_and_cli_and_the_differences_are_recorded() 
         rows.join("\n")
     );
     eprintln!("{report}");
+    if let Ok(path) = std::env::var("ERROR_PARITY_SNAPSHOT") {
+        std::fs::write(
+            path,
+            serde_json::to_string_pretty(&serde_json::Value::Object(snapshot)).unwrap(),
+        )
+        .unwrap();
+    }
     if let Ok(path) = std::env::var("ERROR_PARITY_OUT") {
         std::fs::write(path, &report).unwrap();
     }
+    assert!(rows.is_empty(), "{report}");
 }

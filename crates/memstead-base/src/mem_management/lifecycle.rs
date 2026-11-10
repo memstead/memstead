@@ -404,7 +404,7 @@ pub fn delete_mem(
                 pruned_orphan_config: Some(pruned),
             });
         }
-        return Err(crate::EngineError::UnknownMem(params.name.clone()).into());
+        return Err(engine.unknown_mem(&params.name.clone()).into());
     }
 
     // ---- Step 2: allowlist match ----
@@ -2137,12 +2137,12 @@ fn rename_mode(
             // a read-only mount, so anything else is a name clash
             // with an installed read mem, not a resumable rename).
             if !engine.mem_router().is_writable(&params.new) {
-                return Err(crate::EngineError::UnknownMem(params.old.clone()).into());
+                return Err(engine.unknown_mem(&params.old.clone()).into());
             }
             true
         }
         (None, false) => {
-            return Err(crate::EngineError::UnknownMem(params.old.clone()).into());
+            return Err(engine.unknown_mem(&params.old.clone()).into());
         }
     };
     Ok((old_mount, resumed))

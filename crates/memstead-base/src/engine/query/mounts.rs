@@ -646,7 +646,7 @@ impl Engine {
             None if self.recently_unmounted(mem) => EngineError::MemUnmounted {
                 mem: mem.to_string(),
             },
-            None => EngineError::UnknownMem(mem.to_string()),
+            None => self.unknown_mem(mem),
         }
     }
 

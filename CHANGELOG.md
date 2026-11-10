@@ -26,6 +26,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **An engine error carries one payload, the same on MCP and the CLI.**
+  Every error the engine defines now builds its recovery payload once, in
+  the engine (`EngineError::details`, with no catch-all arm), and both
+  surfaces encode that value: the code, the `details` and the message are
+  equal field for field, which a test holds over one sample of every
+  error. Before, the MCP server and the CLI each rebuilt most payloads by
+  hand and four had drifted apart. No key either surface served is gone
+  and no value changed; six keys are added where one surface served less:
+  `known_mems` on the CLI's `UNKNOWN_MEM`, `suggestions` on the CLI's
+  `ENTITY_NOT_FOUND` (bare and inside a batch entry), `expected` on the
+  CLI's `UNTERMINATED_FENCE_IN_STORED_BODY`, and `proposed_slug` on
+  `INVALID_WIKI_LINK_TARGET` on both. In the Rust interface
+  `EngineError::UnknownMem` becomes `{ name, known_mems }` and
+  `EngineError::NotFound` gains `suggestions`, filled where the error is
+  raised (`Engine::unknown_mem`, `Engine::not_found`).
+
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype
   and batch update now state one of three things to the engine: the hash

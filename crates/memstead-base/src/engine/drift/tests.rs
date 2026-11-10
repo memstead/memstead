@@ -19,7 +19,7 @@ fn engine_diff_unknown_mem_returns_typed_error() {
     let tmp = TempDir::new().unwrap();
     let engine = build_demo_engine(&tmp);
     let err = engine.diff("nope", "a", "b", None).unwrap_err();
-    assert!(matches!(err, EngineError::UnknownMem(v) if v == "nope"));
+    assert!(matches!(err, EngineError::UnknownMem { name: v, .. } if v == "nope"));
 }
 
 /// A `write_id` from a mutation response passed back as `since`
@@ -116,7 +116,7 @@ fn engine_changes_since_unknown_mem_returns_typed_error() {
     let err = engine
         .changes_since("does-not-exist", "abc", None)
         .unwrap_err();
-    assert!(matches!(err, EngineError::UnknownMem(_)));
+    assert!(matches!(err, EngineError::UnknownMem { .. }));
 }
 
 #[test]
@@ -743,7 +743,7 @@ fn mem_drifted_tracks_sibling_advance_until_reload() {
     // Unknown mem errors rather than reporting a bogus `false`.
     assert!(matches!(
         engine.mem_drifted("nope"),
-        Err(EngineError::UnknownMem(_))
+        Err(EngineError::UnknownMem { .. })
     ));
 }
 

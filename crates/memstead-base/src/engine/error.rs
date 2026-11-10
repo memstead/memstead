@@ -274,8 +274,12 @@ pub enum EngineError {
     /// No mount in this engine names the requested mem. Surfaced
     /// before reaching any backend so callers can distinguish
     /// "wrong mem name" from "backend failure".
-    #[error("unknown mem: {0}")]
-    UnknownMem(String),
+    #[error("unknown mem: {name}")]
+    UnknownMem {
+        name: String,
+        /// The mems mounted when it was raised: the recovery set.
+        known_mems: Vec<String>,
+    },
     /// The mem left the mount roster during this engine's lifetime (it
     /// was unregistered or deleted by another process and the roster
     /// reconciliation unmounted it). Cached ids and hashes for it are
@@ -443,7 +447,12 @@ pub enum EngineError {
     /// store. Distinct from `UnknownMem`: the mem exists, the
     /// entity does not.
     #[error("entity not found: {id}")]
-    NotFound { id: String },
+    NotFound {
+        id: String,
+        /// Ids of entities whose id ends with, or whose slug contains,
+        /// the one asked for; at most five.
+        suggestions: Vec<String>,
+    },
     /// Optimistic-locking failure: the caller's `expected_hash` does
     /// not match the entity's current `content_hash` in the store.
     /// `current` is the live hash — pass it as `expected_hash` after
@@ -1568,7 +1577,7 @@ impl EngineError {
     pub fn code(&self) -> &'static str {
         match self {
             EngineError::DuplicateMem(_) => "DUPLICATE_MEM",
-            EngineError::UnknownMem(_) => "UNKNOWN_MEM",
+            EngineError::UnknownMem { .. } => "UNKNOWN_MEM",
             EngineError::MemUnmounted { .. } => "MEM_UNMOUNTED",
             EngineError::MemQuarantined { .. } => "MEM_QUARANTINED",
             EngineError::UnknownRef(_) => "UNKNOWN_REF",
@@ -1749,7 +1758,10 @@ impl EngineError {
             EngineError::RetypeReferrerUnprobeable { id, mem, reason } => {
                 serde_json::json!({ "id": id, "mem": mem, "reason": reason })
             }
-            EngineError::NotFound { id } => serde_json::json!({ "id": id }),
+            EngineError::NotFound { id, suggestions } => serde_json::json!({
+                "id": id,
+                "suggestions": suggestions,
+            }),
             EngineError::AlreadyExists {
                 id,
                 existing_title,
@@ -1837,6 +1849,9 @@ impl EngineError {
                             "from_id": r.from_id,
                             "rel_types": r.rel_types,
                             "mem": r.mem,
+                            // Only a Write-Mem referrer blocks a delete; a
+                            // read-only one demotes the target to a stub.
+                            "capability": "write",
                         })
                     })
                     .collect();
@@ -2241,7 +2256,171 @@ impl EngineError {
                 stage,
                 source,
             } => scope_details_to_entity(source.details(), entity, stage),
-            _ => serde_json::Value::Object(serde_json::Map::new()),
+            // The payloads below were built by hand in both surface
+            // mappers until the error-payload plan moved them here; each
+            // carries every key either surface served.
+            EngineError::DuplicateMem(name) => serde_json::json!({ "name": name }),
+            EngineError::UnknownMem { name, known_mems } => serde_json::json!({
+                "name": name,
+                "known_mems": known_mems,
+            }),
+            EngineError::MemUnmounted { mem } => serde_json::json!({ "mem": mem }),
+            EngineError::ReadOnlyMount(mem) => serde_json::json!({ "mem": mem }),
+            EngineError::CheckNotRecorded { reason } => serde_json::json!({ "reason": reason }),
+            EngineError::InvalidTitle(slug_err) => {
+                let reason = slug_err.reason();
+                match slug_err {
+                    SlugError::IdTooLong { input, length, max } => serde_json::json!({
+                        "reason": reason,
+                        "input": input,
+                        "length": length,
+                        "max": max,
+                    }),
+                    SlugError::TitleEmpty { input } => serde_json::json!({
+                        "reason": reason,
+                        "input": input,
+                    }),
+                    SlugError::TitleHasControlChars {
+                        input,
+                        control_chars,
+                        proposed_slug,
+                    } => serde_json::json!({
+                        "reason": reason,
+                        "input": input,
+                        "control_chars": control_chars
+                            .iter()
+                            .map(|c| c.escape_default().to_string())
+                            .collect::<Vec<_>>(),
+                        "proposed_slug": proposed_slug,
+                    }),
+                }
+            }
+            EngineError::CrossMemEdgeNotDeclared {
+                source_schema,
+                target_schema,
+                rel_type,
+                from_id,
+                to_id,
+            } => serde_json::json!({
+                "source_schema": source_schema,
+                "target_schema": target_schema,
+                "rel_type": rel_type,
+                "from_id": from_id,
+                "to_id": to_id,
+            }),
+            EngineError::RenameNoOp { id, new_title } => serde_json::json!({
+                "id": id,
+                "new_title": new_title,
+            }),
+            EngineError::RenamePartialFailure {
+                committed_mems,
+                failed_mem,
+                failure_cause,
+                mems,
+            } => serde_json::json!({
+                "committed_mems": committed_mems,
+                "failed_mem": failed_mem,
+                "failure_cause": failure_cause,
+                "mems": mems,
+            }),
+            EngineError::CommitNotApplied { mem, detail }
+            | EngineError::StaleView { mem, detail } => serde_json::json!({
+                "mem": mem,
+                "detail": detail,
+            }),
+            EngineError::StubCannotRelate { id }
+            | EngineError::StubNotUpdatable { id }
+            | EngineError::StubNotRenamable { id }
+            | EngineError::NotConflicted { id } => serde_json::json!({ "id": id }),
+            EngineError::ParseAfterWrite(detail)
+            | EngineError::SchemaResolverInit(detail)
+            | EngineError::Mem(detail) => serde_json::json!({ "detail": detail }),
+            EngineError::Parse(inner) => serde_json::json!({ "detail": inner.to_string() }),
+            EngineError::Backend(inner) => serde_json::json!({ "detail": inner.to_string() }),
+            EngineError::EmbeddedSchemaInvalid { mem, pin, reason } => serde_json::json!({
+                "mem": mem,
+                "schema": pin,
+                "error": reason,
+            }),
+            EngineError::MemNameCollision {
+                name,
+                source_origin,
+            } => serde_json::json!({
+                "name": name,
+                "source": source_origin,
+            }),
+            EngineError::InvalidInput(message) => serde_json::json!({ "message": message }),
+            EngineError::MergeConflictUnsupportedBackend { mem } => {
+                serde_json::json!({ "mem": mem })
+            }
+            EngineError::UnknownRemote(remote) => serde_json::json!({ "remote": remote }),
+            EngineError::LocalDivergence { mem, remote_ref } => serde_json::json!({
+                "mem": mem,
+                "remote_ref": remote_ref,
+            }),
+            EngineError::NonFastForward { mem, remote } => serde_json::json!({
+                "mem": mem,
+                "remote": remote,
+            }),
+            EngineError::LocalInvalidState {
+                mem,
+                remote,
+                detail,
+            } => serde_json::json!({
+                "mem": mem,
+                "remote": remote,
+                "detail": detail,
+            }),
+            EngineError::SchemaViolationInFetch {
+                mem,
+                ref_name,
+                violations,
+            } => serde_json::json!({
+                "mem": mem,
+                "ref": ref_name,
+                "violations": violations,
+            }),
+            EngineError::PushedCommitsProtected {
+                mem,
+                target_sha,
+                pushed_shas,
+            } => serde_json::json!({
+                "mem": mem,
+                "target_sha": target_sha,
+                "pushed_shas": pushed_shas,
+            }),
+            EngineError::BranchResetHeadMoved {
+                mem,
+                expected,
+                current,
+            } => serde_json::json!({
+                "mem": mem,
+                "expected": expected,
+                "current": current,
+            }),
+            EngineError::UnknownRef(raw) => serde_json::json!({ "ref": raw }),
+            EngineError::RenameSimilarityOutOfRange {
+                requested,
+                allowed_min,
+                allowed_max,
+            } => serde_json::json!({
+                "field": "rename_similarity",
+                "requested": requested,
+                "allowed_range": [allowed_min, allowed_max],
+            }),
+            EngineError::InvalidTimestampCursor { mem, since } => serde_json::json!({
+                "mem": mem,
+                "since": since,
+            }),
+            EngineError::MemConfigIncomplete {
+                mem,
+                missing_fields,
+            } => serde_json::json!({
+                "mem": mem,
+                "missing_fields": missing_fields,
+                "set_via": format!("memstead mem set-version {mem} <version>"),
+            }),
+            EngineError::SearchUnavailable => serde_json::json!({}),
         }
     }
 
@@ -2855,3 +3034,41 @@ mod plan05_subsystem_tests;
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod samples;
+
+/// Ids in `store` that look like the one asked for: ending with it, or
+/// with `--<it>`, or whose slug contains it; at most five. The recovery
+/// set an `ENTITY_NOT_FOUND` carries.
+pub fn suggest_similar(store: &crate::store::Store, input: &str) -> Vec<String> {
+    let needle = input.trim_start_matches("@memstead/");
+    store
+        .all_ids()
+        .filter(|id| {
+            let haystack = id.as_ref();
+            haystack.ends_with(needle)
+                || haystack.ends_with(&format!("--{needle}"))
+                || haystack
+                    .rsplit_once("--")
+                    .is_some_and(|(_, slug)| slug.contains(needle))
+        })
+        .take(5)
+        .map(|id| id.to_string())
+        .collect()
+}
+
+impl super::Engine {
+    /// `ENTITY_NOT_FOUND` for `id`, with the ids that look like it.
+    pub fn not_found(&self, id: &str) -> EngineError {
+        EngineError::NotFound {
+            id: id.to_string(),
+            suggestions: suggest_similar(&self.store, id),
+        }
+    }
+
+    /// `UNKNOWN_MEM` for `name`, with the mems mounted now.
+    pub fn unknown_mem(&self, name: &str) -> EngineError {
+        EngineError::UnknownMem {
+            name: name.to_string(),
+            known_mems: self.mounts().iter().map(|m| m.mem.clone()).collect(),
+        }
+    }
+}

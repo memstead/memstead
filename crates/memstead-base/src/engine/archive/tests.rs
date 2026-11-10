@@ -890,7 +890,7 @@ fn export_unknown_mem_returns_unknown_mem_error() {
     let (engine, _mem) = folder_mem_with_entities(&tmp, &[]);
     let err = engine.export_mem_to_bytes("missing").unwrap_err();
     match err {
-        EngineError::UnknownMem(v) => assert_eq!(v, "missing"),
+        EngineError::UnknownMem { name: v, .. } => assert_eq!(v, "missing"),
         other => panic!("expected UnknownMem, got {other:?}"),
     }
 }

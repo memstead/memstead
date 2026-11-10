@@ -1273,7 +1273,7 @@ impl Engine {
         body: &DispositionBody,
     ) -> Result<Option<PreparedUpdate>, EngineError> {
         let Some(existing) = self.store.get(id).filter(|e| !e.stub).cloned() else {
-            return Err(EngineError::NotFound { id: id.to_string() });
+            return Err(self.not_found(id.as_ref()));
         };
         if let Some(title) = body.title.as_deref().map(str::trim)
             && !title.is_empty()

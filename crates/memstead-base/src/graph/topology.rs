@@ -319,7 +319,7 @@ mod tests {
 
         // Unknown mem refuses typed.
         let err = engine.mem_topology("ghost").unwrap_err();
-        assert!(matches!(err, crate::EngineError::UnknownMem(m) if m == "ghost"));
+        assert!(matches!(err, crate::EngineError::UnknownMem { name: m, .. } if m == "ghost"));
     }
 }
 

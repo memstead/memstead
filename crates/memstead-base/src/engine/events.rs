@@ -372,7 +372,7 @@ mod tests {
         let cb: EventCallback = Arc::new(|_| {});
         let err = engine.subscribe_mem_changes("missing", cb).unwrap_err();
         match err {
-            crate::EngineError::UnknownMem(v) => assert_eq!(v, "missing"),
+            crate::EngineError::UnknownMem { name: v, .. } => assert_eq!(v, "missing"),
             other => panic!("expected UnknownMem, got {other:?}"),
         }
     }

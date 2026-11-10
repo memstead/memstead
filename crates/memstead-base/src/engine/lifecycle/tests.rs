@@ -909,7 +909,7 @@ fn export_mem_unknown_mem_returns_unknown_mem() {
     .unwrap();
     let output = tmp.path().join("out.mem");
     let err = engine.export_mem("missing", &output).unwrap_err();
-    assert!(matches!(err, EngineError::UnknownMem(v) if v == "missing"));
+    assert!(matches!(err, EngineError::UnknownMem { name: v, .. } if v == "missing"));
 }
 
 #[test]
@@ -1459,7 +1459,7 @@ fn reload_one_mem_rejects_unknown_mem() {
     let mut engine = build_demo_engine(&tmp);
     let err = engine.reload_one_mem("nope").unwrap_err();
     match err {
-        EngineError::UnknownMem(name) => assert_eq!(name, "nope"),
+        EngineError::UnknownMem { name, .. } => assert_eq!(name, "nope"),
         other => panic!("expected UnknownMem, got {other:?}"),
     }
 }
@@ -1630,7 +1630,7 @@ fn reload_one_mem_report_rejects_unknown_mem() {
     let tmp = TempDir::new().unwrap();
     let mut engine = build_demo_engine(&tmp);
     let err = engine.reload_one_mem_report("missing").unwrap_err();
-    assert!(matches!(err, EngineError::UnknownMem(_)));
+    assert!(matches!(err, EngineError::UnknownMem { .. }));
 }
 
 #[test]

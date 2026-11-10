@@ -92,7 +92,7 @@ fn empty_mount_list_constructs_and_errors_unknown_mem_on_read() {
     let engine = Engine::from_mounts(Vec::new()).unwrap();
     assert!(engine.mem_names().is_empty());
     match engine.list_entities("missing") {
-        Err(EngineError::UnknownMem(v)) => assert_eq!(v, "missing"),
+        Err(EngineError::UnknownMem { name: v, .. }) => assert_eq!(v, "missing"),
         other => panic!("expected UnknownMem, got {other:?}"),
     }
 }

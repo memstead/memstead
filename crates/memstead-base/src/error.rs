@@ -498,7 +498,11 @@ mod tests {
     /// path automatically — the full layer never re-stringifies.
     #[test]
     fn wrapped_base_engine_error_delegates_code() {
-        let e: FullEngineError = EngineError::UnknownMem("specs".into()).into();
+        let e: FullEngineError = EngineError::UnknownMem {
+            name: "specs".into(),
+            known_mems: Vec::new(),
+        }
+        .into();
         assert_eq!(e.code(), "UNKNOWN_MEM");
     }
 

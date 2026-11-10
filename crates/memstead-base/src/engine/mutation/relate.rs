@@ -618,9 +618,7 @@ impl Engine {
         let entity: Entity = self
             .store
             .get(&args.source)
-            .ok_or_else(|| EngineError::NotFound {
-                id: args.source.to_string(),
-            })?
+            .ok_or_else(|| self.not_found(args.source.as_ref()))?
             .clone();
 
         // Stubs have no `entity_type`, so the schema lookup below

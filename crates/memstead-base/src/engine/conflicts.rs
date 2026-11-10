@@ -259,7 +259,7 @@ impl Engine {
             .into_iter()
             .find(|e| file_path_to_id(&e.relative_path, &mem) == *id)
         else {
-            return Err(EngineError::NotFound { id: id.to_string() });
+            return Err(self.not_found(id.as_ref()));
         };
         if !parser::has_merge_conflict_markers(&entry.content) {
             return Err(EngineError::NotConflicted { id: id.to_string() });

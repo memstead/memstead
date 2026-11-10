@@ -284,7 +284,13 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
     let id = || s("specs--alpha");
     let mut out: Vec<(String, EngineError)> = vec![
         ("DuplicateMem".into(), EngineError::DuplicateMem(s("specs"))),
-        ("UnknownMem".into(), EngineError::UnknownMem(s("nope"))),
+        (
+            "UnknownMem".into(),
+            EngineError::UnknownMem {
+                name: s("nope"),
+                known_mems: v(&["specs"]),
+            },
+        ),
         (
             "MemUnmounted".into(),
             EngineError::MemUnmounted { mem: s("gone") },
@@ -384,7 +390,13 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
                 reason: s("unreadable"),
             },
         ),
-        ("NotFound".into(), EngineError::NotFound { id: id() }),
+        (
+            "NotFound".into(),
+            EngineError::NotFound {
+                id: id(),
+                suggestions: v(&["specs--alpha"]),
+            },
+        ),
         (
             "ExpectedHashRequired".into(),
             EngineError::ExpectedHashRequired { id: id() },
@@ -858,7 +870,11 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
         ),
         (
             "InEntity(NotFound)".into(),
-            EngineError::NotFound { id: id() }.in_entity("specs/alpha.md", "amend"),
+            EngineError::NotFound {
+                id: id(),
+                suggestions: v(&["specs--alpha"]),
+            }
+            .in_entity("specs/alpha.md", "amend"),
         ),
     ];
     for e in validation_samples() {
@@ -914,7 +930,7 @@ fn label(e: &impl std::fmt::Debug) -> String {
 fn covered(e: &EngineError) {
     match e {
         EngineError::DuplicateMem(_)
-        | EngineError::UnknownMem(_)
+        | EngineError::UnknownMem { .. }
         | EngineError::MemUnmounted { .. }
         | EngineError::MemQuarantined { .. }
         | EngineError::ReadOnlyMount(_)

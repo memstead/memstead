@@ -99,7 +99,12 @@ pub fn set_mem_schema_below_boot(
         .mounts
         .iter()
         .position(|m| m.mem == mem)
-        .ok_or_else(|| BootError::Engine(EngineError::UnknownMem(mem.to_string())))?;
+        .ok_or_else(|| {
+            BootError::Engine(EngineError::UnknownMem {
+                name: mem.to_string(),
+                known_mems: Vec::new(),
+            })
+        })?;
 
     // Shared target-ref validation: same resolver, same catalogue
     // construction, same refusal shape as the booted path.

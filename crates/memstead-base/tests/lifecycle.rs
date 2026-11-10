@@ -744,7 +744,7 @@ fn delete_mem_rejects_unknown_name() {
     .unwrap_err();
     assert!(matches!(
         err,
-        FullEngineError::Engine(EngineError::UnknownMem(v)) if v == "missing"
+        FullEngineError::Engine(EngineError::UnknownMem { name: v, .. }) if v == "missing"
     ));
 }
 

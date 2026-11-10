@@ -46,7 +46,7 @@ impl Engine {
         let entity = self
             .store
             .get(id)
-            .ok_or_else(|| EngineError::NotFound { id: id.to_string() })?;
+            .ok_or_else(|| self.not_found(id.as_ref()))?;
 
         // Snapshot the prev entity's body wiki-link set before any
         // subsequent `&mut self` reborrow burns the `entity` borrow.

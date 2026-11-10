@@ -242,7 +242,7 @@ impl Engine {
             .mounts
             .iter()
             .find(|m| m.mount.mem == mem)
-            .ok_or_else(|| crate::engine::EngineError::UnknownMem(mem.to_string()))?;
+            .ok_or_else(|| self.unknown_mem(mem))?;
         let third_party = mounted.mount.capability == MountCapability::ReadOnly;
         let config = self.mem_config_for(mem);
         // The mem's schema, for the declared section headings below. A

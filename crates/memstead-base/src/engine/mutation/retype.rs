@@ -84,7 +84,7 @@ impl Engine {
         let entity = self
             .store
             .get(id)
-            .ok_or_else(|| EngineError::NotFound { id: id.to_string() })?
+            .ok_or_else(|| self.not_found(id.as_ref()))?
             .clone();
         if entity.stub {
             return Err(EngineError::StubNotUpdatable { id: id.to_string() });

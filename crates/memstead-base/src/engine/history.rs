@@ -437,9 +437,7 @@ impl Engine {
             .all_entities()
             .any(|e| e.mem == mem && e.id.0 == entity_id);
         if !known {
-            return Err(EngineError::NotFound {
-                id: entity_id.to_string(),
-            });
+            return Err(self.not_found(entity_id));
         }
         let id = crate::EntityId(entity_id.to_string());
         let (checks_carried, checks_reason) = match self.archive_checks_for(mem) {
@@ -590,9 +588,7 @@ impl Engine {
             .all_entities()
             .any(|e| e.mem == mem && e.id.0 == entity_id);
         if !known {
-            return Err(EngineError::NotFound {
-                id: entity_id.to_string(),
-            });
+            return Err(self.not_found(entity_id));
         }
 
         let mut limitations: Vec<String> = Vec::new();

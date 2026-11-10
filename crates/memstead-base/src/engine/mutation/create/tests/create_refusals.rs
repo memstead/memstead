@@ -367,7 +367,7 @@ fn create_entity_rejects_unknown_mem() {
             None,
         )
         .unwrap_err();
-    assert!(matches!(err, EngineError::UnknownMem(v) if v == "does-not-exist"));
+    assert!(matches!(err, EngineError::UnknownMem { name: v, .. } if v == "does-not-exist"));
 }
 
 #[test]

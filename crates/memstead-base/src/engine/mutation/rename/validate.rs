@@ -28,7 +28,7 @@ impl Engine {
         let entity = self
             .store
             .get(id)
-            .ok_or_else(|| EngineError::NotFound { id: id.to_string() })?;
+            .ok_or_else(|| self.not_found(id.as_ref()))?;
 
         // Stub guard — stubs derive their title from the id and have
         // no `entity_type` to validate against. Recovery is

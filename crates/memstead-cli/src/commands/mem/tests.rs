@@ -141,6 +141,7 @@ fn lifecycle_refusal_never_degrades_to_validation_failed_token() {
 fn wrapped_base_engine_error_preserves_per_variant_exit_kind() {
     let err = FullEngineError::Engine(EngineError::NotFound {
         id: "specs--missing".to_string(),
+        suggestions: Vec::new(),
     });
     let cli = lifted_cli_error(err);
     assert_eq!(cli.code, "ENTITY_NOT_FOUND");

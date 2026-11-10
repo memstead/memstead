@@ -107,9 +107,7 @@ impl crate::Engine {
             .store()
             .get(&scope.root)
             .filter(|e| !e.stub)
-            .ok_or_else(|| crate::EngineError::NotFound {
-                id: scope.root.to_string(),
-            })?;
+            .ok_or_else(|| self.not_found(scope.root.as_ref()))?;
         if root.mem != mem {
             return Err(crate::EngineError::InvalidInput(format!(
                 "root {} lives in mem '{}', not in the exported mem '{mem}'",

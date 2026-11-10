@@ -193,9 +193,7 @@ impl Engine {
         let entity = self
             .store()
             .get(source_id)
-            .ok_or_else(|| EngineError::NotFound {
-                id: source_id.to_string(),
-            })?;
+            .ok_or_else(|| self.not_found(source_id.as_ref()))?;
         let expected_hash = entity.content_hash.clone();
         let mut sections: IndexMap<String, String> = IndexMap::new();
         if let Some((key, body)) = entity.sections.iter().next() {

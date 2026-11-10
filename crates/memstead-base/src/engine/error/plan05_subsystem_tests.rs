@@ -227,8 +227,11 @@ fn schema_install_probe_hints_only_for_uninstalled_authoring_package() {
     );
 
     // Non-SchemaNotFound errors pass through unchanged.
-    let other =
-        EngineError::UnknownMem("specs".to_string()).with_schema_install_probe(Some(tmp.path()));
+    let other = EngineError::UnknownMem {
+        name: "specs".to_string(),
+        known_mems: Vec::new(),
+    }
+    .with_schema_install_probe(Some(tmp.path()));
     assert_eq!(other.code(), "UNKNOWN_MEM");
 }
 

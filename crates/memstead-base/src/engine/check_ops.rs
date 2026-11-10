@@ -151,9 +151,7 @@ impl Engine {
             .all_entities()
             .find(|e| e.mem == mem_name && e.id.0 == entity_id)
             .map(|e| e.content_hash.clone())
-            .ok_or_else(|| EngineError::NotFound {
-                id: entity_id.to_string(),
-            })?;
+            .ok_or_else(|| self.not_found(entity_id))?;
         let Some(root) = self.workspace_root() else {
             return Err(EngineError::CheckNotRecorded {
                 reason: "engine has no workspace root — no durable check store".to_string(),
@@ -410,9 +408,7 @@ impl Engine {
             .all_entities()
             .find(|e| e.mem == mem_name && e.id.0 == entity_id)
             .map(|e| e.content_hash.clone())
-            .ok_or_else(|| EngineError::NotFound {
-                id: entity_id.to_string(),
-            })?;
+            .ok_or_else(|| self.not_found(entity_id))?;
         let latest =
             self.latest_check_record(mem_name, entity_id, CheckKind::Verification.as_str());
         Ok((derive_state(latest.as_ref(), &current_hash), latest))
@@ -435,9 +431,7 @@ impl Engine {
             .all_entities()
             .find(|e| e.mem == mem_name && e.id.0 == entity_id)
             .map(|e| e.content_hash.clone())
-            .ok_or_else(|| EngineError::NotFound {
-                id: entity_id.to_string(),
-            })?;
+            .ok_or_else(|| self.not_found(entity_id))?;
         let latest = self.latest_check_record(mem_name, entity_id, CheckKind::Conformance.as_str());
         Ok((
             crate::check::derive_state_pinned(

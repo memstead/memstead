@@ -155,728 +155,98 @@ impl CliError {
             other => other,
         };
         let code = e.code();
-        let (kind, details) = match &e {
-            NotFound { id } => (ExitKind::NotFound, Some(serde_json::json!({ "id": id }))),
-            ExpectedHashRequired { .. } => (ExitKind::Validation, Some(e.details())),
-            EntityIdMissingMem { .. } => (ExitKind::NotFound, Some(e.details())),
-            MergeConflictUnsupportedBackend { mem } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "mem": mem })),
-            ),
-            NotConflicted { id } => (ExitKind::Validation, Some(serde_json::json!({ "id": id }))),
-            HashMismatch {
-                id,
-                current,
-                is_stub,
-            } => (
-                ExitKind::HashMismatch,
-                Some(serde_json::json!({
-                    "id": id,
-                    "current": current,
-                    "is_stub": is_stub,
-                })),
-            ),
-            HasIncomingRefs { id, referrers } => {
-                let referrers_json: Vec<_> = referrers
-                    .iter()
-                    .map(|r| {
-                        serde_json::json!({
-                            "from_id": r.from_id,
-                            "rel_types": r.rel_types,
-                            "mem": r.mem,
-                            "capability": "write",
-                        })
-                    })
-                    .collect();
-                (
-                    ExitKind::Validation,
-                    Some(serde_json::json!({
-                        "id": id,
-                        "referrers": referrers_json,
-                    })),
-                )
-            }
-            MemHasIncomingRefs { mem, referrers } => {
-                let referrers_json: Vec<_> = referrers
-                    .iter()
-                    .map(|r| {
-                        serde_json::json!({
-                            "from_id": r.from_id,
-                            "rel_types": r.rel_types,
-                            "mem": r.mem,
-                        })
-                    })
-                    .collect();
-                (
-                    ExitKind::Validation,
-                    Some(serde_json::json!({
-                        "mem": mem,
-                        "referrers": referrers_json,
-                    })),
-                )
-            }
-            WikiLinkWithoutRelation { from_id, missing } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "from_id": from_id,
-                    "missing": missing,
-                })),
-            ),
-            // Block-tier declared-constraint refusals — validation
-            // errors with the same recovery payload the MCP envelope
-            // carries (`EngineError::details`).
-            ConstraintUnsatisfied { .. }
+        // The exit kind is this surface's encoding; the code, the payload
+        // and the message are the engine's (one value for both surfaces).
+        let kind = match &e {
+            StaleView { .. }
+            | CommitNotApplied { .. }
+            | MemQuarantined { .. }
+            | CheckNotRecorded { .. }
+            | DuplicateMem { .. }
+            | SchemaResolverInit { .. }
+            | Mem { .. }
+            | ParseAfterWrite { .. }
+            | Parse { .. }
+            | Backend { .. }
+            | SearchUnavailable => ExitKind::Generic,
+            HashMismatch { .. } => ExitKind::HashMismatch,
+            NotFound { .. }
+            | EntityIdMissingMem { .. }
+            | MemUnmounted { .. }
+            | UnknownMem { .. } => ExitKind::NotFound,
+            ExpectedHashRequired { .. }
+            | MergeConflictUnsupportedBackend { .. }
+            | NotConflicted { .. }
+            | HasIncomingRefs { .. }
+            | MemHasIncomingRefs { .. }
+            | WikiLinkWithoutRelation { .. }
+            | ConstraintUnsatisfied { .. }
             | RequiredOutgoingUnsatisfied { .. }
-            | SectionFormatRefused { .. } => (ExitKind::Validation, Some(e.details())),
-            RelationHasBodyLinks {
-                from_id,
-                to_id,
-                rel_type,
-                body_links,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "from_id": from_id,
-                    "to_id": to_id,
-                    "rel_type": rel_type,
-                    "body_links": body_links,
-                })),
-            ),
-            InvalidEntityId { id, reason } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "id": id, "reason": reason })),
-            ),
-            InvalidWikiLinkTarget {
-                raw,
-                suggested,
-                section,
-                link_source,
-                reason,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "raw": raw,
-                    "suggested": suggested,
-                    "section": section,
-                    "source": link_source,
-                    "reason": reason,
-                })),
-            ),
-            InvalidWikiLinkMem {
-                raw,
-                section,
-                reason,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "raw": raw,
-                    "section": section,
-                    "reason": reason,
-                })),
-            ),
-            CrossMemLinkNotAllowed { from_mem, to_mem } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "from_mem": from_mem,
-                    "to_mem": to_mem,
-                })),
-            ),
-            CrossMemTargetNotFound {
-                target_id,
-                target_mem,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "target_id": target_id,
-                    "target_mem": target_mem,
-                })),
-            ),
-            RenameNoOp { id, new_title } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "id": id, "new_title": new_title })),
-            ),
-            RetypeRefused { .. }
+            | SectionFormatRefused { .. }
+            | RelationHasBodyLinks { .. }
+            | InvalidEntityId { .. }
+            | InvalidWikiLinkTarget { .. }
+            | InvalidWikiLinkMem { .. }
+            | CrossMemLinkNotAllowed { .. }
+            | CrossMemTargetNotFound { .. }
+            | RenameNoOp { .. }
+            | RetypeRefused { .. }
             | RetypeNoOp { .. }
             | RetypeReferrerUnprobeable { .. }
-            | InvalidCheckFinding { .. } => (ExitKind::Validation, Some(e.details())),
-            StubCannotRelate { id } | StubNotUpdatable { id } | StubNotRenamable { id } => {
-                (ExitKind::Validation, Some(serde_json::json!({ "id": id })))
-            }
-            AlreadyExists {
-                id,
-                existing_title,
-                existing_is_stub,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "id": id,
-                    "existing_title": existing_title,
-                    "existing_is_stub": existing_is_stub,
-                })),
-            ),
-            UnknownType {
-                name,
-                schema_ref,
-                declared,
-                suggestion,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "name": name,
-                    "schema_ref": schema_ref,
-                    "declared": declared,
-                    "suggestion": suggestion,
-                })),
-            ),
-            Validation(v) => (ExitKind::Validation, Some(v.details())),
-            MemConfigIncomplete {
-                mem,
-                missing_fields,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "mem": mem,
-                    "missing_fields": missing_fields,
-                    "set_via": format!("memstead mem set-version {mem} <version>"),
-                })),
-            ),
-            InvalidTitle(slug_err) => {
-                use memstead_base::SlugError;
-                let reason = slug_err.reason();
-                let details = match slug_err {
-                    SlugError::IdTooLong { input, length, max } => serde_json::json!({
-                        "reason": reason,
-                        "input": input,
-                        "length": length,
-                        "max": max,
-                    }),
-                    SlugError::TitleEmpty { input } => serde_json::json!({
-                        "reason": reason,
-                        "input": input,
-                    }),
-                    SlugError::TitleHasControlChars {
-                        input,
-                        control_chars,
-                        proposed_slug,
-                    } => {
-                        let control_chars_str: Vec<String> = control_chars
-                            .iter()
-                            .map(|c| c.escape_default().to_string())
-                            .collect();
-                        serde_json::json!({
-                            "reason": reason,
-                            "input": input,
-                            "control_chars": control_chars_str,
-                            "proposed_slug": proposed_slug,
-                        })
-                    }
-                };
-                (ExitKind::Validation, Some(details))
-            }
-            // Exhaustiveness: the
-            // arms below replace a pre-existing `_ => (Generic, None)`
-            // wildcard that silently swallowed `DescriptionNotPermitted`,
-            // `MissingRequiredDescription`, and the rename-policy /
-            // partial-failure variants — trained CLI agents to treat
-            // these as Generic (exit 1) without structured details. The
-            // exhaustive match forces every new `EngineError` variant to
-            // declare its CLI shape before it can land. Compiler is the
-            // forcing function.
-            DescriptionNotPermitted {
-                rel_type,
-                from_id,
-                to_id,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "rel_type": rel_type,
-                    "from_id": from_id,
-                    "to_id": to_id,
-                })),
-            ),
-            MissingRequiredDescription {
-                rel_type,
-                from_id,
-                to_id,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "rel_type": rel_type,
-                    "from_id": from_id,
-                    "to_id": to_id,
-                })),
-            ),
-            RelationManualAuthoringForbidden {
-                rel_type,
-                from_id,
-                to_id,
-                guidance,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "rel_type": rel_type,
-                    "from_id": from_id,
-                    "to_id": to_id,
-                    "guidance": guidance,
-                })),
-            ),
-            CrossMemEdgeNotDeclared {
-                source_schema,
-                target_schema,
-                rel_type,
-                from_id,
-                to_id,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "source_schema": source_schema,
-                    "target_schema": target_schema,
-                    "rel_type": rel_type,
-                    "from_id": from_id,
-                    "to_id": to_id,
-                })),
-            ),
-            RepairNotNeeded { id, recovery } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "id": id, "recovery": recovery })),
-            ),
-            ConflictingSectionModes { section, modes } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "section": section, "modes": modes })),
-            ),
-            RelationshipCycle {
-                rel_type,
-                from,
-                to,
-                existing_path,
-                path_truncated,
-                acyclic_set,
-                existing_path_rel_types,
-            } => {
-                let existing_path_json: Vec<String> =
-                    existing_path.iter().map(|id| id.to_string()).collect();
-                let mut details = serde_json::json!({
-                    "rel_type": rel_type,
-                    "from": from.to_string(),
-                    "to": to.to_string(),
-                    "existing_path": existing_path_json,
-                    "path_truncated": path_truncated,
-                });
-                // Additive set-refusal extras; single-rel-type
-                // refusals keep their byte-identical payload.
-                if let Some(set) = acyclic_set {
-                    details["acyclic_set"] = serde_json::json!(set);
-                }
-                if let Some(rels) = existing_path_rel_types {
-                    details["existing_path_rel_types"] = serde_json::json!(rels);
-                }
-                (ExitKind::Validation, Some(details))
-            }
-            SetAndUnsetConflict { keys } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "keys": keys })),
-            ),
-            RequiredFieldUnset {
-                field,
-                entity_type,
-                field_description,
-                enum_values,
-                type_write_rules,
-                // `on_create` is a prose-dispatch discriminator only;
-                // the structured details payload is identical on both
-                // call sites.
-                on_create: _,
-                missing,
-            } => {
-                // `details.missing[]` carries every required-no-
-                // default field unset on the create path. Each
-                // entry echoes the type-level `write_rules`.
-                let missing_json: Vec<_> = missing
-                    .iter()
-                    .map(|m| {
-                        serde_json::json!({
-                            "field": m.key,
-                            "description": m.description,
-                            "enum_values": m.enum_values,
-                            "write_rules": type_write_rules,
-                        })
-                    })
-                    .collect();
-                (
-                    ExitKind::Validation,
-                    Some(serde_json::json!({
-                        "field": field,
-                        "entity_type": entity_type,
-                        "field_description": field_description,
-                        "enum_values": enum_values,
-                        "type_write_rules": type_write_rules,
-                        "missing": missing_json,
-                    })),
-                )
-            }
-            MissingRequiredSection {
-                entity_type,
-                missing_count,
-                sections,
-                type_guidance,
-                pre_announced_missing_fields,
-            } => {
-                let sections_json: Vec<_> = sections
-                    .iter()
-                    .map(|s| {
-                        serde_json::json!({
-                            "entity_type": s.entity_type,
-                            "key": s.key,
-                            "heading": s.heading,
-                            "write_rules": s.write_rules,
-                        })
-                    })
-                    .collect();
-                let mut details = serde_json::json!({
-                    "entity_type": entity_type,
-                    "missing_count": missing_count,
-                    "sections": sections_json,
-                    "type_guidance": type_guidance,
-                });
-                // Cross-gate pre-announcement — additive, only when
-                // non-empty; element shape mirrors REQUIRED_FIELD_UNSET's
-                // details.missing[] so one decoder reads both.
-                if !pre_announced_missing_fields.is_empty() {
-                    let type_rules = type_guidance.get(entity_type).cloned().unwrap_or_default();
-                    let missing_json: Vec<_> = pre_announced_missing_fields
-                        .iter()
-                        .map(|m| {
-                            serde_json::json!({
-                                "field": m.key,
-                                "description": m.description,
-                                "enum_values": m.enum_values,
-                                "write_rules": type_rules,
-                            })
-                        })
-                        .collect();
-                    details["pre_announced"] = serde_json::json!({
-                        "required_field_unset": { "missing": missing_json }
-                    });
-                }
-                (ExitKind::Validation, Some(details))
-            }
-            PatchSectionEmpty { section } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "section": section })),
-            ),
-            PatchOldNotFound {
-                section,
-                current_content,
-                truncated,
-                found_in_sections,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "section": section,
-                    "current_content": current_content,
-                    "truncated": truncated,
-                    "found_in_sections": found_in_sections,
-                })),
-            ),
-            RenameBlockedByCrossMemPolicy {
-                from_mem,
-                blocked_referrers,
-            } => {
-                let entries: Vec<_> = blocked_referrers
-                    .iter()
-                    .map(|r| {
-                        serde_json::json!({
-                            "from_mem": r.from_mem,
-                            "to_mem": r.to_mem,
-                            "count": r.count,
-                        })
-                    })
-                    .collect();
-                (
-                    ExitKind::Validation,
-                    Some(serde_json::json!({
-                        "from_mem": from_mem,
-                        "blocked_referrers": entries,
-                    })),
-                )
-            }
-            RenamePartialFailure {
-                committed_mems,
-                failed_mem,
-                failure_cause,
-                mems,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "committed_mems": committed_mems,
-                    "failed_mem": failed_mem,
-                    "failure_cause": failure_cause,
-                    "mems": mems,
-                })),
-            ),
-            StaleView { mem, detail } => (
-                ExitKind::Generic,
-                Some(serde_json::json!({ "mem": mem, "detail": detail })),
-            ),
-            CommitNotApplied { mem, detail } => (
-                ExitKind::Generic,
-                Some(serde_json::json!({ "mem": mem, "detail": detail })),
-            ),
-            MemUnmounted { mem } => (ExitKind::NotFound, Some(serde_json::json!({ "mem": mem }))),
-            MemQuarantined {
-                mem,
-                reason_code,
-                reason_message,
-            } => (
-                ExitKind::Generic,
-                Some(serde_json::json!({
-                    "mem": mem,
-                    "reason_code": reason_code,
-                    "reason_message": reason_message,
-                })),
-            ),
-            UnknownMem(name) => (
-                // A missing/unmatched mem is a not-found condition, the
-                // same category as `ENTITY_NOT_FOUND` (exit 3) — not a
-                // validation refusal. This central engine-error path covers
-                // `reload --mem nope` and every command that surfaces the
-                // engine's `UnknownMem` rather than constructing the code
-                // itself.
-                ExitKind::NotFound,
-                Some(serde_json::json!({ "name": name })),
-            ),
-            UnknownRef(raw) => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "ref": raw })),
-            ),
-            // The proposal merge's typed refusals: every one lands
-            // nothing, and every one carries the recovery in `details`.
-            ProposalDispositionsIncomplete { .. }
+            | InvalidCheckFinding { .. }
+            | StubCannotRelate { .. }
+            | StubNotUpdatable { .. }
+            | StubNotRenamable { .. }
+            | AlreadyExists { .. }
+            | UnknownType { .. }
+            | Validation { .. }
+            | MemConfigIncomplete { .. }
+            | InvalidTitle { .. }
+            | DescriptionNotPermitted { .. }
+            | MissingRequiredDescription { .. }
+            | RelationManualAuthoringForbidden { .. }
+            | CrossMemEdgeNotDeclared { .. }
+            | RepairNotNeeded { .. }
+            | ConflictingSectionModes { .. }
+            | RelationshipCycle { .. }
+            | SetAndUnsetConflict { .. }
+            | RequiredFieldUnset { .. }
+            | MissingRequiredSection { .. }
+            | PatchSectionEmpty { .. }
+            | PatchOldNotFound { .. }
+            | RenameBlockedByCrossMemPolicy { .. }
+            | RenamePartialFailure { .. }
+            | UnknownRef { .. }
+            | ProposalDispositionsIncomplete { .. }
             | ProposalConflict { .. }
             | ProposalStale { .. }
             | ProposalUnattributed { .. }
-            | ProposalLinksRejected { .. } => (ExitKind::Validation, Some(e.details())),
-            BranchResetHeadMoved {
-                mem,
-                expected,
-                current,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "mem": mem,
-                    "expected": expected,
-                    "current": current,
-                })),
-            ),
-            PushedCommitsProtected {
-                mem,
-                target_sha,
-                pushed_shas,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "mem": mem,
-                    "target_sha": target_sha,
-                    "pushed_shas": pushed_shas,
-                })),
-            ),
-            UnknownRemote(name) => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "remote": name })),
-            ),
-            LocalDivergence { mem, remote_ref } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "mem": mem,
-                    "remote_ref": remote_ref,
-                })),
-            ),
-            NonFastForward { mem, remote } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "mem": mem,
-                    "remote": remote,
-                })),
-            ),
-            LocalInvalidState {
-                mem,
-                remote,
-                detail,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "mem": mem,
-                    "remote": remote,
-                    "detail": detail,
-                })),
-            ),
-            SchemaViolationInFetch {
-                mem,
-                ref_name,
-                violations,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "mem": mem,
-                    "ref": ref_name,
-                    "violations": violations,
-                })),
-            ),
-            ReadOnlyMount(mem) => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "mem": mem })),
-            ),
-            CheckNotRecorded { reason } => (
-                ExitKind::Generic,
-                Some(serde_json::json!({ "reason": reason })),
-            ),
-            MemNameCollision {
-                name,
-                source_origin,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "name": name,
-                    "source": source_origin,
-                })),
-            ),
-            e @ ProcessMemNotEligible { .. } => (ExitKind::Validation, Some(e.details())),
-            e @ SchemaNotFound { .. } => (ExitKind::Validation, Some(e.details())),
-            EmbeddedSchemaInvalid { mem, pin, reason } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "mem": mem,
-                    "schema": pin,
-                    "error": reason,
-                })),
-            ),
-            SchemaPackageInvalid {
-                name,
-                version,
-                message,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "schema": format!("{name}@{version}"),
-                    "error": message,
-                })),
-            ),
-            InvalidInput(msg) => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "message": msg })),
-            ),
-            RenameSimilarityOutOfRange {
-                requested,
-                allowed_min,
-                allowed_max,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "field": "rename_similarity",
-                    "requested": requested,
-                    "allowed_range": [allowed_min, allowed_max],
-                })),
-            ),
-            // Engine-internal / boundary errors: no user-recoverable
-            // structured payload. Code + message are sufficient — the
-            // CLI surfaces the typed code via `e.code()` (already set
-            // at the top of this fn) and the message text describes
-            // the underlying cause.
-            DuplicateMem(name) => (ExitKind::Generic, Some(serde_json::json!({ "name": name }))),
-            SchemaResolverInit(detail) => (
-                ExitKind::Generic,
-                Some(serde_json::json!({ "detail": detail })),
-            ),
-            Mem(detail) => (
-                ExitKind::Generic,
-                Some(serde_json::json!({ "detail": detail })),
-            ),
-            ParseAfterWrite(detail) => (
-                ExitKind::Generic,
-                Some(serde_json::json!({ "detail": detail })),
-            ),
-            Parse(inner) => (
-                ExitKind::Generic,
-                Some(serde_json::json!({ "detail": inner.to_string() })),
-            ),
-            Backend(inner) => (
-                ExitKind::Generic,
-                Some(serde_json::json!({ "detail": inner.to_string() })),
-            ),
-            SearchUnavailable => (ExitKind::Generic, Some(serde_json::json!({}))),
-            // Typed refusal
-            // when `memstead export --format markdown --mem-name <V>`
-            // targets a backend that doesn't support markdown
-            // regeneration. Validation-class exit code matches other
-            // backend-incompatibility refusals.
-            MarkdownExportUnsupportedBackend {
-                mem,
-                active_backend,
-                supported_backends,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "mem": mem,
-                    "active_backend": active_backend,
-                    "supported_backends": supported_backends,
-                })),
-            ),
-            EmptyUpdate { id } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "id": id,
-                    // The engine's own list, not a copy: four hand-copied
-                    // copies disagreed (consistency-sweep 03/04).
-                    "recognised_keys":
-                        memstead_base::engine::error::RECOGNISED_MUTATION_KEYS,
-                })),
-            ),
-            // A bad `--since` cursor surfaces the typed `INVALID_CURSOR` (via
-            // `e.code()`) with the untruncated cursor — rather than leaking
-            // it as the `MEM_ERROR` catch-all. Both variants share the code:
-            // git-backed mems refuse an unknown commit, timestamp-backed
-            // mems refuse a non-RFC3339 `since` (a `write_id` above all).
-            InvalidChangesCursor { mem, since } | InvalidTimestampCursor { mem, since } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "mem": mem, "since": since })),
-            ),
-            // Review-mark diff on a markless mem (code REVIEW_MARK_NOT_SET
-            // via `e.code()`).
-            ReviewMarkNotSet { mem } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "mem": mem })),
-            ),
-            // A malformed `anchors[]` element on create/update — typed
-            // `INVALID_ANCHOR` (via `e.code()`) with the wrapped anchor
-            // error's recovery detail (offending field, bad value, allowed
-            // set).
-            InvalidAnchor(anchor_err) => (
-                ExitKind::Validation,
-                Some(serde_json::Value::Object(
-                    anchor_err.detail().into_iter().collect(),
-                )),
-            ),
-            // The stored body already ends inside an open fence and this
-            // write does not resolve it. The detail
-            // carries the sections it buried, which is what tells the
-            // operator what a corrected body has to put back.
-            UnterminatedFenceInStoredBody {
-                id,
-                section,
-                fence,
-                swallowed,
-            } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({
-                    "id": id,
-                    "section": section,
-                    "fence": fence,
-                    "swallowed_sections": swallowed,
-                })),
-            ),
-            // Unwrapped above: the source's own arm decides.
+            | ProposalLinksRejected { .. }
+            | BranchResetHeadMoved { .. }
+            | PushedCommitsProtected { .. }
+            | UnknownRemote { .. }
+            | LocalDivergence { .. }
+            | NonFastForward { .. }
+            | LocalInvalidState { .. }
+            | SchemaViolationInFetch { .. }
+            | ReadOnlyMount { .. }
+            | MemNameCollision { .. }
+            | ProcessMemNotEligible { .. }
+            | SchemaNotFound { .. }
+            | EmbeddedSchemaInvalid { .. }
+            | SchemaPackageInvalid { .. }
+            | InvalidInput { .. }
+            | RenameSimilarityOutOfRange { .. }
+            | MarkdownExportUnsupportedBackend { .. }
+            | EmptyUpdate { .. }
+            | InvalidChangesCursor { .. }
+            | InvalidTimestampCursor { .. }
+            | ReviewMarkNotSet { .. }
+            | InvalidAnchor { .. }
+            | UnterminatedFenceInStoredBody { .. } => ExitKind::Validation,
             InEntity { .. } => unreachable!("the per-entity wrapper is unwrapped above"),
         };
+        let details = Some(e.details());
         // Route the CLI message through the rich-prose renderer so markdown-
         // default mode and `--json --message` consumers see the same
         // fully-inlined recovery prose the MCP text channel emits.

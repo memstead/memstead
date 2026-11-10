@@ -1470,7 +1470,7 @@ fn gitdir_for_unknown_mem_returns_unknown_mem() {
     )])
     .unwrap();
     let err = engine.gitdir_for("missing").unwrap_err();
-    assert!(matches!(err, EngineError::UnknownMem(v) if v == "missing"));
+    assert!(matches!(err, EngineError::UnknownMem { name: v, .. } if v == "missing"));
 }
 
 #[test]
@@ -1517,7 +1517,7 @@ fn worktree_for_unknown_mem_returns_unknown_mem() {
     )])
     .unwrap();
     let err = engine.worktree_for("missing").unwrap_err();
-    assert!(matches!(err, EngineError::UnknownMem(v) if v == "missing"));
+    assert!(matches!(err, EngineError::UnknownMem { name: v, .. } if v == "missing"));
 }
 
 #[test]
@@ -1563,7 +1563,7 @@ fn mem_head_sha_unknown_mem_returns_unknown_mem() {
     )])
     .unwrap();
     let err = engine.mem_head_sha("missing").unwrap_err();
-    assert!(matches!(err, EngineError::UnknownMem(v) if v == "missing"));
+    assert!(matches!(err, EngineError::UnknownMem { name: v, .. } if v == "missing"));
 }
 
 #[test]
@@ -1595,7 +1595,7 @@ fn capability_surfaces_per_mount() {
     );
     assert!(matches!(
         engine.capability("missing"),
-        Err(EngineError::UnknownMem(_))
+        Err(EngineError::UnknownMem { .. })
     ));
 }
 

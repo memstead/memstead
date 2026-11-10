@@ -135,7 +135,7 @@ impl Engine {
         let entity = self
             .store
             .get(id)
-            .ok_or_else(|| EngineError::NotFound { id: id.to_string() })?;
+            .ok_or_else(|| self.not_found(id.as_ref()))?;
 
         // A stub has no content to protect: it deletes with no hash, and a
         // non-empty one refuses with `details.is_stub` (the corrective
