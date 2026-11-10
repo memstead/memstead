@@ -38,6 +38,9 @@ use memstead_git_branch::test_support::init_real_mem_repo;
 use tempfile::TempDir;
 
 const MEM: &str = "notes";
+/// A second mem, mounted lazily and never loaded: a relation into it is
+/// verified against its storage, before the commit and again after it.
+const PEER: &str = "peer";
 
 // ---------------------------------------------------------------------
 // The storage trait's methods
@@ -127,6 +130,8 @@ struct FaultState {
     /// Fail the n-th call (1-based) of this method since the reset.
     armed: Option<(Method, usize)>,
     fired: bool,
+    /// The commit had already landed when the fault fired.
+    fired_after_landing: bool,
     landed: bool,
     /// Paths a write was staged for since the reset.
     staged_paths: BTreeSet<PathBuf>,
@@ -146,6 +151,10 @@ impl Faults {
         self.inner.lock().unwrap().fired
     }
 
+    fn fired_after_landing(&self) -> bool {
+        self.inner.lock().unwrap().fired_after_landing
+    }
+
     fn log(&self) -> Vec<(Method, bool)> {
         self.inner.lock().unwrap().log.clone()
     }
@@ -162,6 +171,7 @@ impl Faults {
         let nth = state.log.iter().filter(|(m, _)| *m == method).count();
         if state.armed == Some((method, nth)) && !state.fired {
             state.fired = true;
+            state.fired_after_landing = landed;
             return true;
         }
         false
@@ -385,9 +395,45 @@ impl Workspace {
                 init_real_mem_repo(tmp.path(), &[(MEM, "default@1.0.0")]);
             }
         }
+        let peer = tmp.path().join(PEER);
+        std::fs::create_dir_all(peer.join(".memstead")).unwrap();
+        std::fs::write(
+            peer.join(".memstead/config.json"),
+            r#"{"schema": "default@1.0.0"}"#,
+        )
+        .unwrap();
         let ws = Self::over(tmp, kind);
         ws.seed();
         ws
+    }
+
+    fn peer_mount(&self, lifecycle: MountLifecycle) -> Mount {
+        Mount {
+            mem: PEER.to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: self._tmp.path().join(PEER),
+            },
+            capability: MountCapability::Write,
+            lifecycle,
+            cross_linkable: true,
+            migration_target: None,
+        }
+    }
+
+    fn settle(mut engine: Engine) -> Engine {
+        engine.set_git_branch_ops(memstead_git_branch::storage::FULL_GIT_BRANCH_OPS);
+        let mut settings = memstead_base::WorkspaceSettings::default();
+        settings.cross_mem_links.insert(
+            PEER.to_string(),
+            memstead_schema::workspace_config::CrossLinkValue::Wildcard,
+        );
+        settings.cross_mem_links.insert(
+            MEM.to_string(),
+            memstead_schema::workspace_config::CrossLinkValue::Wildcard,
+        );
+        engine.set_settings(settings);
+        engine
     }
 
     /// A private copy of this workspace's storage.
@@ -434,34 +480,44 @@ impl Workspace {
         instantiate_full_backend(&self.mount).expect("backend instantiates")
     }
 
-    /// An engine loaded from storage, with no fault wrapper.
-    fn fresh_engine(&self) -> Engine {
-        let mut engine = Engine::from_mounts(vec![(self.mount.clone(), self.raw_backend())])
-            .expect("engine boots");
-        engine.set_git_branch_ops(memstead_git_branch::storage::FULL_GIT_BRANCH_OPS);
-        engine
+    /// An engine loaded from storage, with no fault wrapper. `peer`
+    /// mounts the second mem lazily beside the one under test.
+    fn fresh_engine(&self, peer: bool) -> Engine {
+        let mut mounts = vec![(self.mount.clone(), self.raw_backend())];
+        if peer {
+            let mount = self.peer_mount(MountLifecycle::Lazy);
+            let backend = instantiate_full_backend(&mount).expect("peer backend");
+            mounts.push((mount, backend));
+        }
+        Self::settle(Engine::from_mounts(mounts).expect("engine boots"))
     }
 
-    /// An engine whose backend fails on command, plus the handle that
-    /// commands it and the backend instance the engine stages into.
-    fn faulted_engine(&self) -> (Engine, Arc<Faults>, Arc<dyn MemBackend>) {
+    /// An engine whose backends fail on command (the mem's and, with
+    /// `peer`, the lazy peer's share one fault handle), plus that
+    /// handle and the backend instance the engine stages the mem's
+    /// writes into.
+    fn faulted_engine(&self, peer: bool) -> (Engine, Arc<Faults>, Arc<dyn MemBackend>) {
         let inner: Arc<dyn MemBackend> = Arc::from(self.raw_backend());
         let faults = Arc::new(Faults::default());
         let wrapper = FaultBackend {
             inner: Arc::clone(&inner),
             faults: Arc::clone(&faults),
         };
-        let mut engine = Engine::from_mounts(vec![(
-            self.mount.clone(),
-            Box::new(wrapper) as Box<dyn MemBackend>,
-        )])
-        .expect("engine boots");
-        engine.set_git_branch_ops(memstead_git_branch::storage::FULL_GIT_BRANCH_OPS);
+        let mut mounts = vec![(self.mount.clone(), Box::new(wrapper) as Box<dyn MemBackend>)];
+        if peer {
+            let mount = self.peer_mount(MountLifecycle::Lazy);
+            let wrapper = FaultBackend {
+                inner: Arc::from(instantiate_full_backend(&mount).expect("peer backend")),
+                faults: Arc::clone(&faults),
+            };
+            mounts.push((mount, Box::new(wrapper) as Box<dyn MemBackend>));
+        }
+        let engine = Self::settle(Engine::from_mounts(mounts).expect("engine boots"));
         (engine, faults, inner)
     }
 
     fn seed(&self) {
-        let mut engine = self.fresh_engine();
+        let mut engine = self.fresh_engine(false);
         for title in ["Alpha", "Beta", "Gamma"] {
             engine
                 .create_entity(create_args(title, &[]), Actor::Cli, None, None)
@@ -470,6 +526,16 @@ impl Workspace {
         engine
             .relate_entity(relate_args("alpha", "beta"), Actor::Cli, None, None)
             .expect("seed relation");
+
+        let peer = self.peer_mount(MountLifecycle::Eager);
+        let peer_backend = instantiate_full_backend(&peer).expect("peer backend");
+        let mut peer_engine =
+            Engine::from_mounts(vec![(peer, peer_backend)]).expect("peer engine boots");
+        let mut target = create_args("Target", &[]);
+        target.mem = PEER.to_string();
+        peer_engine
+            .create_entity(target, Actor::Cli, None, None)
+            .expect("seed the peer's entity");
     }
 
     /// Storage, byte for byte: the folder's files (ledger included,
@@ -541,6 +607,11 @@ fn snapshot_dir(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Verb {
     Create,
+    /// A create whose relation points into the lazy peer: the engine
+    /// asks the peer's storage about the target before the commit and
+    /// again after it, so this verb has a fallible step after the
+    /// commit that a storage fault can reach.
+    CreateIntoDeferredMem,
     Update,
     Delete,
     Relate,
@@ -551,12 +622,21 @@ enum Verb {
     BatchRelate,
 }
 
+impl Verb {
+    /// Only the verb that relates into the second mem mounts it. The
+    /// others are mutations of one mem; a second mem beside them would
+    /// bring in what an operation does to mems it does not write.
+    fn needs_peer(self) -> bool {
+        self == Verb::CreateIntoDeferredMem
+    }
+}
+
 /// Every kind of mutation the engine records, with the verbs that
 /// produce it. Exhaustive on purpose: a kind added to the engine does
 /// not compile here until its verbs are named.
 fn verbs_of(kind: ProvenanceKind) -> &'static [Verb] {
     match kind {
-        ProvenanceKind::Create => &[Verb::Create, Verb::BatchCreate],
+        ProvenanceKind::Create => &[Verb::Create, Verb::CreateIntoDeferredMem, Verb::BatchCreate],
         ProvenanceKind::Update => &[Verb::Update, Verb::BatchUpdate],
         ProvenanceKind::Delete => &[Verb::Delete],
         ProvenanceKind::Relate => &[Verb::Relate, Verb::BatchRelate],
@@ -661,6 +741,15 @@ fn run(verb: Verb, engine: &mut Engine) -> Result<Vec<String>, EngineError> {
                 .create_entity(create_args("Delta", &["alpha"]), actor, None, note)?
                 .warnings
         }
+        Verb::CreateIntoDeferredMem => {
+            let mut args = create_args("Delta", &[]);
+            args.relations.push(memstead_base::ops::RelateArg {
+                target: EntityId::new(PEER, "target"),
+                rel_type: "USES".to_string(),
+                description: None,
+            });
+            engine.create_entity(args, actor, None, note)?.warnings
+        }
         Verb::Update => {
             let args = update_args(engine, "alpha", "Alpha purpose, rewritten");
             engine.update_entity(args, actor, None, note)?.warnings
@@ -741,11 +830,13 @@ fn run(verb: Verb, engine: &mut Engine) -> Result<Vec<String>, EngineError> {
 /// The engine's view of the mem: every entity with its hash and its
 /// relations in both directions, plus what a search returns. `hashes`
 /// off drops the content hash, for comparing two runs whose bytes
-/// differ only in the timestamps the engine stamps.
+/// differ only in the timestamps the engine stamps. The lazy peer's
+/// own entities are left out: whether an operation happened to load
+/// that mem (a delete's referrer guard does) is not the mem's state.
 fn view(engine: &Engine, hashes: bool) -> BTreeMap<String, String> {
     let store = engine.store();
     let mut out = BTreeMap::new();
-    for entity in store.all_entities() {
+    for entity in store.all_entities().filter(|e| e.id.mem() == MEM) {
         let mut outgoing: Vec<String> = store
             .outgoing(&entity.id)
             .iter()
@@ -781,7 +872,13 @@ fn view(engine: &Engine, hashes: bool) -> BTreeMap<String, String> {
         };
         let mut hits: Vec<String> = engine
             .search(&scope)
-            .map(|r| r.hits.iter().map(|h| h.id.to_string()).collect())
+            .map(|r| {
+                r.hits
+                    .iter()
+                    .filter(|h| h.id.mem() == MEM)
+                    .map(|h| h.id.to_string())
+                    .collect()
+            })
             .unwrap_or_else(|e| vec![format!("search failed: {e}")]);
         hits.sort();
         out.insert(format!("~search:{term}"), format!("{hits:?}"));
@@ -820,13 +917,14 @@ struct Control {
 
 fn control(template: &Workspace, verb: Verb) -> Control {
     let (kind, ws) = (template.kind, template.copy());
-    let (mut engine, faults, _inner) = ws.faulted_engine();
+    let peer = verb.needs_peer();
+    let (mut engine, faults, _inner) = ws.faulted_engine(peer);
     faults.reset();
     run(verb, &mut engine).unwrap_or_else(|e| panic!("{kind:?} {verb:?} undisturbed: {e:?}"));
     let log = faults.log();
     assert_eq!(
         view(&engine, true),
-        view(&ws.fresh_engine(), true),
+        view(&ws.fresh_engine(peer), true),
         "{kind:?} {verb:?}: the undisturbed run's view differs from a fresh load"
     );
     Control {
@@ -859,13 +957,14 @@ fn run_cell(template: &Workspace, verb: Verb, method: Method, nth: usize, contro
     let kind = template.kind;
     let cell = format!("{kind:?} {verb:?} {}#{nth}", method.name());
     let ws = template.copy();
-    let (mut engine, faults, engine_backend) = ws.faulted_engine();
+    let peer = verb.needs_peer();
+    let (mut engine, faults, engine_backend) = ws.faulted_engine(peer);
     let before = ws.storage_snapshot();
 
     faults.arm(method, nth);
     let result = run(verb, &mut engine);
     assert!(faults.fired(), "{cell}: the fault never fired");
-    let landed = faults.log().iter().any(|(_, landed)| *landed);
+    let landed = faults.fired_after_landing();
     let staged = faults.staged_paths();
     faults.reset();
 
@@ -882,7 +981,7 @@ fn run_cell(template: &Workspace, verb: Verb, method: Method, nth: usize, contro
             assert_nothing_staged(&ws, &staged, &engine_backend, &cell);
             assert_eq!(
                 view(&engine, true),
-                view(&ws.fresh_engine(), true),
+                view(&ws.fresh_engine(peer), true),
                 "{cell}: after the failed call the engine's view differs from a fresh load"
             );
             run(verb, &mut engine).unwrap_or_else(|e| panic!("{cell}: the retry failed: {e:?}"));
@@ -893,7 +992,7 @@ fn run_cell(template: &Workspace, verb: Verb, method: Method, nth: usize, contro
             );
             assert_eq!(
                 view(&engine, true),
-                view(&ws.fresh_engine(), true),
+                view(&ws.fresh_engine(peer), true),
                 "{cell}: after the retry the engine's view differs from a fresh load"
             );
         }
@@ -907,7 +1006,7 @@ fn run_cell(template: &Workspace, verb: Verb, method: Method, nth: usize, contro
             );
             assert_eq!(
                 view(&engine, true),
-                view(&ws.fresh_engine(), true),
+                view(&ws.fresh_engine(peer), true),
                 "{cell}: after an absorbed failure the engine's view differs from a fresh load"
             );
         }
@@ -925,7 +1024,7 @@ fn run_cell(template: &Workspace, verb: Verb, method: Method, nth: usize, contro
             );
             assert_eq!(
                 view(&engine, true),
-                view(&ws.fresh_engine(), true),
+                view(&ws.fresh_engine(peer), true),
                 "{cell}: after a failed follow-up the engine's view differs from a fresh load"
             );
         }
@@ -971,4 +1070,89 @@ fn every_failed_storage_call_leaves_nothing_behind_on_the_folder_backend() {
 #[test]
 fn every_failed_storage_call_leaves_nothing_behind_on_the_git_branch_backend() {
     run_matrix(Kind::GitBranch);
+}
+
+/// A failed commit must not switch drift detection off: the engine
+/// records a write as its own only once it is committed, so a sibling's
+/// commit after the failure is still seen and reloaded.
+#[test]
+fn a_failed_commit_is_not_recorded_as_the_engines_own_write() {
+    for kind in [Kind::Folder, Kind::GitBranch] {
+        let ws = Workspace::template(kind);
+        let (mut engine, faults, _backend) = ws.faulted_engine(false);
+        faults.arm(Method::CommitWithExpectedParent, 1);
+        run(Verb::Update, &mut engine).expect_err("the commit fails");
+        faults.reset();
+
+        // A sibling process writes to the same mem.
+        run(Verb::Relate, &mut ws.fresh_engine(false)).expect("the sibling's write lands");
+
+        let warnings = engine.reload_if_stale(Some(MEM));
+        assert!(
+            warnings.iter().any(|w| w.code() == "MEM_RELOADED"),
+            "{kind:?}: the sibling's commit went unseen: {warnings:?}"
+        );
+        assert_eq!(
+            view(&engine, true),
+            view(&ws.fresh_engine(false), true),
+            "{kind:?}: the engine's view differs from a fresh load"
+        );
+    }
+}
+
+/// The refresh of a checked-out worktree runs after the branch has
+/// moved. When it fails, the verb reports the write as done, names the
+/// step, and the engine's view is level with storage.
+#[cfg(unix)]
+#[test]
+fn a_failed_worktree_refresh_is_a_warning_on_a_landed_write() {
+    use std::os::unix::fs::PermissionsExt;
+    let set_mode = |path: &Path, mode: u32| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap()
+    };
+
+    let ws = Workspace::template(Kind::GitBranch);
+    let repo = ws._tmp.path().join("mem-repo");
+    // Give the repository a worktree with the mem's branch checked out.
+    for args in [
+        vec!["config", "core.bare", "false"],
+        vec!["symbolic-ref", "HEAD", "refs/heads/notes"],
+    ] {
+        let status = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.join(".git"))
+            .args(&args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+    let mut engine = ws.fresh_engine(false);
+
+    // A worktree that takes no file: the commit lands, its checkout
+    // cannot.
+    set_mode(&repo, 0o555);
+    let probe = repo.join("permission-probe");
+    if std::fs::write(&probe, b"").is_ok() {
+        let _ = std::fs::remove_file(&probe);
+        set_mode(&repo, 0o755);
+        eprintln!("skipped: this user writes through read-only directories");
+        return;
+    }
+    let result = run(Verb::Update, &mut engine);
+    set_mode(&repo, 0o755);
+
+    let codes = result.expect("a write that landed is not reported as failed");
+    assert!(
+        codes.iter().any(|c| c == "WRITE_FOLLOW_UP_FAILED"),
+        "no warning names the failed refresh: {codes:?}"
+    );
+    assert_eq!(
+        view(&engine, true),
+        view(&ws.fresh_engine(false), true),
+        "the engine's view differs from a fresh load"
+    );
+    assert!(
+        engine.reload_if_stale(Some(MEM)).is_empty(),
+        "the engine's own landed write reads as drift"
+    );
 }
