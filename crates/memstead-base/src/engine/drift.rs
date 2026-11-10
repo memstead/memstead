@@ -318,7 +318,7 @@ impl Engine {
     /// Remember that the drift reload of `mem` failed: its view is
     /// behind storage until a reload succeeds, and no write may land on
     /// it meanwhile ([`Self::commit_staged`]).
-    fn note_reload_failure(&mut self, mem: &str, error: &EngineError) {
+    pub(in crate::engine) fn note_reload_failure(&mut self, mem: &str, error: &EngineError) {
         if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == mem) {
             state.reload_failure = Some(error.to_string());
         }

@@ -763,6 +763,40 @@ impl Method {
     }
 }
 
+/// The git operations the engine reaches through its hook table (they
+/// live in this crate, behind function pointers), each with whether it
+/// writes to a mem-repo. Checked against the table's fields below, so a
+/// hook added to the table is classified before the writers' check
+/// passes.
+const HOOKS: &[(&str, bool)] = &[
+    ("changes_since", false),
+    ("diff", false),
+    ("branch_reset", true),
+    ("fetch", false),
+    ("pull", true),
+    ("push", false),
+    ("ls_remote", false),
+    ("resolve_ref", false),
+    ("is_ancestor", false),
+    ("is_empty_root", false),
+    ("merge_base", false),
+    ("update_ref", true),
+    ("remote_add", false),
+    ("read_tree", false),
+    ("export", false),
+    ("export_to_bytes", false),
+    ("prune_residue", true),
+    ("prune_config_blob", true),
+    ("branch_namespace_conflicts", false),
+    ("create_branch_at", true),
+    ("read_config_at_ref", false),
+    ("rename_mem_storage", true),
+    ("write_schema", true),
+    ("read_schema_file", false),
+    ("read_ref_schemas", false),
+    ("collect_ref_schema_source", false),
+];
+
 /// The engine's own write helpers, which a writer may call instead of
 /// a storage method: the write lock and the one commit call.
 const WRITE_HELPERS: &[&str] = &[
@@ -887,6 +921,25 @@ const NOT_VERBS: &[(&str, &str)] = &[
     ),
     ("retarget_fork_tree", "the fork of a mem"),
     ("fork_mem", "the fork of a mem"),
+    ("roll_back", "the rollback of a fork that failed"),
+    (
+        "pull",
+        "transport: brings a remote's commits into a mem's branch",
+    ),
+    (
+        "fast_forward_ref",
+        "transport: moves a branch to a fetched commit",
+    ),
+    ("branch_reset", "resets a mem's branch to an earlier commit"),
+    ("install_schema", "writes a schema, not a mem's entities"),
+    (
+        "write_to_local_schema_source",
+        "writes a schema, not a mem's entities",
+    ),
+    (
+        "prune_orphan_config",
+        "removes the config of a mem that is gone",
+    ),
     ("create_mem", "the creation of a mem"),
     ("delete_mem", "the deletion of a mem"),
     ("rename_mem", "the renaming of a mem"),
@@ -904,9 +957,10 @@ fn all_verbs() -> Vec<Verb> {
 
 /// The matrix's verb list is the engine's list of writers. Read from
 /// the engine's source: every function that calls a mutating method of
-/// the storage trait, or one of the engine's write helpers, is either
-/// part of a matrix verb or named above with the reason it is not, so
-/// a write path added later fails here until it is placed.
+/// the storage trait, a writing git hook, or one of the engine's write
+/// helpers is either part of a matrix verb or named above with the
+/// reason it is not, so a write path added later fails here until it
+/// is placed.
 #[test]
 fn the_verb_list_is_the_engines_writers() {
     /// The name a line declares, if it declares a function.
@@ -941,6 +995,10 @@ fn the_verb_list_is_the_engines_writers() {
             || WRITE_HELPERS
                 .iter()
                 .any(|helper| line.contains(&format!("{helper}(")))
+            // A hook is a function pointer in a field: `(ops.pull)(…)`.
+            || HOOKS
+                .iter()
+                .any(|(hook, writes)| *writes && line.contains(&format!(".{hook})(")))
     }
 
     fn scan(dir: &Path, found: &mut BTreeSet<String>) {
@@ -1001,6 +1059,26 @@ fn the_verb_list_is_the_engines_writers() {
         }
     }
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../memstead-base/src");
+
+    // The hook list is the hook table's field list.
+    let table = std::fs::read_to_string(source.join("engine/mod.rs")).unwrap();
+    let start = table
+        .find("pub struct GitBranchOps {")
+        .expect("the hook table is declared in engine/mod.rs");
+    let end = start + table[start..].find("\n}\n").expect("the table closes");
+    let in_table: BTreeSet<String> = table[start..end]
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("pub "))
+        .filter_map(|field| field.split(':').next())
+        .filter(|name| !name.contains(' '))
+        .map(str::to_string)
+        .collect();
+    let classified: BTreeSet<String> = HOOKS.iter().map(|(name, _)| name.to_string()).collect();
+    assert_eq!(
+        in_table, classified,
+        "the git hook table and the fault matrix's hook list differ"
+    );
+
     let mut in_engine = BTreeSet::new();
     scan(&source, &mut in_engine);
     let placed: BTreeSet<String> = VERBS

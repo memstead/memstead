@@ -905,3 +905,104 @@ fn a_mem_that_booted_without_a_file_takes_no_write_until_it_is_whole() {
         "no reload step left the view incomplete for the write"
     );
 }
+
+/// The operation whose load finishes an unfinished commit reports it,
+/// whichever verb it is: the batch forms carry what their reloads
+/// report like the single verbs do.
+#[test]
+fn every_verb_reports_the_commit_its_load_finished() {
+    let template = seeded();
+    let (actor, client) = cli_actor();
+    let first = |engine: &mut Engine| {
+        engine.create_entity(empty_create_args(MEM, "Zeta"), actor, Some(&client), None)
+    };
+
+    let probe_dir = TempDir::new().unwrap();
+    copy_dir(template.path(), probe_dir.path());
+    let io = FaultIo::new();
+    let mut probe = faulted_engine(probe_dir.path(), &io);
+    io.reset();
+    first(&mut probe).unwrap();
+    let commit_point = io.commit_point().unwrap();
+
+    for next in ALL_VERBS {
+        let dir = TempDir::new().unwrap();
+        copy_dir(template.path(), dir.path());
+        let io = FaultIo::new();
+        let mut engine = faulted_engine(dir.path(), &io);
+        io.reset();
+        io.arm_fail_from(commit_point + 2);
+        let err = first(&mut engine).expect_err("the commit is cut off");
+        assert_eq!(err.code(), "COMMIT_NOT_APPLIED", "{next}: {err}");
+
+        io.reset();
+        let warnings = run(next, &mut engine).unwrap_or_else(|e| panic!("{next}: {e:?}"));
+        assert!(
+            warnings.iter().any(|w| matches!(
+                w,
+                crate::ops::WarningHint::InterruptedCommitCompleted { mem, files }
+                    if mem == MEM && files.iter().any(|f| f == "zeta.md")
+            )),
+            "{next}: the commit its load finished is not on its response: {warnings:?}"
+        );
+        assert_eq!(
+            view(&engine, true),
+            view(&engine_over(dir.path()), true),
+            "{next}: the engine's view differs from a fresh load"
+        );
+    }
+}
+
+/// The store update after a landed commit fails, and so does the reload
+/// that should bring the view level. The write is the engine's own by
+/// then, so no drift will ever reload the mem: it is marked instead,
+/// takes no write, and the next operation reloads it. A write that
+/// carries the hash from before the landed write gets the honest
+/// mismatch and does not replace it.
+#[test]
+fn a_failed_levelling_reload_leaves_no_view_a_write_can_land_on() {
+    let template = seeded();
+    let (actor, client) = cli_actor();
+
+    let probe_dir = TempDir::new().unwrap();
+    copy_dir(template.path(), probe_dir.path());
+    let io = FaultIo::new();
+    let mut probe = faulted_engine(probe_dir.path(), &io);
+    io.reset();
+    run("update", &mut probe).unwrap();
+    let commit_steps = io.op_count();
+
+    for failing_step in 0..10 {
+        let dir = TempDir::new().unwrap();
+        copy_dir(template.path(), dir.path());
+        let io = FaultIo::new();
+        let mut engine = faulted_engine(dir.path(), &io);
+        let stale = update_args(&engine, "alpha", "a rewrite from the view before");
+
+        io.reset();
+        io.arm_fail_at(commit_steps + failing_step);
+        test_fault::arm();
+        let warnings = run("update", &mut engine).unwrap_or_else(|e| {
+            panic!("step {failing_step}: a landed write reported as failed: {e:?}")
+        });
+        io.reset();
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.code() == "WRITE_FOLLOW_UP_FAILED"),
+            "step {failing_step}: {warnings:?}"
+        );
+        let landed = view(&engine_over(dir.path()), true);
+
+        let err = engine
+            .update_entity(stale, actor, Some(&client), None)
+            .expect_err("a write with the hash from before the landed write must not land");
+        assert_eq!(err.code(), "HASH_MISMATCH", "step {failing_step}: {err}");
+        assert_eq!(
+            view(&engine_over(dir.path()), true),
+            landed,
+            "step {failing_step}: the landed write was replaced"
+        );
+        assert_eq!(view(&engine, true), landed, "step {failing_step}");
+    }
+}

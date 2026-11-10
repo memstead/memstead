@@ -235,6 +235,12 @@ impl Engine {
                 for mem in mems {
                     let mut detail = e.to_string();
                     if let Err(reload) = self.reload_one_mem(&mem) {
+                        // The view stays behind the write that just
+                        // landed, and the write is already recorded as
+                        // the engine's own, so no drift would ever
+                        // reload it: mark the mem, so it takes no write
+                        // and is reloaded before the next operation.
+                        self.note_reload_failure(&mem, &reload);
                         detail.push_str(&format!(
                             "; reloading the mem from storage failed as well: {reload}"
                         ));
@@ -260,6 +266,7 @@ impl Engine {
             self.record_self_write(*mount_idx, write_id);
             let mem = self.mounts[*mount_idx].mount.mem.clone();
             if let Err(e) = self.reload_one_mem(&mem) {
+                self.note_reload_failure(&mem, &e);
                 tracing::warn!(
                     mem = %mem,
                     error = %e,

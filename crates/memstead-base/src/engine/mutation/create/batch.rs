@@ -71,8 +71,11 @@ impl Engine {
         touched_mems.sort();
         touched_mems.dedup();
         let _write_lock = self.lock_mems_for_write_if(!dry_run, &touched_mems)?;
+        // What the reloads report (a sibling's commit, a commit this
+        // load completed) rides the receipt like on a single verb.
+        let mut drift_warnings: Vec<WarningHint> = Vec::new();
         for m in &touched_mems {
-            self.reload_if_stale(Some(m));
+            drift_warnings.extend(self.reload_if_stale(Some(m)));
         }
         // Same acyclic-guard rule as the single-item path: declared
         // relations on an ACYCLIC rel-type (or one in an
@@ -260,7 +263,7 @@ impl Engine {
             }
         }
         let mut mount_commits: Vec<(usize, String)> = Vec::with_capacity(distinct_mounts.len());
-        let mut batch_warnings: Vec<WarningHint> = Vec::new();
+        let mut batch_warnings: Vec<WarningHint> = drift_warnings;
         for &m in &distinct_mounts {
             let entity_ids: Vec<String> = prepared
                 .iter()
