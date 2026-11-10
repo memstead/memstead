@@ -25,7 +25,7 @@
 mod common;
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -1551,4 +1551,300 @@ fn a_second_resolution_while_a_conflict_resolution_is_held_at_its_commit_is_not_
         }
         assert_level_with_storage(&ws, &mut engine, &context);
     }
+}
+
+// ---------------------------------------------------------------------
+// Guards that read more than the mems a call names: the cycle guard,
+// a peer whose reload failed, a bare slug
+// ---------------------------------------------------------------------
+
+fn depends_update(engine: &Engine, from: &EntityId, to: &EntityId) -> UpdateEntityArgs {
+    let mut args = update_args(engine, from, "");
+    args.sections.clear();
+    args.declare_relations = vec![memstead_base::ops::RelateArg {
+        target: to.clone(),
+        rel_type: "DEPENDS_ON".to_string(),
+        description: None,
+    }];
+    args
+}
+
+fn depends_edge(engine: &Engine, from: &EntityId, to: &EntityId) -> bool {
+    engine
+        .store()
+        .outgoing(from)
+        .iter()
+        .any(|e| e.rel_type == "DEPENDS_ON" && &e.target == to)
+}
+
+fn stored_relationships(ws: &Workspace, mem: &str, file: &str) -> String {
+    let mount = ws.mounts.iter().find(|m| m.mem == mem).unwrap();
+    let bytes = instantiate_full_backend(mount)
+        .unwrap()
+        .read_entity(Path::new(file))
+        .unwrap()
+        .unwrap_or_default();
+    let text = String::from_utf8_lossy(&bytes);
+    text.split("## Relationships")
+        .nth(1)
+        .unwrap_or("(none)")
+        .trim()
+        .to_string()
+}
+
+#[derive(Debug, Clone, Copy)]
+enum First {
+    /// Batch update of left--alpha declaring DEPENDS_ON onto right--gamma.
+    BatchUpdate,
+    /// Batch create of left--delta with DEPENDS_ON onto right--gamma.
+    BatchCreate,
+}
+
+fn run_first(first: First, engine: &mut Engine) -> Report {
+    match first {
+        First::BatchUpdate => {
+            let args = depends_update(engine, &id(LEFT, "alpha"), &id(RIGHT, "gamma"));
+            batch_report(engine.batch_update(vec![(args, None)], Actor::Cli, None, false))
+        }
+        First::BatchCreate => {
+            let mut args = create_args(LEFT, "Delta", &[id(RIGHT, "gamma")]);
+            args.relations[0].rel_type = "DEPENDS_ON".to_string();
+            batch_report(engine.batch_create(vec![(args, None)], Actor::Cli, None, false))
+        }
+    }
+}
+
+fn first_source(first: First) -> (EntityId, &'static str) {
+    match first {
+        First::BatchUpdate => (id(LEFT, "alpha"), "alpha.md"),
+        First::BatchCreate => (id(LEFT, "delta"), "delta.md"),
+    }
+}
+
+/// The second process: a batch update of right--gamma declaring
+/// DEPENDS_ON back onto the first one's source.
+fn run_second(first: First, engine: &mut Engine, ready: &dyn Fn()) -> Report {
+    let args = depends_update(engine, &id(RIGHT, "gamma"), &first_source(first).0);
+    ready();
+    batch_report(engine.batch_update(vec![(args, None)], Actor::Cli, None, false))
+}
+
+/// DEPENDS_ON is acyclic. Two single-item batches, each in its own mem,
+/// each declaring a DEPENDS_ON onto the other's entity. Run one after
+/// the other, the second is refused as a cycle. With the first held at
+/// its commit and the second run by a second process, both must not be
+/// acknowledged, and an acknowledged edge must be served by a fresh
+/// engine.
+#[test]
+fn two_writes_in_two_mems_cannot_close_a_cycle_between_them() {
+    let gamma = id(RIGHT, "gamma");
+    let mut failures = Vec::new();
+    for first in [First::BatchUpdate, First::BatchCreate] {
+        for pair in PAIRS {
+            let context = format!("{first:?} {pair:?}");
+            let (source, file) = first_source(first);
+            // Control: one after the other.
+            {
+                let ws = Workspace::new(pair);
+                let one = run_first(first, &mut ws.engine());
+                assert!(one.is_ok(), "{context}: {one:?}");
+                let two = run_second(first, &mut ws.engine(), &|| {});
+                eprintln!("{context}: sequential control: first={one:?} second={two:?}");
+                assert_eq!(two, Err("RELATIONSHIP_CYCLE".to_string()), "{context}");
+            }
+            // Interleaved.
+            let ws = Workspace::new(pair);
+            let (one, window, engine) = hold_at_commit(
+                &ws,
+                move |second, ready| run_second(first, second, ready),
+                |engine| run_first(first, engine),
+            );
+            drop(engine);
+            let fresh = ws.engine();
+            let (out, back) = (
+                depends_edge(&fresh, &source, &gamma),
+                depends_edge(&fresh, &gamma, &source),
+            );
+            let line = format!(
+                "{context}: interleaved: first={one:?} second={:?} both_locked={} | fresh engine serves {source}>gamma={out} gamma>{source}={back} | storage left/{file}: {:?} right/gamma.md: {:?}",
+                window.second,
+                window.both_locked,
+                stored_relationships(&ws, LEFT, file),
+                stored_relationships(&ws, RIGHT, "gamma.md"),
+            );
+            eprintln!("{line}");
+            let both_acknowledged = one.is_ok() && window.second.is_ok();
+            if both_acknowledged || (one.is_ok() && !out) || (window.second.is_ok() && !back) {
+                failures.push(line);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A second process adds a reference from `right`; then this engine's
+/// reload of `right`, under the lock, meets one storage read failure.
+/// The verb must not be acknowledged on a guard (or a referrer list)
+/// computed from the view of `right` it took before the lock.
+#[test]
+fn a_failed_reload_of_the_other_mem_refuses_a_guard_that_would_run_on_the_old_view() {
+    let mut failures = Vec::new();
+    for verb in ["delete", "rename"] {
+        for pair in PAIRS {
+            let context = format!("{verb} {pair:?}");
+            let ws = Workspace::new(pair);
+            let armed = Arc::new(AtomicBool::new(false));
+            let fired = Arc::new(Mutex::new(Vec::<String>::new()));
+            let tap: Tap = {
+                let (armed, fired) = (Arc::clone(&armed), Arc::clone(&fired));
+                Arc::new(move |mem: &str, method: &str| {
+                    if mem == RIGHT
+                        && matches!(
+                            method,
+                            "read_all_entities" | "list_entities" | "read_entity"
+                        )
+                        && armed.swap(false, Ordering::SeqCst)
+                    {
+                        fired.lock().unwrap().push(method.to_string());
+                        return true;
+                    }
+                    false
+                })
+            };
+            let mut engine = ws.tapped_engine(tap);
+            let alpha = id(LEFT, "alpha");
+            let hash = engine.get_entity(&alpha).map(|e| e.content_hash.clone());
+            let added = ws
+                .second_writer(move |second| add_link(second, Link::BodyLink, &|| {}))
+                .join()
+                .unwrap();
+            assert!(added.is_ok(), "{context}: {added:?}");
+
+            armed.store(true, Ordering::SeqCst);
+            let outcome = if verb == "delete" {
+                report(
+                    engine
+                        .delete_entity(
+                            DeleteEntityArgs {
+                                id: alpha.clone(),
+                                expected_hash: hash,
+                            },
+                            Actor::Cli,
+                            None,
+                            None,
+                        )
+                        .map(|o| o.warnings),
+                )
+            } else {
+                report(
+                    engine
+                        .rename_entity(
+                            RenameEntityArgs {
+                                id: alpha.clone(),
+                                expected_hash: hash,
+                                new_title: "Alpha Renamed".to_string(),
+                            },
+                            Actor::Cli,
+                            None,
+                            None,
+                        )
+                        .map(|o| o.warnings),
+                )
+            };
+            armed.store(false, Ordering::SeqCst);
+            let fresh = ws.engine();
+            let alpha_real = fresh.get_entity(&alpha).is_some_and(|e| !e.stub);
+            let gamma_purpose = fresh
+                .get_entity(&id(RIGHT, "gamma"))
+                .and_then(|e| e.sections.get("purpose").cloned())
+                .unwrap_or_default();
+            let line = format!(
+                "{context}: fault fired on {:?}; verb returned {outcome:?}; storage: left--alpha real={alpha_real}, right--gamma purpose={gamma_purpose:?}",
+                fired.lock().unwrap()
+            );
+            eprintln!("{line}");
+            let dangling = !alpha_real && gamma_purpose.contains("[[left--alpha]]");
+            if fired.lock().unwrap().is_empty() || (outcome.is_ok() && dangling) {
+                failures.push(line);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A bare slug is resolved across every mem. A second process creates
+/// a second carrier of the slug in the other mem; a freshly loaded
+/// engine then refuses the bare slug as ambiguous. The engine that
+/// loaded before must not pick its target from that older view.
+#[test]
+fn a_short_id_is_resolved_under_the_lock_not_from_the_view_before_it() {
+    let mut failures = Vec::new();
+    for verb in ["delete", "rename", "retype"] {
+        for pair in PAIRS {
+            let context = format!("{verb} {pair:?}");
+            let ws = Workspace::new(pair);
+            let mut engine = ws.engine();
+            let created = ws
+                .second_writer(|second| {
+                    report(
+                        second
+                            .create_entity(create_args(RIGHT, "Alpha", &[]), Actor::Cli, None, None)
+                            .map(|o| o.warnings),
+                    )
+                })
+                .join()
+                .unwrap();
+            assert!(created.is_ok(), "{context}: {created:?}");
+            let bare = EntityId("alpha".to_string());
+            let run = |engine: &mut Engine| match verb {
+                "delete" => report(
+                    engine
+                        .delete_entity(
+                            DeleteEntityArgs {
+                                id: bare.clone(),
+                                expected_hash: None,
+                            },
+                            Actor::Cli,
+                            None,
+                            None,
+                        )
+                        .map(|o| o.warnings),
+                ),
+                "rename" => report(
+                    engine
+                        .rename_entity(
+                            RenameEntityArgs {
+                                id: bare.clone(),
+                                expected_hash: None,
+                                new_title: "Alpha Renamed".to_string(),
+                            },
+                            Actor::Cli,
+                            None,
+                            None,
+                        )
+                        .map(|o| o.warnings),
+                ),
+                _ => {
+                    let mut args = retype_args(engine, &id(LEFT, "alpha"));
+                    args.id = bare.clone();
+                    args.expected_hash = None;
+                    report(
+                        engine
+                            .retype_entity(args, Actor::Cli, None, None)
+                            .map(|o| o.warnings),
+                    )
+                }
+            };
+            let control = run(&mut ws.engine());
+            let outcome = run(&mut engine);
+            let line = format!(
+                "{context}: a freshly loaded engine answers {control:?}; the engine loaded before answers {outcome:?}"
+            );
+            eprintln!("{line}");
+            if control.is_err() && outcome.is_ok() {
+                failures.push(line);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
 }

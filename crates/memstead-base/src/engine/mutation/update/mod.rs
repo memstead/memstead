@@ -130,9 +130,32 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<UpdateEntityOutcome, EngineError> {
-        // A short id resolves (or refuses) before anything reads its
-        // mem; the announcement leads the outcome's warnings.
+        // The lock first, then the ids: a bare slug, on the entity or on
+        // a relation target, is resolved under the lock against the
+        // reloaded view, and a call that carries one takes the whole
+        // workspace for it. So does an update that declares a relation
+        // on an acyclic relationship, whose cycle guard walks edges in
+        // every mem. Otherwise the update locks its own mem; a stale
+        // hash for the targeted entity then trips a real
+        // `HASH_MISMATCH`, an unrelated concurrent write leaves this
+        // entity's hash intact. The announcements of resolved ids lead
+        // the outcome's warnings.
         let mut args = args;
+        let named_mem = args.id.mem().to_string();
+        let short = named_mem.is_empty()
+            || args
+                .declare_relations
+                .iter()
+                .any(|r| r.target.mem().is_empty());
+        let (_write_lock, reloaded) = {
+            let declared = &args.declare_relations;
+            self.lock_for_verb(!args.dry_run, &[&named_mem], &[&named_mem], |engine| {
+                short
+                    || declared
+                        .iter()
+                        .any(|r| engine.rel_type_is_acyclic(&named_mem, &r.rel_type))
+            })?
+        };
         let (resolved, short_hint) = self.resolve_entity_id(&args.id)?;
         args.id = resolved;
         let mut drift_warnings: Vec<WarningHint> = short_hint.into_iter().collect();
@@ -141,15 +164,7 @@ impl Engine {
             r.target = target;
             drift_warnings.extend(hint);
         }
-        // Reload-before-operation: probe the mem ref and reload if a
-        // sibling advanced it, so the `expected_hash` compare inside
-        // `prepare_update` runs against current truth. A stale hash for
-        // the targeted entity then trips a real `HASH_MISMATCH`; an
-        // unrelated concurrent write leaves this entity's hash intact
-        // and the update proceeds. The drift notice rides the outcome.
-        let (_write_lock, roster) = self.lock_for_write(!args.dry_run, &[args.id.mem()])?;
-        drift_warnings.extend(roster);
-        drift_warnings.extend(self.level_for_write(&[args.id.mem()]));
+        drift_warnings.extend(reloaded);
         // Declared relations on an ACYCLIC rel-type (or one in an
         // `acyclic_sets` set, whose guard walks the set's UNION
         // subgraph) run the same whole-subgraph cycle guard relate

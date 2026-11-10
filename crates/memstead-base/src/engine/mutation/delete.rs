@@ -111,10 +111,6 @@ impl Engine {
     ) -> Result<DeleteEntityOutcome, EngineError> {
         // A short id resolves (or refuses) before anything reads its mem.
         let mut args = args;
-        let (resolved, short_hint) = self.resolve_entity_id(&args.id)?;
-        args.id = resolved;
-        let id = &args.id;
-        let mem = id.mem().to_string();
 
         // Delete's guard is `HAS_INCOMING_REFS`, and an incoming edge
         // can originate in ANY mem. The guard is only truthful over a
@@ -125,6 +121,12 @@ impl Engine {
         // writable mount, reloads every mem and loads the deferred ones
         // before it reads a referrer.
         let (_write_lock, reloaded) = self.lock_workspace_for_write_if(true)?;
+        // A bare slug is resolved under the lock, against the reloaded
+        // view: which mem carries a slug is a fact about every mem.
+        let (resolved, short_hint) = self.resolve_entity_id(&args.id)?;
+        args.id = resolved;
+        let id = &args.id;
+        let mem = id.mem().to_string();
         let mut drift_warnings: Vec<WarningHint> = short_hint.into_iter().collect();
         drift_warnings.extend(reloaded);
 

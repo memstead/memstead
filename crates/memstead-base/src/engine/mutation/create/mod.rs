@@ -87,8 +87,17 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<CreateEntityOutcome, EngineError> {
-        let (_write_lock, mut drift_warnings) = self.lock_for_write(!args.dry_run, &[&args.mem])?;
-        drift_warnings.extend(self.level_for_write(&[&args.mem]));
+        // A create locks its own mem; one that declares a relation on
+        // an acyclic relationship takes the whole workspace, because
+        // its cycle guard walks edges in every mem.
+        let (_write_lock, drift_warnings) = {
+            let (mem, relations) = (&args.mem, &args.relations);
+            self.lock_for_verb(!args.dry_run, &[mem], &[mem], |engine| {
+                relations
+                    .iter()
+                    .any(|r| engine.rel_type_is_acyclic(mem, &r.rel_type))
+            })?
+        };
         // Declared relations on an ACYCLIC rel-type (or one in an
         // `acyclic_sets` set, whose guard walks the set's UNION
         // subgraph) run the same whole-subgraph cycle guard relate

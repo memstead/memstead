@@ -1395,6 +1395,19 @@ pub(super) fn validate_cross_mem_add_policy(
             to_mem: target_mem.to_string(),
         });
     }
+    // The target is checked against the engine's view of its mem. A
+    // view that could not be reloaded under this write's lock is from
+    // before the lock: the target may be gone or retyped since.
+    if let Some(stale) = engine
+        .mounts
+        .iter()
+        .find(|m| m.mount.mem == target_mem && m.reload_failure.is_some())
+    {
+        return Err(EngineError::StaleView {
+            mem: target_mem.to_string(),
+            detail: stale.reload_failure.clone().unwrap_or_default(),
+        });
+    }
     if let Some(mount) = engine.mount(target_mem)
         && mount.capability == crate::workspace::MountCapability::ReadOnly
         && !engine.store.contains(target)

@@ -186,6 +186,10 @@ impl Engine {
     /// the ones whose loading was deferred. No lock is taken after
     /// planning began, so there is nothing to restart.
     ///
+    /// A mem that cannot be reloaded refuses the verb with
+    /// `MEM_VIEW_STALE`: its view is from before the lock, and a guard
+    /// that reads every mem would be evaluated on it.
+    ///
     /// `writes` false (a rehearsal) takes no lock and still brings the
     /// view up to date.
     pub fn lock_workspace_for_write_if(
@@ -193,6 +197,15 @@ impl Engine {
         writes: bool,
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
         let mut warnings = self.roster_before_locking();
+        let (guard, reloaded) = self.lock_whole_workspace(writes)?;
+        warnings.extend(reloaded);
+        Ok((guard, warnings))
+    }
+
+    fn lock_whole_workspace(
+        &mut self,
+        writes: bool,
+    ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
         let writable: Vec<String> = self
             .mounts
             .iter()
@@ -200,8 +213,59 @@ impl Engine {
             .map(|m| m.mount.mem.clone())
             .collect();
         let guard = self.lock_mems_for_write_if(writes, &writable)?;
-        warnings.extend(self.reload_if_stale_content_only(None));
+        let warnings = self.reload_if_stale_content_only(None);
+        if let Some(stale) = self.mounts.iter().find(|m| m.reload_failure.is_some()) {
+            return Err(EngineError::StaleView {
+                mem: stale.mount.mem.clone(),
+                detail: stale.reload_failure.clone().unwrap_or_default(),
+            });
+        }
         Ok((guard, warnings))
+    }
+
+    /// The lock and the view of a verb that names the mems it writes.
+    /// `locked` are the mems whose lock it takes, `written` the ones
+    /// it writes (reloaded, and loaded when deferred); every other
+    /// loaded mem is reloaded too ([`Self::level_for_write`]).
+    ///
+    /// When `reads_workspace` says so, the verb is one that learns its
+    /// write set or its guard's read set by reading the workspace after
+    /// all, and gets [`Self::lock_workspace_for_write_if`] instead:
+    /// a call that names an entity by a bare slug (which mem carries
+    /// the slug is a fact about every mem), and a call that adds an
+    /// edge on an acyclic relationship (the cycle guard walks edges in
+    /// every mem, and two writers that each hold one mem's lock could
+    /// each add the edge that closes the other's cycle). The question
+    /// is asked after the roster is reconciled and before any lock is
+    /// taken.
+    ///
+    /// A mutation running inside another one keeps the outer one's
+    /// locks: taking further locks there would take them out of order.
+    pub(in crate::engine) fn lock_for_verb<S: AsRef<str>>(
+        &mut self,
+        writes: bool,
+        locked: &[S],
+        written: &[S],
+        reads_workspace: impl FnOnce(&Self) -> bool,
+    ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
+        let nested = COVERED.with(|c| !c.borrow().is_empty());
+        let mut warnings = self.roster_before_locking();
+        if !nested && reads_workspace(self) {
+            let (guard, reloaded) = self.lock_whole_workspace(writes)?;
+            warnings.extend(reloaded);
+            return Ok((guard, warnings));
+        }
+        let guard = self.lock_mems_for_write_if(writes, locked)?;
+        warnings.extend(self.level_for_write(written));
+        Ok((guard, warnings))
+    }
+
+    /// Whether an edge of `rel_type` out of `mem` is guarded against
+    /// cycles: the relationship is acyclic, or it is in an acyclic set.
+    pub(in crate::engine) fn rel_type_is_acyclic(&self, mem: &str, rel_type: &str) -> bool {
+        self.schemas.get(mem).is_some_and(|s| {
+            s.relationship_acyclic(rel_type) || s.acyclic_set_containing(rel_type).is_some()
+        })
     }
 
     /// The lock of a verb that names its mems: the roster is reconciled
@@ -228,8 +292,11 @@ impl Engine {
     /// has) changes only through a delete, a rename or a retype, and
     /// each of those holds every writable mount's lock: while this verb
     /// holds one lock, a view reloaded now stays true of those facts
-    /// until it commits. A deferred mem that is not written stays
-    /// unloaded; a target in it is checked against its storage.
+    /// until it commits. A check that relies on more than that, the
+    /// cycle guard, does not run under this view: its verb takes the
+    /// whole workspace ([`Self::lock_for_verb`]). A deferred mem that
+    /// is not written stays unloaded; a target in it is checked
+    /// against its storage.
     pub(in crate::engine) fn level_for_write<S: AsRef<str>>(
         &mut self,
         written: &[S],

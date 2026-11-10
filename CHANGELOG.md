@@ -126,6 +126,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   before it reads the conflicted file, and its provenance record lands
   with its commit.
 
+- **A write whose guard reads the whole workspace locks the whole
+  workspace.** Three cases were guarded from a view of other mems taken
+  before any of their locks was held. (1) Two writes in two mems, each
+  adding an edge on an acyclic relationship, could each pass the cycle
+  guard and together close a cycle; both were acknowledged, and the
+  next load dropped one edge. A `create`, `update` or `relate` (single
+  or batch) that adds an edge on an acyclic relationship now takes the
+  write lock of every writable mem and reloads every mem before its
+  guard runs. (2) A bare slug was resolved to its mem before the lock;
+  a second process that had created the same slug in another mem was
+  not seen, and the call ran on the first mem where a freshly started
+  engine refuses it with `ENTITY_ID_MISSING_MEM`. A call that names an
+  entity by a bare slug now takes the whole workspace and resolves the
+  slug under it. (3) When a mem could not be reloaded under the lock, a
+  `delete`, `retype` or `rename` evaluated its referrers on that mem's
+  old view, without a warning. Such a call, and any write whose
+  relation target lies in a mem that could not be reloaded, is now
+  refused with `MEM_VIEW_STALE` naming the mem. The cost: these writes
+  wait for a write in progress in any mem, and one mem that cannot be
+  read blocks them across the workspace until it can.
+
 - **A delete and a retype check their referrers against every mem as it
   is now.** Both verbs guard on the edges that point at the entity, and
   such an edge can come from any mem. They reloaded their own mem only

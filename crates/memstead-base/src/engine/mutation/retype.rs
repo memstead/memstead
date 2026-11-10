@@ -63,10 +63,6 @@ impl Engine {
     ) -> Result<RetypeEntityOutcome, EngineError> {
         // A short id resolves (or refuses) before anything reads its mem.
         let mut args = args;
-        let (resolved, short_hint) = self.resolve_entity_id(&args.id)?;
-        args.id = resolved;
-        let id = &args.id;
-        let mem = id.mem().to_string();
 
         // A retype rechecks the edges that point at the entity, and they
         // can come from any mem: like a delete, it locks every writable
@@ -74,6 +70,12 @@ impl Engine {
         // walks an edge, so the CAS compare and the edge walk run
         // against current truth everywhere.
         let (_write_lock, reloaded) = self.lock_workspace_for_write_if(!args.dry_run)?;
+        // A bare slug is resolved under the lock, against the reloaded
+        // view: which mem carries a slug is a fact about every mem.
+        let (resolved, short_hint) = self.resolve_entity_id(&args.id)?;
+        args.id = resolved;
+        let id = &args.id;
+        let mem = id.mem().to_string();
         let mut drift_warnings: Vec<WarningHint> = short_hint.into_iter().collect();
         drift_warnings.extend(reloaded);
 
@@ -1280,5 +1282,62 @@ write_rules: []
         );
         assert_eq!(file_bytes(&f, &b), before);
         assert_eq!(engine.get_entity(&b).unwrap().entity_type, "claim");
+    }
+
+    /// A second engine (the second process) adds a pinned
+    /// relation onto the entity from another mem after the first engine
+    /// loaded; the first engine's retype has to see it and refuse.
+    #[test]
+    fn a_retype_sees_a_pinned_referrer_a_second_engine_added_from_another_mem() {
+        let f = fixture();
+        let twin_dir = f._tmp.path().join("mem-twin");
+        std::fs::create_dir_all(&twin_dir).unwrap();
+        let schemas_dir = f.schemas_dir.clone();
+        let main_dir = f.main_dir.clone();
+        let boot2 = move || {
+            let pin = SchemaRef::new("rt", semver::Version::new(0, 1, 0));
+            let mut engine = Engine::from_mounts_with_schemas_dir(
+                vec![
+                    (
+                        mount("main", main_dir.clone(), pin.clone(), MountLifecycle::Eager),
+                        Box::new(FilesystemBackend::new(main_dir.clone())) as Box<dyn MemBackend>,
+                    ),
+                    (
+                        mount("twin", twin_dir.clone(), pin, MountLifecycle::Eager),
+                        Box::new(FilesystemBackend::new(twin_dir.clone())) as Box<dyn MemBackend>,
+                    ),
+                ],
+                Some(&schemas_dir),
+            )
+            .unwrap();
+            let mut settings = WorkspaceSettings::default();
+            let mut links: BTreeMap<String, CrossLinkValue> = BTreeMap::new();
+            links.insert("twin".to_string(), CrossLinkValue::Wildcard);
+            links.insert("main".to_string(), CrossLinkValue::Wildcard);
+            settings.cross_mem_links = links;
+            engine.set_settings(settings);
+            engine
+        };
+        let mut first = boot2();
+        let v = create(&mut first, "main", "Claim V", "claim", "statement");
+
+        let (boot3, v2) = (boot2.clone(), v.clone());
+        std::thread::spawn(move || {
+            let mut second = boot3();
+            let w = create(&mut second, "twin", "Claim W", "claim", "statement");
+            relate(&mut second, &w, "SUPPORTS", &v2);
+        })
+        .join()
+        .unwrap();
+
+        let result = retype(&mut first, &v, "finding", &[("statement", "conclusion")]);
+        let code = result.as_ref().map(|_| "OK").unwrap_or_else(|e| e.code());
+        assert_eq!(
+            code, "INVALID_REL_SHAPE",
+            "the guard sees the pinned referrer"
+        );
+        let fresh = boot2();
+        assert_eq!(fresh.get_entity(&v).unwrap().entity_type, "claim");
+        assert_eq!(fresh.store().incoming(&v).len(), 1);
     }
 }

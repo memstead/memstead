@@ -84,9 +84,34 @@ impl Engine {
         // is the one multi-op-per-process path, so a sibling commit
         // between boot and this call is plausible). Notices stash on
         // the engine for the caller to drain.
-        // Short ids resolve once, before the touched-mem probe reads
-        // each item's mem; an item that does not resolve fails as its
-        // own error below, never the whole batch.
+        // The lock first, then the ids. The batch locks the mems its
+        // items name; it takes the whole workspace when an item names
+        // an entity by a bare slug (resolved under the lock, against
+        // the reloaded view) or declares a relation on an acyclic
+        // relationship (the cycle guard walks edges in every mem). What
+        // the roster reconcile and the reloads report (a mem attached
+        // since, a sibling's commit, a commit this load completed)
+        // rides the receipt like on a single verb.
+        let mut touched_mems: Vec<String> = updates
+            .iter()
+            .map(|(a, _)| a.id.mem().to_string())
+            .collect();
+        touched_mems.sort();
+        touched_mems.dedup();
+        let (_write_lock, drift_warnings) = {
+            let items = &updates;
+            self.lock_for_verb(!dry_run, &touched_mems, &touched_mems, |engine| {
+                items.iter().any(|(a, _)| {
+                    a.id.mem().is_empty()
+                        || a.declare_relations.iter().any(|r| {
+                            r.target.mem().is_empty()
+                                || engine.rel_type_is_acyclic(a.id.mem(), &r.rel_type)
+                        })
+                })
+            })?
+        };
+        // An item whose short id does not resolve fails as its own
+        // error below, never the whole batch.
         let mut short_hints: Vec<WarningHint> = Vec::new();
         let mut short_errors: Vec<(usize, EngineError)> = Vec::new();
         let updates: Vec<(UpdateEntityArgs, Option<String>)> = updates
@@ -112,17 +137,6 @@ impl Engine {
                 (a, n)
             })
             .collect();
-        let mut touched_mems: Vec<String> = updates
-            .iter()
-            .map(|(a, _)| a.id.mem().to_string())
-            .collect();
-        touched_mems.sort();
-        touched_mems.dedup();
-        // What the roster reconcile and the reloads report (a mem
-        // attached since, a sibling's commit, a commit this load
-        // completed) rides the receipt like on a single verb.
-        let (_write_lock, mut drift_warnings) = self.lock_for_write(!dry_run, &touched_mems)?;
-        drift_warnings.extend(self.level_for_write(&touched_mems));
         // Same acyclic-guard rule as the single-item path: declared
         // relations on an ACYCLIC rel-type (or one in an
         // `acyclic_sets` set) walk the whole subgraph, so the walk

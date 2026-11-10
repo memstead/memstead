@@ -827,6 +827,8 @@ const WRITE_HELPERS: &[&str] = &[
     "lock_mems_for_write",
     "lock_mems_for_write_if",
     "lock_for_write",
+    "lock_for_verb",
+    "lock_whole_workspace",
     "lock_workspace_for_write_if",
     "commit_staged",
     "commit_staged_pinned",
@@ -962,9 +964,25 @@ const VERBS: &[(&str, &[Verb])] = &[
         ],
     ),
     (
+        "engine/write_lock.rs::lock_for_verb",
+        &[
+            Verb::Create,
+            Verb::CreateIntoDeferredMem,
+            Verb::BatchCreate,
+            Verb::Update,
+            Verb::BatchUpdate,
+            Verb::Relate,
+            Verb::BatchRelate,
+        ],
+    ),
+    (
         "engine/write_lock.rs::lock_workspace_for_write_if",
         &[Verb::Delete, Verb::DeleteStub, Verb::Retype, Verb::Rename],
     ),
+    // Every verb can end up here: the ones above always, the others
+    // when a call names an entity by a bare slug or adds an edge on an
+    // acyclic relationship.
+    ("engine/write_lock.rs::lock_whole_workspace", EVERY_VERB),
     ("engine/write_lock.rs::drop", EVERY_VERB),
     ("engine/write_lock.rs::discard_strays", EVERY_VERB),
     ("engine/mutation/landing.rs::commit_staged", EVERY_VERB),

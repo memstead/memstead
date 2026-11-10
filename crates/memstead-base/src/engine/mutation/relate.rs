@@ -111,33 +111,39 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<RelateEntityOutcome, EngineError> {
-        // Short ids on either end resolve (or refuse) before anything
-        // reads their mems; the announcements lead the warnings.
+        // The lock first, then the ids. A relate locks the mems of both
+        // ends and reloads the source's (a DEFERRED target mem is
+        // deliberately not loaded: target verification must never cost
+        // a mem's load, the storage check below answers the existence
+        // and type questions against the branch tree / filesystem
+        // instead). It takes the whole workspace when an end is named
+        // by a bare slug, resolved under the lock, or when it adds an
+        // edge on an acyclic relationship, whose cycle guard walks
+        // edges in every mem. The announcements of resolved ids lead
+        // the warnings. Hoisted out of `prepare_relate` so
+        // `batch_relate` can lock and reload once up front instead of
+        // per entry.
         let mut args = args;
+        let (named_source, named_target) =
+            (args.source.mem().to_string(), args.target.mem().to_string());
+        let short = named_source.is_empty() || named_target.is_empty();
+        let (_write_lock, reloaded) = {
+            let (rel_type, adds) = (&args.rel_type, !args.remove);
+            self.lock_for_verb(
+                !args.dry_run,
+                &[&named_source, &named_target],
+                &[&named_source],
+                |engine| short || (adds && engine.rel_type_is_acyclic(&named_source, rel_type)),
+            )?
+        };
         let (source, source_hint) = self.resolve_entity_id(&args.source)?;
         args.source = source;
         let (target, target_hint) = self.resolve_entity_id(&args.target)?;
         args.target = target;
         let source_mem = args.source.mem().to_string();
-        let target_mem = args.target.mem().to_string();
-
-        // Reload-before-operation: reload the source mem (and the
-        // target mem, when distinct) if a sibling advanced either
-        // ref, so the source `expected_hash` compare and the target
-        // existence/stub decisions below run against current truth.
-        // The drift notice rides the outcome's `warnings`. Hoisted
-        // out of `prepare_relate` so `batch_relate` can probe every
-        // touched mem exactly once up front instead of per entry.
         let mut drift_warnings: Vec<WarningHint> =
             source_hint.into_iter().chain(target_hint).collect();
-        let (_write_lock, roster) =
-            self.lock_for_write(!args.dry_run, &[&source_mem, &target_mem])?;
-        drift_warnings.extend(roster);
-        // A DEFERRED target mem is deliberately not loaded here: target
-        // verification must never cost a mem's load (flywheel W7/02 —
-        // the storage check below answers the existence and type
-        // questions against the branch tree / filesystem instead).
-        drift_warnings.extend(self.level_for_write(&[&source_mem]));
+        drift_warnings.extend(reloaded);
         // An ACYCLIC rel-type's cycle guard walks the whole rel-type
         // subgraph (`would_cycle`), and a cycle can pass through any
         // mem — an edge on a deferred (lazy, unloaded) mem's entity is
@@ -1095,9 +1101,42 @@ impl Engine {
         // Reload every touched mem (sources and targets) once, up
         // front — the per-entry probe is hoisted out of
         // `prepare_relate` for exactly this.
-        // Short ids on either end resolve once, before the touched-mem
-        // probe reads each item's mems; an item that does not resolve
-        // fails as its own error below, never the whole batch.
+        // The lock first, then the ids. Every mem an item names is
+        // locked, a deferred target included: its lock costs no load,
+        // and the storage check of the target runs under it. A mem that
+        // is only ever a TARGET in this batch and is deferred stays
+        // unloaded: target verification runs against storage (flywheel
+        // W7/02), and loading it would convert verification into a
+        // full load. Source mems always load: a write into a mem needs
+        // the mem. The batch takes the whole workspace when an item
+        // names an end by a bare slug (resolved under the lock) or adds
+        // an edge on an acyclic relationship (the cycle guard walks
+        // edges in every mem). What the roster reconcile and the
+        // reloads report rides the receipt like on a single verb.
+        let mut touched_mems: Vec<String> = relates
+            .iter()
+            .flat_map(|(a, _)| [a.source.mem().to_string(), a.target.mem().to_string()])
+            .collect();
+        touched_mems.sort();
+        touched_mems.dedup();
+        let mut source_mems: Vec<String> = relates
+            .iter()
+            .map(|(a, _)| a.source.mem().to_string())
+            .collect();
+        source_mems.sort();
+        source_mems.dedup();
+        let (_write_lock, drift_warnings) = {
+            let items = &relates;
+            self.lock_for_verb(!dry_run, &touched_mems, &source_mems, |engine| {
+                items.iter().any(|(a, _)| {
+                    a.source.mem().is_empty()
+                        || a.target.mem().is_empty()
+                        || (!a.remove && engine.rel_type_is_acyclic(a.source.mem(), &a.rel_type))
+                })
+            })?
+        };
+        // An item whose short id does not resolve fails as its own
+        // error below, never the whole batch.
         let mut short_hints: Vec<WarningHint> = Vec::new();
         let mut short_errors: Vec<(usize, EngineError)> = Vec::new();
         let relates: Vec<(RelateEntityArgs, Option<String>)> = relates
@@ -1121,31 +1160,6 @@ impl Engine {
                 (a, n)
             })
             .collect();
-        let mut touched_mems: Vec<String> = relates
-            .iter()
-            .flat_map(|(a, _)| [a.source.mem().to_string(), a.target.mem().to_string()])
-            .collect();
-        touched_mems.sort();
-        touched_mems.dedup();
-        // Every touched mem is locked, a deferred target included: its
-        // lock costs no load, and the storage check of the target runs
-        // under it.
-        let (_write_lock, mut drift_warnings) = self.lock_for_write(!dry_run, &touched_mems)?;
-        // A mem that is only ever a TARGET in this batch and is
-        // deferred stays unloaded: target verification runs against
-        // storage (flywheel W7/02), and loading it would convert
-        // verification into a full load. Source mems always load: a
-        // write into a mem needs the mem. What the roster reconcile and
-        // the reloads report (a mem attached since, a sibling's commit,
-        // a commit this load completed) rides the receipt like on a
-        // single verb.
-        let mut source_mems: Vec<String> = relates
-            .iter()
-            .map(|(a, _)| a.source.mem().to_string())
-            .collect();
-        source_mems.sort();
-        source_mems.dedup();
-        drift_warnings.extend(self.level_for_write(&source_mems));
         // Same acyclic-guard rule as the single-item path: any added
         // edge on an ACYCLIC rel-type (or a rel-type in an
         // `acyclic_sets` set, whose guard walks the set's UNION
