@@ -1371,7 +1371,7 @@ impl Engine {
                     )
                 })
                 .collect();
-            match self.commit_staged(m, &subject, &ctx, &records) {
+            match self.commit_or_complete(m, self.commit_staged(m, &subject, &ctx, &records)) {
                 Ok(landed) => {
                     batch_warnings.extend(landed.warnings);
                     mount_commits.push((m, landed.write_id));
@@ -1384,7 +1384,6 @@ impl Engine {
                     // reloaded from storage.
                     self.store = store_snapshot;
                     self.discard_all_pending();
-                    self.level_committed_mounts(&mount_commits);
                     let items: Vec<(usize, EntityId)> = prepared
                         .iter()
                         .map(|p| (p.mount_idx, p.from.clone()))
@@ -1392,7 +1391,7 @@ impl Engine {
                     return Err(self.batch_commit_failed(
                         &distinct_mounts,
                         &items,
-                        &mount_commits,
+                        mount_commits,
                         m,
                         e,
                     ));

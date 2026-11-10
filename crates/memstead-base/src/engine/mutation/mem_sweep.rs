@@ -295,21 +295,26 @@ impl Engine {
                 .with_logical_operation_id(logical_op_id.to_string())
             })
             .collect();
-        self.commit_staged_pinned(
+        self.commit_or_complete(
             plan.mount_idx,
-            &subject,
-            &ctx,
-            &records,
-            plan.head.as_deref(),
+            self.commit_staged_pinned(
+                plan.mount_idx,
+                &subject,
+                &ctx,
+                &records,
+                plan.head.as_deref(),
+            ),
         )
         .map(|landed| landed.write_id)
     }
 
     /// The report for a sweep that failed at `plans[failed]`. With
     /// nothing committed the sweep failed as a whole and `cause` is the
-    /// report. With a commit landed the report is the partial-failure
-    /// envelope, built after the committed mems were reloaded, so every
-    /// entry carries the hash its entity has now.
+    /// report, and so it is for a sweep that writes one mem. With a
+    /// commit in storage (a mem that committed, or the failed mem when
+    /// its commit is decided and not applied) the report is the
+    /// partial-failure envelope, built after those mems were reloaded,
+    /// so every entry carries the hash its entity has now.
     fn sweep_failed_at(
         &mut self,
         plans: &[SweepPlan],
@@ -317,19 +322,18 @@ impl Engine {
         commits: Vec<(usize, String)>,
         cause: EngineError,
     ) -> EngineError {
-        if commits.is_empty() {
+        let failed_mount = plans[failed].mount_idx;
+        let in_storage = super::landing::with_a_decided_commit(commits, failed_mount, &cause);
+        if in_storage.is_empty() || plans.len() < 2 {
             return cause;
         }
-        self.level_committed_mounts(&commits);
-        let failure_cause = match &cause {
-            EngineError::Backend(crate::backend::BackendError::ParentMismatch { .. }) => "drift",
-            _ => "storage",
-        };
+        self.level_committed_mounts(&in_storage);
+        let landed_in = |mount_idx: usize| in_storage.iter().any(|(idx, _)| *idx == mount_idx);
         let mems = plans
             .iter()
             .enumerate()
             .map(|(at, plan)| {
-                let landed = at < failed;
+                let landed = landed_in(plan.mount_idx);
                 PartialMem {
                     mem: plan.mem.clone(),
                     landed,
@@ -338,11 +342,7 @@ impl Engine {
                         .entity_ids()
                         .into_iter()
                         .map(|id| PartialItem {
-                            current_hash: self
-                                .store
-                                .get(&id)
-                                .filter(|e| !e.stub)
-                                .map(|e| e.content_hash.clone()),
+                            current_hash: self.hash_now(&id),
                             id: id.to_string(),
                             landed,
                         })
@@ -351,9 +351,13 @@ impl Engine {
             })
             .collect();
         EngineError::RenamePartialFailure {
-            committed_mems: plans[..failed].iter().map(|p| p.mem.clone()).collect(),
+            committed_mems: plans
+                .iter()
+                .filter(|p| landed_in(p.mount_idx))
+                .map(|p| p.mem.clone())
+                .collect(),
             failed_mem: plans[failed].mem.clone(),
-            failure_cause: failure_cause.to_string(),
+            failure_cause: super::landing::failure_cause_of(&cause).to_string(),
             mems,
         }
     }

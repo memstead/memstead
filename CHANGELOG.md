@@ -157,6 +157,40 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Sending the items named as not landed completes the batch. A batch
   whose first commit fails still fails as a whole.
 
+- **Two processes that spell a mem's path differently take their
+  write locks in one order.** The locks of an operation over several
+  mems were sorted by the lock file's path as each process spelled it.
+  Two processes that reached the same folder mems through different
+  spellings (a symlink, a `..`), as two workspaces mounting the same
+  folders do, could sort them in opposite orders and wait on each other
+  for ever. Both backends now name their lock file by its canonical
+  path.
+
+- **A partial-failure report no longer calls a decided commit not
+  landed.** When the failing mem's commit was already decided in
+  storage (a folder commit whose apply step failed and whose immediate
+  completion failed too), the report named that mem and its items as
+  not landed with their old hashes, while a freshly started engine
+  completed the commit: resending them was refused, and the identical
+  rename found its entity gone. An operation over several mems now
+  tries the completion once more and, when it goes through, lands whole
+  with a `WRITE_FOLLOW_UP_FAILED` warning. When it fails again the
+  report names the mem as landed, with the failure as its error, and
+  the reload that builds the report completes the commit. A reload
+  that fails while a report is built is tried once more, and a mem
+  whose view still could not be brought level is reported without
+  hashes (`current_hash: null`) instead of with stale ones.
+
+- **A mem that is out of service blocks the writes that read every
+  mem.** A lazily mounted mem whose first load failed under a delete's
+  or a rename's lock was taken out of service, and the verb went on
+  without it: the delete landed although the mem held a referrer, the
+  rename left that referrer on the old id. `delete`, `retype`,
+  `rename`, a mem rename, a proposal merge, a write that adds an edge
+  on an acyclic relationship and a call with a bare slug are now
+  refused with `MEM_VIEW_STALE` while any mem of the workspace is out
+  of service.
+
 - **A delete and a retype check their referrers against every mem as it
   is now.** Both verbs guard on the edges that point at the entity, and
   such an edge can come from any mem. They reloaded their own mem only

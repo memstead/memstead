@@ -2099,6 +2099,48 @@ fn seed_binding_mirror(engine: &mut crate::Engine, mem: &str, note: Option<&str>
     }
 }
 
+/// Which mode a mem rename runs in, from the mounts as they are: the
+/// old mount (normal mode) or the fact that the identity flip already
+/// happened (resumption). Asked twice: before the gates, so a refusal
+/// writes nothing, and again under the rename's lock, because the
+/// mounts a second process changed in between are the ones that count.
+fn rename_mode(
+    engine: &crate::Engine,
+    params: &MemRenameParams,
+) -> Result<(Option<crate::Mount>, bool), FullEngineError> {
+    let old_mount = engine.mount(&params.old).cloned();
+    let new_mount_present = engine.mount(&params.new).is_some();
+    let resumed = match (&old_mount, new_mount_present) {
+        (Some(_), true) => {
+            return Err(crate::EngineError::MemNameCollision {
+                name: params.new.clone(),
+                source_origin: "registered mount".to_string(),
+            }
+            .into());
+        }
+        (Some(m), false) => {
+            if m.capability != crate::MountCapability::Write {
+                return Err(crate::EngineError::ReadOnlyMount(params.old.clone()).into());
+            }
+            false
+        }
+        (None, true) => {
+            // The identity flip already happened — resumption mode.
+            // The new mount must be writable (a rename never produces
+            // a read-only mount, so anything else is a name clash
+            // with an installed read mem, not a resumable rename).
+            if !engine.mem_router().is_writable(&params.new) {
+                return Err(crate::EngineError::UnknownMem(params.old.clone()).into());
+            }
+            true
+        }
+        (None, false) => {
+            return Err(crate::EngineError::UnknownMem(params.old.clone()).into());
+        }
+    };
+    Ok((old_mount, resumed))
+}
+
 /// Rename a mem: `old` → `new`, complete across every surface that
 /// carries the name.
 ///
@@ -2186,36 +2228,7 @@ pub fn rename_mem(
     }
 
     // ---- Step 1: mode resolution ----
-    let old_mount = engine.mount(&params.old).cloned();
-    let new_mount_present = engine.mount(&params.new).is_some();
-    let resumed = match (&old_mount, new_mount_present) {
-        (Some(_), true) => {
-            return Err(crate::EngineError::MemNameCollision {
-                name: params.new.clone(),
-                source_origin: "registered mount".to_string(),
-            }
-            .into());
-        }
-        (Some(m), false) => {
-            if m.capability != crate::MountCapability::Write {
-                return Err(crate::EngineError::ReadOnlyMount(params.old.clone()).into());
-            }
-            false
-        }
-        (None, true) => {
-            // The identity flip already happened — resumption mode.
-            // The new mount must be writable (a rename never produces
-            // a read-only mount, so anything else is a name clash
-            // with an installed read mem, not a resumable rename).
-            if !engine.mem_router().is_writable(&params.new) {
-                return Err(crate::EngineError::UnknownMem(params.old.clone()).into());
-            }
-            true
-        }
-        (None, false) => {
-            return Err(crate::EngineError::UnknownMem(params.old.clone()).into());
-        }
-    };
+    let (old_mount, resumed) = rename_mode(engine, &params)?;
 
     // ---- Step 2: allowlist gates (normal mode, agent posture) ----
     // Resumption mode skips them: the flip that created the current
@@ -2313,6 +2326,8 @@ pub fn rename_mem(
     let (_write_lock, _reloaded) = engine
         .lock_workspace_for_write_if(true)
         .map_err(FullEngineError::from)?;
+    // The mode again, from the mounts as they are under the lock.
+    let (old_mount, resumed) = rename_mode(engine, &params)?;
 
     // ---- Step 3: reference sweep (idempotent; both modes) ----
     let sweep = engine

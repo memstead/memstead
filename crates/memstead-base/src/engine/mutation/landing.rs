@@ -129,6 +129,39 @@ impl Engine {
         self.settle(mount_idx, appended)
     }
 
+    /// For an operation over several mems: one more attempt at a
+    /// commit that came back decided and not applied. A verb on one mem
+    /// can return `COMMIT_NOT_APPLIED` and has told its caller
+    /// everything; an operation over several mems would stop there
+    /// with the other mems' parts unwritten, and report a commit that
+    /// is in storage. So the completion is tried once more here: when
+    /// it goes through, the commit is landed and the operation goes
+    /// on, with the failed step as a warning.
+    pub(in crate::engine) fn commit_or_complete(
+        &self,
+        mount_idx: usize,
+        committed: Result<Landed, EngineError>,
+    ) -> Result<Landed, EngineError> {
+        let (mem, detail) = match committed {
+            Err(EngineError::CommitNotApplied { mem, detail }) => (mem, detail),
+            other => return other,
+        };
+        match self.mounts[mount_idx].backend.complete_interrupted_commit() {
+            Ok(_) => Ok(Landed {
+                write_id: crate::storage::filesystem::make_commit_id(),
+                warnings: vec![WarningHint::WriteFollowUpFailed {
+                    mem,
+                    step: "commit_apply".to_string(),
+                    detail,
+                }],
+            }),
+            Err(again) => Err(EngineError::CommitNotApplied {
+                mem,
+                detail: format!("{detail}; and once more: {again}"),
+            }),
+        }
+    }
+
     /// The report for what a commit call came to.
     fn settle(
         &self,
@@ -259,36 +292,35 @@ impl Engine {
     }
 
     /// The report for a batch whose commit into `failed_mount` failed.
-    /// With nothing committed the batch failed as a whole and `cause`
-    /// is the report. With another mem's commit landed the report is
-    /// the partial-failure envelope: for every mem the batch writes,
-    /// in commit order, whether its commit landed, and for every
-    /// entity the batch writes there, whether it landed and its hash
-    /// now. Sending the items it names as not landed completes the
-    /// batch. The caller has rolled the store back and reloaded the
-    /// mems that committed, so the hashes are read from a view that is
-    /// level with storage.
+    /// With nothing in storage the batch failed as a whole and `cause`
+    /// is the report, and so it is for a batch that writes one mem.
+    /// With a commit in storage the report is the partial-failure
+    /// envelope: for every mem the batch writes, in commit order,
+    /// whether its commit is in storage, and for every entity the
+    /// batch writes there, whether it landed and its hash now. Sending
+    /// the items it names as not landed completes the batch. The
+    /// caller has rolled the store back; the mems with a commit in
+    /// storage are reloaded here, so the hashes are read from a view
+    /// that is level with it.
     pub(in crate::engine) fn batch_commit_failed(
-        &self,
+        &mut self,
         mounts: &[usize],
         items: &[(usize, EntityId)],
-        committed: &[(usize, String)],
+        committed: Vec<(usize, String)>,
         failed_mount: usize,
         cause: EngineError,
     ) -> EngineError {
         use crate::engine::error::{PartialItem, PartialMem};
-        if committed.is_empty() {
+        let in_storage = with_a_decided_commit(committed, failed_mount, &cause);
+        if in_storage.is_empty() || mounts.len() < 2 {
             return cause;
         }
-        let failure_cause = match &cause {
-            EngineError::Backend(BackendError::ParentMismatch { .. }) => "drift",
-            _ => "storage",
-        };
+        self.level_committed_mounts(&in_storage);
         let name = |mount_idx: usize| self.mounts[mount_idx].mount.mem.clone();
         let mems = mounts
             .iter()
             .map(|&mount_idx| {
-                let landed = committed.iter().any(|(idx, _)| *idx == mount_idx);
+                let landed = in_storage.iter().any(|(idx, _)| *idx == mount_idx);
                 let mut ids: Vec<&EntityId> = items
                     .iter()
                     .filter(|(idx, _)| *idx == mount_idx)
@@ -304,43 +336,91 @@ impl Engine {
                         .map(|id| PartialItem {
                             id: id.to_string(),
                             landed,
-                            current_hash: self
-                                .store
-                                .get(id)
-                                .filter(|e| !e.stub)
-                                .map(|e| e.content_hash.clone()),
+                            current_hash: self.hash_now(id),
                         })
                         .collect(),
                 }
             })
             .collect();
         EngineError::RenamePartialFailure {
-            committed_mems: committed.iter().map(|(idx, _)| name(*idx)).collect(),
+            committed_mems: in_storage.iter().map(|(idx, _)| name(*idx)).collect(),
             failed_mem: name(failed_mount),
-            failure_cause: failure_cause.to_string(),
+            failure_cause: failure_cause_of(&cause).to_string(),
             mems,
         }
     }
 
+    /// The content hash the entity has now, for a partial-failure
+    /// report. `None` when it does not exist, and when its mem's view
+    /// could not be brought level with storage: a hash from a view
+    /// that is known to be behind is not the entity's hash now.
+    pub(in crate::engine) fn hash_now(&self, id: &EntityId) -> Option<String> {
+        let stale = self
+            .mounts
+            .iter()
+            .any(|m| m.mount.mem == id.mem() && m.reload_failure.is_some());
+        if stale {
+            return None;
+        }
+        self.store
+            .get(id)
+            .filter(|e| !e.stub)
+            .map(|e| e.content_hash.clone())
+    }
+
     /// Bring the engine's view level with storage for mems whose commit
-    /// landed inside an operation that then failed on another mem: the
-    /// operation's store rollback put the view behind what those
-    /// commits wrote. Each commit is recorded as the engine's own, then
-    /// its mem is reloaded.
+    /// is in storage inside an operation that then failed on another
+    /// mem: the operation's store rollback, or the store update it
+    /// never reached, left the view behind what those commits wrote. A
+    /// commit with an id is recorded as the engine's own; then the mem
+    /// is reloaded, which also completes a commit that was decided and
+    /// not applied. A reload that fails is tried once more, because a
+    /// fault that passes should not leave a report without its hashes;
+    /// one that fails again marks the mem, whose view then takes no
+    /// write, and the next operation retries.
     pub(in crate::engine) fn level_committed_mounts(&mut self, commits: &[(usize, String)]) {
         for (mount_idx, write_id) in commits {
-            self.record_self_write(*mount_idx, write_id);
+            if !write_id.is_empty() {
+                self.record_self_write(*mount_idx, write_id);
+            }
             let mem = self.mounts[*mount_idx].mount.mem.clone();
-            if let Err(e) = self.reload_one_mem(&mem) {
+            let reloaded = self
+                .reload_one_mem(&mem)
+                .or_else(|_| self.reload_one_mem(&mem));
+            if let Err(e) = reloaded {
                 self.note_reload_failure(&mem, &e);
                 tracing::warn!(
                     mem = %mem,
                     error = %e,
-                    "reload after a partly failed batch did not complete; \
+                    "reload after a partly failed operation did not complete; \
                      the next operation retries"
                 );
             }
         }
+    }
+}
+
+/// The mems of an operation whose commit is in storage: the ones that
+/// committed, and the failed one too when its failure is
+/// `COMMIT_NOT_APPLIED`. That commit is decided, its record is durable,
+/// and the next load of the mem applies it; reporting it as not landed
+/// would have the caller send again what storage already holds.
+pub(in crate::engine) fn with_a_decided_commit(
+    mut committed: Vec<(usize, String)>,
+    failed_mount: usize,
+    cause: &EngineError,
+) -> Vec<(usize, String)> {
+    if matches!(cause, EngineError::CommitNotApplied { .. }) {
+        committed.push((failed_mount, String::new()));
+    }
+    committed
+}
+
+/// The partial-failure report's word for why a mem's part failed.
+pub(in crate::engine) fn failure_cause_of(cause: &EngineError) -> &'static str {
+    match cause {
+        EngineError::Backend(BackendError::ParentMismatch { .. }) => "drift",
+        _ => "storage",
     }
 }
 
@@ -367,3 +447,6 @@ pub(in crate::engine) mod test_fault {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod decided_commit_tests;

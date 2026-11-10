@@ -98,12 +98,15 @@ impl Engine {
                 );
                 peer_ctx.logical_operation_id = Some(logical_op_id.as_str());
                 let expected = peer_snapshots.get(&plan.mem).cloned().unwrap_or(None);
-                self.commit_staged_pinned(
+                self.commit_or_complete(
                     plan.mount_idx,
-                    &peer_commit_subject,
-                    &peer_ctx,
-                    std::slice::from_ref(&record),
-                    expected.as_deref(),
+                    self.commit_staged_pinned(
+                        plan.mount_idx,
+                        &peer_commit_subject,
+                        &peer_ctx,
+                        std::slice::from_ref(&record),
+                        expected.as_deref(),
+                    ),
                 )
             });
             let landed = match landed {
@@ -140,11 +143,14 @@ impl Engine {
                     note.map(String::from),
                 );
                 ctx.logical_operation_id = Some(logical_op_id.as_str());
-                self.commit_staged(
+                self.commit_or_complete(
                     mount_idx,
-                    &commit_subject,
-                    &ctx,
-                    std::slice::from_ref(&record),
+                    self.commit_staged(
+                        mount_idx,
+                        &commit_subject,
+                        &ctx,
+                        std::slice::from_ref(&record),
+                    ),
                 )
             });
         let landed = match landed {
@@ -297,12 +303,14 @@ impl Engine {
     }
 
     /// The report for a rename that failed at `failed_mem`. With
-    /// nothing committed the rename failed as a whole and `cause` is
+    /// nothing in storage the rename failed as a whole and `cause` is
     /// the report: storage is as it was, and the same call sent again
-    /// is a first call. With a commit landed the report is the
-    /// partial-failure envelope, built from a view that is level with
-    /// storage: the mems that committed are reloaded first, and each
-    /// entry carries the hash its entity has now. What the failed mem
+    /// is a first call. A rename with no peer mem reports `cause` too.
+    /// With a commit in storage (a mem that committed, or the failed
+    /// mem when its commit is decided and not applied) the report is
+    /// the partial-failure envelope, built from a view that is level
+    /// with storage: those mems are reloaded first, and each entry
+    /// carries the hash its entity has now. What the failed mem
     /// had staged is discarded when the write lock is released, before
     /// any other operation can read it.
     fn rename_failed_at(
@@ -312,23 +320,22 @@ impl Engine {
         committed: Vec<(usize, String)>,
         cause: EngineError,
     ) -> EngineError {
-        if committed.is_empty() {
+        let failed_mount = self
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == failed_mem)
+            .expect("the failed mem is one the rename writes");
+        let in_storage =
+            super::super::landing::with_a_decided_commit(committed, failed_mount, &cause);
+        if in_storage.is_empty() || prepared.peers.is_empty() {
             return cause;
         }
-        self.level_committed_mounts(&committed);
-        let failure_cause = match &cause {
-            EngineError::Backend(crate::backend::BackendError::ParentMismatch { .. }) => "drift",
-            _ => "storage",
-        };
-        let landed_in = |mount_idx: usize| committed.iter().any(|(idx, _)| *idx == mount_idx);
+        self.level_committed_mounts(&in_storage);
+        let landed_in = |mount_idx: usize| in_storage.iter().any(|(idx, _)| *idx == mount_idx);
         let item = |id: &crate::entity::EntityId, landed: bool| PartialItem {
             id: id.to_string(),
             landed,
-            current_hash: self
-                .store
-                .get(id)
-                .filter(|e| !e.stub)
-                .map(|e| e.content_hash.clone()),
+            current_hash: self.hash_now(id),
         };
         let error_for = |mem: &str| (mem == failed_mem).then(|| cause.to_string());
         let mut mems: Vec<PartialMem> = prepared
@@ -344,23 +351,31 @@ impl Engine {
                 }
             })
             .collect();
-        // The renamed entity's own mem never landed here: it commits
-        // last. Its entity is listed under the id it still has.
+        // The renamed entity's own mem commits last. Its commit is in
+        // storage only when it was decided and not applied; the entity
+        // is then listed under its new id, otherwise under the id it
+        // still has.
+        let own_landed = landed_in(prepared.mount_idx);
+        let renamed = if own_landed {
+            &prepared.new_id
+        } else {
+            &prepared.id
+        };
         mems.push(PartialMem {
             mem: prepared.mem.clone(),
-            landed: false,
+            landed: own_landed,
             error: error_for(&prepared.mem),
-            items: std::iter::once(item(&prepared.id, false))
-                .chain(prepared.same_mem.iter().map(|r| item(&r.id, false)))
+            items: std::iter::once(item(renamed, own_landed))
+                .chain(prepared.same_mem.iter().map(|r| item(&r.id, own_landed)))
                 .collect(),
         });
         EngineError::RenamePartialFailure {
-            committed_mems: committed
+            committed_mems: in_storage
                 .iter()
                 .map(|(idx, _)| self.mounts[*idx].mount.mem.clone())
                 .collect(),
             failed_mem: failed_mem.to_string(),
-            failure_cause: failure_cause.to_string(),
+            failure_cause: super::super::landing::failure_cause_of(&cause).to_string(),
             mems,
         }
     }

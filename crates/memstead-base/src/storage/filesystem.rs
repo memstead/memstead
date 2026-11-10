@@ -202,6 +202,14 @@ impl FilesystemBackend {
         self.root.join(crate::mem::MEM_META_DIR)
     }
 
+    /// The write lock's file, by its canonical path: the engine's lock
+    /// and this backend's own recovery take the same lock, and the lock
+    /// table is keyed by path.
+    fn lock_file(&self) -> PathBuf {
+        let root = std::fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone());
+        root.join(".memstead").join("locks").join("write.lock")
+    }
+
     fn record_path(&self) -> PathBuf {
         self.root.join(COMMIT_RECORD_REL)
     }
@@ -504,7 +512,7 @@ impl FilesystemBackend {
         if !self.io.exists(&record).map_err(BackendError::Io)? {
             return Ok(());
         }
-        let lock = self.root.join(".memstead").join("locks").join("write.lock");
+        let lock = self.lock_file();
         if path_lock::acquire(&lock).is_ok() {
             path_lock::release(&lock);
         }
@@ -779,8 +787,13 @@ impl crate::backend::MemBackend for FilesystemBackend {
     /// Inside the mem's own `.memstead/`, in a self-ignoring `locks/`
     /// subtree, so every process that mounts this folder, from any
     /// workspace, contends on the same file.
+    ///
+    /// The path is the canonical one. Two processes that spell the
+    /// folder differently (through a symlink, through `..`) must sort
+    /// their locks alike, or each takes the other's second lock first;
+    /// and within one process the lock table is keyed by this path.
     fn write_lock_path(&self) -> Option<PathBuf> {
-        Some(self.root.join(".memstead").join("locks").join("write.lock"))
+        Some(self.lock_file())
     }
 
     fn read_entity(&self, rel_path: &Path) -> Result<Option<Vec<u8>>, BackendError> {
@@ -935,7 +948,7 @@ impl crate::backend::MemBackend for FilesystemBackend {
         {
             return Ok(Some(CompletedCommit { files }));
         }
-        let lock = self.root.join(".memstead").join("locks").join("write.lock");
+        let lock = self.lock_file();
         if self
             .io
             .exists(&self.record_path())

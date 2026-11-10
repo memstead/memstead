@@ -188,7 +188,8 @@ impl Engine {
     ///
     /// A mem that cannot be reloaded refuses the verb with
     /// `MEM_VIEW_STALE`: its view is from before the lock, and a guard
-    /// that reads every mem would be evaluated on it.
+    /// that reads every mem would be evaluated on it. So does a mem
+    /// that is out of service (quarantined), which is in no view.
     ///
     /// `writes` false (a rehearsal) takes no lock and still brings the
     /// view up to date.
@@ -218,6 +219,15 @@ impl Engine {
             return Err(EngineError::StaleView {
                 mem: stale.mount.mem.clone(),
                 detail: stale.reload_failure.clone().unwrap_or_default(),
+            });
+        }
+        // A mem that is out of service is in no view at all: one whose
+        // deferred load just failed under this lock, or one that never
+        // attached. Its referrers are as unread as a stale mem's.
+        if let Some(out) = self.quarantined.first() {
+            return Err(EngineError::StaleView {
+                mem: out.mount.mem.clone(),
+                detail: format!("the mem is out of service: {}", out.reason_code),
             });
         }
         Ok((guard, warnings))

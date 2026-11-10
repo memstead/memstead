@@ -856,11 +856,10 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
                 }
             })
             .collect();
-        Some(
-            self.gitdir
-                .join("memstead-locks")
-                .join(format!("{file}.lock")),
-        )
+        // The canonical path: two processes that spell the repository
+        // differently must sort their locks alike.
+        let gitdir = std::fs::canonicalize(&self.gitdir).unwrap_or_else(|_| self.gitdir.clone());
+        Some(gitdir.join("memstead-locks").join(format!("{file}.lock")))
     }
 
     fn current_head(&self) -> Result<Option<String>, memstead_base::backend::BackendError> {
