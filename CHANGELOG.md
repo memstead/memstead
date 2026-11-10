@@ -26,6 +26,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **VISION states what reading a mem is worth, measurement by
+  measurement.** The core value proposition opened by denying a
+  read-side advantage and called the read side closed, which read as
+  "reading a mem is beside the point". It now opens with what a mem is
+  for (to be read) and where the engine works (on what the reader
+  finds), then keeps the three results apart: the typed form by itself
+  does not improve answers, curation does save a reader tokens, and a
+  readable source beats the mem where one exists. It also names what is
+  unmeasured: reading knowledge that no source states. No figure
+  changed.
+
 - **A folder mem's write is durable, and costs disk syncs.** A commit to
   a folder mem now has one commit point. Before it, every new file
   content is written beside its target and synced, together with a
