@@ -632,7 +632,6 @@ mod surface_codes {
         "FOREIGN_MEMSTEAD_DIR",
         "MEM_NOT_READ_ONLY",
         "NO_ACTIVE_BINDING",
-        "NO_WORKSPACE",
         "PROJECTION_ENABLE_FAILED",
         "PROJECTION_INIT_FAILED",
         "PROJECTION_VERIFY_BACKFILL_FAILED",
@@ -643,7 +642,6 @@ mod surface_codes {
         "TARGET_NOT_EMPTY",
         "WORKSPACE_ALREADY_EXISTS_ABOVE",
         "WORKSPACE_ALREADY_INITIALISED",
-        "WORKSPACE_CONFIG_READ_FAILED",
     ];
 
     /// Engine codes a surface still builds by hand at some site instead of

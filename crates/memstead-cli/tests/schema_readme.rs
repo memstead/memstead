@@ -171,5 +171,5 @@ fn unknown_reference_refuses_typed_and_subcommands_still_route() {
         .args(["schema", "install", "planning@0.1.0"])
         .assert()
         .failure()
-        .stderr(predicates::str::contains("NO_WORKSPACE"));
+        .stderr(predicates::str::contains("WORKSPACE_NOT_INITIALISED"));
 }

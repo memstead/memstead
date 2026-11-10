@@ -1021,13 +1021,9 @@ This package carries the retired `optional:` key, so it was written when an abse
 
 fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
     let (shape, root) = ctx.workspace_shape().ok_or_else(|| {
-        CliError::new(
-            ExitKind::Generic,
-            "NO_WORKSPACE",
-            "not inside a Memstead workspace (no `.memstead/workspace.toml` in any \
-             ancestor) — cd into your workspace first, or create one: memstead quickstart"
-                .to_string(),
-        )
+        // The engine's not-initialised refusal, as every other command gives it.
+        let cwd = std::env::current_dir().unwrap_or_default();
+        crate::setup::boot_error_to_cli(&cwd, memstead_base::BootError::NotInitialised(cwd.clone()))
     })?;
     let (schema_ref, files) = resolve_source(
         &args.source,

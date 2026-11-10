@@ -533,13 +533,10 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
     use memstead_base::{FileWorkspaceStore, WorkspaceStoreAdapter};
 
     let root = require_workspace_root()?;
-    let workspace = FileWorkspaceStore::new().load(&root).map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "WORKSPACE_CONFIG_READ_FAILED",
-            format!("workspace show: load `{}`: {e}", root.display()),
-        )
-    })?;
+    // The store's own typed refusal (parse, format, io), as boot reports it.
+    let workspace = FileWorkspaceStore::new()
+        .load(&root)
+        .map_err(|e| crate::setup::boot_error_to_cli(&root, memstead_base::BootError::Store(e)))?;
 
     let settings = &workspace.settings;
     let json_mode = ctx.json;

@@ -128,7 +128,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   looks one up. `NO_WRITABLE_MEM` and `AMBIGUOUS_MEM` (`memstead create`,
   `batch-create`, `changes`, `export`, `publish`) are the engine's
   (`Engine::default_writable_mem_or_refuse`, `Engine::sole_writable_mem`),
-  with each command's own hint after the engine's message.
+  with each command's own hint after the engine's message. Two more
+  retirements: `memstead schema install` outside a workspace refuses
+  `WORKSPACE_NOT_INITIALISED` (the engine's boot refusal), where it refused
+  `NO_WORKSPACE`; `memstead workspace show` on an unreadable store reports
+  the store's own code (`WORKSPACE_STORE_PARSE`, ...) where it reported
+  `WORKSPACE_CONFIG_READ_FAILED`.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype
