@@ -894,19 +894,13 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
         let storage = mount.map(|m| &m.storage);
         let snapshot_token: Option<String> = match storage {
             Some(memstead_base::MountStorage::GitBranch { .. }) => {
-                let gitdir = engine.gitdir_for(name).map_err(|e| {
-                    CliError::new(
-                        ExitKind::Generic,
-                        "MEM_ERROR",
-                        format!("workspace dump: gitdir for mem '{name}': {e}"),
-                    )
-                })?;
+                let gitdir = engine
+                    .gitdir_for(name)
+                    .map_err(|e| CliError::from_engine_with_hint(e, "(workspace dump)"))?;
                 Some(read_branch_head_oid(&gitdir, name).map_err(|e| {
-                    CliError::new(
-                        ExitKind::Generic,
-                        "MEM_ERROR",
-                        format!("workspace dump: snapshot token for mem '{name}': {e}"),
-                    )
+                    CliError::from_engine_op(memstead_base::EngineError::Mem(format!(
+                        "workspace dump: snapshot token for mem '{name}': {e}"
+                    )))
                 })?)
             }
             // Folder and Archive mounts have no head-of-branch — the

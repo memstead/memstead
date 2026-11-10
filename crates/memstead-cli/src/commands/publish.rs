@@ -486,17 +486,15 @@ fn find_filesystem_workspace_root() -> anyhow::Result<PathBuf> {
         match current.parent() {
             Some(p) => current = p,
             None => {
-                return Err(CliError::new(
-                    ExitKind::NotFound,
-                    "WORKSPACE_NOT_INITIALISED",
-                    format!(
-                        "no workspace found from {} or any ancestor (missing \
-                         .memstead/workspace.toml) — run `memstead init` first, pass \
-                         --workspace <path>, or supply an archive path",
-                        cwd.display()
-                    ),
-                )
-                .into());
+                // The engine's boot refusal, this command's exit kind, and
+                // its one extra way out.
+                let mut err = crate::setup::boot_error_to_cli(
+                    &cwd,
+                    memstead_base::BootError::NotInitialised(cwd.clone()),
+                );
+                err.kind = ExitKind::NotFound;
+                err.message.push_str(" Or supply an archive path.");
+                return Err(err.into());
             }
         }
     }

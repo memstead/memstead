@@ -1644,13 +1644,7 @@ fn run_set_schema_below_boot(
 }
 
 fn generic_error(msg: String) -> anyhow::Error {
-    CliError {
-        code: "MEM_ERROR",
-        kind: ExitKind::Generic,
-        message: msg,
-        details: None,
-    }
-    .into()
+    CliError::from_engine_op(memstead_base::EngineError::Mem(msg)).into()
 }
 
 fn validation_error(msg: String) -> anyhow::Error {

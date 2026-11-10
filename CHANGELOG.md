@@ -100,7 +100,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (`EngineError::check_entity_id_syntax`): `INVALID_ENTITY_ID` with the
   same payload, and the engine's messages (`entity id '' is malformed:
   empty`, `entity id is too long: N characters, the limit is M`) in place
-  of the server's own.
+  of the server's own. `MEM_ERROR` from `memstead mem` commands and from
+  `memstead workspace dump`'s snapshot read is the engine's
+  (`details.detail` added); a `workspace dump` gitdir lookup now reports
+  the engine's own refusal for the mem instead of wrapping it as
+  `MEM_ERROR`; `memstead publish`'s missing-workspace refusal is the
+  engine's boot refusal (`WORKSPACE_NOT_INITIALISED`, its message and
+  details, exit 3 kept, with "Or supply an archive path." after it).
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype
