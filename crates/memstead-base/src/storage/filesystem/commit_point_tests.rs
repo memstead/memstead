@@ -985,3 +985,42 @@ fn the_first_commit_names_the_metadata_directory_durably() {
         1
     );
 }
+
+/// A commit into a directory that an earlier, cut-off attempt left
+/// behind: the directory exists, so this commit does not create it, and
+/// nobody ever synced its name. The commit syncs every directory from
+/// the file's own up to the mem root before its commit point.
+#[test]
+fn a_commit_into_a_directory_a_cut_off_attempt_left_behind_names_it_durably() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    seed(&root);
+    // What a kill during the attempt's first temp write leaves: the
+    // directories, made and never synced.
+    std::fs::create_dir_all(root.join("fresh/deep")).unwrap();
+
+    let io = FaultIo::new();
+    let backend = FilesystemBackend::with_io(root.clone(), io.clone());
+    // Not this backend's first commit, which syncs the root anyway.
+    backend.write_entity(Path::new("warm-up.md"), NEW).unwrap();
+    backend
+        .commit("warm-up", &CommitContext::internal())
+        .unwrap();
+
+    io.reset();
+    backend
+        .write_entity(Path::new("fresh/deep/new.md"), FRESH)
+        .unwrap();
+    backend
+        .commit("under test", &CommitContext::internal())
+        .unwrap();
+    let trace = io.trace();
+    let point = io.commit_point().unwrap();
+    for dir in [root.join("fresh/deep"), root.join("fresh"), root.clone()] {
+        assert!(
+            trace[..point].contains(&IoOp::SyncDir(dir.clone())),
+            "{dir:?} is not synced before the commit point: {:?}",
+            &trace[..point]
+        );
+    }
+}

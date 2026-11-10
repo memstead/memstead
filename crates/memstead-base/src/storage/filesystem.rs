@@ -286,8 +286,20 @@ impl FilesystemBackend {
         // would name a content that is gone.
         let mut dirs: BTreeSet<PathBuf> = BTreeSet::new();
         for path in attempt.temps.iter().chain(attempt.created_dirs.iter()) {
-            if let Some(parent) = path.parent() {
-                dirs.insert(parent.to_path_buf());
+            // Every directory from the file's own up to the mem root,
+            // not only the ones this attempt created: a directory left
+            // behind by an earlier attempt that was cut off exists
+            // already and was never named durably.
+            let mut dir = path.parent();
+            while let Some(d) = dir {
+                if !d.starts_with(&self.root) {
+                    break;
+                }
+                dirs.insert(d.to_path_buf());
+                if d == self.root {
+                    break;
+                }
+                dir = d.parent();
             }
         }
         // `.memstead/` itself must be named durably before a record is
