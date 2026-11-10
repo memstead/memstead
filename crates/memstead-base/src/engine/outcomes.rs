@@ -120,12 +120,102 @@ pub struct CreateEntityOutcome {
     pub relations_declared: Vec<RelationDeclared>,
 }
 
+/// What a content-changing mutation (update, delete, rename, retype, batch
+/// update) states about the entity's hash.
+///
+/// The engine, not a surface, decides what a missing statement means: it
+/// refuses it with `EXPECTED_HASH_REQUIRED` for a real entity. An omission
+/// that silently disabled the compare is how the surfaces came to differ
+/// (three codes for one refusal, and an MCP delete that skipped the compare
+/// for any entity), so the unguarded write has its own named variant
+/// instead of riding on an absent value.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ExpectedHash {
+    /// The caller states nothing. Refused for a real entity; a stub, which
+    /// has no content to protect, and the two exempt shapes (an update that
+    /// changes no content, a dry run) pass.
+    #[default]
+    Missing,
+    /// The hash the caller read from storage. Compared under the mem's
+    /// write lock; a mismatch refuses `HASH_MISMATCH` with the current hash.
+    Current(String),
+    /// The engine skips the compare. For internal callers only: no tool
+    /// parameter and no command-line flag maps to it, and every use names
+    /// its reason as the variant of [`HashOverride`].
+    Override(HashOverride),
+}
+
+/// Why an internal caller may write without a compare.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashOverride {
+    /// A proposal merge writes from a recorded common ancestor under its
+    /// own lock: it has already compared the target against that ancestor,
+    /// which is a stronger statement than a hash read a moment earlier.
+    ProposalMerge,
+}
+
+impl ExpectedHash {
+    /// The statement a surface token makes: no token is `Missing`, any
+    /// token (including an empty one) is the hash the caller holds. Empty
+    /// tokens keep their per-surface meaning; a surface that reads an empty
+    /// token as "no token" filters it before calling this.
+    pub fn from_token(token: Option<String>) -> Self {
+        match token {
+            Some(h) => Self::Current(h),
+            None => Self::Missing,
+        }
+    }
+
+    /// The hash the caller holds, when it states one.
+    pub fn as_current(&self) -> Option<&str> {
+        match self {
+            Self::Current(h) => Some(h),
+            _ => None,
+        }
+    }
+
+    pub fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
+    }
+
+    /// The one compare every content-changing verb runs, under its lock,
+    /// after its existence and stub gates. The two exemptions stay apart
+    /// because they waive different things: `required: false` (an update
+    /// that changes no content) waives only the requirement, so a hash the
+    /// caller does state is still compared; `compare: false` (a dry run, the
+    /// stale-hash recovery path) waives the compare and with it the
+    /// requirement, because nothing is written.
+    pub(crate) fn check(
+        &self,
+        id: &EntityId,
+        entity: &crate::entity::Entity,
+        required: bool,
+        compare: bool,
+    ) -> Result<(), super::EngineError> {
+        if !compare {
+            return Ok(());
+        }
+        match self {
+            Self::Override(_) => Ok(()),
+            Self::Missing if entity.stub || !required => Ok(()),
+            Self::Missing => Err(super::EngineError::ExpectedHashRequired { id: id.to_string() }),
+            Self::Current(expected) if entity.content_hash == *expected => Ok(()),
+            Self::Current(_) => Err(super::EngineError::HashMismatch {
+                id: id.to_string(),
+                current: entity.content_hash.clone(),
+                is_stub: entity.stub,
+            }),
+        }
+    }
+}
+
 /// Arguments for [`Engine::update_entity`].
 #[derive(Debug, Clone)]
 pub struct UpdateEntityArgs {
     pub id: EntityId,
-    /// Optimistic locking. `None` skips the check.
-    pub expected_hash: Option<String>,
+    /// Optimistic locking; see [`ExpectedHash`]. Not required (and not
+    /// compared) on a dry run or on an update that changes no content.
+    pub expected_hash: ExpectedHash,
     /// Section keys whose body should be replaced wholesale. Empty
     /// values overwrite with empty content.
     pub sections: IndexMap<String, String>,
@@ -349,8 +439,8 @@ pub struct RelationDeclared {
 #[derive(Debug, Clone)]
 pub struct DeleteEntityArgs {
     pub id: EntityId,
-    /// Optimistic locking. `None` skips the check.
-    pub expected_hash: Option<String>,
+    /// Optimistic locking; see [`ExpectedHash`]. A stub needs none.
+    pub expected_hash: ExpectedHash,
 }
 
 /// Successful outcome of [`Engine::delete_entity`].
@@ -390,7 +480,10 @@ pub struct DeleteEntityOutcome {
 #[derive(Debug, Clone)]
 pub struct RelateEntityArgs {
     pub source: EntityId,
-    /// Optimistic locking on the source. `None` skips the check.
+    /// Optimistic locking on the source. `None` skips the check: relate
+    /// stays outside the [`ExpectedHash`] rule on purpose. It adds or
+    /// removes one edge idempotently, cannot overwrite a section, and its
+    /// response returns the hash the next content change must present.
     pub expected_hash: Option<String>,
     pub rel_type: String,
     pub target: EntityId,
@@ -473,8 +566,8 @@ pub struct RelateEntityOutcome {
 #[derive(Debug, Clone)]
 pub struct RenameEntityArgs {
     pub id: EntityId,
-    /// Optimistic locking. `None` skips the check.
-    pub expected_hash: Option<String>,
+    /// Optimistic locking; see [`ExpectedHash`].
+    pub expected_hash: ExpectedHash,
     pub new_title: String,
 }
 
@@ -512,8 +605,9 @@ pub struct RenameEntityOutcome {
 #[derive(Debug, Clone)]
 pub struct RetypeEntityArgs {
     pub id: EntityId,
-    /// Optimistic locking. `None` skips the check (dry runs always skip it).
-    pub expected_hash: Option<String>,
+    /// Optimistic locking; see [`ExpectedHash`]. A dry run needs none and
+    /// skips the compare.
+    pub expected_hash: ExpectedHash,
     /// The type the entity becomes; must be declared by the mem's schema.
     pub target_type: String,
     /// Section keys to rename on the way: `old key → new key`. A key not

@@ -56,7 +56,7 @@ fn update_entity_pointer_schema_auto_synthesises_references_from_body_link() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(source.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(source.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -163,7 +163,7 @@ fn update_entity_declare_relations_passes_strict_validator_in_one_call() {
                 relations_unset: Vec::new(),
                 anchors_unset: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(source.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(source.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -222,7 +222,7 @@ fn update_entity_declare_relations_auto_stubs_absent_target() {
                 relations_unset: Vec::new(),
                 anchors_unset: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(source.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(source.content_hash.clone()),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -301,7 +301,7 @@ fn update_entity_alias_synthesis_runs_unconditionally_for_pointer_schemas() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(source.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(source.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -346,7 +346,7 @@ fn update_entity_dry_run_returns_prospective_hash_without_writing() {
                 id: seeded.id.clone(),
                 // Stale-hash recovery path — dry_run skips the
                 // hash check, so a wrong expected_hash is OK.
-                expected_hash: Some("wrong-hash".to_string()),
+                expected_hash: crate::ExpectedHash::Current("wrong-hash".to_string()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -506,7 +506,7 @@ fn references_edges_round_trip_across_full_crud_cycle() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: probe.id.clone(),
-                expected_hash: Some(relate1.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(relate1.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -534,7 +534,7 @@ fn references_edges_round_trip_across_full_crud_cycle() {
         .rename_entity(
             crate::engine::RenameEntityArgs {
                 id: probe.id.clone(),
-                expected_hash: Some(updated.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(updated.content_hash.clone()),
                 new_title: "Probe Renamed".to_string(),
             },
             actor,
@@ -550,7 +550,7 @@ fn references_edges_round_trip_across_full_crud_cycle() {
         .delete_entity(
             crate::engine::DeleteEntityArgs {
                 id: renamed.new_id.clone(),
-                expected_hash: Some(renamed.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(renamed.content_hash.clone()),
             },
             actor,
             Some(&client),
@@ -603,7 +603,7 @@ fn update_entity_returns_write_id_title_modified_date_warnings_shape() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -679,7 +679,7 @@ fn update_entity_noop_resetting_section_to_current_value_preserves_last_modified
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -755,7 +755,7 @@ fn update_entity_empty_payload_refuses_with_typed_code() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -806,7 +806,7 @@ fn update_entity_noop_same_content_surfaces_warning() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -848,7 +848,7 @@ fn update_entity_noop_metadata_unset_on_absent_key() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -892,7 +892,7 @@ fn update_entity_noop_metadata_unset_on_absent_key() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -934,7 +934,7 @@ fn update_entity_noop_setting_metadata_to_current_value_reports_empty_delta() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -1024,7 +1024,7 @@ fn update_entity_noop_declare_already_related_edge() {
                 relations_unset: Vec::new(),
                 anchors_unset: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(after_relate.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(after_relate.content_hash.clone()),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -1076,7 +1076,7 @@ fn update_entity_real_change_still_commits_and_advances_hash() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -1127,7 +1127,7 @@ fn update_entity_noop_preserves_expected_hash_across_chain() {
                 UpdateEntityArgs {
                     anchors: Vec::new(),
                     id: seeded.id.clone(),
-                    expected_hash: Some(seeded.content_hash.clone()),
+                    expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                     sections: noop_sections.clone(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
@@ -1160,7 +1160,7 @@ fn update_entity_noop_preserves_expected_hash_across_chain() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),

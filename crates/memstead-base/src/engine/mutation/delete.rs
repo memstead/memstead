@@ -137,22 +137,10 @@ impl Engine {
             .get(id)
             .ok_or_else(|| EngineError::NotFound { id: id.to_string() })?;
 
-        if let Some(expected) = args.expected_hash.as_deref()
-            && entity.content_hash != expected
-        {
-            // Stubs have no `content_hash` to compare against, so the
-            // pre-fix `(current: )` paren misdirected callers toward
-            // hash-recovery via `memstead_entity` (which returns the same
-            // empty hash). Surface `details.is_stub: true` and a
-            // corrective-action message — the actual fix is
-            // `expected_hash: ""`. Non-stub mismatches keep the prior
-            // contract.
-            return Err(EngineError::HashMismatch {
-                id: id.to_string(),
-                current: entity.content_hash.clone(),
-                is_stub: entity.stub,
-            });
-        }
+        // A stub has no content to protect: it deletes with no hash, and a
+        // non-empty one refuses with `details.is_stub` (the corrective
+        // action is the empty hash, not a re-read).
+        args.expected_hash.check(id, entity, true, true)?;
 
         let file_path = entity.file_path.clone();
         let entity_is_stub = entity.stub;
@@ -303,12 +291,12 @@ impl Engine {
     pub fn delete_entity_with_ctx(
         &mut self,
         id: &EntityId,
-        expected_hash: &str,
+        expected_hash: crate::ExpectedHash,
         ctx: &CommitContext<'_>,
     ) -> Result<DeleteEntityOutcome, EngineError> {
         let args = DeleteEntityArgs {
             id: id.clone(),
-            expected_hash: Some(expected_hash.to_string()),
+            expected_hash,
         };
         self.delete_entity(args, ctx.actor, ctx.client.as_ref(), ctx.note.as_deref())
     }
@@ -366,7 +354,7 @@ mod tests {
             .delete_entity(
                 DeleteEntityArgs {
                     id: seeded.id.clone(),
-                    expected_hash: Some(seeded.content_hash.clone()),
+                    expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 },
                 actor,
                 Some(&client),
@@ -392,7 +380,7 @@ mod tests {
             .delete_entity(
                 DeleteEntityArgs {
                     id: seeded.id.clone(),
-                    expected_hash: Some(seeded.content_hash.clone()),
+                    expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 },
                 actor,
                 Some(&client),
@@ -450,7 +438,7 @@ mod tests {
             .delete_entity(
                 DeleteEntityArgs {
                     id: seeded.id.clone(),
-                    expected_hash: Some(seeded.content_hash.clone()),
+                    expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 },
                 actor,
                 Some(&client),
@@ -477,7 +465,7 @@ mod tests {
             .delete_entity(
                 DeleteEntityArgs {
                     id: seeded.id.clone(),
-                    expected_hash: Some("nope".to_string()),
+                    expected_hash: crate::ExpectedHash::Current("nope".to_string()),
                 },
                 actor,
                 Some(&client),
@@ -554,7 +542,7 @@ mod tests {
             .delete_entity(
                 DeleteEntityArgs {
                     id: stub_id.clone(),
-                    expected_hash: Some("definitely-non-empty".to_string()),
+                    expected_hash: crate::ExpectedHash::Current("definitely-non-empty".to_string()),
                 },
                 actor,
                 Some(&client),
@@ -620,7 +608,7 @@ mod tests {
             .delete_entity(
                 DeleteEntityArgs {
                     id: stub_id.clone(),
-                    expected_hash: Some(String::new()),
+                    expected_hash: crate::ExpectedHash::Current(String::new()),
                 },
                 actor,
                 Some(&client),
@@ -684,7 +672,11 @@ mod tests {
             .delete_entity(
                 DeleteEntityArgs {
                     id: target.id.clone(),
-                    expected_hash: None,
+                    expected_hash: crate::ExpectedHash::from_token(
+                        engine
+                            .get_entity(&target.id)
+                            .map(|e| e.content_hash.clone()),
+                    ),
                 },
                 actor,
                 Some(&client),
@@ -747,7 +739,7 @@ mod tests {
             .delete_entity(
                 DeleteEntityArgs {
                     id: source.id.clone(),
-                    expected_hash: Some(related.content_hash.clone()),
+                    expected_hash: crate::ExpectedHash::Current(related.content_hash.clone()),
                 },
                 actor,
                 Some(&client),
@@ -801,7 +793,7 @@ mod tests {
             .delete_entity(
                 DeleteEntityArgs {
                     id: source.id.clone(),
-                    expected_hash: Some(related.content_hash.clone()),
+                    expected_hash: crate::ExpectedHash::Current(related.content_hash.clone()),
                 },
                 actor,
                 Some(&client),
@@ -900,7 +892,7 @@ mod tests {
             .delete_entity(
                 DeleteEntityArgs {
                     id: target.id.clone(),
-                    expected_hash: Some(target.content_hash.clone()),
+                    expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 },
                 actor,
                 Some(&client),

@@ -2977,7 +2977,7 @@ write_rules: []
                 anchors: Vec::new(),
                 anchors_unset: Vec::new(),
                 id: id.clone(),
-                expected_hash: Some(hash),
+                expected_hash: crate::ExpectedHash::Current(hash),
                 sections,
                 append_sections: indexmap::IndexMap::new(),
                 patch_sections: indexmap::IndexMap::new(),
@@ -3454,7 +3454,11 @@ fn delete_guard_sees_referrers_in_deferred_mems() {
         .delete_entity(
             DeleteEntityArgs {
                 id: crate::EntityId::new("eag", "alpha"),
-                expected_hash: None,
+                expected_hash: crate::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&crate::EntityId::new("eag", "alpha"))
+                        .map(|e| e.content_hash.clone()),
+                ),
             },
             actor,
             Some(&client),
@@ -4847,7 +4851,7 @@ fn a_derived_entity_anchor_is_pinned_to_its_target_at_write() {
         .update_entity(
             crate::UpdateEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(current),
+                expected_hash: crate::ExpectedHash::Current(current),
                 sections: new_sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),

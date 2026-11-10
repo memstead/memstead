@@ -85,7 +85,11 @@ fn update_sections(
         .update_entity(
             UpdateEntityArgs {
                 id: EntityId::new(id.0, id.1),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&EntityId::new(id.0, id.1))
+                        .map(|e| e.content_hash.clone()),
+                ),
                 sections: sections
                     .iter()
                     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -135,7 +139,11 @@ fn delete(engine: &mut memstead_base::Engine, id: (&str, &str)) {
         .delete_entity(
             DeleteEntityArgs {
                 id: EntityId::new(id.0, id.1),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&EntityId::new(id.0, id.1))
+                        .map(|e| e.content_hash.clone()),
+                ),
             },
             Actor::Cli,
             None,
@@ -305,7 +313,11 @@ fn staged() -> (TempDir, memstead_base::Engine) {
         .rename_entity(
             RenameEntityArgs {
                 id: EntityId::new("specs-fork", "delta"),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&EntityId::new("specs-fork", "delta"))
+                        .map(|e| e.content_hash.clone()),
+                ),
                 new_title: "Delta Prime".to_string(),
             },
             Actor::Cli,

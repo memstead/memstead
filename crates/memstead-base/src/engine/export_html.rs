@@ -812,7 +812,11 @@ mod tests {
         let mut edit = crate::engine::UpdateEntityArgs {
             anchors: Vec::new(),
             id: crate::entity::EntityId::new("specs", "target-entity"),
-            expected_hash: None,
+            expected_hash: crate::ExpectedHash::from_token(
+                engine
+                    .get_entity(&crate::entity::EntityId::new("specs", "target-entity"))
+                    .map(|e| e.content_hash.clone()),
+            ),
             sections: indexmap::IndexMap::from_iter([(
                 "purpose".to_string(),
                 "Geändert.".to_string(),

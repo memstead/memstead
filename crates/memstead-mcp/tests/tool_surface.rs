@@ -1311,6 +1311,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "_hash",
             "write_id",
             // Error-envelope code + details field referenced literally.
+            "EXPECTED_HASH_REQUIRED",
             "HASH_MISMATCH",
             "details.current",
             // Typed error codes + envelope fields.
@@ -1365,6 +1366,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "write_id",
             "warnings",
             // Error-envelope code + details field referenced literally.
+            "EXPECTED_HASH_REQUIRED",
             "HASH_MISMATCH",
             "details.current",
             // Refuse-on-write-mem-referrers contract.
@@ -1414,6 +1416,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "RETYPE_REFERRER_UNPROBEABLE",
             "RETYPE_NO_OP",
             "HASH_MISMATCH",
+            "EXPECTED_HASH_REQUIRED",
             // Provenance kind the description names.
             "retype",
         ],
@@ -2339,6 +2342,7 @@ const STRUCTURED_ERROR_CODES: &[&str] = &[
     "INVALID_CHECK_KIND",
     // Optimistic locking / structural
     "HASH_MISMATCH",
+    "EXPECTED_HASH_REQUIRED",
     "RELATIONSHIP_CYCLE",
     // Schema vocabulary violations
     "UNKNOWN_SECTION",

@@ -102,7 +102,8 @@ pub(super) fn engine_err_unified(
                 e.details(),
             ),
         ),
-        E::ConstraintUnsatisfied { .. }
+        E::ExpectedHashRequired { .. }
+        | E::ConstraintUnsatisfied { .. }
         | E::RequiredOutgoingUnsatisfied { .. }
         | E::SectionFormatRefused { .. } => tool_error_with_payload(
             e.code(),

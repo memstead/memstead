@@ -388,7 +388,7 @@ pub struct DeleteParams {
     #[schemars(description = "Full entity ID to delete")]
     pub id: String,
     #[schemars(
-        description = "Hash from memstead_entity response (_hash field). Required for real entities — read first. Mirrors memstead_update / memstead_rename. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash. Stubs carry an empty `_hash` (they have no on-disk file); pass the empty string to delete a stub — the hash check is skipped because there is nothing to compare."
+        description = "Hash from memstead_entity response (_hash field). Required for real entities — read first. Mirrors memstead_update / memstead_rename. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash. Stubs carry an empty `_hash` (they have no on-disk file); pass the empty string to delete a stub, which has no content to protect. An empty string on a real entity states no hash and refuses EXPECTED_HASH_REQUIRED."
     )]
     pub expected_hash: String,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
@@ -437,7 +437,7 @@ pub struct RetypeParams {
     )]
     pub drop_metadata: Option<Vec<String>>,
     #[schemars(
-        description = "Hash from memstead_entity (_hash). Required unless `dry_run` is true. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash."
+        description = "Hash from memstead_entity (_hash). Required unless `dry_run` is true; missing or empty refuses EXPECTED_HASH_REQUIRED. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash."
     )]
     pub expected_hash: Option<String>,
     #[schemars(

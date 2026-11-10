@@ -10,7 +10,7 @@ fn unset_args(id: EntityId, hash: String, unset: &[&str]) -> UpdateEntityArgs {
     UpdateEntityArgs {
         anchors: Vec::new(),
         id,
-        expected_hash: Some(hash),
+        expected_hash: crate::ExpectedHash::Current(hash),
         sections: IndexMap::new(),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -217,7 +217,7 @@ fn update_entity_patch_names_the_sections_that_do_contain_old() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: patches,
@@ -261,7 +261,7 @@ fn update_entity_appends_to_existing_section_with_newline_separator() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections: IndexMap::new(),
                 append_sections: appends,
                 patch_sections: IndexMap::new(),
@@ -351,7 +351,7 @@ fn a_write_that_does_not_resolve_an_open_fence_is_refused() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: id.clone(),
-                expected_hash: Some(hash),
+                expected_hash: crate::ExpectedHash::Current(hash),
                 sections: IndexMap::from_iter([(
                     "purpose".to_string(),
                     "a new purpose".to_string(),
@@ -406,7 +406,7 @@ fn replacing_the_absorbing_section_is_the_way_out() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: id.clone(),
-                expected_hash: Some(hash),
+                expected_hash: crate::ExpectedHash::Current(hash),
                 sections: IndexMap::from_iter([
                     (
                         "identity".to_string(),
@@ -485,7 +485,9 @@ fn every_verb_that_regenerates_the_file_is_gated_not_only_update() {
             crate::engine::RenameEntityArgs {
                 id: id.clone(),
                 new_title: "Renamed Fenced".to_string(),
-                expected_hash: Some(engine.get_entity(&id).unwrap().content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(
+                    engine.get_entity(&id).unwrap().content_hash.clone(),
+                ),
             },
             actor,
             Some(&client),
@@ -513,7 +515,7 @@ fn an_entity_with_no_open_fence_updates_exactly_as_before() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections: IndexMap::from_iter([(
                     "purpose".to_string(),
                     "a new purpose".to_string(),
@@ -571,7 +573,7 @@ fn update_entity_against_stub_surfaces_typed_stub_not_updatable() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: stub_id.clone(),
-                expected_hash: Some(String::new()),
+                expected_hash: crate::ExpectedHash::Current(String::new()),
                 sections: IndexMap::from_iter([("identity".to_string(), "body".to_string())]),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -610,7 +612,7 @@ fn update_entity_rejects_conflicting_section_modes() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections,
                 append_sections: appends,
                 patch_sections: IndexMap::new(),
@@ -658,7 +660,7 @@ fn update_entity_rejects_overlapping_metadata_and_metadata_unset_keys() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),

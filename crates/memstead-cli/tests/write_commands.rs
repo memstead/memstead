@@ -297,7 +297,7 @@ fn update_requires_hash_by_default() {
         ])
         .assert()
         .code(5)
-        .stderr(contains("--expected-hash"));
+        .stderr(contains("EXPECTED_HASH_REQUIRED"));
 }
 
 /// Criteria 1, 3, 4 and 5 (consistency-sweep 03/04) on the CLI surface, which
@@ -351,7 +351,7 @@ fn an_anchors_only_update_needs_no_expected_hash_on_the_cli() {
         ])
         .assert()
         .code(5)
-        .stderr(contains("--expected-hash"));
+        .stderr(contains("EXPECTED_HASH_REQUIRED"));
 
     // Neither anchors nor content: still the empty-update refusal.
     memstead()

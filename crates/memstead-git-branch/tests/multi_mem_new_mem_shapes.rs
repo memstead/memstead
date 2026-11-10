@@ -52,7 +52,9 @@ fn update_args(engine: &Engine, target: &EntityId, purpose: &str) -> UpdateEntit
     sections.insert("purpose".to_string(), purpose.to_string());
     UpdateEntityArgs {
         id: target.clone(),
-        expected_hash: engine.get_entity(target).map(|e| e.content_hash.clone()),
+        expected_hash: memstead_base::ExpectedHash::from_token(
+            engine.get_entity(target).map(|e| e.content_hash.clone()),
+        ),
         sections,
         append_sections: Default::default(),
         patch_sections: Default::default(),
@@ -529,7 +531,7 @@ fn held_verb(verb: &str, by: LinkBy) -> Held {
             .delete_entity(
                 DeleteEntityArgs {
                     id: alpha.clone(),
-                    expected_hash: hash,
+                    expected_hash: memstead_base::ExpectedHash::from_token(hash),
                 },
                 Actor::Cli,
                 None,
@@ -542,7 +544,7 @@ fn held_verb(verb: &str, by: LinkBy) -> Held {
                 memstead_base::RenameEntityArgs {
                     id: alpha.clone(),
                     new_title: "Omega".to_string(),
-                    expected_hash: hash,
+                    expected_hash: memstead_base::ExpectedHash::from_token(hash),
                 },
                 Actor::Cli,
                 None,
@@ -565,7 +567,7 @@ fn held_verb(verb: &str, by: LinkBy) -> Held {
             .retype_entity(
                 memstead_base::RetypeEntityArgs {
                     id: alpha.clone(),
-                    expected_hash: hash,
+                    expected_hash: memstead_base::ExpectedHash::from_token(hash),
                     target_type: "concept".to_string(),
                     section_map: IndexMap::from_iter([
                         ("identity".to_string(), "definition".to_string()),

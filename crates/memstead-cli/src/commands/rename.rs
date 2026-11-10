@@ -1,7 +1,8 @@
 //! `memstead rename` — change an entity's title, ID, file path, and every incoming wiki-link.
 //!
 //! Hash handling matches `memstead update`: strict by default, `--auto-hash`
-//! refetches from the store, `--force` explicitly accepts the overwrite.
+//! refetches from the store, `--force` refetches too and names the intent to
+//! overwrite (the engine still compares, so a concurrent write is refused).
 
 use clap::Parser;
 
@@ -9,7 +10,7 @@ use memstead_base::vcs::Actor;
 use memstead_base::{EntityId, RenameEntityArgs};
 
 use crate::CliError;
-use crate::output::{ExitKind, print_json, print_markdown};
+use crate::output::{print_json, print_markdown};
 use crate::setup::{CliContext, CliEngine};
 
 #[derive(Parser, Debug)]
@@ -32,7 +33,9 @@ pub struct Args {
     #[arg(long, conflicts_with_all = ["expected_hash", "force"])]
     pub auto_hash: bool,
 
-    /// Skip the hash check (explicit overwrite).
+    /// Read the current hash and present it, naming the intent to overwrite.
+    /// The engine still compares, so a write that lands after the read is
+    /// refused rather than overwritten.
     #[arg(long, conflicts_with_all = ["expected_hash", "auto_hash"])]
     pub force: bool,
 
@@ -51,12 +54,17 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         CliEngine::MemRepo(engine) => {
             let mut engine = memstead_base::OperationScope::begin(engine);
             let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
-            let expected_hash = resolve_expected_hash_mem_repo(&engine, &lookup_id, &args)?;
+            let expected_hash = super::hash_statement(
+                &mut engine,
+                &lookup_id,
+                args.expected_hash.clone(),
+                args.auto_hash || args.force,
+            )?;
             let result = engine
                 .rename_entity_with_ctx(
                     &id,
                     &new_title,
-                    &expected_hash,
+                    expected_hash,
                     &ctx.commit_ctx_with_note(args.note.clone()),
                 )
                 .map_err(CliError::from_engine_op)?;
@@ -89,12 +97,17 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
         CliEngine::Filesystem(mut engine) => {
             let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
-            let expected_hash = resolve_expected_hash_filesystem(&engine, &lookup_id, &args)?;
+            let expected_hash = super::hash_statement(
+                &mut engine,
+                &lookup_id,
+                args.expected_hash.clone(),
+                args.auto_hash || args.force,
+            )?;
             let outcome = engine
                 .rename_entity(
                     RenameEntityArgs {
                         id: id.clone(),
-                        expected_hash: Some(expected_hash),
+                        expected_hash,
                         new_title: new_title.clone(),
                     },
                     Actor::Cli,
@@ -135,77 +148,4 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
     }
     Ok(())
-}
-
-/// Resolve the `expected_hash` for the mem-repo path: either the
-/// flag value, or the live hash from the store under `--auto-hash` /
-/// `--force`. Mirrors the original inline logic — extracted only so
-/// the filesystem path can run the same flag plumbing without
-/// duplicating it.
-fn resolve_expected_hash_mem_repo(
-    engine: &memstead_base::Engine,
-    id: &EntityId,
-    args: &Args,
-) -> anyhow::Result<String> {
-    if args.auto_hash || args.force {
-        Ok(engine
-            .get_entity(id)
-            .ok_or_else(|| {
-                CliError::new(
-                    ExitKind::NotFound,
-                    "ENTITY_NOT_FOUND",
-                    format!("entity not found: {id}"),
-                )
-                .with_details(serde_json::json!({ "id": id.to_string() }))
-            })?
-            .content_hash
-            .clone())
-    } else {
-        args.expected_hash
-            .clone()
-            .filter(|h| !h.is_empty())
-            .ok_or_else(|| {
-                CliError::new(
-                    ExitKind::Validation,
-                    crate::HASH_FLAG_REQUIRED_CODE,
-                    "missing --expected-hash. Read the entity first (memstead entity <id>) and pass its `_hash`, \
-                     or use --auto-hash / --force.",
-                )
-                .into()
-            })
-    }
-}
-
-fn resolve_expected_hash_filesystem(
-    engine: &memstead_base::Engine,
-    id: &EntityId,
-    args: &Args,
-) -> anyhow::Result<String> {
-    if args.auto_hash || args.force {
-        Ok(engine
-            .get_entity(id)
-            .ok_or_else(|| {
-                CliError::new(
-                    ExitKind::NotFound,
-                    "ENTITY_NOT_FOUND",
-                    format!("entity not found: {id}"),
-                )
-                .with_details(serde_json::json!({ "id": id.to_string() }))
-            })?
-            .content_hash
-            .clone())
-    } else {
-        args.expected_hash
-            .clone()
-            .filter(|h| !h.is_empty())
-            .ok_or_else(|| {
-                CliError::new(
-                    ExitKind::Validation,
-                    crate::HASH_FLAG_REQUIRED_CODE,
-                    "missing --expected-hash. Read the entity first (memstead entity <id>) and pass its `_hash`, \
-                     or use --auto-hash / --force.",
-                )
-                .into()
-            })
-    }
 }

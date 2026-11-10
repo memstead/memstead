@@ -1666,7 +1666,11 @@ fn export_seals_latest_check_per_entity_and_kind() {
         .delete_entity(
             crate::DeleteEntityArgs {
                 id: crate::EntityId::new("specs", "gamma"),
-                expected_hash: None,
+                expected_hash: crate::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&crate::EntityId::new("specs", "gamma"))
+                        .map(|e| e.content_hash.clone()),
+                ),
             },
             actor,
             Some(&client),
@@ -2215,7 +2219,11 @@ fn sealed_record_over_a_later_edit_reads_stale_never_fresh() {
         .update_entity(
             crate::UpdateEntityArgs {
                 id: crate::EntityId::new("specs", "alpha"),
-                expected_hash: None,
+                expected_hash: crate::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&crate::EntityId::new("specs", "alpha"))
+                        .map(|e| e.content_hash.clone()),
+                ),
                 sections: [("identity".to_string(), "edited after the check".to_string())]
                     .into_iter()
                     .collect(),

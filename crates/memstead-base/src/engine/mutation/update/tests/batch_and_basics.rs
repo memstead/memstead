@@ -31,10 +31,17 @@ fn short_id_resolves_when_unique_and_refuses_with_candidates_otherwise() {
             .create_entity(empty_create_args(mem, title), Actor::Cli, None, None)
             .unwrap();
     }
-    let update_args = |id: &str, tag: &str| UpdateEntityArgs {
+    let hash_of = |engine: &Engine, id: &str| {
+        crate::ExpectedHash::from_token(
+            engine
+                .get_entity(&EntityId(id.into()))
+                .map(|e| e.content_hash.clone()),
+        )
+    };
+    let update_args = |id: &str, tag: &str, expected_hash: crate::ExpectedHash| UpdateEntityArgs {
         anchors: Vec::new(),
         id: EntityId(id.into()),
-        expected_hash: None,
+        expected_hash,
         sections: IndexMap::new(),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -49,7 +56,12 @@ fn short_id_resolves_when_unique_and_refuses_with_candidates_otherwise() {
 
     // Unique: resolved and announced.
     let out = engine
-        .update_entity(update_args("only", "x"), Actor::Cli, None, None)
+        .update_entity(
+            update_args("only", "x", hash_of(&engine, "a--only")),
+            Actor::Cli,
+            None,
+            None,
+        )
         .expect("unique short id resolves");
     assert_eq!(out.id.0, "a--only");
     assert_eq!(
@@ -61,7 +73,12 @@ fn short_id_resolves_when_unique_and_refuses_with_candidates_otherwise() {
 
     // Ambiguous: refused, both carriers named.
     let err = engine
-        .update_entity(update_args("foo", "x"), Actor::Cli, None, None)
+        .update_entity(
+            update_args("foo", "x", crate::ExpectedHash::Missing),
+            Actor::Cli,
+            None,
+            None,
+        )
         .unwrap_err();
     assert_eq!(err.code(), "ENTITY_ID_MISSING_MEM");
     assert_eq!(
@@ -71,7 +88,12 @@ fn short_id_resolves_when_unique_and_refuses_with_candidates_otherwise() {
 
     // No carrier: refused, no candidates.
     let err = engine
-        .update_entity(update_args("nothing", "x"), Actor::Cli, None, None)
+        .update_entity(
+            update_args("nothing", "x", crate::ExpectedHash::Missing),
+            Actor::Cli,
+            None,
+            None,
+        )
         .unwrap_err();
     assert_eq!(err.code(), "ENTITY_ID_MISSING_MEM");
     assert_eq!(err.details()["candidates"], serde_json::json!([]));
@@ -81,7 +103,7 @@ fn short_id_resolves_when_unique_and_refuses_with_candidates_otherwise() {
         .delete_entity(
             crate::engine::DeleteEntityArgs {
                 id: EntityId("foo".into()),
-                expected_hash: None,
+                expected_hash: crate::ExpectedHash::Missing,
             },
             Actor::Cli,
             None,
@@ -92,7 +114,12 @@ fn short_id_resolves_when_unique_and_refuses_with_candidates_otherwise() {
 
     // A full id: no announcement.
     let out = engine
-        .update_entity(update_args("a--only", "y"), Actor::Cli, None, None)
+        .update_entity(
+            update_args("a--only", "y", hash_of(&engine, "a--only")),
+            Actor::Cli,
+            None,
+            None,
+        )
         .unwrap();
     assert!(
         out.warnings.iter().all(|w| w.code() != "SHORT_ID_RESOLVED"),
@@ -135,7 +162,7 @@ fn update_warns_on_section_heading_divergence_and_still_commits() {
                 UpdateEntityArgs {
                     anchors: Vec::new(),
                     id: id.clone(),
-                    expected_hash: Some(current),
+                    expected_hash: crate::ExpectedHash::Current(current),
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
@@ -259,7 +286,7 @@ fn batch_update_refuses_whole_batch_when_one_item_fails() {
     let valid_update = UpdateEntityArgs {
         anchors: Vec::new(),
         id: created.id.clone(),
-        expected_hash: Some(created.content_hash.clone()),
+        expected_hash: crate::ExpectedHash::Current(created.content_hash.clone()),
         sections: IndexMap::from_iter([("identity".to_string(), "updated body".to_string())]),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -274,7 +301,7 @@ fn batch_update_refuses_whole_batch_when_one_item_fails() {
     let missing_update = UpdateEntityArgs {
         anchors: Vec::new(),
         id: EntityId("specs--nonexistent".to_string()),
-        expected_hash: None,
+        expected_hash: crate::ExpectedHash::Missing,
         sections: IndexMap::new(),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -365,7 +392,7 @@ fn batch_update_applies_all_valid_items_as_one_commit() {
     let upd = |id: EntityId, hash: String, body: &str| UpdateEntityArgs {
         anchors: Vec::new(),
         id,
-        expected_hash: Some(hash),
+        expected_hash: crate::ExpectedHash::Current(hash),
         sections: IndexMap::from_iter([("identity".to_string(), body.to_string())]),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -460,7 +487,7 @@ fn batch_update_dry_run_reports_receipt_and_writes_nothing() {
     let upd = |id: EntityId, hash: String, body: &str| UpdateEntityArgs {
         anchors: Vec::new(),
         id,
-        expected_hash: Some(hash),
+        expected_hash: crate::ExpectedHash::Current(hash),
         sections: IndexMap::from_iter([("identity".to_string(), body.to_string())]),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -547,7 +574,7 @@ fn batch_update_dry_run_refuses_identically_to_real() {
     let upd = |id: EntityId, hash: Option<String>| UpdateEntityArgs {
         anchors: Vec::new(),
         id,
-        expected_hash: hash,
+        expected_hash: crate::ExpectedHash::from_token(hash),
         sections: IndexMap::from_iter([("identity".to_string(), "new".to_string())]),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -640,7 +667,7 @@ fn batch_update_reports_every_failing_item() {
     let upd = |id: EntityId, hash: Option<String>| UpdateEntityArgs {
         anchors: Vec::new(),
         id,
-        expected_hash: hash,
+        expected_hash: crate::ExpectedHash::from_token(hash),
         sections: IndexMap::from_iter([("identity".to_string(), "new body".to_string())]),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -655,7 +682,10 @@ fn batch_update_reports_every_failing_item() {
     let result = engine
         .batch_update(
             vec![
-                (upd(created.id.clone(), None), None),
+                (
+                    upd(created.id.clone(), Some(created.content_hash.clone())),
+                    None,
+                ),
                 (upd(EntityId("specs--missing-one".to_string()), None), None),
                 (upd(EntityId("specs--missing-two".to_string()), None), None),
             ],
@@ -727,7 +757,7 @@ fn batch_update_rolls_back_in_memory_store_auto_stub_on_refusal() {
         relations_unset: Vec::new(),
         anchors_unset: Vec::new(),
         id: a.id.clone(),
-        expected_hash: Some(a.content_hash.clone()),
+        expected_hash: crate::ExpectedHash::Current(a.content_hash.clone()),
         sections: IndexMap::new(),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -744,7 +774,7 @@ fn batch_update_rolls_back_in_memory_store_auto_stub_on_refusal() {
     let item2 = UpdateEntityArgs {
         anchors: Vec::new(),
         id: EntityId::new("specs", "nonexistent"),
-        expected_hash: None,
+        expected_hash: crate::ExpectedHash::Missing,
         sections: IndexMap::from_iter([("identity".to_string(), "x".to_string())]),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -798,7 +828,7 @@ fn update_entity_replaces_a_section_and_logs_provenance() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -849,7 +879,7 @@ fn update_entity_rejects_hash_mismatch() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some("wrong-hash".to_string()),
+                expected_hash: crate::ExpectedHash::Current("wrong-hash".to_string()),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -890,7 +920,7 @@ fn update_entity_rejects_unknown_id() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: crate::EntityId::new("specs", "ghost"),
-                expected_hash: None,
+                expected_hash: crate::ExpectedHash::Missing,
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -933,7 +963,7 @@ fn update_entity_rejects_read_only_mount() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id,
-                expected_hash: None,
+                expected_hash: crate::ExpectedHash::Missing,
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -968,7 +998,7 @@ fn update_entity_patches_section_with_find_and_replace() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections: replace,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -1001,7 +1031,7 @@ fn update_entity_patches_section_with_find_and_replace() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(replaced.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(replaced.content_hash.clone()),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: patches,
@@ -1048,7 +1078,7 @@ fn update_entity_patch_rejects_missing_old_substring() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: patches,

@@ -363,7 +363,7 @@ fn deep_acyclic_chain_near_path_cap_is_accepted() {
                     anchors: Vec::new(),
                     anchors_unset: Vec::new(),
                     id,
-                    expected_hash: Some(hash),
+                    expected_hash: crate::ExpectedHash::Current(hash),
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
@@ -609,7 +609,7 @@ fn update_judges_format_on_composed_body() {
             crate::engine::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: created.id.clone(),
-                expected_hash: Some(current.clone()),
+                expected_hash: crate::ExpectedHash::Current(current.clone()),
                 sections: IndexMap::new(),
                 append_sections: append,
                 patch_sections: IndexMap::new(),
@@ -639,7 +639,7 @@ fn update_judges_format_on_composed_body() {
             crate::engine::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: created.id.clone(),
-                expected_hash: Some(current),
+                expected_hash: crate::ExpectedHash::Current(current),
                 sections: IndexMap::new(),
                 append_sections: append,
                 patch_sections: IndexMap::new(),

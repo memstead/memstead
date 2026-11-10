@@ -1567,7 +1567,9 @@ fn update_args(engine: &Engine, slug: &str, text: &str) -> UpdateEntityArgs {
     sections.insert("purpose".to_string(), text.to_string());
     UpdateEntityArgs {
         id: id(slug),
-        expected_hash: engine.get_entity(&id(slug)).map(|e| e.content_hash.clone()),
+        expected_hash: memstead_base::ExpectedHash::from_token(
+            engine.get_entity(&id(slug)).map(|e| e.content_hash.clone()),
+        ),
         sections,
         append_sections: Default::default(),
         patch_sections: Default::default(),
@@ -1652,7 +1654,7 @@ fn run_verb(verb: Verb, engine: &mut Engine) -> Result<Result<Vec<String>, Strin
         Verb::Delete => {
             let args = DeleteEntityArgs {
                 id: id("gamma"),
-                expected_hash: hash_of(engine, "gamma"),
+                expected_hash: memstead_base::ExpectedHash::from_token(hash_of(engine, "gamma")),
             };
             engine.delete_entity(args, actor, None, note)?.warnings
         }
@@ -1663,7 +1665,7 @@ fn run_verb(verb: Verb, engine: &mut Engine) -> Result<Result<Vec<String>, Strin
             );
             let args = DeleteEntityArgs {
                 id: id("ghost"),
-                expected_hash: Some(String::new()),
+                expected_hash: memstead_base::ExpectedHash::Current(String::new()),
             };
             engine.delete_entity(args, actor, None, note)?.warnings
         }
@@ -1675,7 +1677,7 @@ fn run_verb(verb: Verb, engine: &mut Engine) -> Result<Result<Vec<String>, Strin
         Verb::Retype => {
             let args = RetypeEntityArgs {
                 id: id("gamma"),
-                expected_hash: hash_of(engine, "gamma"),
+                expected_hash: memstead_base::ExpectedHash::from_token(hash_of(engine, "gamma")),
                 target_type: "concept".to_string(),
                 section_map: IndexMap::from_iter([
                     ("identity".to_string(), "definition".to_string()),
@@ -1690,7 +1692,7 @@ fn run_verb(verb: Verb, engine: &mut Engine) -> Result<Result<Vec<String>, Strin
         Verb::Rename => {
             let args = RenameEntityArgs {
                 id: id("beta"),
-                expected_hash: hash_of(engine, "beta"),
+                expected_hash: memstead_base::ExpectedHash::from_token(hash_of(engine, "beta")),
                 new_title: "Beta Renamed".to_string(),
             };
             engine.rename_entity(args, actor, None, note)?.warnings

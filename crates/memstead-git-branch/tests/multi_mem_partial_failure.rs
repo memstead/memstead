@@ -65,7 +65,9 @@ fn update_args(engine: &Engine, target: &EntityId, purpose: &str) -> UpdateEntit
     sections.insert("purpose".to_string(), purpose.to_string());
     UpdateEntityArgs {
         id: target.clone(),
-        expected_hash: engine.get_entity(target).map(|e| e.content_hash.clone()),
+        expected_hash: memstead_base::ExpectedHash::from_token(
+            engine.get_entity(target).map(|e| e.content_hash.clone()),
+        ),
         sections,
         append_sections: Default::default(),
         patch_sections: Default::default(),
@@ -259,7 +261,7 @@ fn run(op: Op, engine: &mut Engine, hash: Option<String>) -> Result<String, Engi
             .rename_entity(
                 RenameEntityArgs {
                     id: id(LEFT, "alpha"),
-                    expected_hash: hash,
+                    expected_hash: memstead_base::ExpectedHash::from_token(hash),
                     new_title: "Alpha Renamed".to_string(),
                 },
                 Actor::Cli,
@@ -749,7 +751,7 @@ fn batch(
                     let target = id(m, slug_of(form, m));
                     let mut args = update_args(engine, &target, "batch text, see [[left--alpha]]");
                     if let Some(h) = hashes.get(&target.to_string()) {
-                        args.expected_hash = h.clone();
+                        args.expected_hash = memstead_base::ExpectedHash::from_token(h.clone());
                     }
                     (args, None)
                 })

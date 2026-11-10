@@ -175,7 +175,7 @@ fn race_with_a_long_lived_engine(storage: &str) {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: EntityId::canonical(&id),
-                expected_hash: Some(stale.clone()),
+                expected_hash: memstead_base::ExpectedHash::Current(stale.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -215,4 +215,152 @@ fn a_long_lived_engine_and_racing_processes_on_a_folder_mem_land_exactly_one_wri
 #[test]
 fn a_long_lived_engine_and_racing_processes_on_a_git_branch_mem_land_exactly_one_write() {
     race_with_a_long_lived_engine("git-branch");
+}
+
+/// Run a command expected to fail and return its `--json` error code.
+fn refused_code(ws: &Path, args: &[&str]) -> String {
+    let out = Command::new(bin())
+        .current_dir(ws)
+        .arg("--json")
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "memstead {args:?} must refuse");
+    let text = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|_| {
+        panic!(
+            "memstead {args:?}: no JSON envelope on stdout: {text} / {}",
+            String::from_utf8_lossy(&out.stderr)
+        )
+    });
+    v["code"].as_str().unwrap_or_default().to_string()
+}
+
+/// Every content-changing CLI verb, given no hash, is refused by the engine
+/// with `EXPECTED_HASH_REQUIRED` (the CLI's `HASH_FLAG_REQUIRED` and the
+/// batch entry's `INVALID_INPUT` for this case retired), on both storages.
+fn a_missing_hash_is_the_engines_refusal(storage: &str) {
+    let ws = workspace(storage);
+    let id = create(ws.path(), "Gated");
+    let before = hash(ws.path(), &id);
+    for args in [
+        vec!["update", id.as_str(), "--section", "conditions=x"],
+        vec![
+            "update",
+            id.as_str(),
+            "--section",
+            "conditions=x",
+            "--expected-hash",
+            "",
+        ],
+        vec!["rename", id.as_str(), "Gated Two"],
+        vec!["retype", id.as_str(), "--type", "memo"],
+    ] {
+        assert_eq!(
+            refused_code(ws.path(), &args),
+            "EXPECTED_HASH_REQUIRED",
+            "{storage}: {args:?}"
+        );
+    }
+    let batch = ws.path().join("batch.json");
+    std::fs::write(
+        &batch,
+        format!(r#"{{ "updates": [ {{ "id": "{id}", "sections": {{ "conditions": "x" }} }} ] }}"#),
+    )
+    .unwrap();
+    let out = Command::new(bin())
+        .current_dir(ws.path())
+        .args(["--json", "batch-update", "--from", batch.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        all.contains("EXPECTED_HASH_REQUIRED"),
+        "{storage}: batch: {all}"
+    );
+    assert!(!all.contains("INVALID_INPUT"), "{storage}: batch: {all}");
+    assert_eq!(hash(ws.path(), &id), before, "{storage}: nothing moved");
+}
+
+#[test]
+fn a_missing_hash_is_the_engines_refusal_on_a_folder_mem() {
+    a_missing_hash_is_the_engines_refusal("folder");
+}
+
+#[test]
+fn a_missing_hash_is_the_engines_refusal_on_a_git_branch_mem() {
+    a_missing_hash_is_the_engines_refusal("git-branch");
+}
+
+/// `--force` / `--auto-hash` read the current hash and present it; they do
+/// not skip the compare. Hold a second writer in the window between that
+/// read and the write (here: a CLI process that lands after the refetch),
+/// and the forced write, single or batched, is refused with the mismatch
+/// instead of overwriting it.
+fn a_forced_write_after_a_peer_landed_is_refused(storage: &str) {
+    let ws = workspace(storage);
+    let id = create(ws.path(), "Raced");
+    let entity = EntityId(id.clone());
+    let mut engine = engine_from_workspace_root(ws.path()).expect("engine boots");
+    // The CLI's own refetch, single and batch forms.
+    let single = memstead_cli::commands::hash_statement(&mut engine, &entity, None, true).unwrap();
+    let batched = memstead_cli::commands::refetched_hash(&mut engine, &entity);
+    assert_eq!(single.as_current(), Some(hash(ws.path(), &id).as_str()));
+    assert_eq!(single, batched);
+
+    // The peer lands inside the window.
+    run(
+        ws.path(),
+        &["update", &id, "--auto-hash", "--section", "conditions=peer"],
+    );
+    let peer_hash = hash(ws.path(), &id);
+
+    let args = |expected_hash| UpdateEntityArgs {
+        anchors: Vec::new(),
+        anchors_unset: Vec::new(),
+        id: entity.clone(),
+        expected_hash,
+        sections: IndexMap::from_iter([("conditions".to_string(), "forced".to_string())]),
+        append_sections: IndexMap::new(),
+        patch_sections: IndexMap::new(),
+        sections_unset: Vec::new(),
+        metadata: IndexMap::new(),
+        metadata_unset: Vec::new(),
+        declare_relations: Vec::new(),
+        relations_unset: Vec::new(),
+        dry_run: false,
+    };
+    match engine.update_entity(args(single), Actor::Cli, None, None) {
+        Err(EngineError::HashMismatch { current, .. }) => assert_eq!(current, peer_hash),
+        other => panic!("{storage}: a forced single update must refuse, got {other:?}"),
+    }
+    let result = engine
+        .batch_update(vec![(args(batched), None)], Actor::Cli, None, false)
+        .unwrap();
+    assert!(!result.applied, "{storage}: {result:?}");
+    assert_eq!(
+        result.results[0].error.as_ref().map(|e| e.code.as_str()),
+        Some("HASH_MISMATCH"),
+        "{storage}: {result:?}"
+    );
+    let out = run(ws.path(), &["entity", &id]);
+    assert!(
+        out.contains("peer") && !out.contains("forced"),
+        "{storage}: the peer's write stands: {out}"
+    );
+}
+
+#[test]
+fn a_forced_write_after_a_peer_landed_is_refused_on_a_folder_mem() {
+    a_forced_write_after_a_peer_landed_is_refused("folder");
+}
+
+#[test]
+fn a_forced_write_after_a_peer_landed_is_refused_on_a_git_branch_mem() {
+    a_forced_write_after_a_peer_landed_is_refused("git-branch");
 }

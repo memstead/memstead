@@ -1339,7 +1339,9 @@ impl Engine {
         }
         let args = crate::UpdateEntityArgs {
             id: id.clone(),
-            expected_hash: None,
+            // The amend writes from the recorded ancestor under the merge's
+            // own lock, which already compared the target against it.
+            expected_hash: crate::ExpectedHash::Override(crate::HashOverride::ProposalMerge),
             sections: body.sections.clone(),
             append_sections: Default::default(),
             patch_sections: Default::default(),

@@ -72,7 +72,10 @@ fn update_missing_entity_returns_typed_code() {
     assert_typed_code(&env, "update missing entity");
 }
 
-/// F13 — `memstead update <id>` with no hash flag returns HASH_FLAG_REQUIRED.
+/// F13: `memstead update <id>` with no hash flag returns a typed code. The
+/// missing hash itself is the engine's to refuse (`EXPECTED_HASH_REQUIRED`,
+/// pinned on a real entity in `write_commands`); on an id that names
+/// nothing, the engine's existence gate answers first.
 #[test]
 fn update_missing_hash_flag_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
@@ -98,8 +101,8 @@ fn update_missing_hash_flag_returns_typed_code() {
     let env = parse_envelope(&output);
     assert_typed_code(&env, "update missing hash flag");
     assert_eq!(
-        env["code"], "HASH_FLAG_REQUIRED",
-        "expected HASH_FLAG_REQUIRED, got: {env}",
+        env["code"], "UNKNOWN_MEM",
+        "expected UNKNOWN_MEM, got: {env}",
     );
 }
 

@@ -1068,7 +1068,7 @@ fn create_overrides_user_supplied_timestamps_update_rejects_them() {
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
             sections_unset: Vec::new(),
-            expected_hash: Some(outcome.content_hash.clone()),
+            expected_hash: crate::ExpectedHash::Current(outcome.content_hash.clone()),
             dry_run: false,
             declare_relations: Vec::new(),
             relations_unset: Vec::new(),

@@ -2231,7 +2231,7 @@ community:
                 crate::engine::UpdateEntityArgs {
                     anchors: Vec::new(),
                     id: src.id.clone(),
-                    expected_hash: Some(src.content_hash.clone()),
+                    expected_hash: crate::ExpectedHash::Current(src.content_hash.clone()),
                     sections: IndexMap::from_iter([(
                         "body".to_string(),
                         "now see [[tgt--missing]].".to_string(),

@@ -1064,7 +1064,11 @@ mod tests {
             .update_entity(
                 crate::UpdateEntityArgs {
                     id: crate::EntityId(id.to_string()),
-                    expected_hash: None,
+                    expected_hash: crate::ExpectedHash::from_token(
+                        engine
+                            .get_entity(&crate::EntityId(id.to_string()))
+                            .map(|e| e.content_hash.clone()),
+                    ),
                     sections: [("identity".to_string(), format!("touched: {note}"))]
                         .into_iter()
                         .collect(),
@@ -1124,7 +1128,11 @@ mod tests {
             .rename_entity(
                 crate::RenameEntityArgs {
                     id: crate::EntityId(id.clone()),
-                    expected_hash: None,
+                    expected_hash: crate::ExpectedHash::from_token(
+                        engine
+                            .get_entity(&crate::EntityId(id.clone()))
+                            .map(|e| e.content_hash.clone()),
+                    ),
                     new_title: "After Rename".to_string(),
                 },
                 crate::vcs::Actor::Cli,
@@ -1166,7 +1174,11 @@ mod tests {
             .rename_entity(
                 crate::RenameEntityArgs {
                     id: crate::EntityId(id.clone()),
-                    expected_hash: None,
+                    expected_hash: crate::ExpectedHash::from_token(
+                        engine
+                            .get_entity(&crate::EntityId(id.clone()))
+                            .map(|e| e.content_hash.clone()),
+                    ),
                     new_title: "Slot Moved".to_string(),
                 },
                 crate::vcs::Actor::Cli,

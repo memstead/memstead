@@ -13572,7 +13572,7 @@ mod f1_drift_on_error_paths {
             memstead_base::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: id.clone(),
-                expected_hash: Some(expected_hash),
+                expected_hash: memstead_base::ExpectedHash::Current(expected_hash),
                 sections,
                 append_sections: indexmap::IndexMap::new(),
                 patch_sections: indexmap::IndexMap::new(),
@@ -13621,7 +13621,7 @@ mod f1_drift_on_error_paths {
         b.delete_entity(
             memstead_base::DeleteEntityArgs {
                 id: x.clone(),
-                expected_hash: Some(x_hash),
+                expected_hash: memstead_base::ExpectedHash::Current(x_hash),
             },
             Actor::Cli,
             Some(&client()),
@@ -13746,4 +13746,140 @@ mod f1_drift_on_error_paths {
             "notice lists the sibling X edit that caused the collision: {entries:?}",
         );
     }
+}
+
+/// The hash rule on the MCP surface, folder and git-branch: a content change
+/// that states no hash is refused by the ENGINE with `EXPECTED_HASH_REQUIRED`
+/// and its payload, on update and retype alike (retype's `INVALID_INPUT`
+/// retired), and a delete with an empty hash is refused for a real entity.
+#[test]
+fn a_missing_hash_refuses_with_the_engines_one_code_on_both_backends() {
+    for git_branch in [false, true] {
+        let tmp = setup_test_workspace();
+        let engine = if git_branch {
+            setup_unified_test_engine_git_branch(tmp.path())
+        } else {
+            setup_unified_test_engine(tmp.path())
+        };
+        let server = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
+        let ctx = if git_branch { "git-branch" } else { "folder" };
+        let code_and_details = |r: &CallToolResult| {
+            let sc = r.structured_content.clone().unwrap_or_default();
+            (
+                sc.get("code")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                sc.get("details").cloned().unwrap_or_default(),
+            )
+        };
+        let expect_missing = |r: &CallToolResult, what: &str| {
+            assert!(r.is_error.unwrap_or(false), "{ctx} {what}: refused");
+            let (code, details) = code_and_details(r);
+            assert_eq!(
+                code,
+                "EXPECTED_HASH_REQUIRED",
+                "{ctx} {what}: {}",
+                extract_text(r)
+            );
+            assert_eq!(details["field"], "expected_hash", "{ctx} {what}: {details}");
+            assert_eq!(details["id"], "specs--entity-a", "{ctx} {what}: {details}");
+        };
+
+        let update: UpdateParams = serde_json::from_value(serde_json::json!({
+            "id": "specs--entity-a", "sections": { "purpose": "changed" },
+        }))
+        .unwrap();
+        expect_missing(&server.memstead_update(Parameters(update)), "update");
+
+        for token in [serde_json::Value::Null, serde_json::json!("")] {
+            let mut p = serde_json::json!({
+                "id": "specs--entity-a", "target_type": "spec",
+            });
+            if !token.is_null() {
+                p["expected_hash"] = token.clone();
+            }
+            let retype: RetypeParams = serde_json::from_value(p).unwrap();
+            let r = server.memstead_retype(Parameters(retype));
+            // The engine reaches the hash before the no-op check, so the
+            // missing hash is what the caller hears, never INVALID_INPUT.
+            expect_missing(&r, &format!("retype token={token}"));
+        }
+
+        let delete: DeleteParams = serde_json::from_value(serde_json::json!({
+            "id": "specs--entity-a", "expected_hash": "",
+        }))
+        .unwrap();
+        expect_missing(&server.memstead_delete(Parameters(delete)), "delete \"\"");
+
+        // Nothing moved: the entity is still there and still a spec.
+        let read: EntityParams =
+            serde_json::from_value(serde_json::json!({ "id": "specs--entity-a" })).unwrap();
+        let text = extract_text(&server.memstead_entity(Parameters(read)));
+        assert!(text.contains("Testing the MCP server."), "{ctx}: {text}");
+    }
+}
+
+/// Over MCP a stub deletes with the empty hash: it has no content to
+/// protect. The stub is held by a read-only referrer, the one organic way a
+/// stub outlives the writes that made it.
+#[test]
+fn a_stub_deletes_over_mcp_with_the_empty_hash() {
+    use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
+    let tmp = setup_test_workspace();
+    let archive = tmp.path().join("archive");
+    fs::create_dir_all(archive.join(".memstead")).unwrap();
+    fs::write(
+        archive.join(".memstead/config.json"),
+        r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
+    )
+    .unwrap();
+    fs::write(
+        archive.join("holder.md"),
+        "---\ntype: spec\ncreated_date: 2026-01-15\nlast_modified: 2026-04-12\nlevel: M0\n---\n# Holder\n\n## Identity\n\nHolds a link.\n\n## Purpose\n\nUses [[specs--ghost]].\n\n## Relationships\n\n- **USES**: [[specs--ghost]]\n",
+    )
+    .unwrap();
+    let mut mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = Vec::new();
+    for (name, capability) in [
+        ("specs", MountCapability::Write),
+        ("archive", MountCapability::ReadOnly),
+    ] {
+        let mount = Mount {
+            mem: name.to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: tmp.path().join(name),
+            },
+            capability,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let backend = memstead_base::instantiate_local_backend(&mount).unwrap();
+        mounts.push((mount, backend));
+    }
+    let engine = memstead_base::Engine::from_mounts(mounts).unwrap();
+    let ghost = memstead_base::EntityId::new("specs", "ghost");
+    assert!(
+        engine.get_entity(&ghost).is_some_and(|e| e.stub),
+        "the read-only link holds a stub"
+    );
+    let server = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
+    let delete: DeleteParams = serde_json::from_value(serde_json::json!({
+        "id": "specs--ghost", "expected_hash": "",
+    }))
+    .unwrap();
+    let out = server.memstead_delete(Parameters(delete));
+    let code = out
+        .structured_content
+        .as_ref()
+        .and_then(|s| s.get("code"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_string();
+    assert!(
+        !out.is_error.unwrap_or(false),
+        "a stub deletes with the empty hash, got {code}: {}",
+        extract_text(&out)
+    );
 }

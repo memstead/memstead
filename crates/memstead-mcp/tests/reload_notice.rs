@@ -70,7 +70,7 @@ fn update_purpose_args(id: EntityId, expected_hash: String, body: &str) -> Updat
     UpdateEntityArgs {
         anchors: Vec::new(),
         id,
-        expected_hash: Some(expected_hash),
+        expected_hash: memstead_base::ExpectedHash::Current(expected_hash),
         sections,
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -93,7 +93,7 @@ fn anchor_only_args(id: EntityId, expected_hash: String, anchor_json: &str) -> U
     UpdateEntityArgs {
         anchors: vec![anchor],
         id,
-        expected_hash: Some(expected_hash),
+        expected_hash: memstead_base::ExpectedHash::Current(expected_hash),
         sections: IndexMap::new(),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -728,7 +728,7 @@ fn batch_per_entry_notes_survive_on_git_branch() {
     let upd = UpdateEntityArgs {
         anchors: Vec::new(),
         id: EntityId("specs--alpha-noted".into()),
-        expected_hash: Some(alpha_hash),
+        expected_hash: memstead_base::ExpectedHash::Current(alpha_hash),
         sections: IndexMap::from_iter([("identity".to_string(), "revised".to_string())]),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),

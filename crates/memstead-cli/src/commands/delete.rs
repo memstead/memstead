@@ -99,7 +99,7 @@ fn run_mem_repo(
     let result = engine
         .delete_entity_with_ctx(
             &id,
-            &current_hash,
+            memstead_base::ExpectedHash::Current(current_hash),
             &ctx.commit_ctx_with_note(args.note.clone()),
         )
         .map_err(CliError::from_engine_op)?;
@@ -175,7 +175,7 @@ fn run_filesystem(
         .delete_entity(
             DeleteEntityArgs {
                 id: id.clone(),
-                expected_hash: Some(current_hash),
+                expected_hash: memstead_base::ExpectedHash::Current(current_hash),
             },
             Actor::Cli,
             None,

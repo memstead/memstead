@@ -115,12 +115,12 @@ impl Engine {
         &mut self,
         old_id: &EntityId,
         new_title: &str,
-        expected_hash: &str,
+        expected_hash: crate::ExpectedHash,
         ctx: &CommitContext<'_>,
     ) -> Result<RenameEntityOutcome, EngineError> {
         let args = RenameEntityArgs {
             id: old_id.clone(),
-            expected_hash: Some(expected_hash.to_string()),
+            expected_hash,
             new_title: new_title.to_string(),
         };
         self.rename_entity(args, ctx.actor, ctx.client.as_ref(), ctx.note.as_deref())

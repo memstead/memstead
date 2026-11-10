@@ -254,3 +254,51 @@ pub mod transport;
 pub mod uninstall;
 pub mod verify_anchors;
 pub mod workspace;
+
+/// What `--force` / `--auto-hash` (and their batch-entry forms) present:
+/// the entity's current hash as the engine's view holds it now, with a
+/// short id resolved for the read. The engine still compares it under its
+/// lock after reloading, so a write that lands between this read and the
+/// commit is refused with the mismatch, never overwritten. An id that names
+/// nothing reads as no hash; the engine then answers with its own refusal.
+pub fn refetched_hash(
+    engine: &mut memstead_base::Engine,
+    id: &memstead_base::EntityId,
+) -> memstead_base::ExpectedHash {
+    let current = match engine.resolve_entity_id(id) {
+        Ok((resolved, _)) => engine.get_entity(&resolved).map(|e| e.content_hash.clone()),
+        Err(_) => None,
+    };
+    memstead_base::ExpectedHash::from_token(current)
+}
+
+/// The hash statement a single content-changing command presents to the
+/// engine. `refetch` is [`refetched_hash`], refusing an id that names
+/// nothing before the write. An explicit token is the hash the caller
+/// holds; an empty one counts as none, as it always has on the CLI.
+/// Nothing stated is `Missing`, and whether that is refused is the engine's
+/// decision (`EXPECTED_HASH_REQUIRED` for a real entity, made after its
+/// existence and stub gates).
+pub fn hash_statement(
+    engine: &mut memstead_base::Engine,
+    id: &memstead_base::EntityId,
+    explicit: Option<String>,
+    refetch: bool,
+) -> anyhow::Result<memstead_base::ExpectedHash> {
+    if refetch {
+        let current = refetched_hash(engine, id);
+        if current.is_missing() {
+            return Err(crate::CliError::new(
+                crate::ExitKind::NotFound,
+                "ENTITY_NOT_FOUND",
+                format!("entity not found: {id}"),
+            )
+            .with_details(serde_json::json!({ "id": id.to_string() }))
+            .into());
+        }
+        return Ok(current);
+    }
+    Ok(memstead_base::ExpectedHash::from_token(
+        explicit.filter(|h| !h.is_empty()),
+    ))
+}

@@ -636,7 +636,7 @@ write_rules: []
             crate::engine::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: id.clone(),
-                expected_hash: Some(current),
+                expected_hash: crate::ExpectedHash::Current(current),
                 sections: indexmap::IndexMap::new(),
                 append_sections: indexmap::IndexMap::new(),
                 patch_sections: indexmap::IndexMap::new(),
@@ -664,7 +664,7 @@ write_rules: []
                 crate::engine::UpdateEntityArgs {
                     anchors: Vec::new(),
                     id: id.clone(),
-                    expected_hash: Some(current),
+                    expected_hash: crate::ExpectedHash::Current(current),
                     sections: indexmap::IndexMap::new(),
                     append_sections: append,
                     patch_sections: indexmap::IndexMap::new(),

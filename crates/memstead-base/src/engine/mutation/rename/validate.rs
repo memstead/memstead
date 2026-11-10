@@ -39,15 +39,7 @@ impl Engine {
             return Err(EngineError::StubNotRenamable { id: id.to_string() });
         }
 
-        if let Some(expected) = args.expected_hash.as_deref()
-            && entity.content_hash != expected
-        {
-            return Err(EngineError::HashMismatch {
-                id: id.to_string(),
-                current: entity.content_hash.clone(),
-                is_stub: entity.stub,
-            });
-        }
+        args.expected_hash.check(id, entity, true, true)?;
 
         let derivation = validate_and_derive_slug(&args.new_title)?;
         let new_slug = derivation.slug.clone();

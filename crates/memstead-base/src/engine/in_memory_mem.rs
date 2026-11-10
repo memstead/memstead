@@ -50,7 +50,7 @@ fn empty_update(id: EntityId, expected_hash: Option<String>) -> UpdateEntityArgs
     UpdateEntityArgs {
         anchors: Vec::new(),
         id,
-        expected_hash,
+        expected_hash: crate::ExpectedHash::from_token(expected_hash),
         sections: IndexMap::new(),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -190,7 +190,7 @@ fn full_lifecycle_round_trips_in_memory() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Spec".to_string(),
             },
             actor,
@@ -241,7 +241,11 @@ fn full_lifecycle_round_trips_in_memory() {
         .delete_entity(
             DeleteEntityArgs {
                 id: referrer.id.clone(),
-                expected_hash: None,
+                expected_hash: crate::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&referrer.id)
+                        .map(|e| e.content_hash.clone()),
+                ),
             },
             actor,
             Some(&client),
@@ -257,7 +261,11 @@ fn full_lifecycle_round_trips_in_memory() {
         .delete_entity(
             DeleteEntityArgs {
                 id: renamed_target.clone(),
-                expected_hash: None,
+                expected_hash: crate::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&renamed_target)
+                        .map(|e| e.content_hash.clone()),
+                ),
             },
             actor,
             Some(&client),

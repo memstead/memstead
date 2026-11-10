@@ -9,8 +9,13 @@
 //!   outside the content hash, so the token would compare a value the write
 //!   cannot move.
 //! * **`--auto-hash`.** Refetch the current hash immediately before writing.
-//!   Ergonomic for one-off interactive edits; the user accepts the race window.
-//! * **`--force`.** Skip the hash check entirely. Explicit opt-out.
+//!   Ergonomic for one-off interactive edits.
+//! * **`--force`.** The same refetch, naming the intent to overwrite. Neither
+//!   flag skips the compare: the engine still checks the presented hash
+//!   under its lock, so a write that lands after the refetch is refused.
+//!
+//! A missing hash is refused by the engine (`EXPECTED_HASH_REQUIRED`), not
+//! here.
 //!
 //! Only one of the three may be used per invocation.
 
@@ -49,12 +54,15 @@ pub struct Args {
     pub expected_hash: Option<String>,
 
     /// Refetch the current hash immediately before writing.
-    /// Convenient for interactive use; accepts the race window between
-    /// the refetch and the write.
+    /// Convenient for interactive use. The engine still compares the
+    /// refetched hash, so a write landing between the refetch and the
+    /// commit is refused, not overwritten.
     #[arg(long, conflicts_with_all = ["expected_hash", "force"])]
     pub auto_hash: bool,
 
-    /// Skip the hash check entirely (explicit overwrite).
+    /// Read the current hash and present it, naming the intent to overwrite.
+    /// The engine still compares, so a write that lands after the read is
+    /// refused rather than overwritten.
     #[arg(long, conflicts_with_all = ["expected_hash", "auto_hash"])]
     pub force: bool,
 
@@ -179,7 +187,7 @@ pub struct Args {
     /// `--dry-run` (forces a dry run even when the file says otherwise), and
     /// `--note`. Deliberately: `auto_hash` is NOT a payload field here
     /// (unlike `batch-update` entries) — a stored payload must not be able
-    /// to disable optimistic locking; pass the `--auto-hash` FLAG beside
+    /// to pick its own hash mode; pass the `--auto-hash` FLAG beside
     /// `--from` for that.
     #[arg(long = "from", value_name = "FILE")]
     pub from: Option<PathBuf>,
@@ -516,7 +524,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             let update_args = UpdateEntityArgs {
                 anchors: payload.anchors,
                 id: entity_id.clone(),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::Missing,
                 sections: payload.sections,
                 append_sections: payload.append_sections,
                 patch_sections,
@@ -533,18 +541,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 anchors_unset: payload.anchors_unset,
             };
             let mut update_args = update_args;
-            update_args.expected_hash = resolve_hash_mem_repo(
-                &engine,
+            update_args.expected_hash = super::hash_statement(
+                &mut engine,
                 &lookup_id,
                 explicit_hash,
-                args.auto_hash,
-                args.force,
-                // `dry_run` joins the exemption because MCP's contract already
-                // says dry-run bypasses ONLY the hash check, and it is the
-                // documented stale-hash recovery path. Demanding a token here
-                // while MCP does not is a surface divergence
-                // (consistency-sweep 03/04).
-                !update_args.changes_content() || update_args.dry_run,
+                args.auto_hash || args.force,
             )?;
 
             let result = engine
@@ -664,7 +665,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             let update_args = UpdateEntityArgs {
                 anchors: payload.anchors,
                 id: entity_id.clone(),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::Missing,
                 sections: payload.sections,
                 // CLI's update surface doesn't accept
                 // append_sections / patch_sections on its wire
@@ -684,13 +685,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 anchors_unset: payload.anchors_unset,
             };
             let mut update_args = update_args;
-            update_args.expected_hash = resolve_hash_filesystem(
-                &engine,
+            update_args.expected_hash = super::hash_statement(
+                &mut engine,
                 &lookup_id,
                 explicit_hash,
-                args.auto_hash,
-                args.force,
-                !update_args.changes_content(),
+                args.auto_hash || args.force,
             )?;
             let outcome = engine
                 .update_entity(
@@ -839,97 +838,6 @@ fn render_metadata_mutations(m: &memstead_git_branch::ModifiedMetadata) -> Optio
         None
     } else {
         Some(parts.join(", "))
-    }
-}
-
-/// Resolve the hash the update will be issued with.
-///
-/// * `--force` and `--auto-hash` both refetch from the engine's in-memory
-///   store. Because the CLI initializes a fresh engine per invocation, the
-///   loaded hash matches the on-disk content as long as no concurrent writer
-///   changed the file between load and update (race window is microseconds).
-///   The two flags exist to encode user intent — `--auto-hash` for "I didn't
-///   bother reading the entity first," `--force` for "I intend to overwrite
-///   regardless of what's there."
-/// * Strict (default) → use the explicit `--expected-hash` / JSON field, else error.
-fn resolve_hash_mem_repo(
-    engine: &memstead_base::Engine,
-    id: &EntityId,
-    explicit: Option<String>,
-    auto_hash: bool,
-    force: bool,
-    exempt: bool,
-) -> anyhow::Result<Option<String>> {
-    if auto_hash || force {
-        let entity = engine.get_entity(id).ok_or_else(|| {
-            CliError::new(
-                ExitKind::NotFound,
-                "ENTITY_NOT_FOUND",
-                format!("entity not found: {id}"),
-            )
-            .with_details(serde_json::json!({ "id": id.to_string() }))
-        })?;
-        return Ok(Some(entity.content_hash.clone()));
-    }
-    require_explicit_hash(explicit, exempt)
-}
-
-/// Filesystem-mem counterpart of [`resolve_hash_mem_repo`]. Same
-/// semantics; differs only in the engine accessor type.
-fn resolve_hash_filesystem(
-    engine: &memstead_base::Engine,
-    id: &EntityId,
-    explicit: Option<String>,
-    auto_hash: bool,
-    force: bool,
-    exempt: bool,
-) -> anyhow::Result<Option<String>> {
-    if auto_hash || force {
-        let entity = engine.get_entity(id).ok_or_else(|| {
-            CliError::new(
-                ExitKind::NotFound,
-                "ENTITY_NOT_FOUND",
-                format!("entity not found: {id}"),
-            )
-            .with_details(serde_json::json!({ "id": id.to_string() }))
-        })?;
-        return Ok(Some(entity.content_hash.clone()));
-    }
-    require_explicit_hash(explicit, exempt)
-}
-
-/// `exempt` waives the requirement (consistency-sweep 03/04). The
-/// compare-and-swap token asserts that the entity's CONTENT is unchanged, and
-/// on an anchors-only write the content is unchanged by construction: the
-/// anchors sidecar is outside `_hash` by deliberate design, so the token
-/// compares a value the guarded write cannot move. Demanding it therefore
-/// bought no protection and cost a read or dry-run roundtrip per entity,
-/// falling on exactly the backfill flows the anchor dialect exists to make
-/// attractive.
-///
-/// Callers derive `exempt` from the engine's own `changes_content()`, so this
-/// surface and MCP cannot come to disagree about whether a write is safe. The
-/// mem-repo path additionally waives it for `--dry-run`, matching the shipped
-/// MCP contract that a dry run bypasses only this check and is the designated
-/// stale-hash recovery path; a dry run writes nothing, so there is nothing to
-/// guard.
-///
-/// An EMPTY token counts as no token, here and on every other surface: it can
-/// never match a real hash, so treating it as a supplied one turned an
-/// anchors-only write into a spurious mismatch on whichever surface forgot.
-fn require_explicit_hash(explicit: Option<String>, exempt: bool) -> anyhow::Result<Option<String>> {
-    match explicit {
-        Some(h) if !h.is_empty() => Ok(Some(h)),
-        _ if exempt => Ok(None),
-        _ => Err(CliError::new(
-            ExitKind::Validation,
-            crate::HASH_FLAG_REQUIRED_CODE,
-            "missing --expected-hash. Read the entity first (memstead entity <id>) and pass its `_hash`, \
-             or use --auto-hash for one-off interactive updates, or --force to overwrite. \
-             An anchors-only update (--anchor / --anchor-unset and nothing else) needs none: \
-             anchors are outside the content hash.",
-        )
-        .into()),
     }
 }
 

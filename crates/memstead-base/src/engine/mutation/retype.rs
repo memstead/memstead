@@ -89,16 +89,7 @@ impl Engine {
         if entity.stub {
             return Err(EngineError::StubNotUpdatable { id: id.to_string() });
         }
-        if !args.dry_run
-            && let Some(expected) = args.expected_hash.as_deref()
-            && entity.content_hash != expected
-        {
-            return Err(EngineError::HashMismatch {
-                id: id.to_string(),
-                current: entity.content_hash.clone(),
-                is_stub: false,
-            });
-        }
+        args.expected_hash.check(id, &entity, true, !args.dry_run)?;
 
         let schema = self
             .schemas
@@ -917,7 +908,7 @@ write_rules: []
         engine.retype_entity(
             RetypeEntityArgs {
                 id: id.clone(),
-                expected_hash: Some(hash),
+                expected_hash: crate::ExpectedHash::Current(hash),
                 target_type: target.to_string(),
                 section_map: map
                     .iter()
@@ -1260,7 +1251,7 @@ write_rules: []
             .retype_entity(
                 RetypeEntityArgs {
                     id: b.clone(),
-                    expected_hash: None,
+                    expected_hash: crate::ExpectedHash::Missing,
                     target_type: "finding".to_string(),
                     section_map: IndexMap::from_iter([(
                         "statement".to_string(),

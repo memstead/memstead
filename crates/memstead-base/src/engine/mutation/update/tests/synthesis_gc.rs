@@ -84,7 +84,7 @@ fn synthesis_gc_drops_auto_emitted_reference_when_body_link_removed() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(source.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(source.content_hash.clone()),
                 sections: new_sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -177,7 +177,7 @@ fn update_gc_removes_orphan_stub_when_last_body_link_dropped() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(source.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(source.content_hash.clone()),
                 sections: new_sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -281,7 +281,7 @@ fn update_gc_noop_when_section_edit_changes_no_body_link() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(source.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(source.content_hash.clone()),
                 sections: edit,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -361,7 +361,7 @@ fn update_gc_preserves_stub_with_surviving_referrer() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: source_a.id.clone(),
-                expected_hash: Some(source_a.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(source_a.content_hash.clone()),
                 sections: drop_link,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -458,7 +458,7 @@ fn synthesis_gc_preserves_non_pointer_explicit_relation_across_body_update() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(relate.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(relate.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -532,7 +532,7 @@ fn synthesis_dedupes_repeated_body_links_to_same_target() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(source.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(source.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -627,7 +627,7 @@ fn synthesis_coexists_with_explicit_uses_to_same_target() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(relate.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(relate.content_hash.clone()),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -941,7 +941,7 @@ community:
                 UpdateEntityArgs {
                     anchors: Vec::new(),
                     id: source.id.clone(),
-                    expected_hash: Some(source.content_hash.clone()),
+                    expected_hash: crate::ExpectedHash::Current(source.content_hash.clone()),
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),

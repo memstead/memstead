@@ -6,7 +6,7 @@
 //! pages composing exactly.
 
 use memstead_base::vcs::{Actor, ClientId};
-use memstead_base::{CreateEntityArgs, EntityId, RenameEntityArgs, UpdateEntityArgs};
+use memstead_base::{CreateEntityArgs, Engine, EntityId, RenameEntityArgs, UpdateEntityArgs};
 use memstead_git_branch::test_support::init_real_mem_repo;
 use memstead_git_branch::workspace_store::engine_from_workspace_root;
 use tempfile::TempDir;
@@ -40,10 +40,14 @@ fn create(engine: &mut memstead_base::Engine, title: &str, note: &str) -> String
         .0
 }
 
-fn update_args(id: &str, body: &str) -> UpdateEntityArgs {
+fn update_args(engine: &Engine, id: &str, body: &str) -> UpdateEntityArgs {
     UpdateEntityArgs {
         id: EntityId(id.to_string()),
-        expected_hash: None,
+        expected_hash: memstead_base::ExpectedHash::from_token(
+            engine
+                .get_entity(&EntityId(id.to_string()))
+                .map(|e| e.content_hash.clone()),
+        ),
         sections: [("identity".to_string(), body.to_string())]
             .into_iter()
             .collect(),
@@ -75,10 +79,10 @@ fn goal_fixture_full_story_under_the_current_id() {
         .batch_update(
             vec![
                 (
-                    update_args(&story, "batch touch"),
+                    update_args(&engine, &story, "batch touch"),
                     Some("batch pass".to_string()),
                 ),
-                (update_args(&bystander, "batch touch"), None),
+                (update_args(&engine, &bystander, "batch touch"), None),
             ],
             Actor::Agent,
             Some(&ClientId {
@@ -95,7 +99,11 @@ fn goal_fixture_full_story_under_the_current_id() {
         .rename_entity(
             RenameEntityArgs {
                 id: EntityId(story.clone()),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&EntityId(story.clone()))
+                        .map(|e| e.content_hash.clone()),
+                ),
                 new_title: "Story Renamed".to_string(),
             },
             Actor::Cli,
@@ -110,7 +118,7 @@ fn goal_fixture_full_story_under_the_current_id() {
     // Writer 2 (App): the final touch under the new id.
     engine
         .update_entity(
-            update_args(&renamed, "final touch"),
+            update_args(&engine, &renamed, "final touch"),
             Actor::App,
             Some(&ClientId {
                 name: "memstead-app".to_string(),

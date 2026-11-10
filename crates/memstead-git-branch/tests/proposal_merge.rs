@@ -93,7 +93,11 @@ fn update_sections(
         .update_entity(
             UpdateEntityArgs {
                 id: EntityId::new(id.0, id.1),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&EntityId::new(id.0, id.1))
+                        .map(|e| e.content_hash.clone()),
+                ),
                 sections: sections
                     .iter()
                     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -143,7 +147,11 @@ fn delete(engine: &mut memstead_base::Engine, id: (&str, &str)) {
         .delete_entity(
             DeleteEntityArgs {
                 id: EntityId::new(id.0, id.1),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&EntityId::new(id.0, id.1))
+                        .map(|e| e.content_hash.clone()),
+                ),
             },
             Actor::Cli,
             None,
@@ -340,7 +348,11 @@ fn staged() -> (TempDir, memstead_base::Engine) {
         .rename_entity(
             RenameEntityArgs {
                 id: EntityId::new("specs-fork", "delta"),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&EntityId::new("specs-fork", "delta"))
+                        .map(|e| e.content_hash.clone()),
+                ),
                 new_title: "Delta Prime".to_string(),
             },
             Actor::Cli,
@@ -2241,7 +2253,11 @@ fn renaming_an_adopted_entity_keeps_its_origin() {
         .rename_entity(
             RenameEntityArgs {
                 id: EntityId::new("specs", "beta"),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&EntityId::new("specs", "beta"))
+                        .map(|e| e.content_hash.clone()),
+                ),
                 new_title: "Beta Renamed By The Owner".to_string(),
             },
             Actor::Cli,
@@ -2286,7 +2302,9 @@ fn a_retype_that_rekeys_sections_keeps_the_origin() {
             memstead_base::RetypeEntityArgs {
                 id: id.clone(),
                 target_type: "memo".to_string(),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::from_token(
+                    engine.get_entity(&id).map(|e| e.content_hash.clone()),
+                ),
                 section_map: indexmap::IndexMap::from_iter([
                     ("identity".to_string(), "claim".to_string()),
                     ("purpose".to_string(), "context".to_string()),
@@ -2416,7 +2434,11 @@ fn renaming_a_linked_entity_keeps_the_linking_adopted_body_third_party() {
         .rename_entity(
             RenameEntityArgs {
                 id: EntityId::new("specs", "alpha"),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&EntityId::new("specs", "alpha"))
+                        .map(|e| e.content_hash.clone()),
+                ),
                 new_title: "Alpha Renamed".to_string(),
             },
             Actor::Cli,
@@ -2479,7 +2501,9 @@ fn a_retype_after_a_full_rewrite_leaves_the_record_readable() {
             memstead_base::RetypeEntityArgs {
                 id: id.clone(),
                 target_type: "memo".to_string(),
-                expected_hash: None,
+                expected_hash: memstead_base::ExpectedHash::from_token(
+                    engine.get_entity(&id).map(|e| e.content_hash.clone()),
+                ),
                 section_map: indexmap::IndexMap::from_iter([
                     ("identity".to_string(), "claim".to_string()),
                     ("purpose".to_string(), "context".to_string()),
@@ -2756,7 +2780,9 @@ fn an_update_to_an_adopted_entity_while_a_merge_is_held_at_its_commit_is_not_los
                 let beta = EntityId::new("specs", "beta");
                 let args = UpdateEntityArgs {
                     id: beta.clone(),
-                    expected_hash: second.get_entity(&beta).map(|e| e.content_hash.clone()),
+                    expected_hash: memstead_base::ExpectedHash::from_token(
+                        second.get_entity(&beta).map(|e| e.content_hash.clone()),
+                    ),
                     sections: [(
                         "purpose".to_string(),
                         "the second process's purpose".to_string(),

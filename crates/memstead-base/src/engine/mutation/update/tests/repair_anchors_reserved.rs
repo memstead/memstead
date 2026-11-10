@@ -36,7 +36,7 @@ fn repair_args(id: EntityId, hash: Option<String>) -> UpdateEntityArgs {
     UpdateEntityArgs {
         anchors: Vec::new(),
         id,
-        expected_hash: hash,
+        expected_hash: crate::ExpectedHash::from_token(hash),
         sections: IndexMap::new(),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -80,7 +80,10 @@ fn relations_unset_on_conformant_entity_refuses_repair_not_needed() {
             None,
         )
         .expect("relate on conformant entity works");
-    let mut args = repair_args(anchor.clone(), None);
+    let mut args = repair_args(
+        anchor.clone(),
+        engine.get_entity(&anchor).map(|e| e.content_hash.clone()),
+    );
     args.relations_unset[0].target = drifted.clone();
     let err = engine
         .update_entity(args, Actor::Cli, None, None)
@@ -117,7 +120,10 @@ fn relations_unset_repairs_non_conformant_entity_atomically() {
         pre.iter().any(|f| f.id == drifted.to_string()),
         "fixture must lint non-conformant; got {pre:?}"
     );
-    let mut args = repair_args(drifted.clone(), None);
+    let mut args = repair_args(
+        drifted.clone(),
+        engine.get_entity(&drifted).map(|e| e.content_hash.clone()),
+    );
     args.metadata_unset = vec!["zzz_bogus_field".to_string()];
     engine
         .update_entity(args, Actor::Cli, None, None)
@@ -146,7 +152,10 @@ fn relations_unset_repairs_non_conformant_entity_atomically() {
 fn relations_unset_post_state_must_still_validate() {
     let (_tmp, mut engine) = repair_engine();
     let drifted = EntityId::new("specs", "drifted");
-    let mut args = repair_args(drifted.clone(), None);
+    let mut args = repair_args(
+        drifted.clone(),
+        engine.get_entity(&drifted).map(|e| e.content_hash.clone()),
+    );
     // Post-state violation: an unknown section alongside the
     // repair input.
     args.sections = IndexMap::from_iter([("nonexistent_section".to_string(), "x".to_string())]);
@@ -172,7 +181,10 @@ fn relations_unset_post_state_must_still_validate() {
 fn relations_unset_absent_pair_is_silent_noop() {
     let (_tmp, mut engine) = repair_engine();
     let drifted = EntityId::new("specs", "drifted");
-    let mut args = repair_args(drifted.clone(), None);
+    let mut args = repair_args(
+        drifted.clone(),
+        engine.get_entity(&drifted).map(|e| e.content_hash.clone()),
+    );
     args.relations_unset[0].rel_type = "NEVER_DECLARED".to_string();
     // Also repair the field so the post-state is integral.
     args.metadata_unset = vec!["zzz_bogus_field".to_string()];
@@ -215,7 +227,7 @@ fn anchor_args(id: EntityId, hash: Option<String>) -> UpdateEntityArgs {
         anchors: Vec::new(),
         anchors_unset: Vec::new(),
         id,
-        expected_hash: hash,
+        expected_hash: crate::ExpectedHash::from_token(hash),
         sections: IndexMap::new(),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -563,7 +575,7 @@ fn bare_args(id: EntityId, hash: Option<String>) -> UpdateEntityArgs {
         anchors: Vec::new(),
         anchors_unset: Vec::new(),
         id,
-        expected_hash: hash,
+        expected_hash: crate::ExpectedHash::from_token(hash),
         sections: IndexMap::new(),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),

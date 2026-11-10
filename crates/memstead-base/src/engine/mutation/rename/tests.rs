@@ -39,7 +39,7 @@ fn rename_moves_entity_anchors_to_new_id() {
         .rename_entity(
             RenameEntityArgs {
                 id: old_id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 new_title: "New Anchored".to_string(),
             },
             actor,
@@ -85,7 +85,7 @@ fn rename_entity_renames_file_and_id_persists_across_restart() {
             .rename_entity(
                 RenameEntityArgs {
                     id: seeded.id.clone(),
-                    expected_hash: Some(seeded.content_hash.clone()),
+                    expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                     new_title: "New Name".to_string(),
                 },
                 actor,
@@ -124,7 +124,7 @@ fn rename_entity_returns_typed_warning_on_slug_noop() {
         .rename_entity(
             RenameEntityArgs {
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 new_title: "Same  Slug".to_string(), // slugifies to same
             },
             actor,
@@ -155,7 +155,7 @@ fn rename_entity_returns_write_id_on_real_rename() {
         .rename_entity(
             RenameEntityArgs {
                 id: seeded.id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 new_title: "Brand New Name".to_string(),
             },
             actor,
@@ -229,7 +229,7 @@ fn rename_entity_rewrites_self_references_in_body_and_relationships() {
         .rename_entity(
             RenameEntityArgs {
                 id: seeded.id.clone(),
-                expected_hash: Some(related.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(related.content_hash.clone()),
                 new_title: "Brand New Name".to_string(),
             },
             actor,
@@ -321,7 +321,7 @@ fn rename_preserves_referrer_last_modified_but_rewrites_link() {
         .rename_entity(
             RenameEntityArgs {
                 id: target_id,
-                expected_hash: Some(target_hash),
+                expected_hash: crate::ExpectedHash::Current(target_hash),
                 new_title: "Target Renamed".to_string(),
             },
             actor,
@@ -392,7 +392,7 @@ fn rename_rewrites_prose_only_referrer_without_relationships_row() {
         .rename_entity(
             RenameEntityArgs {
                 id: target_id,
-                expected_hash: Some(target_hash),
+                expected_hash: crate::ExpectedHash::Current(target_hash),
                 new_title: "Target Renamed".to_string(),
             },
             actor,
@@ -517,7 +517,7 @@ fn rename_entity_rewrites_same_mem_referrers_atomically() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Spec".to_string(),
             },
             actor,
@@ -685,7 +685,7 @@ fn rename_entity_rewrites_a_self_prefixed_link_inside_a_hierarchical_mem() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Spec".to_string(),
             },
             actor,
@@ -772,7 +772,7 @@ fn rename_entity_rewrites_cross_mem_referrer_in_hierarchical_mems() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Spec".to_string(),
             },
             actor,
@@ -865,7 +865,7 @@ fn rename_entity_rewrites_cross_mem_write_referrer() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Spec".to_string(),
             },
             actor,
@@ -1070,7 +1070,7 @@ fn a_rename_whose_only_peer_drifts_before_anything_landed_fails_whole() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Spec".to_string(),
             },
             actor,
@@ -1186,7 +1186,7 @@ fn a_peer_that_drifts_after_another_peer_landed_gets_the_partial_failure_envelop
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Spec".to_string(),
             },
             actor,
@@ -1302,7 +1302,7 @@ fn rename_entity_tags_every_per_mem_commit_with_same_logical_operation_id() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Spec".to_string(),
             },
             actor,
@@ -1415,7 +1415,7 @@ fn rename_entity_refuses_when_cross_mem_referrer_blocked_by_policy() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Spec".to_string(),
             },
             actor,
@@ -1523,7 +1523,7 @@ fn rename_entity_demotes_to_stub_when_only_readonly_cross_mem_referrers_remain()
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Target".to_string(),
             },
             actor,
@@ -1647,7 +1647,7 @@ fn rename_entity_rewrites_full_id_form_body_link_on_same_mem_referrer() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Spec".to_string(),
             },
             actor,
@@ -1690,7 +1690,7 @@ fn rename_entity_rejects_collision_with_existing_id() {
         .rename_entity(
             RenameEntityArgs {
                 id: first.id.clone(),
-                expected_hash: Some(first.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(first.content_hash.clone()),
                 new_title: "Second".to_string(),
             },
             actor,
@@ -1806,7 +1806,7 @@ fn rename_propagation_gate_checks_actual_edge_direction() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed".to_string(),
             },
             actor,
@@ -1925,7 +1925,7 @@ fn rename_propagation_succeeds_when_actual_edge_direction_granted() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed".to_string(),
             },
             actor,
@@ -1978,7 +1978,7 @@ fn rename_with_no_cross_mem_referrers_succeeds_regardless_of_policy() {
         .rename_entity(
             RenameEntityArgs {
                 id: target.id.clone(),
-                expected_hash: Some(target.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(target.content_hash.clone()),
                 new_title: "Renamed Target".to_string(),
             },
             actor,
@@ -2036,7 +2036,7 @@ fn rename_carries_check_records_to_the_new_id() {
         .rename_entity(
             RenameEntityArgs {
                 id: old_id.clone(),
-                expected_hash: Some(seeded.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
                 new_title: "Checked After Rename".to_string(),
             },
             actor,

@@ -66,21 +66,14 @@ impl Engine {
             return Err(EngineError::StubNotUpdatable { id: id.to_string() });
         }
 
-        // Skip the hash check on dry_run — full's dry_run is the
-        // designated stale-hash recovery path. Agents preview a
-        // change without holding a fresh hash, get back the current
-        // `content_hash` and a `prospective_hash`, then call the
-        // real update with `expected_hash = content_hash`.
-        if !args.dry_run
-            && let Some(expected) = args.expected_hash.as_deref()
-            && entity.content_hash != expected
-        {
-            return Err(EngineError::HashMismatch {
-                id: id.to_string(),
-                current: entity.content_hash.clone(),
-                is_stub: entity.stub,
-            });
-        }
+        // The dry run skips the compare: it is the designated stale-hash
+        // recovery path. Agents preview a change without holding a fresh
+        // hash, get back the current `content_hash` and a
+        // `prospective_hash`, then call the real update with it. An update
+        // that changes no content (anchors only) needs no hash, but one it
+        // states is compared.
+        args.expected_hash
+            .check(id, entity, args.changes_content(), !args.dry_run)?;
 
         let entity = entity.clone();
         Ok(ResolvedUpdate {

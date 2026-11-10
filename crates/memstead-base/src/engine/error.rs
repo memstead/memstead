@@ -454,6 +454,14 @@ pub enum EngineError {
     /// structured payload instead of parsing the message text — pre-fix
     /// the wire emitted `(current: )` with an empty paren that
     /// misdirected toward hash-recovery for a stub-shaped entity.
+    /// A content-changing mutation of a real entity stated no hash.
+    /// The engine's one refusal for that case on every surface.
+    #[error(
+        "expected_hash is required to change {id}: read the entity first and pass its `_hash`, \
+         or preview with a dry run. Only an update that changes no content (anchors only) and a \
+         stub need none."
+    )]
+    ExpectedHashRequired { id: String },
     #[error("{}", _hash_mismatch_msg(id, current, *is_stub))]
     HashMismatch {
         id: String,
@@ -1588,6 +1596,7 @@ impl EngineError {
             EngineError::SectionFormatRefused { violation, .. } => violation.code(),
             EngineError::NotFound { .. } => "ENTITY_NOT_FOUND",
             EngineError::HashMismatch { .. } => "HASH_MISMATCH",
+            EngineError::ExpectedHashRequired { .. } => "EXPECTED_HASH_REQUIRED",
             EngineError::HasIncomingRefs { .. } => "HAS_INCOMING_REFS",
             EngineError::MemHasIncomingRefs { .. } => "MEM_HAS_INCOMING_REFS",
             EngineError::CrossMemLinkNotAllowed { .. } => "CROSS_MEM_LINK_NOT_ALLOWED",
@@ -1806,6 +1815,10 @@ impl EngineError {
                 "schema_ref": schema_ref,
                 "declared": declared,
                 "suggestion": suggestion,
+            }),
+            EngineError::ExpectedHashRequired { id } => serde_json::json!({
+                "field": "expected_hash",
+                "id": id,
             }),
             EngineError::HashMismatch {
                 id,

@@ -182,7 +182,9 @@ fn update_args(
     sections.insert("purpose".to_string(), text.to_string());
     UpdateEntityArgs {
         id: target.clone(),
-        expected_hash: hash.or_else(|| engine.get_entity(target).map(|e| e.content_hash.clone())),
+        expected_hash: crate::ExpectedHash::from_token(
+            hash.or_else(|| engine.get_entity(target).map(|e| e.content_hash.clone())),
+        ),
         sections,
         append_sections: Default::default(),
         patch_sections: Default::default(),
@@ -308,9 +310,11 @@ fn run(op: Op, engine: &mut Engine) -> Result<String, EngineError> {
         Op::Rename => {
             let args = RenameEntityArgs {
                 id: id(ONE, "alpha"),
-                expected_hash: engine
-                    .get_entity(&id(ONE, "alpha"))
-                    .map(|e| e.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::from_token(
+                    engine
+                        .get_entity(&id(ONE, "alpha"))
+                        .map(|e| e.content_hash.clone()),
+                ),
                 new_title: "Alpha Renamed".to_string(),
             };
             engine
@@ -667,7 +671,7 @@ mod a_peer_with_a_cut_off_commit {
                 .delete_entity(
                     crate::engine::DeleteEntityArgs {
                         id: id(mem, slug),
-                        expected_hash: None,
+                        expected_hash: crate::ExpectedHash::Missing,
                     },
                     actor,
                     Some(&client),

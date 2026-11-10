@@ -105,12 +105,14 @@ fn create_args(mem: &str, title: &str, uses: &[EntityId]) -> CreateEntityArgs {
     }
 }
 
-fn update_args(target: &EntityId, purpose: &str) -> UpdateEntityArgs {
+fn update_args(engine: &Engine, target: &EntityId, purpose: &str) -> UpdateEntityArgs {
     let mut sections = IndexMap::new();
     sections.insert("purpose".to_string(), purpose.to_string());
     UpdateEntityArgs {
         id: target.clone(),
-        expected_hash: None,
+        expected_hash: memstead_base::ExpectedHash::from_token(
+            engine.get_entity(target).map(|e| e.content_hash.clone()),
+        ),
         sections,
         append_sections: Default::default(),
         patch_sections: Default::default(),
@@ -201,22 +203,18 @@ fn spelled_by(symlink: bool) -> Spelled {
 }
 
 fn batch(engine: &mut Engine, tag: &str) -> Result<bool, String> {
-    engine
-        .batch_update(
-            vec![
-                (
-                    update_args(&id(LEFT, "alpha"), &format!("alpha {tag}")),
-                    None,
-                ),
-                (
-                    update_args(&id(RIGHT, "gamma"), &format!("gamma {tag}")),
-                    None,
-                ),
-            ],
-            Actor::Cli,
+    let items = vec![
+        (
+            update_args(engine, &id(LEFT, "alpha"), &format!("alpha {tag}")),
             None,
-            false,
-        )
+        ),
+        (
+            update_args(engine, &id(RIGHT, "gamma"), &format!("gamma {tag}")),
+            None,
+        ),
+    ];
+    engine
+        .batch_update(items, Actor::Cli, None, false)
         .map(|r| r.applied)
         .map_err(|e| e.code().to_string())
 }
@@ -390,7 +388,7 @@ fn deferred_load_fails(verb: &str, git: bool) -> DeferredLoadOutcome {
                 .delete_entity(
                     DeleteEntityArgs {
                         id: id(LEFT, "alpha"),
-                        expected_hash: Some(hash),
+                        expected_hash: memstead_base::ExpectedHash::Current(hash),
                     },
                     Actor::Cli,
                     None,
@@ -401,7 +399,7 @@ fn deferred_load_fails(verb: &str, git: bool) -> DeferredLoadOutcome {
                 .rename_entity(
                     memstead_base::RenameEntityArgs {
                         id: id(LEFT, "alpha"),
-                        expected_hash: Some(hash),
+                        expected_hash: memstead_base::ExpectedHash::Current(hash),
                         new_title: "Alpha Renamed".to_string(),
                     },
                     Actor::Cli,

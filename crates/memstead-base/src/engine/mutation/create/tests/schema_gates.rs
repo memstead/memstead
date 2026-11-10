@@ -313,7 +313,7 @@ fn update_enforces_requires_when_by_severity() {
             crate::engine::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: id.clone(),
-                expected_hash: Some(current),
+                expected_hash: crate::ExpectedHash::Current(current),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -652,7 +652,7 @@ fn update_flip_to_trigger_value_enforces_conditional_block() {
             crate::engine::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: id.clone(),
-                expected_hash: Some(current),
+                expected_hash: crate::ExpectedHash::Current(current),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -934,7 +934,7 @@ fn create_inline_and_update_declared_refuse_set_cycle() {
             crate::engine::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: e_id,
-                expected_hash: Some(current),
+                expected_hash: crate::ExpectedHash::Current(current),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -1231,7 +1231,7 @@ fn grounded_labelling_extension_evidence_and_invalidation() {
             crate::engine::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: b_id,
-                expected_hash: Some(current),
+                expected_hash: crate::ExpectedHash::Current(current),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -1714,7 +1714,7 @@ fn signals_reads_thresholds_neighbour_filter_and_determinism() {
             crate::engine::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: obj_one,
-                expected_hash: Some(current),
+                expected_hash: crate::ExpectedHash::Current(current),
                 sections: IndexMap::new(),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),

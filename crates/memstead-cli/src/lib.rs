@@ -26,11 +26,6 @@ use output::ExitKind;
 /// comment explaining why no recoverable typed code applies.
 pub const INTERNAL_CODE: &str = "INTERNAL";
 
-/// Argument-validation refusal: mutating commands require one of
-/// `--auto-hash`, `--expected-hash`, or `--force`. The typed code lets
-/// agents branch on the wire token rather than parsing the message.
-pub const HASH_FLAG_REQUIRED_CODE: &str = "HASH_FLAG_REQUIRED";
-
 /// `memstead init <target>` refusal: target directory is non-empty (the
 /// init refuses to scribble over existing files / pre-existing
 /// workspaces).
@@ -162,6 +157,7 @@ impl CliError {
         let code = e.code();
         let (kind, details) = match &e {
             NotFound { id } => (ExitKind::NotFound, Some(serde_json::json!({ "id": id }))),
+            ExpectedHashRequired { .. } => (ExitKind::Validation, Some(e.details())),
             EntityIdMissingMem { .. } => (ExitKind::NotFound, Some(e.details())),
             MergeConflictUnsupportedBackend { mem } => (
                 ExitKind::Validation,

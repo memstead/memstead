@@ -1883,21 +1883,24 @@ fn run_mutation_sequence(seed: u64) {
         "batch_refused",
     ];
 
-    let bare_update = |id: crate::EntityId| crate::engine::UpdateEntityArgs {
-        anchors: Vec::new(),
-        anchors_unset: Vec::new(),
-        id,
-        expected_hash: None,
-        sections: IndexMap::new(),
-        append_sections: IndexMap::new(),
-        patch_sections: IndexMap::new(),
-        sections_unset: Vec::new(),
-        metadata: IndexMap::new(),
-        metadata_unset: Vec::new(),
-        declare_relations: Vec::new(),
-        dry_run: false,
-        relations_unset: Vec::new(),
-    };
+    let bare_update =
+        |engine: &crate::Engine, id: crate::EntityId| crate::engine::UpdateEntityArgs {
+            anchors: Vec::new(),
+            anchors_unset: Vec::new(),
+            expected_hash: crate::ExpectedHash::from_token(
+                engine.get_entity(&id).map(|e| e.content_hash.clone()),
+            ),
+            id,
+            sections: IndexMap::new(),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            declare_relations: Vec::new(),
+            dry_run: false,
+            relations_unset: Vec::new(),
+        };
 
     for op_i in 0..30usize {
         // First pass cycles every kind once (coverage by
@@ -1922,7 +1925,7 @@ fn run_mutation_sequence(seed: u64) {
             }
             "update" => {
                 let id = live[rng.pick(live.len())].clone();
-                let mut args = bare_update(id);
+                let mut args = bare_update(&engine, id);
                 args.append_sections
                     .insert("body".to_string(), format!("appended at op {op_i}"));
                 engine
@@ -1973,7 +1976,9 @@ fn run_mutation_sequence(seed: u64) {
                         .delete_entity(
                             crate::engine::DeleteEntityArgs {
                                 id: id.clone(),
-                                expected_hash: None,
+                                expected_hash: crate::ExpectedHash::from_token(
+                                    engine.get_entity(&id).map(|e| e.content_hash.clone()),
+                                ),
                             },
                             crate::vcs::Actor::Cli,
                             None,
@@ -1990,9 +1995,11 @@ fn run_mutation_sequence(seed: u64) {
                 let out = engine
                     .rename_entity(
                         crate::engine::RenameEntityArgs {
-                            id: old,
+                            id: old.clone(),
                             new_title: format!("Renamed {counter}"),
-                            expected_hash: None,
+                            expected_hash: crate::ExpectedHash::from_token(
+                                engine.get_entity(&old).map(|e| e.content_hash.clone()),
+                            ),
                         },
                         crate::vcs::Actor::Cli,
                         None,
@@ -2004,7 +2011,7 @@ fn run_mutation_sequence(seed: u64) {
             }
             "batch_applied" => {
                 let id_a = live[rng.pick(live.len())].clone();
-                let mut a = bare_update(id_a);
+                let mut a = bare_update(&engine, id_a);
                 a.append_sections
                     .insert("body".to_string(), format!("batch line {op_i}"));
                 let result = engine
@@ -2015,10 +2022,10 @@ fn run_mutation_sequence(seed: u64) {
             }
             "batch_refused" => {
                 let id_a = live[rng.pick(live.len())].clone();
-                let mut a = bare_update(id_a);
+                let mut a = bare_update(&engine, id_a);
                 a.append_sections
                     .insert("body".to_string(), "doomed".to_string());
-                let missing = bare_update(crate::EntityId::new("specs", "no-such-entity"));
+                let missing = bare_update(&engine, crate::EntityId::new("specs", "no-such-entity"));
                 let result = engine
                     .batch_update(
                         vec![(a, None), (missing, None)],
@@ -2387,7 +2394,9 @@ fn set_schema_migration_lifecycle_end_to_end() {
     let mut bad = crate::engine::UpdateEntityArgs {
         anchors: Vec::new(),
         id: one.clone(),
-        expected_hash: None,
+        expected_hash: crate::ExpectedHash::from_token(
+            engine.get_entity(&one).map(|e| e.content_hash.clone()),
+        ),
         sections: indexmap::IndexMap::new(),
         append_sections: indexmap::IndexMap::new(),
         patch_sections: indexmap::IndexMap::new(),
@@ -2421,7 +2430,9 @@ fn set_schema_migration_lifecycle_end_to_end() {
     let repair = crate::engine::UpdateEntityArgs {
         anchors: Vec::new(),
         id: two.clone(),
-        expected_hash: None,
+        expected_hash: crate::ExpectedHash::from_token(
+            engine.get_entity(&two).map(|e| e.content_hash.clone()),
+        ),
         sections: indexmap::IndexMap::new(),
         append_sections: indexmap::IndexMap::new(),
         patch_sections: indexmap::IndexMap::new(),
@@ -2479,7 +2490,9 @@ fn relations_unset_works_during_migration_without_mode_flag() {
             crate::engine::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: one.clone(),
-                expected_hash: None,
+                expected_hash: crate::ExpectedHash::from_token(
+                    engine.get_entity(&one).map(|e| e.content_hash.clone()),
+                ),
                 sections: indexmap::IndexMap::new(),
                 append_sections: indexmap::IndexMap::new(),
                 patch_sections: indexmap::IndexMap::new(),
@@ -2512,7 +2525,9 @@ fn relations_unset_works_during_migration_without_mode_flag() {
             crate::engine::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: one.clone(),
-                expected_hash: None,
+                expected_hash: crate::ExpectedHash::from_token(
+                    engine.get_entity(&one).map(|e| e.content_hash.clone()),
+                ),
                 sections: indexmap::IndexMap::new(),
                 append_sections: indexmap::IndexMap::new(),
                 patch_sections: indexmap::IndexMap::new(),

@@ -53,7 +53,9 @@ fn update_args(engine: &Engine, target: &EntityId, purpose: &str) -> UpdateEntit
     sections.insert("purpose".to_string(), purpose.to_string());
     UpdateEntityArgs {
         id: target.clone(),
-        expected_hash: engine.get_entity(target).map(|e| e.content_hash.clone()),
+        expected_hash: memstead_base::ExpectedHash::from_token(
+            engine.get_entity(target).map(|e| e.content_hash.clone()),
+        ),
         sections,
         append_sections: Default::default(),
         patch_sections: Default::default(),
@@ -227,9 +229,11 @@ fn control_a_link_from_a_mem_attached_before_the_delete_refuses_it() {
     let second = second_process(&root, LinkBy::Text);
     let args = DeleteEntityArgs {
         id: id(LEFT, "alpha"),
-        expected_hash: engine
-            .get_entity(&id(LEFT, "alpha"))
-            .map(|e| e.content_hash.clone()),
+        expected_hash: memstead_base::ExpectedHash::from_token(
+            engine
+                .get_entity(&id(LEFT, "alpha"))
+                .map(|e| e.content_hash.clone()),
+        ),
     };
     let deleted = engine
         .delete_entity(args, Actor::Cli, None, None)
@@ -314,7 +318,7 @@ fn held_verb(verb: &str, by: LinkBy) -> Held {
             .delete_entity(
                 DeleteEntityArgs {
                     id: alpha.clone(),
-                    expected_hash: hash,
+                    expected_hash: memstead_base::ExpectedHash::from_token(hash),
                 },
                 Actor::Cli,
                 None,
@@ -327,7 +331,7 @@ fn held_verb(verb: &str, by: LinkBy) -> Held {
                 memstead_base::RenameEntityArgs {
                     id: alpha.clone(),
                     new_title: "Omega".to_string(),
-                    expected_hash: hash,
+                    expected_hash: memstead_base::ExpectedHash::from_token(hash),
                 },
                 Actor::Cli,
                 None,

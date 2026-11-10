@@ -227,7 +227,7 @@ fn engine_changes_since_removed_envelope_keeps_title_and_type_none() {
         .delete_entity(
             DeleteEntityArgs {
                 id: id.clone(),
-                expected_hash: Some(hash),
+                expected_hash: crate::ExpectedHash::Current(hash),
             },
             actor,
             Some(&client),
@@ -444,7 +444,7 @@ fn folder_feed_serves_a_renamed_entity_once_with_its_final_id() {
         .rename_entity(
             RenameEntityArgs {
                 id: old_id.clone(),
-                expected_hash: Some(created.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(created.content_hash.clone()),
                 new_title: "Alpha Two".to_string(),
             },
             actor,

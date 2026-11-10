@@ -1690,7 +1690,7 @@ fn generation_keyed_memos_survive_rollback_and_track_mutations() {
         anchors: Vec::new(),
         anchors_unset: Vec::new(),
         id,
-        expected_hash: None,
+        expected_hash: crate::ExpectedHash::Missing,
         sections: IndexMap::new(),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),

@@ -247,7 +247,9 @@ fn update_args(engine: &Engine, target: &EntityId, purpose: &str) -> UpdateEntit
     sections.insert("purpose".to_string(), purpose.to_string());
     UpdateEntityArgs {
         id: target.clone(),
-        expected_hash: engine.get_entity(target).map(|e| e.content_hash.clone()),
+        expected_hash: memstead_base::ExpectedHash::from_token(
+            engine.get_entity(target).map(|e| e.content_hash.clone()),
+        ),
         sections,
         append_sections: Default::default(),
         patch_sections: Default::default(),
@@ -277,14 +279,18 @@ fn relate_args(from: &EntityId, to: &EntityId) -> RelateEntityArgs {
 fn delete_args(engine: &Engine, target: &EntityId) -> DeleteEntityArgs {
     DeleteEntityArgs {
         id: target.clone(),
-        expected_hash: engine.get_entity(target).map(|e| e.content_hash.clone()),
+        expected_hash: memstead_base::ExpectedHash::from_token(
+            engine.get_entity(target).map(|e| e.content_hash.clone()),
+        ),
     }
 }
 
 fn retype_args(engine: &Engine, target: &EntityId) -> RetypeEntityArgs {
     RetypeEntityArgs {
         id: target.clone(),
-        expected_hash: engine.get_entity(target).map(|e| e.content_hash.clone()),
+        expected_hash: memstead_base::ExpectedHash::from_token(
+            engine.get_entity(target).map(|e| e.content_hash.clone()),
+        ),
         target_type: "concept".to_string(),
         section_map: IndexMap::from_iter([
             ("identity".to_string(), "definition".to_string()),
@@ -1008,7 +1014,9 @@ fn link_gamma_to_alpha(ws: &Workspace) {
 fn rename_args(engine: &Engine, target: &EntityId, new_title: &str) -> RenameEntityArgs {
     RenameEntityArgs {
         id: target.clone(),
-        expected_hash: engine.get_entity(target).map(|e| e.content_hash.clone()),
+        expected_hash: memstead_base::ExpectedHash::from_token(
+            engine.get_entity(target).map(|e| e.content_hash.clone()),
+        ),
         new_title: new_title.to_string(),
     }
 }
@@ -1155,7 +1163,7 @@ fn a_rename_that_fails_after_a_peer_landed_reports_what_landed_and_the_same_call
         let mut engine = ws.tapped_engine(tap);
         let alpha = id(LEFT, "alpha");
         let args = rename_args(&engine, &alpha, "Alpha Renamed");
-        let sent_hash = args.expected_hash.clone();
+        let sent_hash = args.expected_hash.as_current().map(str::to_string);
         let again = RenameEntityArgs {
             id: args.id.clone(),
             expected_hash: args.expected_hash.clone(),
@@ -1736,7 +1744,7 @@ fn a_failed_reload_of_the_other_mem_refuses_a_guard_that_would_run_on_the_old_vi
                         .delete_entity(
                             DeleteEntityArgs {
                                 id: alpha.clone(),
-                                expected_hash: hash,
+                                expected_hash: memstead_base::ExpectedHash::from_token(hash),
                             },
                             Actor::Cli,
                             None,
@@ -1750,7 +1758,7 @@ fn a_failed_reload_of_the_other_mem_refuses_a_guard_that_would_run_on_the_old_vi
                         .rename_entity(
                             RenameEntityArgs {
                                 id: alpha.clone(),
-                                expected_hash: hash,
+                                expected_hash: memstead_base::ExpectedHash::from_token(hash),
                                 new_title: "Alpha Renamed".to_string(),
                             },
                             Actor::Cli,
@@ -1811,7 +1819,7 @@ fn a_short_id_is_resolved_under_the_lock_not_from_the_view_before_it() {
                         .delete_entity(
                             DeleteEntityArgs {
                                 id: bare.clone(),
-                                expected_hash: None,
+                                expected_hash: memstead_base::ExpectedHash::Missing,
                             },
                             Actor::Cli,
                             None,
@@ -1824,7 +1832,7 @@ fn a_short_id_is_resolved_under_the_lock_not_from_the_view_before_it() {
                         .rename_entity(
                             RenameEntityArgs {
                                 id: bare.clone(),
-                                expected_hash: None,
+                                expected_hash: memstead_base::ExpectedHash::Missing,
                                 new_title: "Alpha Renamed".to_string(),
                             },
                             Actor::Cli,
@@ -1836,7 +1844,7 @@ fn a_short_id_is_resolved_under_the_lock_not_from_the_view_before_it() {
                 _ => {
                     let mut args = retype_args(engine, &id(LEFT, "alpha"));
                     args.id = bare.clone();
-                    args.expected_hash = None;
+                    args.expected_hash = memstead_base::ExpectedHash::Missing;
                     report(
                         engine
                             .retype_entity(args, Actor::Cli, None, None)
@@ -2201,7 +2209,11 @@ fn identity_update(engine: &Engine, target: &EntityId, text: &str) -> UpdateEnti
     args.sections.clear();
     args.sections
         .insert("identity".to_string(), text.to_string());
-    args.expected_hash = None;
+    // The engine's one unguarded write is the internal override; this
+    // helper stands in for such a writer so the lock behaviour around it
+    // stays pinned. No surface can send it.
+    args.expected_hash =
+        memstead_base::ExpectedHash::Override(memstead_base::HashOverride::ProposalMerge);
     args
 }
 
@@ -3149,12 +3161,17 @@ fn conflict_alpha_with_link(ws: &Workspace) {
     .unwrap();
 }
 
+/// An update without a compare: since the engine refuses a missing hash,
+/// the internal override is the one such writer left (a proposal merge),
+/// and no surface can send it. The test pins the lock behaviour around it.
 fn unconditional(target: &EntityId, purpose: &str) -> UpdateEntityArgs {
     let mut sections = IndexMap::new();
     sections.insert("purpose".to_string(), purpose.to_string());
     UpdateEntityArgs {
         id: target.clone(),
-        expected_hash: None,
+        expected_hash: memstead_base::ExpectedHash::Override(
+            memstead_base::HashOverride::ProposalMerge,
+        ),
         sections,
         append_sections: Default::default(),
         patch_sections: Default::default(),

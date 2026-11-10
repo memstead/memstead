@@ -78,7 +78,7 @@ fn relate_args(from: &str, to: &str) -> RelateEntityArgs {
 fn update_args(engine: &Engine, slug: &str, text: &str) -> UpdateEntityArgs {
     UpdateEntityArgs {
         id: id(slug),
-        expected_hash: hash_of(engine, slug),
+        expected_hash: crate::ExpectedHash::from_token(hash_of(engine, slug)),
         sections: IndexMap::from_iter([("purpose".to_string(), text.to_string())]),
         append_sections: Default::default(),
         patch_sections: Default::default(),
@@ -143,7 +143,7 @@ fn run(
         "delete" => {
             let args = DeleteEntityArgs {
                 id: id("gamma"),
-                expected_hash: hash_of(engine, "gamma"),
+                expected_hash: crate::ExpectedHash::from_token(hash_of(engine, "gamma")),
             };
             engine.delete_entity(args, actor, client, None)?.warnings
         }
@@ -162,7 +162,7 @@ fn run(
         "retype" => {
             let args = RetypeEntityArgs {
                 id: id("gamma"),
-                expected_hash: hash_of(engine, "gamma"),
+                expected_hash: crate::ExpectedHash::from_token(hash_of(engine, "gamma")),
                 target_type: "concept".to_string(),
                 section_map: IndexMap::from_iter([
                     ("identity".to_string(), "definition".to_string()),
@@ -176,7 +176,7 @@ fn run(
         "rename" => {
             let args = RenameEntityArgs {
                 id: id("beta"),
-                expected_hash: hash_of(engine, "beta"),
+                expected_hash: crate::ExpectedHash::from_token(hash_of(engine, "beta")),
                 new_title: "Beta Renamed".to_string(),
             };
             engine.rename_entity(args, actor, client, None)?.warnings

@@ -50,7 +50,7 @@ fn with_ctx_wrappers_delegate_to_explicit_forms() {
     let update_args = UpdateEntityArgs {
         anchors: Vec::new(),
         id: created.id.clone(),
-        expected_hash: Some(created.content_hash.clone()),
+        expected_hash: crate::ExpectedHash::Current(created.content_hash.clone()),
         sections: IndexMap::from_iter([("identity".to_string(), "updated".to_string())]),
         append_sections: IndexMap::new(),
         patch_sections: IndexMap::new(),
@@ -72,14 +72,23 @@ fn with_ctx_wrappers_delegate_to_explicit_forms() {
 
     // rename_entity_with_ctx
     let renamed = engine
-        .rename_entity_with_ctx(&created.id, "Renamed", &updated.content_hash, &ctx)
+        .rename_entity_with_ctx(
+            &created.id,
+            "Renamed",
+            crate::ExpectedHash::Current(updated.content_hash.clone()),
+            &ctx,
+        )
         .unwrap();
     assert_ne!(renamed.old_id, renamed.new_id);
     assert!(engine.store().get(&renamed.new_id).is_some());
 
     // delete_entity_with_ctx
     let deleted = engine
-        .delete_entity_with_ctx(&renamed.new_id, &renamed.content_hash, &ctx)
+        .delete_entity_with_ctx(
+            &renamed.new_id,
+            crate::ExpectedHash::Current(renamed.content_hash.clone()),
+            &ctx,
+        )
         .unwrap();
     assert_eq!(deleted.id, renamed.new_id);
     assert!(engine.store().get(&renamed.new_id).is_none());
@@ -961,4 +970,344 @@ fn every_mark_following_writer_refuses_a_defective_record() {
         )],
     );
     assert_eq!(out, Some(bytes), "export refuses");
+}
+
+/// The hash rule, called on the engine with no surface in between: every
+/// content-changing verb refuses a real entity when it states no hash, a
+/// stale hash refuses with the current one, the internal override writes,
+/// and the exemptions (stub delete, anchors-only update, dry run) hold.
+mod hash_rule {
+    use super::*;
+    use crate::engine::{DeleteEntityArgs, EngineError, RenameEntityArgs, RetypeEntityArgs};
+    use crate::{ExpectedHash, HashOverride};
+
+    fn engine(tmp: &TempDir) -> Engine {
+        let mem_dir = tmp.path().to_path_buf();
+        Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(FilesystemBackend::new(mem_dir)) as Box<dyn MemBackend>,
+        )])
+        .unwrap()
+    }
+
+    fn seed(engine: &mut Engine, title: &str) -> (crate::EntityId, String) {
+        let created = engine
+            .create_entity_with_ctx(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "specs".to_string(),
+                    title: title.to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: IndexMap::from_iter([
+                        ("identity".to_string(), format!("{title} identity")),
+                        ("purpose".to_string(), format!("{title} purpose")),
+                    ]),
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                &CommitContext::internal(),
+            )
+            .unwrap();
+        (created.id, created.content_hash)
+    }
+
+    fn update(id: &crate::EntityId, expected_hash: ExpectedHash, text: &str) -> UpdateEntityArgs {
+        UpdateEntityArgs {
+            anchors: Vec::new(),
+            id: id.clone(),
+            expected_hash,
+            sections: IndexMap::from_iter([("identity".to_string(), text.to_string())]),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            dry_run: false,
+            declare_relations: Vec::new(),
+            relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
+        }
+    }
+
+    fn retype(
+        id: &crate::EntityId,
+        expected_hash: ExpectedHash,
+        dry_run: bool,
+    ) -> RetypeEntityArgs {
+        RetypeEntityArgs {
+            id: id.clone(),
+            expected_hash,
+            target_type: "memo".to_string(),
+            section_map: IndexMap::from_iter([
+                ("identity".to_string(), "claim".to_string()),
+                ("purpose".to_string(), "context".to_string()),
+            ]),
+            drop_metadata: vec!["level".to_string()],
+            dry_run,
+        }
+    }
+
+    fn refused_missing(r: Result<impl std::fmt::Debug, EngineError>, id: &crate::EntityId) {
+        match r {
+            Err(EngineError::ExpectedHashRequired { id: got }) => assert_eq!(got, id.to_string()),
+            other => panic!("expected EXPECTED_HASH_REQUIRED for {id}, got {other:?}"),
+        }
+    }
+
+    fn refused_stale(r: Result<impl std::fmt::Debug, EngineError>, current: &str) {
+        match r {
+            Err(EngineError::HashMismatch {
+                current: got,
+                is_stub,
+                ..
+            }) => {
+                assert_eq!(got, current);
+                assert!(!is_stub);
+            }
+            other => panic!("expected HASH_MISMATCH carrying {current}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_verb_refuses_a_real_entity_that_states_no_hash() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine(&tmp);
+        let (id, hash) = seed(&mut engine, "Alpha");
+        let a = crate::vcs::Actor::Cli;
+
+        let e = engine.update_entity(update(&id, ExpectedHash::Missing, "x"), a, None, None);
+        refused_missing(e, &id);
+        let e = engine.batch_update(
+            vec![(update(&id, ExpectedHash::Missing, "x"), None)],
+            a,
+            None,
+            false,
+        );
+        let batch = e.unwrap();
+        assert!(!batch.applied);
+        assert_eq!(
+            batch.results[0].error.as_ref().map(|e| e.code.as_str()),
+            Some("EXPECTED_HASH_REQUIRED"),
+            "{batch:?}"
+        );
+        let e = engine.delete_entity(
+            DeleteEntityArgs {
+                id: id.clone(),
+                expected_hash: ExpectedHash::Missing,
+            },
+            a,
+            None,
+            None,
+        );
+        refused_missing(e, &id);
+        let e = engine.rename_entity(
+            RenameEntityArgs {
+                id: id.clone(),
+                expected_hash: ExpectedHash::Missing,
+                new_title: "Alpha Two".to_string(),
+            },
+            a,
+            None,
+            None,
+        );
+        refused_missing(e, &id);
+        let e = engine.retype_entity(retype(&id, ExpectedHash::Missing, false), a, None, None);
+        refused_missing(e, &id);
+
+        // Nothing moved.
+        assert_eq!(engine.get_entity(&id).unwrap().content_hash, hash);
+        assert_eq!(engine.get_entity(&id).unwrap().entity_type, "spec");
+    }
+
+    #[test]
+    fn every_verb_refuses_a_stale_hash_with_the_current_one() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine(&tmp);
+        let (id, hash) = seed(&mut engine, "Alpha");
+        let a = crate::vcs::Actor::Cli;
+        let stale = || ExpectedHash::Current("0000000000000000".to_string());
+
+        refused_stale(
+            engine.update_entity(update(&id, stale(), "x"), a, None, None),
+            &hash,
+        );
+        let batch = engine
+            .batch_update(vec![(update(&id, stale(), "x"), None)], a, None, false)
+            .unwrap();
+        assert_eq!(
+            batch.results[0].error.as_ref().map(|e| e.code.as_str()),
+            Some("HASH_MISMATCH")
+        );
+        refused_stale(
+            engine.delete_entity(
+                DeleteEntityArgs {
+                    id: id.clone(),
+                    expected_hash: stale(),
+                },
+                a,
+                None,
+                None,
+            ),
+            &hash,
+        );
+        refused_stale(
+            engine.rename_entity(
+                RenameEntityArgs {
+                    id: id.clone(),
+                    expected_hash: stale(),
+                    new_title: "Beta".into(),
+                },
+                a,
+                None,
+                None,
+            ),
+            &hash,
+        );
+        refused_stale(
+            engine.retype_entity(retype(&id, stale(), false), a, None, None),
+            &hash,
+        );
+    }
+
+    #[test]
+    fn the_override_writes_and_the_exemptions_hold() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine(&tmp);
+        let (id, hash) = seed(&mut engine, "Alpha");
+        let a = crate::vcs::Actor::Cli;
+
+        // The override writes without a compare.
+        let out = engine
+            .update_entity(
+                update(
+                    &id,
+                    ExpectedHash::Override(HashOverride::ProposalMerge),
+                    "overridden",
+                ),
+                a,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_ne!(out.content_hash, hash);
+
+        // A dry run needs no hash and skips the compare (update and retype).
+        let dry = UpdateEntityArgs {
+            dry_run: true,
+            ..update(&id, ExpectedHash::Missing, "dry")
+        };
+        engine.update_entity(dry, a, None, None).unwrap();
+        let dry_stale = UpdateEntityArgs {
+            dry_run: true,
+            ..update(&id, ExpectedHash::Current("stale".into()), "dry")
+        };
+        engine.update_entity(dry_stale, a, None, None).unwrap();
+        engine
+            .retype_entity(retype(&id, ExpectedHash::Missing, true), a, None, None)
+            .unwrap();
+
+        // An update that changes no content needs no hash; a stated one is
+        // still compared.
+        let anchors_only = |expected_hash| UpdateEntityArgs {
+            sections: IndexMap::new(),
+            anchors: vec![
+                serde_json::from_value::<crate::anchor::AnchorInput>(serde_json::json!({
+                    "artifact": "a.rs", "grain": "file", "class": "anchored",
+                    "hash": "h-a", "hash_stability": "stable",
+                }))
+                .unwrap(),
+            ],
+            ..update(&id, expected_hash, "")
+        };
+        engine
+            .update_entity(anchors_only(ExpectedHash::Missing), a, None, None)
+            .unwrap();
+        let current = engine.get_entity(&id).unwrap().content_hash.clone();
+        refused_stale(
+            engine.update_entity(
+                anchors_only(ExpectedHash::Current("stale".into())),
+                a,
+                None,
+                None,
+            ),
+            &current,
+        );
+
+        // A stub deletes without a hash; a non-empty one refuses with is_stub.
+        let (_src, src_hash) = seed(&mut engine, "Source");
+        let stub = crate::EntityId::new("specs", "ghost");
+        engine
+            .relate_entity(
+                crate::engine::RelateEntityArgs {
+                    source: crate::EntityId::new("specs", "source"),
+                    expected_hash: Some(src_hash),
+                    rel_type: "USES".to_string(),
+                    target: stub.clone(),
+                    remove: false,
+                    description: None,
+                    dry_run: false,
+                },
+                a,
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(engine.get_entity(&stub).unwrap().stub);
+        match engine.delete_entity(
+            DeleteEntityArgs {
+                id: stub.clone(),
+                expected_hash: ExpectedHash::Current("x".into()),
+            },
+            a,
+            None,
+            None,
+        ) {
+            Err(EngineError::HashMismatch { is_stub: true, .. }) => {}
+            other => panic!("expected the stub mismatch, got {other:?}"),
+        }
+        // Relate stays outside the rule: no hash, no refusal.
+        engine
+            .relate_entity(
+                crate::engine::RelateEntityArgs {
+                    source: crate::EntityId::new("specs", "source"),
+                    expected_hash: None,
+                    rel_type: "USES".to_string(),
+                    target: stub.clone(),
+                    remove: true,
+                    description: None,
+                    dry_run: false,
+                },
+                a,
+                None,
+                None,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_stub_deletes_with_no_hash() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine(&tmp);
+        seed(&mut engine, "Anchor");
+        // An orphan stub can only be set up white-box: every organic path
+        // collects one the moment its last referrer drops.
+        let stub = crate::EntityId::new("specs", "ghost");
+        engine.store.upsert(
+            stub.clone(),
+            crate::engine::mutation::make_stub(&stub, crate::entity::StubKind::ForwardReference),
+        );
+        engine
+            .delete_entity(
+                DeleteEntityArgs {
+                    id: stub.clone(),
+                    expected_hash: ExpectedHash::Missing,
+                },
+                crate::vcs::Actor::Cli,
+                None,
+                None,
+            )
+            .expect("a stub has no content to protect");
+        assert!(engine.get_entity(&stub).is_none());
+    }
 }

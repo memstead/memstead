@@ -541,7 +541,7 @@ fn enum_from_neighbour_flags_stale_holders_after_rename() {
             crate::engine::UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: vocab.id.clone(),
-                expected_hash: Some(current),
+                expected_hash: crate::ExpectedHash::Current(current),
                 sections,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -679,7 +679,7 @@ fn update_warns_missing_required_outgoing_until_satisfied() {
                     crate::engine::UpdateEntityArgs {
                         anchors: Vec::new(),
                         id: id.clone(),
-                        expected_hash: Some(current),
+                        expected_hash: crate::ExpectedHash::Current(current),
                         sections,
                         append_sections: IndexMap::new(),
                         patch_sections: IndexMap::new(),

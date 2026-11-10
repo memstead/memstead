@@ -204,7 +204,7 @@ impl Engine {
         let args = UpdateEntityArgs {
             anchors: Vec::new(),
             id: source_id.clone(),
-            expected_hash: Some(expected_hash),
+            expected_hash: crate::ExpectedHash::Current(expected_hash),
             sections,
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),

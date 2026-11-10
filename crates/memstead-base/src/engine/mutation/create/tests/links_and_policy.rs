@@ -932,7 +932,7 @@ fn require_notes_drives_single_note_missing_warning_per_noteless_mutation() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: created.id.clone(),
-                expected_hash: Some(created.content_hash.clone()),
+                expected_hash: crate::ExpectedHash::Current(created.content_hash.clone()),
                 sections: edit,
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),

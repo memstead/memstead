@@ -155,7 +155,7 @@ fn derivation_write_edit_report_reassert_clear() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: target.id.clone(),
-                expected_hash: Some(t_now),
+                expected_hash: crate::ExpectedHash::Current(t_now),
                 sections: IndexMap::from_iter([("body".to_string(), "v2".to_string())]),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
@@ -190,7 +190,7 @@ fn derivation_write_edit_report_reassert_clear() {
             UpdateEntityArgs {
                 anchors: Vec::new(),
                 id: source.id.clone(),
-                expected_hash: Some(s_now),
+                expected_hash: crate::ExpectedHash::Current(s_now),
                 sections: IndexMap::from_iter([("body".to_string(), "conclusion v2".to_string())]),
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),

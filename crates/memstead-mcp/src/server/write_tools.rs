@@ -202,7 +202,7 @@ impl McpServer {
             anchors,
             anchors_unset,
             id: id.clone(),
-            expected_hash: p.expected_hash.clone(),
+            expected_hash: memstead_base::ExpectedHash::from_token(p.expected_hash.clone()),
             sections: p.sections.unwrap_or_default(),
             append_sections: p.append_sections.unwrap_or_default(),
             patch_sections,
@@ -221,43 +221,15 @@ impl McpServer {
                 })
                 .collect(),
         };
-        // The compare-and-swap gate, enforced HERE rather than by the engine
-        // core, which has always checked only when a caller supplies a token
-        // (consistency-sweep 03/04). Content-changing updates still demand it;
-        // an anchors-only update does not, because the sidecar is outside
-        // `_hash` and the token would compare a value the write cannot move.
-        // `changes_content` is the engine's own predicate, so this surface and
-        // the CLI cannot come to disagree about whether a write is safe.
         // An EMPTY token is no token on an anchors-only write, where the CLI
         // already discards it: leaving it Some("") sent it to the engine,
         // which compared "" against a real hash and refused HASH_MISMATCH for
-        // a write the CLI accepted.
-        //
-        // Narrowed to that shape on purpose. Normalizing unconditionally made
-        // this gate fire BEFORE the engine's existence and stub gates, so an
-        // empty token on a stub reported a missing hash instead of
-        // `STUB_NOT_UPDATABLE`, which is the more specific and more actionable
-        // refusal. A content-changing payload therefore keeps its empty token
-        // and keeps the engine's own ordering.
-        if !args.changes_content() {
-            args.expected_hash = args.expected_hash.filter(|h| !h.is_empty());
-        }
-        if args.expected_hash.is_none() && !args.dry_run && args.changes_content() {
-            let message = format!(
-                "`expected_hash` is required for an update that changes content. Read `{id}` \
-                 first and pass its `_hash`, or pass `dry_run: true` to preview. Only an \
-                 anchors-only update (`anchors` / `anchors_unset` and nothing else) may omit \
-                 it, because anchors are outside the content hash."
-            );
-            return tool_error_with_payload(
-                "EXPECTED_HASH_REQUIRED",
-                &message,
-                envelope(
-                    "EXPECTED_HASH_REQUIRED",
-                    message.clone(),
-                    serde_json::json!({ "field": "expected_hash", "id": id.to_string() }),
-                ),
-            );
+        // a write the CLI accepted. Narrowed to that shape on purpose: on a
+        // content-changing payload the empty token stays a stated hash and
+        // keeps its mismatch. Whether a missing hash is refused is the
+        // engine's decision (`ExpectedHash`), made under its lock.
+        if !args.changes_content() && args.expected_hash.as_current().is_some_and(str::is_empty) {
+            args.expected_hash = memstead_base::ExpectedHash::Missing;
         }
         let client = self.client.get().cloned();
         match engine.update_entity(args, Actor::Agent, client.as_ref(), p.note.as_deref()) {
@@ -642,14 +614,14 @@ impl McpServer {
             return err;
         }
         let id = EntityId::canonical(&p.id);
-        // Empty `expected_hash` is the stub-delete escape hatch —
-        // stubs have an empty content_hash so the hash check is
-        // skipped. Convert empty string to None at this boundary so
-        // engine semantics stay opaque to the request shape.
-        let expected_hash_opt = if p.expected_hash.is_empty() {
-            None
+        // An empty `expected_hash` states no hash. The engine deletes a
+        // stub without one (it has no content to protect) and refuses a
+        // real entity `EXPECTED_HASH_REQUIRED`; the parameter stays a
+        // required string so the schema keeps asking for the read.
+        let expected_hash = if p.expected_hash.is_empty() {
+            memstead_base::ExpectedHash::Missing
         } else {
-            Some(p.expected_hash.clone())
+            memstead_base::ExpectedHash::Current(p.expected_hash.clone())
         };
 
         let (role, identity) =
@@ -669,7 +641,7 @@ impl McpServer {
         };
         let args = memstead_base::DeleteEntityArgs {
             id: id.clone(),
-            expected_hash: expected_hash_opt,
+            expected_hash,
         };
         let client = self.client.get().cloned();
         match engine.delete_entity(args, Actor::Agent, client.as_ref(), p.note.as_deref()) {
@@ -898,7 +870,7 @@ impl McpServer {
         };
         let args = memstead_base::RenameEntityArgs {
             id: id.clone(),
-            expected_hash: Some(p.expected_hash.clone()),
+            expected_hash: memstead_base::ExpectedHash::Current(p.expected_hash.clone()),
             new_title: p.new_title.clone(),
         };
         let client = self.client.get().cloned();
@@ -957,19 +929,6 @@ impl McpServer {
             return err;
         }
         let dry_run = p.dry_run.unwrap_or(false);
-        if !dry_run && p.expected_hash.as_deref().is_none_or(str::is_empty) {
-            let msg = "`expected_hash` is required for a real retype (read the entity first and \
-                       pass its `_hash`); only `dry_run: true` may omit it";
-            return tool_error_with_payload(
-                "INVALID_INPUT",
-                msg,
-                envelope(
-                    "INVALID_INPUT",
-                    msg.to_string(),
-                    serde_json::json!({ "field": "expected_hash" }),
-                ),
-            );
-        }
         let id = EntityId::canonical(&p.id);
         let (role, identity) =
             match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
@@ -984,9 +943,13 @@ impl McpServer {
             Ok((resolved, _)) => resolved.mem().to_string(),
             Err(e) => return engine_err_unified(e, &engine),
         };
+        // An empty token states no hash, as it always has on retype; the
+        // engine refuses the missing hash after its existence and stub gates.
         let args = memstead_base::RetypeEntityArgs {
             id: id.clone(),
-            expected_hash: p.expected_hash.clone(),
+            expected_hash: memstead_base::ExpectedHash::from_token(
+                p.expected_hash.clone().filter(|h| !h.is_empty()),
+            ),
             target_type: p.target_type.clone(),
             section_map: p
                 .section_map

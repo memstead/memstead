@@ -1031,7 +1031,11 @@ fn advance_refuses_a_worked_artifact_whose_anchor_rows_still_drift() {
             .update_entity(
                 memstead_base::UpdateEntityArgs {
                     id: memstead_base::EntityId("engine--covers-a".into()),
-                    expected_hash: None,
+                    expected_hash: memstead_base::ExpectedHash::from_token(
+                        engine
+                            .get_entity(&memstead_base::EntityId("engine--covers-a".into()))
+                            .map(|e| e.content_hash.clone()),
+                    ),
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),

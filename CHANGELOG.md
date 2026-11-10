@@ -26,6 +26,36 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The engine decides whether a write needs a hash, and refuses a
+  missing one with one code everywhere.** Update, delete, rename, retype
+  and batch update now state one of three things to the engine: the hash
+  the caller read, an internal override, or nothing; nothing is refused
+  for a real entity with `EXPECTED_HASH_REQUIRED` (`details.field`,
+  `details.id`), after the existence and stub gates, on MCP and the CLI
+  alike and on folder and git-branch mems. Before, each surface decided
+  this itself and they differed. Three declared wire changes follow:
+  (1) the CLI's `HASH_FLAG_REQUIRED`, MCP retype's `INVALID_INPUT` and a
+  batch-update entry's `INVALID_INPUT` ("exactly one of `expected_hash`,
+  `auto_hash`, or `force`") are retired for this case and answer
+  `EXPECTED_HASH_REQUIRED`; (2) `batch-update`'s per-entry `force` reads
+  the current hash and presents it, as `--force` on `memstead update`
+  always did, instead of sending none: a write that lands between that
+  read and the commit is now refused with `HASH_MISMATCH` where it used
+  to be overwritten (`--force` on every verb is documented accordingly:
+  it names the intent, the engine still compares); (3) `memstead_delete`
+  with an empty `expected_hash` refuses a real entity with
+  `EXPECTED_HASH_REQUIRED`, where it used to delete any entity without a
+  compare; a stub, which has no content to protect, still deletes with
+  the empty hash. An update that changes no content (anchors only) and a
+  dry run keep their exemptions, and relate stays outside the rule: it
+  adds or removes one edge and returns the hash the next content change
+  presents. In the engine's Rust interface the `expected_hash` field of
+  `UpdateEntityArgs`, `DeleteEntityArgs`, `RenameEntityArgs` and
+  `RetypeEntityArgs` is now an `ExpectedHash` (`Missing`, `Current`,
+  `Override(HashOverride)`) instead of an `Option<String>` whose `None`
+  skipped the compare; the override has one caller, the proposal merge,
+  and no tool parameter or flag reaches it.
+
 - **VISION states what reading a mem is worth, measurement by
   measurement.** The core value proposition opened by denying a
   read-side advantage and called the read side closed, which read as

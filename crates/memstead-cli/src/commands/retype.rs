@@ -8,7 +8,8 @@
 //! entity are stale.
 //!
 //! Hash handling matches `memstead update`: strict by default, `--auto-hash`
-//! refetches from the store, `--force` explicitly accepts the overwrite;
+//! refetches from the store, `--force` refetches too and names the intent to
+//! overwrite (the engine still compares, so a concurrent write is refused);
 //! `--dry-run` previews without a hash.
 
 use clap::Parser;
@@ -67,7 +68,9 @@ pub struct Args {
     #[arg(long, conflicts_with_all = ["expected_hash", "force"])]
     pub auto_hash: bool,
 
-    /// Skip the hash check (explicit overwrite).
+    /// Read the current hash and present it, naming the intent to overwrite.
+    /// The engine still compares, so a write that lands after the read is
+    /// refused rather than overwritten.
     #[arg(long, conflicts_with_all = ["expected_hash", "auto_hash"])]
     pub force: bool,
 
@@ -121,7 +124,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             // Reading the raw id here refused a short id with
             // `ENTITY_NOT_FOUND` before the resolver ever ran.
             let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
-            let expected_hash = resolve_expected_hash(&engine, &lookup_id, &args)?;
+            let expected_hash = super::hash_statement(
+                &mut engine,
+                &lookup_id,
+                args.expected_hash.clone(),
+                !args.dry_run && (args.auto_hash || args.force),
+            )?;
             let mem_repo_ctx = ctx.commit_ctx_with_note(args.note.clone());
             engine.set_role(mem_repo_ctx.role);
             engine.set_identity(mem_repo_ctx.identity.clone());
@@ -145,7 +153,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
         CliEngine::Filesystem(mut engine) => {
             let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
-            let expected_hash = resolve_expected_hash(&engine, &lookup_id, &args)?;
+            let expected_hash = super::hash_statement(
+                &mut engine,
+                &lookup_id,
+                args.expected_hash.clone(),
+                !args.dry_run && (args.auto_hash || args.force),
+            )?;
             let outcome = engine
                 .retype_entity(
                     RetypeEntityArgs {
@@ -214,46 +227,4 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         print_markdown(&body);
     }
     Ok(())
-}
-
-/// The `expected_hash` for the write: the flag value, or the live hash
-/// under `--auto-hash` / `--force`; `None` on a dry run, which skips the
-/// optimistic lock by contract.
-fn resolve_expected_hash(
-    engine: &memstead_base::Engine,
-    id: &EntityId,
-    args: &Args,
-) -> anyhow::Result<Option<String>> {
-    if args.dry_run {
-        return Ok(None);
-    }
-    if args.auto_hash || args.force {
-        return Ok(Some(
-            engine
-                .get_entity(id)
-                .ok_or_else(|| {
-                    CliError::new(
-                        ExitKind::NotFound,
-                        "ENTITY_NOT_FOUND",
-                        format!("entity not found: {id}"),
-                    )
-                    .with_details(serde_json::json!({ "id": id.to_string() }))
-                })?
-                .content_hash
-                .clone(),
-        ));
-    }
-    args.expected_hash
-        .clone()
-        .filter(|h| !h.is_empty())
-        .map(Some)
-        .ok_or_else(|| {
-            CliError::new(
-                ExitKind::Validation,
-                crate::HASH_FLAG_REQUIRED_CODE,
-                "missing --expected-hash. Read the entity first (memstead entity <id>) and pass its `_hash`, \
-                 or use --auto-hash / --force / --dry-run.",
-            )
-            .into()
-        })
 }

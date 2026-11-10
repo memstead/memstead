@@ -634,7 +634,11 @@ impl Engine {
                     .collect();
                 LandingWrite::Update(Box::new(crate::UpdateEntityArgs {
                     id: target_id,
-                    expected_hash: None,
+                    // The merge has compared the target against the recorded
+                    // ancestor under its own lock; a hash read now adds nothing.
+                    expected_hash: crate::ExpectedHash::Override(
+                        crate::HashOverride::ProposalMerge,
+                    ),
                     sections,
                     append_sections: Default::default(),
                     patch_sections: Default::default(),
