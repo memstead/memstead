@@ -2851,3 +2851,7 @@ impl From<BackendError> for EngineError {
 mod inline_list_tests;
 #[cfg(test)]
 mod plan05_subsystem_tests;
+/// One value of every error, for the surface-parity tests.
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub mod samples;

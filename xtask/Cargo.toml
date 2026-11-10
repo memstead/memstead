@@ -30,6 +30,9 @@ tempfile.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+# The engine's error samples for the MCP-CLI payload parity test; xtask is
+# the one crate that depends on both surfaces without layering one on the other.
+memstead-base = { workspace = true, features = ["test-support"] }
 
 
 [lints]

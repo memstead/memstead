@@ -391,6 +391,17 @@ impl McpServer {
 }
 
 mod errors;
+
+/// The MCP rendering of an engine error, exactly as a tool call returns
+/// it. For the test that holds MCP and the CLI to one payload per error;
+/// not a surface of its own.
+#[doc(hidden)]
+pub fn render_engine_error(
+    e: memstead_base::EngineError,
+    engine: &memstead_base::Engine,
+) -> rmcp::model::CallToolResult {
+    errors::engine_err_unified(e, engine)
+}
 mod mem_tools;
 mod read_tools;
 mod responses;

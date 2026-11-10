@@ -1,0 +1,168 @@
+//! Every error the engine defines, rendered by the MCP server and by the
+//! CLI's JSON output, compared field for field.
+//!
+//! (Lives in xtask, the one crate that depends on both surfaces; the MCP
+//! crate must not depend on the CLI.) The engine's sample list (`memstead_base::engine::error::samples`) is
+//! complete by construction: its `covered` match has no wildcard. This test
+//! raises each sample through both surfaces' real mappers and records where
+//! the code, the recovery payload or the message differ.
+//!
+//! Inventory mode: the test prints the differences (and writes them as
+//! markdown to `$ERROR_PARITY_OUT` when set) and asserts only that every
+//! sample renders on both surfaces. The convergence work turns each entry
+//! into an equality.
+
+use memstead_base::engine::error::samples::every_engine_error;
+use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
+
+fn engine(tmp: &std::path::Path) -> memstead_base::Engine {
+    let dir = tmp.join("specs");
+    std::fs::create_dir_all(dir.join(".memstead")).unwrap();
+    std::fs::write(
+        dir.join(".memstead/config.json"),
+        r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("alpha.md"),
+        "---\ntype: spec\nlevel: M0\n---\n# Alpha\n\n## Identity\n\nA.\n\n## Purpose\n\nB.\n",
+    )
+    .unwrap();
+    let mount = Mount {
+        mem: "specs".to_string(),
+        schema: Some("default@1.0.0".parse().unwrap()),
+        storage: MountStorage::Folder { path: dir },
+        capability: MountCapability::Write,
+        lifecycle: MountLifecycle::Eager,
+        cross_linkable: true,
+        migration_target: None,
+    };
+    let backend = memstead_base::instantiate_local_backend(&mount).unwrap();
+    memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap()
+}
+
+struct Rendered {
+    code: String,
+    message: String,
+    details: serde_json::Value,
+}
+
+fn mcp(e: memstead_base::EngineError, engine: &memstead_base::Engine) -> Rendered {
+    let r = memstead_mcp::server::render_engine_error(e, engine);
+    let sc = r.structured_content.unwrap_or_default();
+    Rendered {
+        code: sc["code"].as_str().unwrap_or_default().to_string(),
+        message: sc["message"].as_str().unwrap_or_default().to_string(),
+        details: sc
+            .get("details")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    }
+}
+
+fn cli(e: memstead_base::EngineError) -> Rendered {
+    let c = memstead_cli::CliError::from_engine_op(e);
+    let (_, line) =
+        memstead_cli::output::render_cli_error(c.code, &c.message, true, c.details.as_ref());
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    Rendered {
+        code: v["code"].as_str().unwrap_or_default().to_string(),
+        message: v["message"].as_str().unwrap_or_default().to_string(),
+        details: v.get("details").cloned().unwrap_or(serde_json::Value::Null),
+    }
+}
+
+/// Keys present on one side only, and keys whose values differ.
+fn key_diff(
+    a: &serde_json::Value,
+    b: &serde_json::Value,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let empty = serde_json::Map::new();
+    let am = a.as_object().unwrap_or(&empty);
+    let bm = b.as_object().unwrap_or(&empty);
+    let only_a = am
+        .keys()
+        .filter(|k| !bm.contains_key(*k))
+        .cloned()
+        .collect();
+    let only_b = bm
+        .keys()
+        .filter(|k| !am.contains_key(*k))
+        .cloned()
+        .collect();
+    let differ = am
+        .iter()
+        .filter(|(k, v)| bm.get(*k).is_some_and(|w| w != *v))
+        .map(|(k, _)| k.clone())
+        .collect();
+    (only_a, only_b, differ)
+}
+
+#[test]
+fn every_engine_error_renders_on_mcp_and_cli_and_the_differences_are_recorded() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let engine = engine(tmp.path());
+    let mut rows = Vec::new();
+    let mut agree = 0usize;
+    // EngineError is not Clone (it can carry an io::Error); the list is
+    // built twice, deterministically, once per surface.
+    let samples = every_engine_error();
+    let total = samples.len();
+    for ((label, e), (_, e2)) in samples.into_iter().zip(every_engine_error()) {
+        let engine_code = e.code().to_string();
+        let engine_message = e.prose_render();
+        let engine_details = e.details();
+        let m = mcp(e, &engine);
+        let c = cli(e2);
+        assert!(!m.code.is_empty(), "{label}: MCP rendered no code");
+        assert!(!c.code.is_empty(), "{label}: CLI rendered no code");
+        let mut notes = Vec::new();
+        if m.code != c.code || m.code != engine_code {
+            notes.push(format!(
+                "code engine `{engine_code}`, MCP `{}`, CLI `{}`",
+                m.code, c.code
+            ));
+        }
+        if m.details != c.details {
+            let (only_m, only_c, differ) = key_diff(&m.details, &c.details);
+            notes.push(format!(
+                "details: MCP only {only_m:?}, CLI only {only_c:?}, values differ {differ:?}"
+            ));
+        }
+        // Where both surfaces agree, they may still serve a payload the
+        // engine's own `details()` does not build: a hand-built copy.
+        let (surface_only, engine_only, values) = key_diff(&m.details, &engine_details);
+        if m.details == c.details && m.details != engine_details {
+            notes.push(format!(
+                "both surfaces serve a hand-built payload: keys not in engine details() {surface_only:?}, engine-only keys {engine_only:?}, values differ {values:?}"
+            ));
+        }
+        if !m
+            .message
+            .starts_with(engine_message.lines().next().unwrap_or_default())
+            || !c
+                .message
+                .starts_with(engine_message.lines().next().unwrap_or_default())
+        {
+            notes.push("message does not begin with the engine's on both surfaces".to_string());
+        }
+        if notes.is_empty() {
+            agree += 1;
+        } else {
+            rows.push(format!(
+                "| `{label}` | `{engine_code}` | {} |",
+                notes.join("; ")
+            ));
+        }
+    }
+    let report = format!(
+        "{} of {total} engine errors render identically on MCP and the CLI; {} differ.\n\n| sample | engine code | difference |\n|---|---|---|\n{}\n",
+        agree,
+        rows.len(),
+        rows.join("\n")
+    );
+    eprintln!("{report}");
+    if let Ok(path) = std::env::var("ERROR_PARITY_OUT") {
+        std::fs::write(path, &report).unwrap();
+    }
+}
