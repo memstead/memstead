@@ -83,6 +83,39 @@ pub enum SchemaSourceError {
     MalformedManifest { path: PathBuf, reason: String },
 }
 
+impl SchemaSourceError {
+    /// The wire code every surface reports for this refusal.
+    pub fn code(&self) -> &'static str {
+        match self {
+            SchemaSourceError::NotFound { .. } => "SCHEMA_NOT_FOUND",
+            SchemaSourceError::Io { .. } => "IO_ERROR",
+            SchemaSourceError::VersionMismatch { .. }
+            | SchemaSourceError::MalformedManifest { .. } => "SCHEMA_VALIDATION_FAILED",
+        }
+    }
+
+    /// The recovery payload: the paths consulted or the file at fault.
+    pub fn details(&self) -> serde_json::Value {
+        match self {
+            SchemaSourceError::NotFound {
+                schema_ref,
+                candidates,
+            } => serde_json::json!({ "schema_ref": schema_ref, "candidates": candidates }),
+            SchemaSourceError::Io { path, source } => {
+                serde_json::json!({ "path": path, "reason": source.to_string() })
+            }
+            SchemaSourceError::VersionMismatch {
+                path,
+                expected,
+                found,
+            } => serde_json::json!({ "path": path, "expected": expected, "found": found }),
+            SchemaSourceError::MalformedManifest { path, reason } => {
+                serde_json::json!({ "path": path, "reason": reason })
+            }
+        }
+    }
+}
+
 /// Resolve the schema pinned by `schema_ref` to a sorted set of source
 /// files ready to embed under `.memstead/schema/` in a mem archive.
 ///

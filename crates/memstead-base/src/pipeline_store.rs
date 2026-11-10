@@ -435,6 +435,72 @@ pub fn parse_binding_id(binding_id: &str) -> Option<(&str, &str)> {
         .filter(|(mem, stem)| is_mem_path(mem) && is_single_component(stem))
 }
 
+/// A binding id, or the mem and stem it is built from, that the store
+/// would refuse as a path: refused before any disk touch, with one code.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum BindingIdError {
+    #[error(
+        "invalid mem '{}': must be a mem name (plain path components joined by '/'; \
+         no traversal segments, backslashes, ':' or NUL)",
+        value.escape_default()
+    )]
+    Mem { value: String },
+    #[error(
+        "invalid name '{}': must be a single path component (no separators, \
+         traversal segments, ':' or NUL)",
+        value.escape_default()
+    )]
+    Name { value: String },
+    #[error(
+        "invalid binding id '{}': expected `<mem>/<stem>`, the stem a single path \
+         component after the last '/', the mem a mem name (a nested `team/sub-mem` \
+         is fine; no traversal segments, ':' or NUL anywhere)",
+        binding.escape_default()
+    )]
+    Id { binding: String },
+}
+
+impl BindingIdError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            BindingIdError::Mem { .. }
+            | BindingIdError::Name { .. }
+            | BindingIdError::Id { .. } => "PROJECTION_INVALID_NAME",
+        }
+    }
+
+    pub fn details(&self) -> serde_json::Value {
+        match self {
+            BindingIdError::Mem { value } => serde_json::json!({ "kind": "mem", "value": value }),
+            BindingIdError::Name { value } => serde_json::json!({ "kind": "name", "value": value }),
+            BindingIdError::Id { binding } => serde_json::json!({ "binding": binding }),
+        }
+    }
+}
+
+/// The mem and stem a new binding id is built from, refused when either
+/// would not make a path the store accepts.
+pub fn check_binding_parts(mem: &str, stem: &str) -> Result<(), BindingIdError> {
+    if !is_mem_path(mem) {
+        return Err(BindingIdError::Mem {
+            value: mem.to_string(),
+        });
+    }
+    if !is_single_component(stem) {
+        return Err(BindingIdError::Name {
+            value: stem.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// [`parse_binding_id`], refusing a malformed id with its typed error.
+pub fn parse_binding_id_or_refuse(binding_id: &str) -> Result<(&str, &str), BindingIdError> {
+    parse_binding_id(binding_id).ok_or_else(|| BindingIdError::Id {
+        binding: binding_id.to_string(),
+    })
+}
+
 /// Refuse a `name` value that is not a single, plain path component.
 /// Validated here, the one place every mutation's path is built, so no
 /// surface above (CLI, MCP, engine embedders) can bypass it.

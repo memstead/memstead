@@ -99,8 +99,12 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     let pin_unresolved =
         memstead_base::engine::resolve_builtin_schema_pin_pub(&schema_pin, &builtin).is_none();
     let unresolved_warning = pin_unresolved.then(|| unresolved_pin_warning(&schema_pin, &builtin));
+    // The warning's code is the engine's refusal for the same pin, the one
+    // every engine-booting command meets until the package is installed.
+    let unresolved_code =
+        memstead_base::EngineError::unknown_builtin_schema(&schema_pin.as_display()).code();
     if let Some(w) = &unresolved_warning {
-        eprintln!("memstead: WARNING [SCHEMA_NOT_FOUND]: {w}");
+        eprintln!("memstead: WARNING [{unresolved_code}]: {w}");
     }
 
     if target.exists() {
@@ -170,7 +174,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         // Additive optional entry on the stable success shape — only
         // present when the pin is unresolved at init time.
         if let Some(w) = &unresolved_warning {
-            warnings.push(json!({ "code": "SCHEMA_NOT_FOUND", "message": w }));
+            warnings.push(json!({ "code": unresolved_code, "message": w }));
         }
         let mut payload = json!({
             "workspace_root": target.display().to_string(),

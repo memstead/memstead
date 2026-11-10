@@ -32,13 +32,11 @@ use clap::{Args as ClapArgs, Subcommand, ValueEnum};
 use serde_json::json;
 
 use memstead_base::binding::{
-    BuildMode, BuildOperation, CapabilityError, DEFAULT_ADJUDICATION_CAP,
-    DEFAULT_FULL_RESYNC_EVERY, ScaffoldParams, SyncOperation, VerifyOperation, validate_binding,
+    BuildMode, BuildOperation, DEFAULT_ADJUDICATION_CAP, DEFAULT_FULL_RESYNC_EVERY, ScaffoldParams,
+    SyncOperation, VerifyOperation,
 };
 use memstead_base::pipeline::{IngestTrigger, MediumType};
-use memstead_base::pipeline_store::{
-    is_mem_path, is_single_component, load_pipeline_configs, parse_binding_id, read_binding,
-};
+use memstead_base::pipeline_store::{load_pipeline_configs, read_binding};
 use memstead_projection::advance::{
     AdvanceError, DispositionInput, ExcludeError, advance_baseline, record_exclusions,
 };
@@ -693,12 +691,7 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
         // advance` does, with the one-command remedy in `details`.
         if args.sync {
             let configs = load_pipeline_configs(&root).map_err(|e| {
-                CliError::new(
-                    ExitKind::Generic,
-                    "PROJECTION_LOAD_FAILED",
-                    format!("could not load binding store: {e}"),
-                )
-                .with_details(json!({ "error": e.to_string() }))
+                crate::setup::boot_error_to_cli(&root, memstead_base::BootError::Store(e))
             })?;
             if let Some(record) = configs
                 .bindings
@@ -753,12 +746,7 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
         Some(binding) if !args.all => (Some((binding, OperationKind::Build)), Vec::new()),
         _ => {
             let configs = load_pipeline_configs(&root).map_err(|e| {
-                CliError::new(
-                    ExitKind::Generic,
-                    "PROJECTION_LOAD_FAILED",
-                    format!("could not load binding store: {e}"),
-                )
-                .with_details(json!({ "error": e.to_string() }))
+                crate::setup::boot_error_to_cli(&root, memstead_base::BootError::Store(e))
             })?;
             // Distinguish "nothing is configured" from "everything is backing
             // off". Both otherwise collapse into the same `None` from
@@ -891,32 +879,15 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // refuse anything the store would refuse before touching disk, with
     // the store's own guards. The mem is a mem path (a nested name is
     // legal), the stem a single plain component.
-    if !is_mem_path(&mem) {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_INVALID_NAME",
-            format!(
-                "invalid mem '{}': must be a mem name (plain path components joined by '/'; \
-                 no traversal segments, backslashes, ':' or NUL)",
-                mem.escape_default()
-            ),
-        )
-        .with_details(json!({ "kind": "mem", "value": mem }))
-        .into());
-    }
-    if !is_single_component(&stem) {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_INVALID_NAME",
-            format!(
-                "invalid name '{}': must be a single path component (no separators, \
-                 traversal segments, ':' or NUL); pass an explicit --name",
-                stem.escape_default()
-            ),
-        )
-        .with_details(json!({ "kind": "name", "value": stem }))
-        .into());
-    }
+    memstead_base::pipeline_store::check_binding_parts(&mem, &stem).map_err(|e| {
+        let hint = match e {
+            memstead_base::pipeline_store::BindingIdError::Name { .. } => {
+                "; pass an explicit --name"
+            }
+            _ => "",
+        };
+        binding_id_error(e, hint)
+    })?;
 
     let binding_id = format!("{mem}/{stem}");
     let medium_type = args.medium_type.to_medium_type();
@@ -930,16 +901,19 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         .join(&mem)
         .join(format!("{stem}.json"));
     if binding_path.exists() {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_EXISTS",
-            format!(
-                "a binding `{binding_id}` already exists at \
-                 .memstead/projections/{mem}/{stem}.json — `projection init` never overwrites; \
-                 choose a different --name or edit the existing binding"
+        let e = memstead_base::pipeline_edit::PipelineEditError::AlreadyExists {
+            primitive: "projection",
+            key: binding_id.clone(),
+        };
+        return Err(CliError {
+            kind: ExitKind::Validation,
+            code: e.code(),
+            details: Some(e.details(&binding_id)),
+            message: format!(
+                "{e} at .memstead/projections/{mem}/{stem}.json; `projection init` never \
+                 overwrites: choose a different --name or edit the existing binding"
             ),
-        )
-        .with_details(json!({ "binding": binding_id }))
+        }
         .into());
     }
 
@@ -1066,22 +1040,15 @@ fn binding_miss_error(configs: &memstead_base::BindingConfigs, binding_id: &str)
     }
 }
 
-/// A malformed binding id (not `<mem>/<stem>`, a mem that is not a mem path,
-/// or a stem that is not a single plain path component): the same shape guard
-/// `init` applies to its scaffolded id, spelled here so the failure is typed
-/// before any disk touch.
-fn invalid_binding_id(binding_id: &str) -> CliError {
-    CliError::new(
-        ExitKind::Validation,
-        "PROJECTION_INVALID_NAME",
-        format!(
-            "invalid binding id '{}': expected `<mem>/<stem>`, the stem a single path \
-             component after the last '/', the mem a mem name (a nested `team/sub-mem` \
-             is fine; no traversal segments, ':' or NUL anywhere)",
-            binding_id.escape_default()
-        ),
-    )
-    .with_details(json!({ "binding": binding_id }))
+/// A binding id, mem or stem the store would refuse as a path: the
+/// engine's value, with this command's own advice after the message.
+fn binding_id_error(e: memstead_base::pipeline_store::BindingIdError, hint: &str) -> CliError {
+    CliError {
+        kind: ExitKind::Validation,
+        code: e.code(),
+        details: Some(e.details()),
+        message: format!("{e}{hint}"),
+    }
 }
 
 fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
@@ -1097,8 +1064,8 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
     // Parse the binding id `<mem>/<stem>` with the store's own parser; refuse
     // a malformed shape before touching disk. Own the halves so `binding_id`
     // is free to move into JSON payloads later.
-    let (mem, stem) =
-        parse_binding_id(&binding_id).ok_or_else(|| invalid_binding_id(&binding_id))?;
+    let (mem, stem) = memstead_base::pipeline_store::parse_binding_id_or_refuse(&binding_id)
+        .map_err(|e| binding_id_error(e, ""))?;
     let mem = mem.to_string();
     let stem = stem.to_string();
 
@@ -1111,16 +1078,8 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
         .join(&mem)
         .join(format!("{stem}.json"));
     if !binding_path.exists() {
-        return Err(CliError::new(
-            ExitKind::NotFound,
-            "PROJECTION_NOT_FOUND",
-            format!(
-                "no binding `{binding_id}` at .memstead/projections/{mem}/{stem}.json — \
-                 scaffold one with `projection init`"
-            ),
-        )
-        .with_details(json!({ "binding": binding_id }))
-        .into());
+        let configs = load_pipeline_configs(&root).unwrap_or_default();
+        return Err(binding_miss_error(&configs, &binding_id).into());
     }
     // Quarantine consult before the raw read: a retired-format or corrupt
     // file refuses with its typed reason rather than a generic enable
@@ -1149,6 +1108,21 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
             memstead_base::binding::OperationStateError::AlreadyEnabled {
                 binding: binding_id.clone(),
                 operation: op.name(),
+            },
+        )
+        .into());
+    }
+
+    // Refuse, before any write, an operation the binding's medium cannot
+    // carry (e.g. `sync`/`verify` over a `web` source): the engine's own
+    // capability gap. Refusals about other operations reflect pre-existing
+    // config and do not block this enable.
+    if let Some(gap) = binding.operation_capability_gap(op.name()) {
+        return Err(operation_state_error(
+            memstead_base::binding::OperationStateError::CapabilityUnsupported {
+                binding: binding_id.clone(),
+                operation: op.name(),
+                gap,
             },
         )
         .into());
@@ -1185,29 +1159,6 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
                 full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
             });
         }
-    }
-
-    // Matrix validation: the v2 record carries its sources inline, so the
-    // candidate validates directly — refuse if a source's medium half cannot
-    // support the operation being enabled (e.g. `sync`/`verify` over a `web`
-    // source). Refusals about *other* operations reflect pre-existing config
-    // and do not block this enable. No write on refusal — the file stays
-    // byte-identical.
-    if let Err(refusals) = validate_binding(&binding)
-        && let Some(err) = refusals.iter().find(|r| {
-            matches!(
-                r,
-                CapabilityError::OperationOutOfScope { operation, .. } if *operation == op.name()
-            )
-        })
-    {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_CAPABILITY_UNSUPPORTED",
-            err.to_string(),
-        )
-        .with_details(json!({ "binding": binding_id, "operation": op.name() }))
-        .into());
     }
 
     // The write goes through the engine so the binding-store commit in
@@ -1258,8 +1209,8 @@ fn edit(ctx: &CliContext, args: EditArgs) -> anyhow::Result<()> {
     })?;
 
     let binding_id = args.binding;
-    let (mem, stem) =
-        parse_binding_id(&binding_id).ok_or_else(|| invalid_binding_id(&binding_id))?;
+    let (mem, stem) = memstead_base::pipeline_store::parse_binding_id_or_refuse(&binding_id)
+        .map_err(|e| binding_id_error(e, ""))?;
     let mem = mem.to_string();
     let stem = stem.to_string();
 
@@ -1405,13 +1356,8 @@ fn check_path(ctx: &CliContext, args: CheckPathArgs) -> anyhow::Result<()> {
         })?,
     };
 
-    let configs = load_pipeline_configs(&root).map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_LOAD_FAILED",
-            format!("binding store unreadable: {e}"),
-        )
-    })?;
+    let configs = load_pipeline_configs(&root)
+        .map_err(|e| crate::setup::boot_error_to_cli(&root, memstead_base::BootError::Store(e)))?;
     let binding = configs
         .bindings
         .iter()
@@ -1527,14 +1473,8 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
         })?;
 
     // Find the binding by canonical id in the v1 store.
-    let configs = load_pipeline_configs(&root).map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_ADVANCE_FAILED",
-            format!("could not load pipeline config: {e}"),
-        )
-        .with_details(json!({ "error": e.to_string() }))
-    })?;
+    let configs = load_pipeline_configs(&root)
+        .map_err(|e| crate::setup::boot_error_to_cli(&root, memstead_base::BootError::Store(e)))?;
     let record = configs
         .bindings
         .iter()
@@ -1664,14 +1604,8 @@ fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
         .transpose()?;
 
     // Find the binding by canonical id in the v1 store.
-    let configs = load_pipeline_configs(&root).map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_EXCLUDE_FAILED",
-            format!("could not load pipeline config: {e}"),
-        )
-        .with_details(json!({ "error": e.to_string() }))
-    })?;
+    let configs = load_pipeline_configs(&root)
+        .map_err(|e| crate::setup::boot_error_to_cli(&root, memstead_base::BootError::Store(e)))?;
     let record = configs
         .bindings
         .iter()
@@ -1856,14 +1790,8 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
 
     let binding_id = args.binding;
 
-    let configs = load_pipeline_configs(&root).map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_VERIFY_FAILED",
-            format!("could not load pipeline config: {e}"),
-        )
-        .with_details(json!({ "error": e.to_string() }))
-    })?;
+    let configs = load_pipeline_configs(&root)
+        .map_err(|e| crate::setup::boot_error_to_cli(&root, memstead_base::BootError::Store(e)))?;
     let record = configs
         .bindings
         .iter()

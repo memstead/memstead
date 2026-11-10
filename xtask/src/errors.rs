@@ -635,25 +635,7 @@ mod surface_codes {
     /// raising the engine's value: each site moves to the engine's value
     /// (or, for INVALID_INPUT, is a defect in the surface's own input
     /// syntax spelled with the engine's code).
-    const ENGINE_CODE_BUILT_AT_SURFACE: &[&str] = &[
-        "AMBIGUOUS_MEM",
-        "INVALID_INPUT",
-        "INVALID_OBSERVATION",
-        "IO_ERROR",
-        "PROJECTION_ADVANCE_FAILED",
-        "PROJECTION_CAPABILITY_UNSUPPORTED",
-        "PROJECTION_EXCLUDE_FAILED",
-        "PROJECTION_EXISTS",
-        "PROJECTION_INVALID_NAME",
-        "PROJECTION_LOAD_FAILED",
-        "PROJECTION_NOT_FOUND",
-        "PROJECTION_VERIFY_FAILED",
-        "SCHEMA_NOT_FOUND",
-        "SCHEMA_VALIDATION_FAILED",
-        "UNKNOWN_ENTITY_TYPE",
-        "UNKNOWN_MEM",
-        "WORKSPACE_NOT_INITIALISED",
-    ];
+    const ENGINE_CODE_BUILT_AT_SURFACE: &[&str] = &["INVALID_INPUT"];
 
     #[test]
     fn engine_codes_built_by_hand_at_a_surface_are_exactly_the_listed_ones() {

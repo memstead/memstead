@@ -163,7 +163,35 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `quickstart` (`TARGET_NOT_EMPTY` now carries `details.retry` here too).
   `FINDINGS_STORE_ERROR` retires: a findings store that cannot be written
   under `verify-anchors` reports the store's own code
-  (`WORKSPACE_STORE_*`).
+  (`WORKSPACE_STORE_*`). The engine codes a command still spelled by hand
+  are the engine's values now, and these payloads change: a binding store
+  that cannot be read under `projection brief`, `advance`, `exclude`,
+  `verify` and the brief's sync gate reports the store's own code
+  (`WORKSPACE_STORE_*`) where it reported `PROJECTION_LOAD_FAILED`,
+  `PROJECTION_ADVANCE_FAILED`, `PROJECTION_EXCLUDE_FAILED` or
+  `PROJECTION_VERIFY_FAILED`; `projection enable` on a binding that does
+  not exist lists `details.available`, and its capability refusal reads
+  the engine's message (`OperationStateError::CapabilityUnsupported`);
+  `projection init` over an existing binding reads `projection '<id>'
+  already exists` before its advice; malformed binding ids and parts are
+  one engine type (`pipeline_store::BindingIdError`, payload unchanged).
+  `memstead type <unknown>` refuses with the engine's `UNKNOWN_ENTITY_TYPE`
+  payload: `details.unknown` (a list) replaces `details.name`, beside
+  `schema_ref`, `declared` and the run's `fallback`; its `AMBIGUOUS_MEM`
+  is the engine's value. `verify-anchors --observations` reads the file
+  through the engine (`anchor::read_supplied_observations`), whose
+  refusals carry `details.path` (and `details.reason`). `schema validate`
+  and `schema install` share one engine authoring read
+  (`Engine::validate_authoring_package`): install's invalid-package
+  message reads `schema at <path> is invalid` like validate's. A built-in
+  schema source that cannot be collected reports its own code and payload
+  (`SchemaSourceError::code`, `details`). A command that cannot write its
+  own output file (`export --format llms-txt|html --output`, `schema
+  new`, `schema install` writing a package) refuses `INTERNAL_IO_ERROR` with `details.path`,
+  as quickstart does, where it refused `IO_ERROR`. `WORKSPACE_NOT_INITIALISED`
+  from the CLI's workspace walk carries the engine's payload, adding
+  `details.path`. `memstead pull --all` exits with the refused ref's own
+  code where an unlisted code became `INTERNAL`.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

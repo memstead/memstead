@@ -1442,6 +1442,59 @@ pub enum ObservationValidationError {
         first: usize,
         second: usize,
     },
+    #[error("reading {}: {reason}", path.display())]
+    Unreadable {
+        path: std::path::PathBuf,
+        reason: String,
+    },
+    #[error("{} is not valid JSON: {reason}", path.display())]
+    NotJson {
+        path: std::path::PathBuf,
+        reason: String,
+    },
+    #[error(
+        "{} must be a JSON array of observation rows or an object with an `observations` array",
+        path.display()
+    )]
+    NotRows { path: std::path::PathBuf },
+    #[error("{}: observation rows do not parse: {reason}", path.display())]
+    RowsDoNotParse {
+        path: std::path::PathBuf,
+        reason: String,
+    },
+}
+
+/// Read an observations file: a bare array of rows, or an object with an
+/// `observations` array. Rows are parsed, not yet validated
+/// ([`validate_supplied_observations`] does that).
+pub fn read_supplied_observations(
+    path: &std::path::Path,
+) -> Result<Vec<SuppliedObservationInput>, ObservationValidationError> {
+    let text =
+        std::fs::read_to_string(path).map_err(|e| ObservationValidationError::Unreadable {
+            path: path.to_path_buf(),
+            reason: e.to_string(),
+        })?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| ObservationValidationError::NotJson {
+            path: path.to_path_buf(),
+            reason: e.to_string(),
+        })?;
+    let rows = match value {
+        serde_json::Value::Array(_) => value,
+        serde_json::Value::Object(mut o) if o.get("observations").is_some_and(|v| v.is_array()) => {
+            o.remove("observations").unwrap_or_default()
+        }
+        _ => {
+            return Err(ObservationValidationError::NotRows {
+                path: path.to_path_buf(),
+            });
+        }
+    };
+    serde_json::from_value(rows).map_err(|e| ObservationValidationError::RowsDoNotParse {
+        path: path.to_path_buf(),
+        reason: e.to_string(),
+    })
 }
 
 impl ObservationValidationError {
@@ -1479,6 +1532,15 @@ impl ObservationValidationError {
             } => {
                 d.insert("artifact".into(), serde_json::json!(artifact));
                 d.insert("rows".into(), serde_json::json!([first, second]));
+            }
+            ObservationValidationError::Unreadable { path, reason }
+            | ObservationValidationError::NotJson { path, reason }
+            | ObservationValidationError::RowsDoNotParse { path, reason } => {
+                d.insert("path".into(), serde_json::json!(path));
+                d.insert("reason".into(), serde_json::json!(reason));
+            }
+            ObservationValidationError::NotRows { path } => {
+                d.insert("path".into(), serde_json::json!(path));
             }
         }
         d

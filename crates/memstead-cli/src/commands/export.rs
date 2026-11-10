@@ -538,13 +538,7 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
         .mem_configs_named()
         .find(|(name, _)| *name == mem_name)
         .map(|(_, c)| c)
-        .ok_or_else(|| {
-            CliError::new(
-                ExitKind::NotFound,
-                "UNKNOWN_MEM",
-                format!("mem config not found for '{mem_name}'"),
-            )
-        })?;
+        .ok_or_else(|| CliError::from_engine_op(engine.unknown_mem(&mem_name)))?;
 
     let output = match args.output {
         Some(p) => p,
@@ -935,9 +929,10 @@ fn run_llms_txt(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             std::fs::write(path, &doc).map_err(|e| {
                 CliError::new(
                     ExitKind::Generic,
-                    "IO_ERROR",
+                    "INTERNAL_IO_ERROR",
                     format!("write {}: {e}", path.display()),
                 )
+                .with_details(json!({ "path": path.display().to_string() }))
             })?;
             if ctx.json {
                 print_json(&serde_json::json!({
@@ -1062,9 +1057,10 @@ fn run_html(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     std::fs::write(&out_path, &html).map_err(|e| {
         CliError::new(
             ExitKind::Generic,
-            "IO_ERROR",
+            "INTERNAL_IO_ERROR",
             format!("write {}: {e}", out_path.display()),
         )
+        .with_details(json!({ "path": out_path.display().to_string() }))
     })?;
     if ctx.json {
         print_json(&serde_json::json!({

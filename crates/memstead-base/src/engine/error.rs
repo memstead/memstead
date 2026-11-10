@@ -3023,6 +3023,79 @@ fn _hash_mismatch_msg(id: &str, current: &str, is_stub: bool) -> String {
     }
 }
 
+/// A schema package directory refused as authoring input: a sealed copy
+/// where an authored one belongs, or a package the authoring read refuses.
+#[derive(Debug, thiserror::Error)]
+pub enum AuthoringPackageError {
+    #[error(
+        "{} is a sealed schema package (it carries `schema-format.json`, the seal marker), \
+         not authoring input; validate the package's source directory instead",
+        path.display()
+    )]
+    Sealed { path: PathBuf },
+    #[error("schema at {} is invalid: {error}", path.display())]
+    Invalid { path: PathBuf, error: String },
+}
+
+impl AuthoringPackageError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            AuthoringPackageError::Sealed { .. } | AuthoringPackageError::Invalid { .. } => {
+                "SCHEMA_VALIDATION_FAILED"
+            }
+        }
+    }
+
+    pub fn details(&self) -> serde_json::Value {
+        match self {
+            AuthoringPackageError::Sealed { path } => serde_json::json!({
+                "path": path,
+                "reason": "sealed_package",
+            }),
+            AuthoringPackageError::Invalid { path, error } => serde_json::json!({
+                "path": path,
+                "error": error,
+            }),
+        }
+    }
+}
+
+impl crate::Engine {
+    /// Refuse a sealed package where authoring input is asked for.
+    pub fn refuse_sealed_authoring_input(
+        path: &std::path::Path,
+    ) -> Result<(), AuthoringPackageError> {
+        if path.join("schema-format.json").is_file() {
+            return Err(AuthoringPackageError::Sealed {
+                path: path.to_path_buf(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Load a schema package directory the way an authoring act reads it:
+    /// the loader, the heading round-trip, the reserved metadata keys, the
+    /// section formats, the system-message markers and the exemplar gate
+    /// installation runs. A package this passes, install accepts.
+    pub fn validate_authoring_package(
+        path: &std::path::Path,
+    ) -> Result<std::sync::Arc<memstead_schema::Schema>, AuthoringPackageError> {
+        let invalid = |error: String| AuthoringPackageError::Invalid {
+            path: path.to_path_buf(),
+            error,
+        };
+        let schema = memstead_schema::load_schema_from_dir(path)
+            .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
+            .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
+            .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
+            .and_then(|s| memstead_schema::check_system_message_markers(&s).map(|()| s))
+            .map_err(|e| invalid(e.to_string()))?;
+        let schema = std::sync::Arc::new(schema);
+        crate::Engine::validate_schema_exemplars(&schema).map_err(invalid)?;
+        Ok(schema)
+    }
+}
+
 /// Errors surfaced by [`Engine::from_workspace_root`] (the folder boot
 /// path) and its git-branch counterpart (`memstead_git_branch::engine_from_workspace_root`).
 ///

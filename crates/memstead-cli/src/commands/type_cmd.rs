@@ -7,7 +7,7 @@ use memstead_base::render;
 use memstead_schema::Schema;
 
 use crate::CliError;
-use crate::output::{ExitKind, print_json, print_markdown};
+use crate::output::{print_json, print_markdown};
 use crate::setup::CliContext;
 
 /// Describe one type, or list all types when no name is given.
@@ -69,29 +69,26 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 // a schema that is not theirs, with the quarantine unmentioned
                 // on both channels — the sharpest form of the defect this
                 // command was fixed for.
-                let message = match &notice {
-                    Some(n) => format!(
-                        "Unknown type: {name} (schema {schema_label}). Known types: {}\n\n{n}",
-                        known.join(", ")
-                    ),
-                    None => format!(
-                        "Unknown type: {name} (schema {schema_label}). Known types: {}",
-                        known.join(", ")
-                    ),
-                };
-                return Err(
-                    CliError::new(ExitKind::Generic, "UNKNOWN_ENTITY_TYPE", message)
-                        .with_details(json!({
-                            "name": name,
-                            "schema_ref": schema_label,
-                            "declared": known,
-                            "fallback": resolved.condition.as_ref().map(|c| json!({
-                                "code": c.code(),
-                                "detail": c.notice(),
-                            })),
-                        }))
-                        .into(),
-                );
+                // Code, payload and message are the engine's; the condition
+                // that made this schema the answer is this run's fact.
+                let mut err = CliError::from_engine_op(memstead_base::EngineError::UnknownTypes {
+                    schema_ref: schema_label.to_string(),
+                    unknown: vec![name.to_string()],
+                    declared: known.iter().map(|t| t.to_string()).collect(),
+                });
+                if let Some(d) = err.details.as_mut().and_then(|d| d.as_object_mut()) {
+                    d.insert(
+                        "fallback".to_string(),
+                        json!(resolved.condition.as_ref().map(|c| json!({
+                            "code": c.code(),
+                            "detail": c.notice(),
+                        }))),
+                    );
+                }
+                if let Some(n) = &notice {
+                    err.message = format!("{}\n\n{n}", err.message);
+                }
+                return Err(err.into());
             }
         },
     };
@@ -214,15 +211,12 @@ fn resolve_schema(ctx: &CliContext, mem: Option<&str>) -> anyhow::Result<Resolve
                 if all_same {
                     writable[0]
                 } else {
-                    return Err(CliError::new(
-                        ExitKind::Validation,
-                        "AMBIGUOUS_MEM",
-                        format!(
-                            "writable mems pin different schemas ([{}]) — pass `--mem <name>` to pick one",
-                            writable.join(", ")
-                        ),
+                    return Err(CliError::from_engine_with_hint(
+                        memstead_base::EngineError::AmbiguousMem {
+                            mems: writable.iter().map(|m| m.to_string()).collect(),
+                        },
+                        "The writable mems pin different schemas: pass `--mem <name>` to pick one.",
                     )
-                    .with_details(json!({ "mems": writable }))
                     .into());
                 }
             }

@@ -27,31 +27,16 @@ use memstead_git_branch::workspace_store::engine_from_workspace_root;
 use crate::CliError;
 use crate::output::ExitKind;
 
-/// Structured-code constant for the missing-workspace exit envelope.
-/// Surfaced on both `--json` output (under the `code` key in
-/// `details`) and as the `Display` body of the underlying `CliError`.
-/// Scripts and agents branch on this stable token; the human prose
-/// (which mentions the recovery command) is the message and can be
-/// adjusted without breaking the contract.
-pub const WORKSPACE_NOT_INITIALISED_CODE: &str = "WORKSPACE_NOT_INITIALISED";
-
-/// Recovery command suggested when no `.memstead/workspace.toml` is
-/// reachable from cwd. The structured `hint.recovery_command` field
-/// carries this token
-/// verbatim so an agent can re-exec it.
-pub const WORKSPACE_RECOVERY_COMMAND: &str = "memstead mem-repo init";
-
-/// Build the typed `WORKSPACE_NOT_INITIALISED` exit envelope. Goes
-/// through `CliError` so the top-level `main` downcast lifts the
-/// `code` + `hint` fields into the JSON output.
+/// The missing-workspace refusal: the engine's boot value for "no
+/// workspace here" (code and payload, with the bootstrap command under
+/// `details.hint.recovery_command`), with this command's own message.
 pub fn workspace_not_initialised_error(message: &str) -> CliError {
+    let e = memstead_base::BootError::NotInitialised(std::env::current_dir().unwrap_or_default());
     CliError {
         kind: ExitKind::Generic,
-        code: WORKSPACE_NOT_INITIALISED_CODE,
+        code: e.code(),
         message: message.to_string(),
-        details: Some(serde_json::json!({
-            "hint": { "recovery_command": WORKSPACE_RECOVERY_COMMAND },
-        })),
+        details: Some(e.details()),
     }
 }
 

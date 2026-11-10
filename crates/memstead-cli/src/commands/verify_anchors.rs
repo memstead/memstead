@@ -91,51 +91,17 @@ fn load_observations(
     path: &std::path::Path,
     now: &str,
 ) -> anyhow::Result<memstead_base::engine::query::SuppliedObservations> {
-    let text = std::fs::read_to_string(path).map_err(|e| {
-        CliError::new(
-            crate::output::ExitKind::Generic,
-            "INVALID_OBSERVATION",
-            format!("reading {}: {e}", path.display()),
-        )
-    })?;
-    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
-        CliError::new(
-            crate::output::ExitKind::Validation,
-            "INVALID_OBSERVATION",
-            format!("{} is not valid JSON: {e}", path.display()),
-        )
-    })?;
-    let rows_value = match &value {
-        serde_json::Value::Array(_) => value.clone(),
-        serde_json::Value::Object(o) if o.get("observations").is_some_and(|v| v.is_array()) => {
-            o["observations"].clone()
-        }
-        _ => {
-            return Err(CliError::new(
-                crate::output::ExitKind::Validation,
-                "INVALID_OBSERVATION",
-                format!(
-                    "{} must be a JSON array of observation rows or an object with an \
-                     `observations` array",
-                    path.display()
-                ),
-            )
-            .into());
-        }
-    };
-    let rows: Vec<memstead_base::anchor::SuppliedObservationInput> =
-        serde_json::from_value(rows_value).map_err(|e| {
-            CliError::new(
-                crate::output::ExitKind::Validation,
-                "INVALID_OBSERVATION",
-                format!("{}: observation rows do not parse: {e}", path.display()),
-            )
-        })?;
-    memstead_base::anchor::validate_supplied_observations(&rows, now).map_err(|e| {
-        CliError::new(crate::output::ExitKind::Validation, e.code(), e.to_string())
+    use memstead_base::anchor::ObservationValidationError;
+    let refuse = |e: ObservationValidationError| {
+        let kind = match e {
+            ObservationValidationError::Unreadable { .. } => crate::output::ExitKind::Generic,
+            _ => crate::output::ExitKind::Validation,
+        };
+        CliError::new(kind, e.code(), e.to_string())
             .with_details(serde_json::Value::Object(e.detail().into_iter().collect()))
-            .into()
-    })
+    };
+    let rows = memstead_base::anchor::read_supplied_observations(path).map_err(refuse)?;
+    memstead_base::anchor::validate_supplied_observations(&rows, now).map_err(|e| refuse(e).into())
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {

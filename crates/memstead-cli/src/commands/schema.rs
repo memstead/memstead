@@ -390,18 +390,20 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
             .map_err(|e| {
                 CliError::new(
                     ExitKind::Generic,
-                    "IO_ERROR",
+                    "INTERNAL_IO_ERROR",
                     format!("read {}: {e}", pkg_dir.display()),
                 )
+                .with_details(json!({ "path": pkg_dir.display().to_string() }))
             })?
             .next()
             .transpose()
             .map_err(|e| {
                 CliError::new(
                     ExitKind::Generic,
-                    "IO_ERROR",
+                    "INTERNAL_IO_ERROR",
                     format!("read {}: {e}", pkg_dir.display()),
                 )
+                .with_details(json!({ "path": pkg_dir.display().to_string() }))
             })?
     {
         let found = entry.file_name().to_string_lossy().to_string();
@@ -422,9 +424,10 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
     std::fs::create_dir_all(pkg_dir.join("types")).map_err(|e| {
         CliError::new(
             ExitKind::Generic,
-            "IO_ERROR",
+            "INTERNAL_IO_ERROR",
             format!("create {}: {e}", pkg_dir.join("types").display()),
         )
+        .with_details(json!({ "path": pkg_dir.join("types").display().to_string() }))
     })?;
     for (rel, content) in [
         ("schema.yaml", &manifest),
@@ -434,9 +437,10 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
         std::fs::write(&dest, content).map_err(|e| {
             CliError::new(
                 ExitKind::Generic,
-                "IO_ERROR",
+                "INTERNAL_IO_ERROR",
                 format!("write {}: {e}", dest.display()),
             )
+            .with_details(json!({ "path": dest.display().to_string() }))
         })?;
     }
 
@@ -795,77 +799,50 @@ write_rules:
 }
 
 fn validate(ctx: &CliContext, args: ValidateArgs) -> anyhow::Result<()> {
-    // A directory carrying `schema-format.json` is a SEALED package —
-    // installer output, not authoring input. Reporting conformance
-    // errors against it sends the author fixing a file the seal wrote;
-    // name what it is instead. (The validate-vs-loader tolerance
-    // asymmetry itself is by design and documented; this is only the
-    // recognition hint.)
-    if args.path.join("schema-format.json").is_file() {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "SCHEMA_VALIDATION_FAILED",
-            format!(
-                "{} is a sealed schema package (it carries `schema-format.json`, the seal \
-                 marker), not authoring input — `schema validate` checks the directories you \
-                 author, before sealing. Validate the package's source directory instead, or \
-                 install this package directly with `memstead schema install`.",
-                args.path.display(),
-            ),
-        )
-        .with_details(json!({
+    // A sealed package is installer output, not authoring input: the
+    // engine names what it is instead of reporting conformance errors
+    // against a file the seal wrote. The authoring read is the engine's,
+    // the same one `schema install` runs on a package directory.
+    let schema = memstead_base::Engine::refuse_sealed_authoring_input(&args.path)
+        .map_err(|e| {
+            authoring_package_error(
+                e,
+                ". Or install this package directly with `memstead schema install`.",
+            )
+        })
+        .and_then(|()| {
+            memstead_base::Engine::validate_authoring_package(&args.path)
+                .map_err(|e| authoring_package_error(e, ""))
+        })?;
+    let (name, version) = schema.id();
+    let type_count = schema.types.len();
+    if ctx.json {
+        print_json(&json!({
+            "ok": true,
+            "schema": format!("{name}@{version}"),
+            "types": type_count,
             "path": args.path,
-            "reason": "sealed_package",
-        }))
-        .into());
+        }))?;
+    } else {
+        print_markdown(&format!(
+            "# Schema valid\n\n`{name}@{version}` — {type_count} type(s) at `{}`\n",
+            args.path.display(),
+        ));
     }
-    match memstead_schema::loader::load_schema_from_dir(&args.path)
-        .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
-        .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
-        .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
-        .and_then(|s| memstead_schema::check_system_message_markers(&s).map(|()| s))
-    {
-        Ok(schema) => {
-            // Exemplar gate — same validator the install/seal path
-            // runs; the authoring pre-flight must not pass a package
-            // installation would refuse.
-            let schema = std::sync::Arc::new(schema);
-            if let Err(defect) = memstead_base::Engine::validate_schema_exemplars(&schema) {
-                return Err(CliError::new(
-                    ExitKind::Validation,
-                    "SCHEMA_VALIDATION_FAILED",
-                    format!("schema at {} is invalid: {defect}", args.path.display()),
-                )
-                .with_details(json!({ "path": args.path, "error": defect }))
-                .into());
-            }
-            let (name, version) = schema.id();
-            let type_count = schema.types.len();
-            if ctx.json {
-                print_json(&json!({
-                    "ok": true,
-                    "schema": format!("{name}@{version}"),
-                    "types": type_count,
-                    "path": args.path,
-                }))?;
-            } else {
-                print_markdown(&format!(
-                    "# Schema valid\n\n`{name}@{version}` — {type_count} type(s) at `{}`\n",
-                    args.path.display(),
-                ));
-            }
-            Ok(())
-        }
-        Err(e) => Err(CliError::new(
-            ExitKind::Validation,
-            "SCHEMA_VALIDATION_FAILED",
-            format!("schema at {} is invalid: {e}", args.path.display()),
-        )
-        .with_details(json!({
-            "path": args.path,
-            "error": e.to_string(),
-        }))
-        .into()),
+    Ok(())
+}
+
+/// A package directory refused as authoring input: the engine's value at
+/// exit `Validation`, with this command's own advice after the message.
+fn authoring_package_error(
+    e: memstead_base::engine::error::AuthoringPackageError,
+    hint: &str,
+) -> CliError {
+    CliError {
+        kind: ExitKind::Validation,
+        code: e.code(),
+        details: Some(e.details()),
+        message: format!("{e}{hint}"),
     }
 }
 
@@ -1113,38 +1090,12 @@ fn resolve_source(
 ) -> anyhow::Result<(SchemaRef, Vec<memstead_schema::SchemaSourceFile>)> {
     let as_path = Path::new(source);
     if as_path.is_dir() {
-        // Path source — validate with the engine loader before copying.
-        // Includes the heading round-trip and reserved-metadata-key
-        // gates: install is an authoring path, so a schema whose
-        // headings cannot derive back to their keys, or that declares
-        // a reserved `type`/`mem`/`id` metadata field, is refused
-        // here, never sealed.
-        let schema = memstead_schema::load_schema_from_dir(as_path)
-            .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
-            .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
-            .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
-            .and_then(|s| memstead_schema::check_system_message_markers(&s).map(|()| s))
-            .map_err(|e| {
-                CliError::new(
-                    ExitKind::Validation,
-                    "SCHEMA_VALIDATION_FAILED",
-                    format!("package at {source} is invalid: {e}"),
-                )
-                .with_details(json!({ "path": source, "error": e.to_string() }))
-            })?;
-        // Exemplar gate — the same real-create-path validation the
-        // mem-repo install runs via `validate_schema_package`; a
-        // non-conformant exemplar never seals on either backend.
-        let schema = std::sync::Arc::new(schema);
-        if let Err(defect) = memstead_base::Engine::validate_schema_exemplars(&schema) {
-            return Err(CliError::new(
-                ExitKind::Validation,
-                "SCHEMA_VALIDATION_FAILED",
-                format!("package at {source} is invalid: {defect}"),
-            )
-            .with_details(json!({ "path": source, "error": defect }))
-            .into());
-        }
+        // Path source: the engine's authoring read (loader, heading
+        // round-trip, reserved metadata keys, section formats, markers and
+        // the exemplar gate) before copying; a package it refuses is never
+        // sealed.
+        let schema = memstead_base::Engine::validate_authoring_package(as_path)
+            .map_err(|e| authoring_package_error(e, ""))?;
         let (name, version) = schema.id();
         let mut files = collect_dir_package(as_path)?;
         // Stamp the seal with its authoring provenance: the canonical
@@ -1188,14 +1139,8 @@ fn resolve_source(
         let schema_ref = resolve_builtin_ref(source)?;
         let mut files =
             memstead_schema::collect_schema_source(None, None, &schema_ref).map_err(|e| {
-                CliError::new(
-                    ExitKind::Validation,
-                    "SCHEMA_NOT_FOUND",
-                    format!(
-                        "could not collect source for {}: {e}",
-                        schema_ref.as_display()
-                    ),
-                )
+                CliError::new(ExitKind::Validation, e.code(), e.to_string())
+                    .with_details(e.details())
             })?;
         // Built-in packages may ship a `mem-template.json`; install it
         // alongside the schema so the scaffolding travels with the fork.
@@ -1322,18 +1267,20 @@ fn write_package(
             std::fs::create_dir_all(parent).map_err(|e| {
                 CliError::new(
                     ExitKind::Generic,
-                    "IO_ERROR",
+                    "INTERNAL_IO_ERROR",
                     format!("could not create {}: {e}", parent.display()),
                 )
+                .with_details(json!({ "path": parent.display().to_string() }))
             })?;
         }
         let bytes = retarget_yaml_directive(&f.archive_path, &f.bytes);
         std::fs::write(&dest, &bytes).map_err(|e| {
             CliError::new(
                 ExitKind::Generic,
-                "IO_ERROR",
+                "INTERNAL_IO_ERROR",
                 format!("could not write {}: {e}", dest.display()),
             )
+            .with_details(json!({ "path": dest.display().to_string() }))
         })?;
     }
     Ok(())

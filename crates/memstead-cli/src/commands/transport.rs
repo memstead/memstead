@@ -226,13 +226,11 @@ fn run_push_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
         }
     }
     if let Some(first) = outcome.refused.first() {
-        let code: &'static str = match first.code.as_str() {
-            "NON_FAST_FORWARD" => "NON_FAST_FORWARD",
-            "LOCAL_INVALID_STATE" => "LOCAL_INVALID_STATE",
-            "UNKNOWN_REF" => "UNKNOWN_REF",
-            "UNKNOWN_REMOTE" => "UNKNOWN_REMOTE",
-            _ => "INTERNAL",
-        };
+        // The refusal's own code, whatever the engine named: a translation
+        // table here dropped every code it did not list to INTERNAL. The
+        // process ends with this error, so the one leaked string is the
+        // price of the CLI's `&'static str` code field.
+        let code: &'static str = Box::leak(first.code.clone().into_boxed_str());
         let listed = outcome
             .refused
             .iter()
