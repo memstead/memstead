@@ -241,7 +241,8 @@ pub enum Command {
 
     /// Modify an existing entity. `--expected-hash` is required for an update
     /// that changes content, unless `--auto-hash` (refetch before write) or
-    /// `--force` (skip check) is given; an anchors-only update needs none,
+    /// `--force` (refetch, naming the overwrite) is given; the engine still
+    /// compares either way. An anchors-only update needs none,
     /// since anchors sit outside the content hash.
     Update(commands::update::Args),
 
