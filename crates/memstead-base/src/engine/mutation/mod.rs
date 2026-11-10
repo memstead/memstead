@@ -433,8 +433,9 @@ impl super::Engine {
         }
         // Same posture as every other commit-producing write: probe for
         // sibling-engine drift so the sidecar merge runs against current truth.
-        let _write_lock = self.lock_mems_for_write(&[mem_name])?;
-        let _warnings = self.reload_if_stale(Some(mem_name));
+        let (_write_lock, _roster) = self.lock_for_write(true, &[mem_name])?;
+        let _warnings = self.reload_if_stale_content_only(Some(mem_name));
+        let mount_idx = self.writable_mount_index(mem_name)?;
 
         let backend = self.mounts[mount_idx].backend.as_ref();
         let mut sidecar = read_sidecar(backend)?;
@@ -514,8 +515,9 @@ impl super::Engine {
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
-        let _write_lock = self.lock_mems_for_write(&[mem_name])?;
-        let _warnings = self.reload_if_stale(Some(mem_name));
+        let (_write_lock, _roster) = self.lock_for_write(true, &[mem_name])?;
+        let _warnings = self.reload_if_stale_content_only(Some(mem_name));
+        let mount_idx = self.writable_mount_index(mem_name)?;
 
         let backend = self.mounts[mount_idx].backend.as_ref();
         let mut sidecar = read_sidecar(backend)?;

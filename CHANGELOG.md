@@ -69,6 +69,32 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A delete and a retype check their referrers against every mem as it
+  is now.** Both verbs guard on the edges that point at the entity, and
+  such an edge can come from any mem. They reloaded their own mem only
+  and read the others from the view the engine had loaded earlier, so a
+  relation or a body link that a second process had added from another
+  mem was not seen: the delete went through and left the reference
+  pointing at nothing, the retype kept an edge its new type does not
+  allow. Both now take the write lock of every writable mem, in the one
+  order the lock defines, and reload every mem under it before they
+  read a referrer; a second process that writes a reference in that
+  time waits, reloads, and writes against a target that is gone.
+  `create`, `update` and `relate` reload every loaded mem under their
+  lock for the same reason, so a relation target is checked as it is
+  now and not as it was when the engine last read its mem. A workspace
+  with several mems pays one head probe per loaded mem on each write,
+  and a delete or a retype waits for a write in progress in any mem.
+
+- **The first write into a mem attached after the engine started is a
+  locked write.** A mutation computed its lock set from the mounts it
+  had and reconciled the roster afterwards, so a mem that another
+  process had attached since was written without its write lock. The
+  roster is now reconciled before the lock set is computed, in
+  `create`, `update`, `relate` and their batch forms, in `delete` and
+  `retype`, and in the writes of a mem's settings, review mark and
+  anchor observations.
+
 - **A load no longer sweeps the files of a commit that was decided a
   moment before.** A load of a folder mem that found no commit record
   went on to remove leftover temp files. A writer in another process

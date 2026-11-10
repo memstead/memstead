@@ -78,10 +78,18 @@ impl Engine {
     /// Cache invalidation rides on `reload_one_mem` — community
     /// and search-index memos drop when any mem reloads.
     pub fn reload_if_stale(&mut self, mem: Option<&str>) -> Vec<crate::ops::WarningHint> {
+        let mut warnings = self.roster_warnings();
+        warnings.extend(self.reload_if_stale_content_only(mem));
+        warnings
+    }
+
+    /// The membership half of [`Self::reload_if_stale`]: the roster is
+    /// probed before content, because a mem that left must not be loaded
+    /// or served and a mem that arrived must be there for the operation
+    /// that follows (roster.rs). Also run on its own by a verb that
+    /// locks every writable mount, before it computes that lock set.
+    pub(in crate::engine) fn roster_warnings(&mut self) -> Vec<crate::ops::WarningHint> {
         let mut warnings = Vec::new();
-        // Phase -1 — membership. The roster is probed before content: a
-        // mem that left must not be loaded or served, a mem that arrived
-        // must be there for the operation that follows (roster.rs).
         match self.reconcile_roster() {
             Ok(Some(change)) if !change.is_empty() => {
                 warnings.push(crate::ops::WarningHint::MemRosterChanged {
@@ -105,7 +113,6 @@ impl Engine {
                 });
             }
         }
-        warnings.extend(self.reload_if_stale_content_only(mem));
         warnings
     }
 

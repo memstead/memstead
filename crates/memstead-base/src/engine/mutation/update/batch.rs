@@ -118,13 +118,11 @@ impl Engine {
             .collect();
         touched_mems.sort();
         touched_mems.dedup();
-        let _write_lock = self.lock_mems_for_write_if(!dry_run, &touched_mems)?;
-        // What the reloads report (a sibling's commit, a commit this
-        // load completed) rides the receipt like on a single verb.
-        let mut drift_warnings: Vec<WarningHint> = Vec::new();
-        for v in &touched_mems {
-            drift_warnings.extend(self.reload_if_stale(Some(v)));
-        }
+        // What the roster reconcile and the reloads report (a mem
+        // attached since, a sibling's commit, a commit this load
+        // completed) rides the receipt like on a single verb.
+        let (_write_lock, mut drift_warnings) = self.lock_for_write(!dry_run, &touched_mems)?;
+        drift_warnings.extend(self.level_for_write(&touched_mems));
         // Same acyclic-guard rule as the single-item path: declared
         // relations on an ACYCLIC rel-type (or one in an
         // `acyclic_sets` set) walk the whole subgraph, so the walk

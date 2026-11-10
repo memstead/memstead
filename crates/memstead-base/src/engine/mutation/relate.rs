@@ -130,18 +130,14 @@ impl Engine {
         // touched mem exactly once up front instead of per entry.
         let mut drift_warnings: Vec<WarningHint> =
             source_hint.into_iter().chain(target_hint).collect();
-        let _write_lock =
-            self.lock_mems_for_write_if(!args.dry_run, &[&source_mem, &target_mem])?;
-        drift_warnings.extend(self.reload_if_stale(Some(&source_mem)));
-        if target_mem != source_mem && !self.mem_is_deferred(&target_mem) {
-            // A DEFERRED target mem is deliberately not probed here:
-            // the funnel's phase-0 trigger would full-load it, and
-            // target verification must never cost a mem's load
-            // (flywheel W7/02 — the storage check below answers the
-            // existence and type questions against the branch tree /
-            // filesystem instead).
-            drift_warnings.append(&mut self.reload_if_stale(Some(&target_mem)));
-        }
+        let (_write_lock, roster) =
+            self.lock_for_write(!args.dry_run, &[&source_mem, &target_mem])?;
+        drift_warnings.extend(roster);
+        // A DEFERRED target mem is deliberately not loaded here: target
+        // verification must never cost a mem's load (flywheel W7/02 —
+        // the storage check below answers the existence and type
+        // questions against the branch tree / filesystem instead).
+        drift_warnings.extend(self.level_for_write(&[&source_mem]));
         // An ACYCLIC rel-type's cycle guard walks the whole rel-type
         // subgraph (`would_cycle`), and a cycle can pass through any
         // mem — an edge on a deferred (lazy, unloaded) mem's entity is
@@ -1131,21 +1127,25 @@ impl Engine {
             .collect();
         touched_mems.sort();
         touched_mems.dedup();
+        // Every touched mem is locked, a deferred target included: its
+        // lock costs no load, and the storage check of the target runs
+        // under it.
+        let (_write_lock, mut drift_warnings) = self.lock_for_write(!dry_run, &touched_mems)?;
         // A mem that is only ever a TARGET in this batch and is
         // deferred stays unloaded: target verification runs against
-        // storage (flywheel W7/02), and the funnel's phase-0 trigger
-        // would otherwise convert verification into a full load.
-        // Source mems always reload — a write into a mem needs the mem.
-        let source_mems: std::collections::HashSet<&str> =
-            relates.iter().map(|(a, _)| a.source.mem()).collect();
-        touched_mems.retain(|m| source_mems.contains(m.as_str()) || !self.mem_is_deferred(m));
-        let _write_lock = self.lock_mems_for_write_if(!dry_run, &touched_mems)?;
-        // What the reloads report (a sibling's commit, a commit this
-        // load completed) rides the receipt like on a single verb.
-        let mut drift_warnings: Vec<WarningHint> = Vec::new();
-        for m in &touched_mems {
-            drift_warnings.extend(self.reload_if_stale(Some(m)));
-        }
+        // storage (flywheel W7/02), and loading it would convert
+        // verification into a full load. Source mems always load: a
+        // write into a mem needs the mem. What the roster reconcile and
+        // the reloads report (a mem attached since, a sibling's commit,
+        // a commit this load completed) rides the receipt like on a
+        // single verb.
+        let mut source_mems: Vec<String> = relates
+            .iter()
+            .map(|(a, _)| a.source.mem().to_string())
+            .collect();
+        source_mems.sort();
+        source_mems.dedup();
+        drift_warnings.extend(self.level_for_write(&source_mems));
         // Same acyclic-guard rule as the single-item path: any added
         // edge on an ACYCLIC rel-type (or a rel-type in an
         // `acyclic_sets` set, whose guard walks the set's UNION

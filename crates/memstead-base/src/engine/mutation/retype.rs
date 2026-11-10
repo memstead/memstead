@@ -43,7 +43,6 @@ use crate::runtime_validator::{
     validate_cross_mem_edge, validate_rel_shape, validate_section_content, validate_section_keys,
 };
 use crate::vcs::{Actor, ClientId};
-use crate::workspace::MountCapability;
 
 use super::super::{Engine, EngineError, RetypeEntityArgs, RetypeEntityOutcome};
 use super::unknown_type_error;
@@ -69,20 +68,16 @@ impl Engine {
         let id = &args.id;
         let mem = id.mem().to_string();
 
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem)
-            .ok_or_else(|| self.unknown_mem_error(&mem))?;
-        if self.mounts[mount_idx].mount.capability != MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem));
-        }
-
-        // Reload-before-operation, so the CAS compare and the edge walk
-        // run against current truth.
+        // A retype rechecks the edges that point at the entity, and they
+        // can come from any mem: like a delete, it locks every writable
+        // mount, reloads every mem and loads the deferred ones before it
+        // walks an edge, so the CAS compare and the edge walk run
+        // against current truth everywhere.
+        let (_write_lock, reloaded) = self.lock_workspace_for_write_if(!args.dry_run)?;
         let mut drift_warnings: Vec<WarningHint> = short_hint.into_iter().collect();
-        let _write_lock = self.lock_mems_for_write_if(!args.dry_run, &[&mem])?;
-        drift_warnings.extend(self.reload_if_stale(Some(&mem)));
+        drift_warnings.extend(reloaded);
+
+        let mount_idx = self.writable_mount_index(&mem)?;
 
         let entity = self
             .store

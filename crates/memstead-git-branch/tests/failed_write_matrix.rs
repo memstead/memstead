@@ -826,6 +826,8 @@ const HOOKS: &[(&str, bool)] = &[
 const WRITE_HELPERS: &[&str] = &[
     "lock_mems_for_write",
     "lock_mems_for_write_if",
+    "lock_for_write",
+    "lock_workspace_for_write_if",
     "commit_staged",
     "commit_staged_pinned",
     "append_record",
@@ -927,6 +929,25 @@ const VERBS: &[(&str, &[Verb])] = &[
     ),
     // The write lock and the one commit call, shared by every verb.
     ("engine/write_lock.rs::lock_mems_for_write_if", EVERY_VERB),
+    // A verb that names its mems locks them after the roster is
+    // reconciled; a verb whose guard reads the workspace locks every
+    // writable mount.
+    (
+        "engine/write_lock.rs::lock_for_write",
+        &[
+            Verb::Create,
+            Verb::CreateIntoDeferredMem,
+            Verb::BatchCreate,
+            Verb::Update,
+            Verb::BatchUpdate,
+            Verb::Relate,
+            Verb::BatchRelate,
+        ],
+    ),
+    (
+        "engine/write_lock.rs::lock_workspace_for_write_if",
+        &[Verb::Delete, Verb::DeleteStub, Verb::Retype],
+    ),
     ("engine/write_lock.rs::drop", EVERY_VERB),
     ("engine/write_lock.rs::discard_strays", EVERY_VERB),
     ("engine/mutation/landing.rs::commit_staged", EVERY_VERB),

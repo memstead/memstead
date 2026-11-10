@@ -116,31 +116,19 @@ impl Engine {
         let id = &args.id;
         let mem = id.mem().to_string();
 
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem)
-            .ok_or_else(|| self.unknown_mem_error(&mem))?;
-        if self.mounts[mount_idx].mount.capability != MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem));
-        }
-
-        // Delete's race guard is `HAS_INCOMING_REFS`, and incoming
-        // edges can originate in ANY mem — so the check is only
-        // truthful over a complete store. A deferred (lazy, unloaded)
-        // mem's referrers would otherwise be invisible and the delete
-        // would silently admit what an eager boot refuses (the third
-        // lazy-mount grade demonstrated exactly that). Full load first;
-        // the drift reload below stays scoped to the target mem.
-        self.ensure_mems_loaded(None);
-
-        // Reload-before-operation: reload if a sibling advanced the
-        // mem ref, so the `expected_hash` compare and the
-        // referrer classification below see current truth. Notice
-        // rides the outcome's `warnings`.
+        // Delete's guard is `HAS_INCOMING_REFS`, and an incoming edge
+        // can originate in ANY mem. The guard is only truthful over a
+        // view of every mem that was taken under that mem's lock: a
+        // relation a sibling process added from another mem is not in a
+        // view this engine loaded earlier, and a deferred mem's
+        // referrers are in no view at all. So the delete locks every
+        // writable mount, reloads every mem and loads the deferred ones
+        // before it reads a referrer.
+        let (_write_lock, reloaded) = self.lock_workspace_for_write_if(true)?;
         let mut drift_warnings: Vec<WarningHint> = short_hint.into_iter().collect();
-        let _write_lock = self.lock_mems_for_write(&[&mem])?;
-        drift_warnings.extend(self.reload_if_stale(Some(&mem)));
+        drift_warnings.extend(reloaded);
+
+        let mount_idx = self.writable_mount_index(&mem)?;
 
         let entity = self
             .store

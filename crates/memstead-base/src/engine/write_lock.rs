@@ -175,6 +175,105 @@ impl Engine {
         Err(failure)
     }
 
+    /// The lock and the view for a verb that learns what it writes, or
+    /// what its guard reads, only by reading the workspace (a delete's
+    /// and a retype's referrer check, a rename's referrers). Such a verb
+    /// cannot name its mems up front, and a view of a mem taken before
+    /// that mem's lock is held can miss what a sibling wrote into it. So
+    /// it takes every writable mount's lock, in the one sorted order the
+    /// lock defines, after the roster is reconciled (a mem attached
+    /// since is locked too), and only then reloads every mem and loads
+    /// the ones whose loading was deferred. No lock is taken after
+    /// planning began, so there is nothing to restart.
+    ///
+    /// `writes` false (a rehearsal) takes no lock and still brings the
+    /// view up to date.
+    pub fn lock_workspace_for_write_if(
+        &mut self,
+        writes: bool,
+    ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
+        let mut warnings = self.roster_before_locking();
+        let writable: Vec<String> = self
+            .mounts
+            .iter()
+            .filter(|m| m.mount.capability == crate::workspace::MountCapability::Write)
+            .map(|m| m.mount.mem.clone())
+            .collect();
+        let guard = self.lock_mems_for_write_if(writes, &writable)?;
+        warnings.extend(self.reload_if_stale_content_only(None));
+        Ok((guard, warnings))
+    }
+
+    /// The lock of a verb that names its mems: the roster is reconciled
+    /// first, so a mem attached to the workspace since this engine
+    /// started is mounted, and therefore locked, before the first write
+    /// into it. Returns what the reconcile reported; the caller takes
+    /// its view under the lock ([`Self::level_for_write`]) and looks
+    /// its mounts up after this call (a reconcile moves them).
+    pub fn lock_for_write<S: AsRef<str>>(
+        &mut self,
+        writes: bool,
+        mems: &[S],
+    ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
+        let warnings = self.roster_before_locking();
+        let guard = self.lock_mems_for_write_if(writes, mems)?;
+        Ok((guard, warnings))
+    }
+
+    /// The view a verb plans from, taken under its lock: the mems it
+    /// writes are reloaded (a deferred one is loaded: a write into a
+    /// mem needs the mem), and so is every other mem that is loaded,
+    /// because the verb checks its relation targets against them. What
+    /// such a check relies on (that the target exists, what type it
+    /// has) changes only through a delete, a rename or a retype, and
+    /// each of those holds every writable mount's lock: while this verb
+    /// holds one lock, a view reloaded now stays true of those facts
+    /// until it commits. A deferred mem that is not written stays
+    /// unloaded; a target in it is checked against its storage.
+    pub(in crate::engine) fn level_for_write<S: AsRef<str>>(
+        &mut self,
+        written: &[S],
+    ) -> Vec<crate::ops::WarningHint> {
+        let mut mems: Vec<String> = written.iter().map(|m| m.as_ref().to_string()).collect();
+        for m in &self.mounts {
+            if !m.deferred && !mems.contains(&m.mount.mem) {
+                mems.push(m.mount.mem.clone());
+            }
+        }
+        let mut warnings = Vec::new();
+        for mem in &mems {
+            warnings.extend(self.reload_if_stale_content_only(Some(mem)));
+        }
+        warnings
+    }
+
+    /// The mount a write into `mem` goes to. Looked up after
+    /// [`Self::lock_for_write`], whose roster reconcile can move the
+    /// mounts.
+    pub(in crate::engine) fn writable_mount_index(&self, mem: &str) -> Result<usize, EngineError> {
+        let idx = self
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == mem)
+            .ok_or_else(|| self.unknown_mem_error(mem))?;
+        if self.mounts[idx].mount.capability != crate::workspace::MountCapability::Write {
+            return Err(EngineError::ReadOnlyMount(mem.to_string()));
+        }
+        Ok(idx)
+    }
+
+    /// Reconcile the roster ahead of a lock. A mutation that runs
+    /// inside another one (a batch over the single-item path) holds its
+    /// locks already and has begun planning: the membership it planned
+    /// against stays as it is until the outer mutation is done.
+    fn roster_before_locking(&mut self) -> Vec<crate::ops::WarningHint> {
+        if COVERED.with(|c| c.borrow().is_empty()) {
+            self.roster_warnings()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// [`Self::lock_mems_for_write`] when `writes` is true; an empty
     /// guard otherwise. A rehearsal (`dry_run`) commits nothing, so it
     /// takes no lock and leaves the workspace byte-identical, lock files

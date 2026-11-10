@@ -97,8 +97,9 @@ impl Engine {
         }
 
         // Same posture as every other commit-producing mutation.
-        let _write_lock = self.lock_mems_for_write(&[mem_name])?;
-        let mut warnings = self.reload_if_stale(Some(mem_name));
+        let (_write_lock, mut warnings) = self.lock_for_write(true, &[mem_name])?;
+        warnings.extend(self.reload_if_stale_content_only(Some(mem_name)));
+        let mount_idx = self.writable_mount_index(mem_name)?;
         if let Some(w) = self.note_missing_warning("set_review_mark", note) {
             warnings.push(w);
         }
