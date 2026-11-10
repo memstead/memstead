@@ -720,34 +720,14 @@ fn resolve_mem_name(
     if let Some(name) = explicit {
         return Ok(name);
     }
-    // Every mount: a broken mem is still a writable mem
-    // for the purpose of "is the target unambiguous", and omitting it turns an
-    // ambiguous workspace into a silently-resolved one.
-    let writable: Vec<String> = engine
-        .mounts_with_optional_config()
-        .filter(|(name, _)| engine.mem_router().is_writable(name))
-        .map(|(name, _)| name.to_string())
-        .collect();
-
-    match writable.len() {
-        0 => Err(CliError::new(
-            ExitKind::Generic,
-            "NO_WRITABLE_MEM",
-            "no writable mem loaded — nothing to export",
-        )
-        .into()),
-        1 => Ok(writable.into_iter().next().unwrap()),
-        _ => Err(CliError::new(
-            ExitKind::Validation,
-            "AMBIGUOUS_MEM",
-            format!(
-                "multiple writable mems loaded ({}); pass --mem <name>",
-                writable.join(", ")
-            ),
-        )
-        .with_details(json!({ "mems": writable }))
-        .into()),
-    }
+    // Every mount counts, a broken mem too (see `sole_writable_mem`).
+    engine.sole_writable_mem().map_err(|e| {
+        let hint = match e {
+            memstead_base::EngineError::NoWritableMem => "Nothing to export.",
+            _ => "Pass --mem <name>.",
+        };
+        CliError::from_engine_with_hint(e, hint).into()
+    })
 }
 
 /// Filesystem-mem `memstead export --format mem` builds the `.mem`

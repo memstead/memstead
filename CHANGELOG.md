@@ -125,7 +125,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   operation-state refusals are the engine's too
   (`BindingConfigs::lookup_error`, `Binding::absent_sync_error`); a binding
   that does not exist now lists `details.available` on every command that
-  looks one up.
+  looks one up. `NO_WRITABLE_MEM` and `AMBIGUOUS_MEM` (`memstead create`,
+  `batch-create`, `changes`, `export`, `publish`) are the engine's
+  (`Engine::default_writable_mem_or_refuse`, `Engine::sole_writable_mem`),
+  with each command's own hint after the engine's message.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

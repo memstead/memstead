@@ -7,7 +7,7 @@
 use clap::Parser;
 
 use crate::CliError;
-use crate::output::{ExitKind, print_json, print_markdown};
+use crate::output::{print_json, print_markdown};
 use crate::setup::{CliContext, CliEngine};
 
 #[derive(Parser, Debug)]
@@ -65,10 +65,9 @@ fn run_mem_repo(ctx: &CliContext, engine: memstead_base::Engine, args: Args) -> 
             .find(|(name, _)| engine.mem_router().is_writable(name))
             .map(|(name, _)| name.to_string())
             .ok_or_else(|| {
-                CliError::new(
-                    ExitKind::Generic,
-                    "NO_WRITABLE_MEM",
-                    "no writable mem loaded — pass --mem <name>",
+                CliError::from_engine_with_hint(
+                    memstead_base::EngineError::NoWritableMem,
+                    "Pass --mem <name>.",
                 )
             })?,
     };

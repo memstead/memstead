@@ -211,6 +211,32 @@ impl Engine {
     /// pre-fix MCP path read `writable_mems().iter().next()` off an
     /// unordered `HashSet`, which silently retargeted writes when a second
     /// mem appeared).
+    /// The default writable mem for a call that names none, or the
+    /// engine's refusal when there is none.
+    pub fn default_writable_mem_or_refuse(&self) -> Result<String, EngineError> {
+        self.default_writable_mem()
+            .map(str::to_string)
+            .ok_or(EngineError::NoWritableMem)
+    }
+
+    /// The one writable mem, for a call that acts on exactly one: refused
+    /// when none or several are mounted.
+    pub fn sole_writable_mem(&self) -> Result<String, EngineError> {
+        // Every mount, not only those with a readable config: counting only
+        // config-readable mems could report exactly one writable mem while a
+        // second, broken one exists, and act on the wrong one.
+        let mut writable: Vec<String> = self
+            .mounts_with_optional_config()
+            .filter(|(name, _)| self.mem_router().is_writable(name))
+            .map(|(name, _)| name.to_string())
+            .collect();
+        match writable.len() {
+            0 => Err(EngineError::NoWritableMem),
+            1 => Ok(writable.remove(0)),
+            _ => Err(EngineError::AmbiguousMem { mems: writable }),
+        }
+    }
+
     pub fn default_writable_mem(&self) -> Option<&str> {
         self.mounts
             .iter()

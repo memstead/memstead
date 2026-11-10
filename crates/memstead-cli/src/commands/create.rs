@@ -541,15 +541,9 @@ fn first_writable_mem(engine: &memstead_base::Engine) -> anyhow::Result<String> 
     // MCP omitted-`mem` paths always agree: the first writable mount in
     // declaration order — the seed mem — not an alphabetically-first or
     // set-order pick that shifts when an unrelated mem is added.
-    match engine.default_writable_mem() {
-        Some(name) => Ok(name.to_string()),
-        None => Err(CliError::new(
-            ExitKind::Generic,
-            "NO_WRITABLE_MEM",
-            "no writable mem loaded — pass --mem <name>",
-        )
-        .into()),
-    }
+    engine
+        .default_writable_mem_or_refuse()
+        .map_err(|e| CliError::from_engine_with_hint(e, "Pass --mem <name>.").into())
 }
 
 #[cfg(test)]

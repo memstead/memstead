@@ -176,17 +176,9 @@ fn build_create_args(
 ) -> anyhow::Result<(CreateEntityArgs, Option<String>)> {
     let mem = match entry.mem {
         Some(v) => v,
-        None => match engine.default_writable_mem() {
-            Some(name) => name.to_string(),
-            None => {
-                return Err(CliError::new(
-                    ExitKind::Generic,
-                    "NO_WRITABLE_MEM",
-                    format!("entry {idx}: no writable mem loaded — set `mem` in the entry"),
-                )
-                .into());
-            }
-        },
+        None => engine.default_writable_mem_or_refuse().map_err(|e| {
+            CliError::from_engine_with_hint(e, &format!("Set `mem` in entry {idx}."))
+        })?,
     };
 
     if let Some(template_id) = entry.id.as_deref() {

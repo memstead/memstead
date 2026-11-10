@@ -178,104 +178,91 @@ fn run_with_root(
     //    for the POST call. `resolved_version` is the version that will
     //    actually publish — surfaced in the dry-run preview.
     let mut resolved_version: Option<String> = None;
-    let (archive_path, _tempfile_guard): (PathBuf, Option<NamedTempFile>) =
-        if let Some(p) = args.archive {
-            (p, None)
-        } else if let Some(mem_name) = args.mem.as_deref() {
-            let workspace_root = resolve_workspace_root(root_override.as_deref())?;
-            let mut engine = ctx.cli_engine_at(&workspace_root)?.into_base();
-            // Persist the version bump before exporting — but never
-            // under --dry-run, which must leave the workspace untouched.
-            if let Some(ver) = target_version.clone()
-                && !args.dry_run
-            {
-                let bumped = engine
-                    .set_mem_version(mem_name, ver, Some("version bump for registry publish"))
-                    .map_err(CliError::from_engine_op)?;
-                // Publish is about to ship this mem outward, so a config that
-                // moved under us is exactly what the operator needs to see
-                // before the archive leaves.
-                for w in &bumped.warnings {
-                    crate::output::print_markdown(&format!("> {w}"));
+    let (archive_path, _tempfile_guard): (PathBuf, Option<NamedTempFile>) = if let Some(p) =
+        args.archive
+    {
+        (p, None)
+    } else if let Some(mem_name) = args.mem.as_deref() {
+        let workspace_root = resolve_workspace_root(root_override.as_deref())?;
+        let mut engine = ctx.cli_engine_at(&workspace_root)?.into_base();
+        // Persist the version bump before exporting — but never
+        // under --dry-run, which must leave the workspace untouched.
+        if let Some(ver) = target_version.clone()
+            && !args.dry_run
+        {
+            let bumped = engine
+                .set_mem_version(mem_name, ver, Some("version bump for registry publish"))
+                .map_err(CliError::from_engine_op)?;
+            // Publish is about to ship this mem outward, so a config that
+            // moved under us is exactly what the operator needs to see
+            // before the archive leaves.
+            for w in &bumped.warnings {
+                crate::output::print_markdown(&format!("> {w}"));
+            }
+        }
+        resolved_version = target_version.as_ref().map(|v| v.to_string()).or_else(|| {
+            engine
+                .mem_config_for(mem_name)
+                .and_then(|c| c.version.clone())
+                .map(|v| v.to_string())
+        });
+        let bytes = engine
+            .export_mem_to_bytes(mem_name)
+            .map_err(CliError::from_engine_op)?;
+        stage_bytes_to_tempfile(&redact_if_requested(&args, bytes)?)?
+    } else {
+        let workspace_root = resolve_workspace_root(root_override.as_deref())?;
+        // Engine-first: the engine exports whatever layout it
+        // booted — the mount roster locates the mem folder and its
+        // config, so the bare shape works from the workspace root
+        // of a current-layout (`workspace.toml` + mounts) workspace
+        // exactly like `--mem` does (sealed-gate finding F6's seam;
+        // the legacy assembly resolved the config against the
+        // workspace root, which only coincides with the mem folder
+        // in the legacy single-mem layout). The legacy folder
+        // assembly stays as the fallback for exactly that layout,
+        // where no engine boots.
+        // Exactly one writable mem routes through the engine;
+        // multiple demand `--mem`; zero (an engine that boots but
+        // mounts nothing writable — some legacy-shaped test trees)
+        // falls through to the folder assembly like a failed boot.
+        let engine_mem: Option<(memstead_base::Engine, String)> = match ctx
+            .cli_engine_at(&workspace_root)
+        {
+            Ok(cli_engine) => {
+                let engine = cli_engine.into_base();
+                // No writable mem is not a refusal here: publish
+                // falls back to the workspace's archive path.
+                match engine.sole_writable_mem() {
+                    Ok(mem) => Some((engine, mem)),
+                    Err(memstead_base::EngineError::NoWritableMem) => None,
+                    Err(e) => {
+                        return Err(CliError::from_engine_with_hint(e, "Pass --mem <name>.").into());
+                    }
                 }
             }
-            resolved_version = target_version.as_ref().map(|v| v.to_string()).or_else(|| {
-                engine
-                    .mem_config_for(mem_name)
-                    .and_then(|c| c.version.clone())
-                    .map(|v| v.to_string())
-            });
-            let bytes = engine
-                .export_mem_to_bytes(mem_name)
-                .map_err(CliError::from_engine_op)?;
-            stage_bytes_to_tempfile(&redact_if_requested(&args, bytes)?)?
-        } else {
-            let workspace_root = resolve_workspace_root(root_override.as_deref())?;
-            // Engine-first: the engine exports whatever layout it
-            // booted — the mount roster locates the mem folder and its
-            // config, so the bare shape works from the workspace root
-            // of a current-layout (`workspace.toml` + mounts) workspace
-            // exactly like `--mem` does (sealed-gate finding F6's seam;
-            // the legacy assembly resolved the config against the
-            // workspace root, which only coincides with the mem folder
-            // in the legacy single-mem layout). The legacy folder
-            // assembly stays as the fallback for exactly that layout,
-            // where no engine boots.
-            // Exactly one writable mem routes through the engine;
-            // multiple demand `--mem`; zero (an engine that boots but
-            // mounts nothing writable — some legacy-shaped test trees)
-            // falls through to the folder assembly like a failed boot.
-            let engine_mem: Option<(memstead_base::Engine, String)> =
-                match ctx.cli_engine_at(&workspace_root) {
-                    Ok(cli_engine) => {
-                        let engine = cli_engine.into_base();
-                        let writable: Vec<String> = engine
-                            // Every mount. Counting only
-                            // config-readable mems could report exactly one
-                            // writable mem while a second, broken one exists,
-                            // and silently publish the wrong one.
-                            .mounts_with_optional_config()
-                            .filter(|(name, _)| engine.mem_router().is_writable(name))
-                            .map(|(name, _)| name.to_string())
-                            .collect();
-                        match writable.len() {
-                            1 => Some((engine, writable.into_iter().next().unwrap())),
-                            0 => None,
-                            _ => {
-                                return Err(CliError::new(
-                                    ExitKind::Validation,
-                                    "AMBIGUOUS_MEM",
-                                    format!(
-                                        "multiple writable mems loaded ({}); pass --mem <name>",
-                                        writable.join(", ")
-                                    ),
-                                )
-                                .into());
-                            }
-                        }
-                    }
-                    Err(_) => None,
-                };
-            let bytes = match engine_mem {
-                Some((engine, mem_name)) => {
-                    resolved_version = engine
-                        .mem_config_for(&mem_name)
-                        .and_then(|c| c.version.clone())
-                        .map(|v| v.to_string());
-                    engine
-                        .export_mem_to_bytes(&mem_name)
-                        .map_err(CliError::from_engine_op)?
-                }
-                None => assemble_archive(&workspace_root).map_err(|e| {
-                    CliError::new(
-                        ExitKind::Validation,
-                        "ARCHIVE_ASSEMBLY_FAILED",
-                        format!("assemble archive: {e}"),
-                    )
-                })?,
-            };
-            stage_bytes_to_tempfile(&redact_if_requested(&args, bytes)?)?
+            Err(_) => None,
         };
+        let bytes = match engine_mem {
+            Some((engine, mem_name)) => {
+                resolved_version = engine
+                    .mem_config_for(&mem_name)
+                    .and_then(|c| c.version.clone())
+                    .map(|v| v.to_string());
+                engine
+                    .export_mem_to_bytes(&mem_name)
+                    .map_err(CliError::from_engine_op)?
+            }
+            None => assemble_archive(&workspace_root).map_err(|e| {
+                CliError::new(
+                    ExitKind::Validation,
+                    "ARCHIVE_ASSEMBLY_FAILED",
+                    format!("assemble archive: {e}"),
+                )
+            })?,
+        };
+        stage_bytes_to_tempfile(&redact_if_requested(&args, bytes)?)?
+    };
 
     // 2. Dry run: report the resolved publish and stop — no auth, no
     //    POST, no mutation (any --version bump was skipped above).

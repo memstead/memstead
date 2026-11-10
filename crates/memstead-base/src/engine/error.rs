@@ -1108,6 +1108,12 @@ pub enum EngineError {
     /// length, malformed path, etc.) is the message text.
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// A call that needs a writable mem, in a workspace that mounts none.
+    #[error("no writable mem loaded")]
+    NoWritableMem,
+    /// A call that needs the one writable mem, where several are mounted.
+    #[error("multiple writable mems loaded ({})", mems.join(", "))]
+    AmbiguousMem { mems: Vec<String> },
     /// A type selection naming types the schema does not declare.
     #[error("unknown entity type(s): [{}]; declared types: [{}]", unknown.join(", "), declared.join(", "))]
     UnknownTypes {
@@ -1695,6 +1701,8 @@ impl EngineError {
             EngineError::MemNameCollision { .. } => "MEM_NAME_COLLISION",
             EngineError::ProcessMemNotEligible { .. } => "PROCESS_MEM_NOT_ELIGIBLE",
             EngineError::InvalidInput(_) => "INVALID_INPUT",
+            EngineError::NoWritableMem => "NO_WRITABLE_MEM",
+            EngineError::AmbiguousMem { .. } => "AMBIGUOUS_MEM",
             EngineError::UnknownTypes { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::UnknownSchema { .. } => "SCHEMA_NOT_FOUND",
             EngineError::InvalidTargetSchema { .. } => "INVALID_INPUT",
@@ -2478,7 +2486,8 @@ impl EngineError {
                 "missing_fields": missing_fields,
                 "set_via": format!("memstead mem set-version {mem} <version>"),
             }),
-            EngineError::SearchUnavailable => serde_json::json!({}),
+            EngineError::SearchUnavailable | EngineError::NoWritableMem => serde_json::json!({}),
+            EngineError::AmbiguousMem { mems } => serde_json::json!({ "mems": mems }),
         }
     }
 

@@ -891,6 +891,13 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
             },
         ),
         ("SearchUnavailable".into(), EngineError::SearchUnavailable),
+        ("NoWritableMem".into(), EngineError::NoWritableMem),
+        (
+            "AmbiguousMem".into(),
+            EngineError::AmbiguousMem {
+                mems: v(&["a", "b"]),
+            },
+        ),
         (
             "MarkdownExportUnsupportedBackend".into(),
             EngineError::MarkdownExportUnsupportedBackend {
@@ -1048,6 +1055,8 @@ fn covered(e: &EngineError) {
         | EngineError::DescriptionNotPermitted { .. }
         | EngineError::RelationManualAuthoringForbidden { .. }
         | EngineError::SearchUnavailable
+        | EngineError::NoWritableMem
+        | EngineError::AmbiguousMem { .. }
         | EngineError::MarkdownExportUnsupportedBackend { .. }
         | EngineError::InvalidAnchor(_)
         | EngineError::InEntity { .. } => {}

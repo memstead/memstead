@@ -625,7 +625,6 @@ mod surface_codes {
     /// Workspace, mem or entity state still built at a surface: each moves
     /// into the engine.
     const MOVE_TO_ENGINE: &[&str] = &[
-        "AMBIGUOUS_MEM",
         "AMBIGUOUS_QUERY",
         "ANCHORS_SIDECAR_UNREADABLE",
         "CONTEXT_NOT_COMPUTABLE",
@@ -634,7 +633,6 @@ mod surface_codes {
         "MEM_NOT_READ_ONLY",
         "NO_ACTIVE_BINDING",
         "NO_WORKSPACE",
-        "NO_WRITABLE_MEM",
         "PROJECTION_ENABLE_FAILED",
         "PROJECTION_INIT_FAILED",
         "PROJECTION_VERIFY_BACKFILL_FAILED",
@@ -653,6 +651,7 @@ mod surface_codes {
     /// (or, for INVALID_INPUT, is a defect in the surface's own input
     /// syntax spelled with the engine's code).
     const ENGINE_CODE_BUILT_AT_SURFACE: &[&str] = &[
+        "AMBIGUOUS_MEM",
         "EMBEDDED_SCHEMA_INVALID",
         "INVALID_INPUT",
         "INVALID_OBSERVATION",

@@ -192,7 +192,8 @@ impl CliError {
             | ParseAfterWrite { .. }
             | Parse { .. }
             | Backend { .. }
-            | SearchUnavailable => ExitKind::Generic,
+            | SearchUnavailable
+            | NoWritableMem => ExitKind::Generic,
             HashMismatch { .. } => ExitKind::HashMismatch,
             NotFound { .. }
             | EntityIdMissingMem { .. }
@@ -263,6 +264,7 @@ impl CliError {
             | InvalidTargetSchema { .. }
             | UnknownSchema { .. }
             | UnknownTypes { .. }
+            | AmbiguousMem { .. }
             | EntityIdTooLong { .. }
             | RenameSimilarityOutOfRange { .. }
             | MarkdownExportUnsupportedBackend { .. }
