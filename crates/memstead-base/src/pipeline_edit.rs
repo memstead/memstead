@@ -110,6 +110,74 @@ pub enum PipelineEditError {
     Store(#[from] StoreError),
 }
 
+impl PipelineEditError {
+    /// The wire code of a binding edit refusal.
+    pub fn code(&self) -> &'static str {
+        match self {
+            PipelineEditError::NoWorkspaceRoot => "WORKSPACE_NOT_INITIALISED",
+            PipelineEditError::AlreadyExists { .. }
+            | PipelineEditError::RenameTargetExists { .. } => "PROJECTION_EXISTS",
+            PipelineEditError::NotFound { .. } => "PROJECTION_NOT_FOUND",
+            PipelineEditError::InvalidJson { .. } => "PROJECTION_EDIT_INVALID_JSON",
+            PipelineEditError::Capability { .. } => "PROJECTION_EDIT_REFUSED",
+            PipelineEditError::IntentUnknownRelationship { .. } => {
+                crate::binding_intent::BINDING_INTENT_UNKNOWN_RELATIONSHIP_CODE
+            }
+            PipelineEditError::Provenance(_) | PipelineEditError::Store(_) => {
+                "PROJECTION_EDIT_FAILED"
+            }
+        }
+    }
+
+    /// The message a binding edit refusal reads, naming the binding.
+    pub fn prose_render(&self, binding: &str) -> String {
+        match self {
+            PipelineEditError::NotFound { .. } => format!("no binding `{binding}`"),
+            PipelineEditError::InvalidJson { message, .. } => {
+                format!("the patch for `{binding}` did not deserialize: {message}")
+            }
+            PipelineEditError::Capability { refusals, .. } => format!(
+                "the patch would introduce validation refusals on `{binding}` (nothing was \
+                 written): {}",
+                refusals
+                    .iter()
+                    .map(|r| r.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
+            PipelineEditError::IntentUnknownRelationship { findings, .. } => {
+                crate::binding_intent::intent_refusal_message(binding, findings)
+            }
+            _ => format!("could not edit binding `{binding}`: {self}"),
+        }
+    }
+
+    /// The recovery payload, with the binding the call named.
+    pub fn details(&self, binding: &str) -> serde_json::Value {
+        match self {
+            PipelineEditError::InvalidJson { message, .. } => serde_json::json!({
+                "binding": binding,
+                "error": message,
+            }),
+            PipelineEditError::Capability { refusals, .. } => serde_json::json!({
+                "binding": binding,
+                "refusals": refusals.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
+            }),
+            PipelineEditError::IntentUnknownRelationship { findings, .. } => {
+                crate::binding_intent::intent_refusal_details(binding, findings)
+            }
+            PipelineEditError::NotFound { .. }
+            | PipelineEditError::AlreadyExists { .. }
+            | PipelineEditError::RenameTargetExists { .. }
+            | PipelineEditError::NoWorkspaceRoot => serde_json::json!({ "binding": binding }),
+            PipelineEditError::Provenance(_) | PipelineEditError::Store(_) => serde_json::json!({
+                "binding": binding,
+                "error": self.to_string(),
+            }),
+        }
+    }
+}
+
 /// The destination schema a binding write is checked against: the pin as
 /// displayed (`software@0.5.0`) and the loaded schema. `None` when the
 /// destination mem is not mounted or carries no schema — there is no

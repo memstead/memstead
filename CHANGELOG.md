@@ -117,7 +117,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `PROJECTION_SCOPE_UNINTERPRETABLE` carries `details.reason`. The verify
   refusals do too; a malformed binding id under `projection verify` is
   `PROJECTION_INVALID_NAME` (exit 5) as under every other projection
-  command, where it was `PROJECTION_VERIFY_FAILED` (exit 1).
+  command, where it was `PROJECTION_VERIFY_FAILED` (exit 1). A binding
+  edit refusal names its code in the engine (`PipelineEditError::code`):
+  on the CLI an edit that would create a binding whose name is taken now
+  refuses `PROJECTION_EXISTS` (exit 5) where it fell to
+  `PROJECTION_EDIT_FAILED` (exit 1).
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

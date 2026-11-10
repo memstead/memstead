@@ -223,6 +223,42 @@ pub fn render_intent_findings(findings: &[IntentFinding], binding_id: &str) -> S
     format!("{}\n\n", lines.join("\n>\n"))
 }
 
+/// The recovery payload of an intent refusal: the tokens it named, the
+/// destination schema and that schema's relationship vocabulary.
+pub fn intent_refusal_details(binding: &str, findings: &[IntentFinding]) -> serde_json::Value {
+    let tokens: Vec<&str> = findings.iter().map(|f| f.token.as_str()).collect();
+    let first = findings.first();
+    serde_json::json!({
+        "binding": binding,
+        "tokens": tokens,
+        "schema": first.map(|f| f.schema.clone()).unwrap_or_default(),
+        "vocabulary": first.map(|f| f.vocabulary.clone()).unwrap_or_default(),
+    })
+}
+
+/// The message of an intent refusal.
+pub fn intent_refusal_message(binding: &str, findings: &[IntentFinding]) -> String {
+    let fmt = |items: &[String]| {
+        items
+            .iter()
+            .map(|t| format!("`{t}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let tokens: Vec<String> = findings.iter().map(|f| f.token.clone()).collect();
+    let first = findings.first();
+    let schema = first.map(|f| f.schema.clone()).unwrap_or_default();
+    let vocabulary = first.map(|f| f.vocabulary.clone()).unwrap_or_default();
+    format!(
+        "intent refused for `{binding}` (nothing was written): it names {} — not a \
+         relationship of the destination schema `{schema}`. An agent reads an all-caps \
+         token in the intent as an edge it may write, so the intent may name only what \
+         the vocabulary carries: {}",
+        fmt(&tokens),
+        fmt(&vocabulary)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

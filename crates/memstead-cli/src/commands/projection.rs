@@ -925,41 +925,14 @@ fn derive_stem(source: &str) -> String {
 /// checked against, so the caller can fix the intent without opening the
 /// schema.
 fn intent_refusal(binding_id: &str, findings: &[IntentFinding]) -> CliError {
-    let tokens: Vec<&str> = findings.iter().map(|f| f.token.as_str()).collect();
-    let schema = findings
-        .first()
-        .map(|f| f.schema.clone())
-        .unwrap_or_default();
-    let vocabulary = findings
-        .first()
-        .map(|f| f.vocabulary.clone())
-        .unwrap_or_default();
-    CliError::new(
-        ExitKind::Validation,
-        "BINDING_INTENT_UNKNOWN_RELATIONSHIP",
-        format!(
-            "intent refused for `{binding_id}` (nothing was written): it names {} — not a \
-             relationship of the destination schema `{schema}`. An agent reads an all-caps \
-             token in the intent as an edge it may write, so the intent may name only what \
-             the vocabulary carries: {}",
-            tokens
-                .iter()
-                .map(|t| format!("`{t}`"))
-                .collect::<Vec<_>>()
-                .join(", "),
-            vocabulary
-                .iter()
-                .map(|v| format!("`{v}`"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    )
-    .with_details(json!({
-        "binding": binding_id,
-        "tokens": tokens,
-        "schema": schema,
-        "vocabulary": vocabulary,
-    }))
+    CliError {
+        kind: ExitKind::Validation,
+        code: memstead_base::binding_intent::BINDING_INTENT_UNKNOWN_RELATIONSHIP_CODE,
+        message: memstead_base::binding_intent::intent_refusal_message(binding_id, findings),
+        details: Some(memstead_base::binding_intent::intent_refusal_details(
+            binding_id, findings,
+        )),
+    }
 }
 
 fn init_write_error(binding_id: &str, err: impl std::fmt::Display) -> CliError {
@@ -1447,43 +1420,26 @@ fn edit_refused(
     err: memstead_base::pipeline_edit::PipelineEditError,
 ) -> CliError {
     use memstead_base::pipeline_edit::PipelineEditError as E;
-    match &err {
-        E::NotFound { .. } => CliError::new(
-            ExitKind::NotFound,
-            "PROJECTION_NOT_FOUND",
-            format!("no binding `{binding_id}` — scaffold one with `projection init`"),
-        )
-        .with_details(json!({ "binding": binding_id })),
-        E::InvalidJson { message, .. } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_EDIT_INVALID_JSON",
-            format!("the patch for `{binding_id}` did not deserialize: {message}"),
-        )
-        .with_details(json!({ "binding": binding_id, "error": message })),
-        E::Capability { refusals, .. } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_EDIT_REFUSED",
-            format!(
-                "the patch would introduce validation refusals on `{binding_id}` (nothing was \
-                 written): {}",
-                refusals
-                    .iter()
-                    .map(|r| r.to_string())
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ),
-        )
-        .with_details(json!({
-            "binding": binding_id,
-            "refusals": refusals.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
-        })),
-        E::IntentUnknownRelationship { findings, .. } => intent_refusal(binding_id, findings),
-        _ => CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_EDIT_FAILED",
-            format!("could not edit binding `{binding_id}`: {err}"),
-        )
-        .with_details(json!({ "binding": binding_id, "error": err.to_string() })),
+    // Code, payload and message are the edit error's own; the exit kind
+    // and the `projection init` pointer are this command's.
+    let kind = match &err {
+        E::NotFound { .. } => ExitKind::NotFound,
+        E::InvalidJson { .. }
+        | E::Capability { .. }
+        | E::IntentUnknownRelationship { .. }
+        | E::AlreadyExists { .. }
+        | E::RenameTargetExists { .. } => ExitKind::Validation,
+        _ => ExitKind::Generic,
+    };
+    let mut message = err.prose_render(binding_id);
+    if matches!(err, E::NotFound { .. }) {
+        message.push_str(" — scaffold one with `projection init`");
+    }
+    CliError {
+        kind,
+        code: err.code(),
+        details: Some(err.details(binding_id)),
+        message,
     }
 }
 

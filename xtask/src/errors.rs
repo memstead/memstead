@@ -588,7 +588,7 @@ mod surface_codes {
         "INVALID_ROLE",
         "INVALID_VERDICT",
         "INVALID_VERSION",
-        "PROJECTION_EDIT_INVALID_JSON",
+        "PROJECTION_BRIEF_BINDING_REQUIRED",
         "PROJECTION_INVALID_DISPOSITIONS",
         "PROJECTION_INVALID_EXCLUSIONS",
     ];
@@ -635,11 +635,7 @@ mod surface_codes {
         "NO_ACTIVE_BINDING",
         "NO_WORKSPACE",
         "NO_WRITABLE_MEM",
-        "PROJECTION_BRIEF_BINDING_REQUIRED",
-        "PROJECTION_EDIT_FAILED",
-        "PROJECTION_EDIT_REFUSED",
         "PROJECTION_ENABLE_FAILED",
-        "PROJECTION_EXISTS",
         "PROJECTION_INIT_FAILED",
         "PROJECTION_OP_ALREADY_ENABLED",
         "PROJECTION_QUARANTINED",
@@ -660,7 +656,6 @@ mod surface_codes {
     /// (or, for INVALID_INPUT, is a defect in the surface's own input
     /// syntax spelled with the engine's code).
     const ENGINE_CODE_BUILT_AT_SURFACE: &[&str] = &[
-        "BINDING_INTENT_UNKNOWN_RELATIONSHIP",
         "EMBEDDED_SCHEMA_INVALID",
         "INVALID_INPUT",
         "INVALID_OBSERVATION",
@@ -668,6 +663,7 @@ mod surface_codes {
         "PROJECTION_ADVANCE_FAILED",
         "PROJECTION_CAPABILITY_UNSUPPORTED",
         "PROJECTION_EXCLUDE_FAILED",
+        "PROJECTION_EXISTS",
         "PROJECTION_INVALID_NAME",
         "PROJECTION_LOAD_FAILED",
         "PROJECTION_NOT_FOUND",
