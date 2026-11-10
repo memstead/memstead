@@ -674,6 +674,17 @@ pub enum EngineError {
         "the write to mem `{mem}` is decided and not yet applied ({detail}) — do not resend it; the next operation on the mem completes it first"
     )]
     CommitNotApplied { mem: String, detail: String },
+    /// The mem changed in storage and the reload before this write
+    /// failed, so the write was computed from a view that is behind
+    /// storage. Nothing was written. No existing code says this: the
+    /// caller's hash may even match the stale view, so `HASH_MISMATCH`
+    /// would be false, and the storage failure itself belongs to the
+    /// reload, not to this write. The next operation on the mem retries
+    /// the reload; resend the write after it.
+    #[error(
+        "mem `{mem}` changed in storage and could not be reloaded before this write ({detail}) — nothing was written; the next operation retries the reload, resend the write then"
+    )]
+    StaleView { mem: String, detail: String },
     /// `memstead_relate` source is a stub — stubs have no `entity_type`
     /// and cannot author edges. The agent must promote the stub to a
     /// real entity via `memstead_create` (stub adoption preserves any
@@ -1577,6 +1588,7 @@ impl EngineError {
             }
             EngineError::RenamePartialFailure { .. } => "RENAME_PARTIAL_FAILURE",
             EngineError::CommitNotApplied { .. } => "COMMIT_NOT_APPLIED",
+            EngineError::StaleView { .. } => "MEM_VIEW_STALE",
             EngineError::RelationHasBodyLinks { .. } => "RELATION_HAS_BODY_LINKS",
             EngineError::WikiLinkWithoutRelation { .. } => "WIKILINK_WITHOUT_RELATION",
             EngineError::StubCannotRelate { .. } => "STUB_CANNOT_RELATE",

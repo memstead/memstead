@@ -597,3 +597,117 @@ fn a_cut_off_commit_is_not_served_in_part_by_a_read_that_goes_to_storage() {
         assert_eq!(engine.entity_anchors(&id("alpha")).len(), 1, "step {step}");
     }
 }
+
+/// A write never lands on a view that is known to be behind storage.
+/// Here a sibling engine has written to the mem and this engine's
+/// reload before its own write fails once: the write, whose hash still
+/// matches the stale view, is refused with nothing written, and the
+/// sibling's write survives. The next call reloads and gets the honest
+/// hash mismatch.
+#[test]
+fn a_write_does_not_land_on_a_mem_whose_reload_failed() {
+    let template = seeded();
+    let dir = TempDir::new().unwrap();
+    copy_dir(template.path(), dir.path());
+    let io = FaultIo::new();
+    let mut engine = faulted_engine(dir.path(), &io);
+    let stale = update_args(&engine, "alpha", "this engine's rewrite");
+
+    // The sibling's write.
+    let mut sibling = engine_over(dir.path());
+    run("update", &mut sibling).unwrap();
+    let after_sibling = view(&engine_over(dir.path()), true);
+
+    // The reload this engine runs before its write fails once.
+    io.reset();
+    io.arm_fail_at(0);
+    let (actor, client) = cli_actor();
+    let err = engine
+        .update_entity(stale.clone(), actor, Some(&client), None)
+        .expect_err("a write from a stale view must not land");
+    assert_eq!(err.code(), "MEM_VIEW_STALE", "{err}");
+    io.reset();
+    assert_eq!(
+        view(&engine_over(dir.path()), true),
+        after_sibling,
+        "the refused write changed storage"
+    );
+
+    // The next call reloads; the stale hash is then what it is.
+    let err = engine
+        .update_entity(stale, actor, Some(&client), None)
+        .expect_err("the hash is stale");
+    assert_eq!(err.code(), "HASH_MISMATCH", "{err}");
+    assert_eq!(view(&engine, true), after_sibling);
+}
+
+/// A commit that is applied except for the sync of its record's removal
+/// is not finished, and the next operation finishes it first, also when
+/// the reload that would do so fails once in between: the write of that
+/// operation is refused, and the operation after it reloads, reports
+/// the completed commit and lands.
+#[test]
+fn an_unfinished_commit_is_finished_before_the_next_write_lands() {
+    let template = seeded();
+
+    let probe_dir = TempDir::new().unwrap();
+    copy_dir(template.path(), probe_dir.path());
+    let io = FaultIo::new();
+    let mut probe = faulted_engine(probe_dir.path(), &io);
+    io.reset();
+    run("update", &mut probe).unwrap();
+    let last_step = io.op_count() - 1;
+
+    for next in ["create", "relate", "update", "retype", "delete"] {
+        let dir = TempDir::new().unwrap();
+        copy_dir(template.path(), dir.path());
+        let io = FaultIo::new();
+        let mut engine = faulted_engine(dir.path(), &io);
+
+        // The update is applied; the sync of its record's removal
+        // fails, and keeps failing while the engine tries at once.
+        io.reset();
+        io.arm_fail_from(last_step);
+        let err = run("update", &mut engine).expect_err("the removal sync is owed");
+        assert_eq!(err.code(), "COMMIT_NOT_APPLIED", "{next}: {err}");
+
+        // One more failing step, then storage works. The operation that
+        // meets the failure writes nothing.
+        io.reset();
+        io.arm_fail_at(0);
+        let before = view(&engine_over(dir.path()), true);
+        let refused = run(next, &mut engine);
+        assert!(
+            refused.is_err(),
+            "{next}: a write landed although the commit before it was not finished"
+        );
+        io.reset();
+        assert_eq!(
+            view(&engine_over(dir.path()), true),
+            before,
+            "{next}: the refused write changed storage"
+        );
+
+        // The operation after it finishes the commit first and says so.
+        let warnings = engine.reload_if_stale(Some(MEM));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.code() == "INTERRUPTED_COMMIT_COMPLETED"),
+            "{next}: the finished commit is not reported: {warnings:?}"
+        );
+        assert_eq!(
+            view(&engine, true),
+            view(&engine_over(dir.path()), true),
+            "{next}: the engine's view differs from a fresh load"
+        );
+        if next != "update" {
+            run(next, &mut engine).unwrap_or_else(|e| panic!("{next}: {e:?}"));
+            assert_eq!(
+                view(&engine, true),
+                view(&engine_over(dir.path()), true),
+                "{next}: after the write the engine's view differs from a fresh load"
+            );
+        }
+    }
+}

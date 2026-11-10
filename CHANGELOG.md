@@ -86,6 +86,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   completes it first. Until then nothing of the commit is served: a
   read that goes to the files (an anchor lookup, a publish, a conflict
   scan) refuses until a load has completed the commit.
+- **A write never lands on a view the engine could not reload.** Before
+  every operation the engine reloads a mem that changed in storage, and
+  a reload that failed was logged and the operation went on with the
+  stale view. For a read that is a stale answer; for a write it was a
+  lost update: the caller's hash still matched the stale view, the
+  compare passed, and the commit overwrote what a sibling (or the
+  engine's own cut-off commit) had put there. A write whose mem could
+  not be reloaded is now refused with the new code `MEM_VIEW_STALE`
+  (`details.mem`, `details.detail`) and nothing is written; the next
+  operation retries the reload.
 - **`memstead rename` rewrites a self-prefixed link inside a hierarchical
   mem.** Inside mem `library/a`, a body link spelled by the full id
   (`[[library/a--first-note]]`) is accepted at write (the resolver strips

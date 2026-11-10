@@ -144,6 +144,7 @@ impl Engine {
                 // whose METADATA half fails still quarantines at boot;
                 // only the entity load defers.
                 deferred: false,
+                reload_failure: None,
             });
         }
 

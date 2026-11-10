@@ -999,6 +999,15 @@ pub(super) fn engine_err_unified(
                 serde_json::json!({ "mem": mem, "detail": detail }),
             ),
         ),
+        E::StaleView { mem, detail } => tool_error_with_payload(
+            "MEM_VIEW_STALE",
+            &message,
+            envelope(
+                "MEM_VIEW_STALE",
+                message.clone(),
+                serde_json::json!({ "mem": mem, "detail": detail }),
+            ),
+        ),
         E::DuplicateMem(name) => tool_error_with_payload(
             "DUPLICATE_MEM",
             &message,

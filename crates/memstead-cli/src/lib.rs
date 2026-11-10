@@ -616,6 +616,10 @@ impl CliError {
                     "failure_cause": failure_cause,
                 })),
             ),
+            StaleView { mem, detail } => (
+                ExitKind::Generic,
+                Some(serde_json::json!({ "mem": mem, "detail": detail })),
+            ),
             CommitNotApplied { mem, detail } => (
                 ExitKind::Generic,
                 Some(serde_json::json!({ "mem": mem, "detail": detail })),

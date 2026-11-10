@@ -133,6 +133,10 @@ impl Engine {
         }
         let mut sink: Vec<WarningHint> = Vec::new();
         let result = self.reload_one_mem_inner(mem, &mut sink)?;
+        // The view is level with storage again: a write may land on it.
+        if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == mem) {
+            state.reload_failure = None;
+        }
         self.load_warnings.retain(|w| w.source_mem() != Some(mem));
         self.load_warnings
             .extend(sink.into_iter().filter(|w| w.source_mem() == Some(mem)));
@@ -311,6 +315,7 @@ impl Engine {
             // The reattach loads entities immediately below — a
             // quarantine return-to-service is never deferred.
             deferred: false,
+            reload_failure: None,
         });
         self.mem_router = std::sync::Arc::new(crate::engine::boot::build_mem_router_from_mounts(
             &self.mounts,

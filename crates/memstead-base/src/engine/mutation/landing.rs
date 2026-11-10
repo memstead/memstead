@@ -20,7 +20,9 @@
 //!   `COMMIT_NOT_APPLIED` and the next load of the mem completes it.
 //!
 //! Every mutation verb commits through [`Engine::commit_staged`], so
-//! the three reports are made in one place.
+//! the three reports are made in one place. The same place refuses a
+//! write whose mem could not be reloaded before the operation: a view
+//! that is known to be behind storage serves reads, never writes.
 
 use crate::backend::BackendError;
 use crate::entity::EntityId;
@@ -85,6 +87,18 @@ impl Engine {
     ) -> Result<Landed, EngineError> {
         let state = &self.mounts[mount_idx];
         let backend = state.backend.as_ref();
+        // The reload before this operation failed, so everything staged
+        // here was computed from a view that is behind storage, and its
+        // hash compare ran against content that may have moved on.
+        // Landing it would overwrite what the view has not seen. The
+        // next operation retries the reload.
+        if let Some(reason) = &state.reload_failure {
+            let _ = backend.discard_pending();
+            return Err(EngineError::StaleView {
+                mem: state.mount.mem.clone(),
+                detail: reason.clone(),
+            });
+        }
         let staged = records
             .iter()
             .try_for_each(|record| backend.stage_provenance(record));

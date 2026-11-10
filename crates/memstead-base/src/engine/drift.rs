@@ -196,6 +196,7 @@ impl Engine {
                             });
                         }
                         Err(e) => {
+                            self.note_reload_failure(&name, &e);
                             tracing::warn!(
                                 mem = %name,
                                 error = %e,
@@ -249,6 +250,7 @@ impl Engine {
                         });
                     }
                     Err(e) => {
+                        self.note_reload_failure(&name, &e);
                         tracing::warn!(
                             mem = %name,
                             error = %e,
@@ -262,6 +264,15 @@ impl Engine {
         }
 
         warnings
+    }
+
+    /// Remember that the drift reload of `mem` failed: its view is
+    /// behind storage until a reload succeeds, and no write may land on
+    /// it meanwhile ([`Self::commit_staged`]).
+    fn note_reload_failure(&mut self, mem: &str, error: &EngineError) {
+        if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == mem) {
+            state.reload_failure = Some(error.to_string());
+        }
     }
 
     /// The head to record after a reload of `mem`. A load can move the

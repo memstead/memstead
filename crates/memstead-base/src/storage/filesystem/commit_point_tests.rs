@@ -804,3 +804,69 @@ fn a_read_refuses_a_cut_off_commit_until_a_load_completes_it() {
         );
     }
 }
+
+/// A commit that is applied except for the sync of its record's removal
+/// is unfinished, and the backend says so on every surface until a
+/// completion makes the sync good: the drift cursor reads as pending
+/// (also for a commit that carried no ledger line, whose cursor would
+/// otherwise not move at all), reads refuse, a further commit refuses,
+/// and the completion names the commit's files.
+#[test]
+fn a_commit_whose_removal_sync_is_owed_stays_unfinished_until_completed() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    seed(&root);
+    let io = FaultIo::new();
+    let backend = FilesystemBackend::with_io(root.clone(), io.clone());
+    let before = backend.current_head().unwrap();
+
+    // A commit with no provenance record: one file, no ledger line.
+    io.reset();
+    backend
+        .write_entity(Path::new("notes/old.md"), NEW)
+        .unwrap();
+    backend.commit("probe", &CommitContext::internal()).unwrap();
+    let last_step = io.op_count() - 1;
+    assert_eq!(io.trace()[last_step], IoOp::SyncDir(root.join(".memstead")));
+    assert_eq!(
+        backend.current_head().unwrap(),
+        before,
+        "no ledger line was written"
+    );
+
+    io.reset();
+    io.arm_fail_at(last_step);
+    backend
+        .write_entity(Path::new("notes/old.md"), FRESH)
+        .unwrap();
+    let result = backend.commit("under test", &CommitContext::internal());
+    assert!(
+        matches!(result, Err(BackendError::CommitNotApplied { .. })),
+        "{result:?}"
+    );
+    assert!(
+        !root.join(COMMIT_RECORD_REL).exists(),
+        "the record is removed"
+    );
+
+    assert_eq!(
+        backend.current_head().unwrap().as_deref(),
+        Some(COMMIT_PENDING_HEAD)
+    );
+    assert!(backend.read_entity(Path::new("notes/old.md")).is_err());
+    backend.write_entity(Path::new("later.md"), NEW).unwrap();
+    assert!(backend.commit("later", &CommitContext::internal()).is_err());
+    assert!(!root.join("later.md").exists());
+
+    let completed = backend.complete_interrupted_commit().unwrap();
+    assert_eq!(
+        completed.map(|c| c.files),
+        Some(vec!["notes/old.md".to_string()])
+    );
+    assert_eq!(backend.current_head().unwrap(), before);
+    assert_eq!(
+        backend.read_entity(Path::new("notes/old.md")).unwrap(),
+        Some(FRESH.to_vec())
+    );
+    assert_eq!(backend.complete_interrupted_commit().unwrap(), None);
+}

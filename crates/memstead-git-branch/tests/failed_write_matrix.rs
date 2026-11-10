@@ -16,9 +16,9 @@
 //!
 //! Both lists are checked against the engine's source. A method added
 //! to the storage trait fails `the_method_list_is_the_trait` until it
-//! joins the matrix, and a function that takes the write lock fails
-//! `the_verb_list_is_the_engines_write_entry_points` until it is a
-//! matrix verb or is named with the reason it is not one.
+//! joins the matrix, and a function that takes the write lock or
+//! commits to a backend fails `the_verb_list_is_the_engines_writers`
+//! until it is a matrix verb or is named with the reason it is not one.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -722,15 +722,21 @@ impl Verb {
     }
 }
 
-/// The engine's write entry points (every function that takes the
-/// per-mem write lock), each with the matrix verbs that drive it.
+/// Every function of the engine that writes to a mem (it takes the
+/// per-mem write lock, or it commits to a backend), each with the
+/// matrix verbs that drive it.
 const VERBS: &[(&str, &[Verb])] = &[
     (
         "create_entity",
         &[Verb::Create, Verb::CreateIntoDeferredMem],
     ),
+    (
+        "commit_prepared_create",
+        &[Verb::Create, Verb::CreateIntoDeferredMem],
+    ),
     ("batch_create", &[Verb::BatchCreate]),
     ("update_entity", &[Verb::Update]),
+    ("commit_prepared_update", &[Verb::Update]),
     ("batch_update", &[Verb::BatchUpdate]),
     ("delete_entity", &[Verb::Delete, Verb::DeleteStub]),
     ("relate_entity", &[Verb::Relate]),
@@ -739,8 +745,8 @@ const VERBS: &[(&str, &[Verb])] = &[
     ("rename_entity", &[Verb::Rename]),
 ];
 
-/// Write entry points that are not mutation verbs of an entity, each
-/// with the reason it stays out of the matrix.
+/// Functions that write to a mem and are not a mutation verb on one
+/// mem's entities, each with the reason it stays out of the matrix.
 const NOT_VERBS: &[(&str, &str)] = &[
     (
         "set_mem_version",
@@ -764,60 +770,139 @@ const NOT_VERBS: &[(&str, &str)] = &[
         "record_anchor_observations",
         "the verify pass's observation record on the anchors sidecar, not an entity verb",
     ),
+    (
+        "refresh_derivation_baseline_on_noop",
+        "a relate that finds its edge present and refreshes a derivation baseline: it needs a \
+         schema that declares a derivation relation, which no built-in schema does; it commits \
+         through the verbs' one commit call",
+    ),
+    (
+        "publish_checks",
+        "writes check records to the check-ledger ref, not to a mem's entities",
+    ),
+    (
+        "resolve_merge_conflict",
+        "the resolution of a pull's conflict, an operation over a merge",
+    ),
+    (
+        "rewrite_mem_references",
+        "the sweep after a mem is renamed, an operation over several mems",
+    ),
+    (
+        "proposal_merge",
+        "the merge of a proposal, an operation over several commits",
+    ),
+    ("retarget_fork_tree", "the fork of a mem"),
+    ("create_mem", "the creation of a mem"),
 ];
 
 fn all_verbs() -> Vec<Verb> {
-    VERBS
-        .iter()
-        .flat_map(|(_, verbs)| verbs.iter().copied())
-        .collect()
+    let mut verbs: Vec<Verb> = Vec::new();
+    for verb in VERBS.iter().flat_map(|(_, verbs)| verbs.iter().copied()) {
+        if !verbs.contains(&verb) {
+            verbs.push(verb);
+        }
+    }
+    verbs
 }
 
-/// The matrix's verb list is the engine's list of write entry points.
-/// Read from the engine's source: every function that takes the per-mem
-/// write lock is either driven by a matrix verb or named above with the
-/// reason it is not one, so a write path added later fails here until
-/// it is placed.
+/// The matrix's verb list is the engine's list of writers. Read from
+/// the engine's source: every function that takes the per-mem write
+/// lock or commits to a backend is either driven by a matrix verb or
+/// named above with the reason it is not one, so a write path added
+/// later fails here until it is placed.
 #[test]
-fn the_verb_list_is_the_engines_write_entry_points() {
+fn the_verb_list_is_the_engines_writers() {
+    /// The name a line declares, if it declares a function.
+    fn declared_fn(line: &str) -> Option<String> {
+        let mut rest = line.trim_start();
+        if let Some(after) = rest.strip_prefix("pub") {
+            rest = after.trim_start();
+            if rest.starts_with('(') {
+                rest = rest[rest.find(')')? + 1..].trim_start();
+            }
+        }
+        let name: String = rest
+            .strip_prefix("fn ")?
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        (!name.is_empty()).then_some(name)
+    }
+
+    /// Does the line take the write lock or commit to a backend? A
+    /// backend commit passes its subject by reference, which tells it
+    /// from the search index's argument-less `commit()`.
+    fn writes(line: &str, next: Option<&str>) -> bool {
+        if [
+            "lock_mems_for_write(",
+            "lock_mems_for_write_if(",
+            "commit_staged(",
+            "commit_staged_pinned(",
+            "commit_with_expected_parent(",
+        ]
+        .iter()
+        .any(|call| line.contains(call))
+        {
+            return true;
+        }
+        match line.find(".commit(") {
+            Some(at) => {
+                let after = line[at + ".commit(".len()..].trim_start();
+                after.starts_with('&')
+                    || (after.is_empty() && next.is_some_and(|n| n.trim_start().starts_with('&')))
+            }
+            None => false,
+        }
+    }
+
     fn scan(dir: &Path, found: &mut BTreeSet<String>) {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             let name = path.file_name().unwrap().to_string_lossy().to_string();
             if path.is_dir() {
-                if name != "tests" {
+                // The backends are what is written to; the search index
+                // commits to itself.
+                if !["tests", "storage", "search_index"].contains(&name.as_str()) {
                     scan(&path, found);
                 }
                 continue;
             }
-            // The lock's own module defines the calls; test modules
-            // call verbs, not the lock.
-            if !name.ends_with(".rs") || name == "write_lock.rs" || name.ends_with("tests.rs") {
+            // The trait, the lock and the commit call define what the
+            // writers call; test modules call verbs.
+            if !name.ends_with(".rs")
+                || ["backend.rs", "write_lock.rs", "landing.rs"].contains(&name.as_str())
+                || name.ends_with("tests.rs")
+            {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();
-            for call in ["lock_mems_for_write(", "lock_mems_for_write_if("] {
-                let mut from = 0;
-                while let Some(at) = text[from..].find(call) {
-                    let at = from + at;
-                    from = at + call.len();
-                    // The function the call sits in: the last `fn`
-                    // before it.
-                    let Some(decl) = text[..at].rfind("fn ") else {
-                        continue;
-                    };
-                    let name: String = text[decl + 3..]
-                        .chars()
-                        .take_while(|c| c.is_alphanumeric() || *c == '_')
-                        .collect();
-                    found.insert(name);
+            // Inline test modules sit at the end of a file.
+            let text = match text.find("#[cfg(test)]\nmod tests {") {
+                Some(at) => &text[..at],
+                None => &text,
+            };
+            let lines: Vec<&str> = text.lines().collect();
+            let mut current: Option<String> = None;
+            for (i, line) in lines.iter().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                if let Some(name) = declared_fn(line) {
+                    current = Some(name);
+                }
+                if writes(line, lines.get(i + 1).copied())
+                    && declared_fn(line).is_none()
+                    && let Some(name) = &current
+                {
+                    found.insert(name.clone());
                 }
             }
         }
     }
-    let engine = Path::new(env!("CARGO_MANIFEST_DIR")).join("../memstead-base/src/engine");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../memstead-base/src");
     let mut in_engine = BTreeSet::new();
-    scan(&engine, &mut in_engine);
+    scan(&source, &mut in_engine);
     let placed: BTreeSet<String> = VERBS
         .iter()
         .map(|(name, _)| name.to_string())
@@ -825,7 +910,7 @@ fn the_verb_list_is_the_engines_write_entry_points() {
         .collect();
     assert_eq!(
         in_engine, placed,
-        "the engine's write entry points and the fault matrix's verb list differ"
+        "the engine's writers and the fault matrix's verb list differ"
     );
 }
 

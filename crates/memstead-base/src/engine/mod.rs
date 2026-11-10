@@ -134,6 +134,13 @@ pub(crate) struct MountedBackend {
     ///
     /// [`MountLifecycle::Lazy`]: crate::workspace::MountLifecycle::Lazy
     deferred: bool,
+    /// Why the last drift reload of this mem failed, cleared by the next
+    /// reload that succeeds. While it is set the engine's view of the
+    /// mem is known to be behind storage: reads still serve it (a stale
+    /// whole state beats no answer), a write does not land on it
+    /// ([`Engine::commit_staged`] refuses), because a write computed
+    /// from a stale view overwrites what the view has not seen.
+    reload_failure: Option<String>,
 }
 
 /// One quarantined mem: the mem-level boot failure that took it out of

@@ -651,7 +651,11 @@ impl crate::backend::MemBackend for FilesystemBackend {
         // A commit record on disk is a decided commit not yet applied:
         // report a cursor no ledger line carries, so the staleness
         // probe reloads the mem and the reload completes the commit.
-        if std::fs::symlink_metadata(self.record_path()).is_ok() {
+        // The same while the sync of an applied commit's record removal
+        // is owed: a commit that carried no ledger line would otherwise
+        // leave the cursor where it was, and nothing would ever reload
+        // the mem and make the sync good.
+        if std::fs::symlink_metadata(self.record_path()).is_ok() || self.owed().is_some() {
             return Ok(Some(COMMIT_PENDING_HEAD.to_string()));
         }
         let log_path = crate::filesystem::changelog::changelog_path(&self.root);
@@ -817,6 +821,16 @@ impl crate::backend::MemBackend for FilesystemBackend {
         let staged = std::mem::replace(&mut *pending, Pending::new());
         if staged.ops.is_empty() && staged.records.is_empty() {
             return Ok(make_commit_id());
+        }
+
+        // An earlier commit whose record removal is not synced yet is
+        // not finished either: a load makes it good and reports it.
+        if self.owed().is_some() {
+            return Err(BackendError::Other(
+                "an earlier commit of this mem is applied but not yet durable; \
+                 the mem must be loaded, which finishes it, before it is written again"
+                    .to_string(),
+            ));
         }
 
         // A record already on disk is an earlier commit, decided and
