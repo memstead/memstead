@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-07T09:08:15Z
-last_modified: 2026-09-21T11:30:39Z
+last_modified: 2026-11-10T10:43:18Z
 status: accepted
 decided_on: 2026-08-06
 deciders: operator (agent-toolbox bundle decision 2), implementing agent
@@ -31,6 +31,7 @@ Two external field projects independently built the same substitute — project-
 - **REFERENCES**: [[engine:graph-health-report-surface]]
 - **REFERENCES**: [[enforce-schema-declared-section-content-formats-with-a-real-commonmark-parser]]
 - **REFERENCES**: [[gated-status-transitions-are-a-generic-constraint-kind-spike-verdict-yes]]
+- **REFERENCES**: [[admit-a-reading-on-paper-evidence-and-keep-the-real-holding-bar-for-a-form-that-refuses-a-write]]
 
 ## Options
 
@@ -43,3 +44,6 @@ Two external field projects independently built the same substitute — project-
 ## Notes
 
 Shipped 2026-08-06 as public-repo commits `e583e90` (forms 1 and 4 as complete verticals) and `cb0d851`/`fc5b303` (forms 2, 3, 5 plus both field proofs); independently graded — all nine acceptance criteria confirmed. Complementary half of the same design move as [[engineering--enforce-schema-declared-section-content-formats-with-a-real-commonmark-parser]]: this vocabulary covers cross-entity and metadata invariants, the section content format covers the markdown shape inside a section; `enum_from_neighbour` reads "the entries of a section" as the item shape of a section declaring `content: list`.
+
+
+2026-11-10 amendment: the admission bar stated under Consequences (a new form needs a real holding writing a check none of the existing ones express) now stands for forms that can refuse a write. For a form that only adds a reading, the bar is set by [[engineering--admit-a-reading-on-paper-evidence-and-keep-the-real-holding-bar-for-a-form-that-refuses-a-write]]. The vocabulary itself and its rejection of a general expression language are unchanged.
