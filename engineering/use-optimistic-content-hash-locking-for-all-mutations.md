@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:08Z
-last_modified: 2026-08-27T02:28:13Z
+last_modified: 2026-11-10T19:30:43Z
 status: accepted
 decided_on: 2026-06-08
 deciders: memstead-core
@@ -35,3 +35,4 @@ The engine is built for concurrent access: a long-lived MCP engine instance can 
 ## Notes
 
 The token surfaces as `_hash` on every entity read and is required as `expected_hash` on delete, on rename, and on any update that CHANGES CONTENT. An anchors-only update is exempt (consistency-sweep 03/04): the anchors sidecar sits outside the content hash, so the token would compare a value the guarded write cannot move, and demanding it bought no protection while costing a read per entity in exactly the backfill flows anchors exist for. The decision itself is unchanged; what narrowed is where a token can protect anything. Enforced piecewise across the mutation modules; the git-branch backend's commit-tip CAS is mapped onto the same envelope in `crates/memstead-base/src/storage.rs` so agents see a single `HASH_MISMATCH` code.
+Since 2026-11-10 (engine-soundness plan 03) the requirement has one home: the engine, not the surfaces, decides whether a write must carry the token. Update, delete, rename, retype and batch update state one of three things (the hash the caller read, an internal override, or nothing), and nothing is refused for a real entity with `EXPECTED_HASH_REQUIRED` on every surface; before, each surface decided this itself and three codes answered one refusal. `--force` and `--auto-hash` read the current hash and present it, so the compare still runs and a write landing after the read is refused, never overwritten. The override exists for internal callers only (today the proposal merge, which compares against its recorded ancestor under its own lock) and no tool parameter or flag reaches it, because an omission that silently disables a guard is the defect shape the plan removed. Relate stays outside the requirement: it adds or removes one edge, cannot overwrite a section, compares a hash only when one is supplied, and returns the hash the next content change presents.
