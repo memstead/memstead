@@ -52,9 +52,9 @@ use memstead_projection::report::{
 };
 use memstead_projection::resolve::{ResolveError, resolve_binding_run};
 use memstead_projection::{
-    OperationFilter, OperationKind, RenderBriefError, UnservedDestination, not_loop_declared,
-    render_ingest_brief, render_sync_brief_budgeted, render_sync_brief_for,
-    render_verify_brief_for, select_next_due_operation,
+    OperationFilter, OperationKind, RenderBriefError, not_loop_declared, render_ingest_brief,
+    render_sync_brief_budgeted, render_sync_brief_for, render_verify_brief_for,
+    select_next_due_operation,
 };
 
 use crate::CliError;
@@ -678,39 +678,6 @@ fn absent_sync_error(binding_id: &str, binding: &memstead_base::binding::Binding
         "binding": binding_id,
         "remedy": { "cli": format!("memstead projection enable sync {binding_id}") },
     }))
-}
-
-/// The typed refusal for a binding whose destination mem this workspace does
-/// not serve, shared by `verify` and by the verify and sync briefs, so the
-/// three refuse a given mem with one code and one exit status. The engine
-/// decides the refusal and writes the message
-/// ([`memstead_projection::unserved_destination`]); this maps it. The code is
-/// the engine's own lookup code for the mem, so the refusal reads like every
-/// other lookup of it: `UNKNOWN_MEM` and `MEM_UNMOUNTED` exit `NotFound`, the
-/// category those codes carry on every command (and on `verify-anchors --mem`,
-/// the other verify surface), while `MEM_QUARANTINED` keeps the `Validation`
-/// exit these commands have always given it. Each code is spelled as a
-/// literal at its construction site so the generated error index keeps
-/// finding it.
-fn unserved_destination_error(
-    binding_id: &str,
-    message: String,
-    unserved: &UnservedDestination,
-) -> CliError {
-    // The engine's code and payload; the binding rides beside them, a
-    // fact of the request. The exit kinds are this command's own.
-    let kind = match &unserved.error {
-        memstead_base::EngineError::MemQuarantined { .. } => ExitKind::Validation,
-        _ => ExitKind::NotFound,
-    };
-    let mut details = unserved.error.details();
-    details["binding"] = json!(binding_id);
-    CliError {
-        kind,
-        code: unserved.error.code(),
-        message,
-        details: Some(details),
-    }
 }
 
 /// Map a [`RenderBriefError`] to a typed CLI error (D12). Not-found bindings /
@@ -2094,55 +2061,25 @@ remove the sidecar and re-run",
     } else {
         verify_binding
     };
-    let outcome = run(engine, &root, &record.config, &resolved).map_err(|e| match &e {
-        // No mem to measure: the engine's typed lookup code for the
-        // destination, never a findings exit and never the onboarding
-        // verdict. Nothing was observed or recorded.
-        FindingsError::DestinationUnserved { unserved, .. } => {
-            unserved_destination_error(&binding_id, e.to_string(), unserved)
+    // Code, payload and message are the verify error's own; the exit kind
+    // is this command's. Nothing was observed or recorded on any refusal.
+    let outcome = run(engine, &root, &record.config, &resolved).map_err(|e| {
+        let kind = match &e {
+            FindingsError::DestinationUnserved { unserved, .. } => match &unserved.error {
+                memstead_base::EngineError::MemQuarantined { .. } => ExitKind::Validation,
+                _ => ExitKind::NotFound,
+            },
+            FindingsError::SourceUnreachable { .. }
+            | FindingsError::FullWalkNonEnumerable(_)
+            | FindingsError::MalformedId(_) => ExitKind::Validation,
+            FindingsError::Store(_) => ExitKind::Generic,
+        };
+        CliError {
+            kind,
+            code: e.code(),
+            details: Some(e.details(&binding_id)),
+            message: e.prose_render(&binding_id),
         }
-        // A vanished/unmounted source is a typed refusal, not a failed
-        // measurement: nothing was observed, no findings were recorded,
-        // and the `#verified` baseline is deliberately left untouched
-        // (a transient unmount must never clobber real recorded state).
-        FindingsError::SourceUnreachable { source_name, path } => CliError::new(
-            ExitKind::Validation,
-            "SOURCE_UNREACHABLE",
-            format!(
-                "verify refused for `{binding_id}`: source '{source_name}' resolves to \
-                 `{path}`, which cannot be read (absent, or present but not \
-                 enumerable) — restore or remount the source (or \
-                 repoint its pointer); the recorded `#verified` baseline was left \
-                 untouched"
-            ),
-        )
-        .with_details(json!({
-            "binding": binding_id,
-            "source": source_name,
-            "path": path,
-        })),
-        // `--full` over a non-enumerable medium: the existing typed
-        // capability refusal — a full measurement promises complete
-        // figures, so the run refuses instead of rendering a report
-        // with fabricated completeness. Nothing was observed or
-        // recorded.
-        FindingsError::FullWalkNonEnumerable(refusal) => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_CAPABILITY_UNSUPPORTED",
-            format!("verify --full refused for `{binding_id}`: {e}"),
-        )
-        .with_details(json!({
-            "binding": binding_id,
-            "facet": refusal.facet,
-            "medium_type": refusal.medium_type,
-            "reason": refusal.reason,
-        })),
-        _ => CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_VERIFY_FAILED",
-            format!("verify failed for `{binding_id}`: {e}"),
-        )
-        .with_details(json!({ "binding": binding_id, "error": e.to_string() })),
     })?;
 
     // The run completed — record its prepared-hash backfill: every hash the

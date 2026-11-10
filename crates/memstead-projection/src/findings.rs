@@ -610,6 +610,66 @@ pub enum FindingsError {
     },
 }
 
+impl FindingsError {
+    /// The wire code of a verify refusal.
+    pub fn code(&self) -> &'static str {
+        match self {
+            FindingsError::MalformedId(_) => "PROJECTION_INVALID_NAME",
+            FindingsError::Store(_) => "PROJECTION_VERIFY_FAILED",
+            FindingsError::SourceUnreachable { .. } => "SOURCE_UNREACHABLE",
+            FindingsError::FullWalkNonEnumerable(_) => "PROJECTION_CAPABILITY_UNSUPPORTED",
+            FindingsError::DestinationUnserved { unserved, .. } => unserved.code(),
+        }
+    }
+
+    /// The recovery payload, with the binding the call named.
+    pub fn details(&self, binding: &str) -> serde_json::Value {
+        match self {
+            FindingsError::SourceUnreachable { source_name, path } => serde_json::json!({
+                "binding": binding,
+                "source": source_name,
+                "path": path,
+            }),
+            FindingsError::FullWalkNonEnumerable(refusal) => serde_json::json!({
+                "binding": binding,
+                "facet": refusal.facet,
+                "medium_type": refusal.medium_type,
+                "reason": refusal.reason,
+            }),
+            FindingsError::DestinationUnserved { unserved, .. } => {
+                let mut d = unserved.error.details();
+                d["binding"] = serde_json::json!(binding);
+                d
+            }
+            FindingsError::MalformedId(_) | FindingsError::Store(_) => serde_json::json!({
+                "binding": binding,
+                "error": self.to_string(),
+            }),
+        }
+    }
+
+    /// The message a verify refusal reads, naming the binding and, for an
+    /// unreachable source, the repair.
+    pub fn prose_render(&self, binding: &str) -> String {
+        match self {
+            FindingsError::DestinationUnserved { .. } => self.to_string(),
+            FindingsError::SourceUnreachable { source_name, path } => format!(
+                "verify refused for `{binding}`: source '{source_name}' resolves to \
+                 `{path}`, which cannot be read (absent, or present but not \
+                 enumerable) — restore or remount the source (or \
+                 repoint its pointer); the recorded `#verified` baseline was left \
+                 untouched"
+            ),
+            FindingsError::FullWalkNonEnumerable(_) => {
+                format!("verify --full refused for `{binding}`: {self}")
+            }
+            FindingsError::MalformedId(_) | FindingsError::Store(_) => {
+                format!("verify failed for `{binding}`: {self}")
+            }
+        }
+    }
+}
+
 /// The outcome of a [`verify_binding`] pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifyOutcome {

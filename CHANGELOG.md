@@ -114,7 +114,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   same state, where it refused `PROJECTION_ADVANCE_FAILED` (a declared
   retirement for this state); `PROJECTION_NOT_FOUND` carries
   `details.available`, the bindings there are, and
-  `PROJECTION_SCOPE_UNINTERPRETABLE` carries `details.reason`.
+  `PROJECTION_SCOPE_UNINTERPRETABLE` carries `details.reason`. The verify
+  refusals do too; a malformed binding id under `projection verify` is
+  `PROJECTION_INVALID_NAME` (exit 5) as under every other projection
+  command, where it was `PROJECTION_VERIFY_FAILED` (exit 1).
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype
