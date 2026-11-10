@@ -1683,81 +1683,17 @@ fn map_resolve_err(binding_id: &str, err: ResolveError) -> CliError {
 /// error; store / engine failures are generic. Codes are spelled as literals at
 /// each site so the generated error index picks them up.
 fn map_advance_err(binding_id: &str, err: AdvanceError) -> CliError {
-    let message = err.to_string();
-    match &err {
-        AdvanceError::MalformedId(_) => {
-            CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
-                .with_details(json!({ "binding": binding_id }))
-        }
-        AdvanceError::UnknownArtifact {
-            artifacts,
-            suggestions,
-            ..
-        } => {
-            // `corrected_artifacts` maps each medium-relative-looking id to
-            // the workspace-relative id the slice actually presented — the
-            // machine-readable half of the message's remedy.
-            let corrected: serde_json::Map<String, serde_json::Value> = suggestions
-                .iter()
-                .map(|(supplied, corrected)| {
-                    (
-                        supplied.clone(),
-                        serde_json::Value::String(corrected.clone()),
-                    )
-                })
-                .collect();
-            CliError::new(
-                ExitKind::Validation,
-                "PROJECTION_ADVANCE_UNKNOWN_ARTIFACT",
-                message,
-            )
-            .with_details(json!({
-                "binding": binding_id,
-                "unknown_artifacts": artifacts,
-                "corrected_artifacts": corrected,
-            }))
-        }
-        AdvanceError::AnchorsStillDrifted { artifacts } => {
-            // The machine-readable half: artifact -> the entities whose rows
-            // still carry the pre-change hash, so the agent knows exactly
-            // which anchors to re-pin before disposing the artifact again.
-            let drifted: serde_json::Map<String, serde_json::Value> = artifacts
-                .iter()
-                .map(|(art, ents)| (art.clone(), serde_json::json!(ents)))
-                .collect();
-            CliError::new(
-                ExitKind::Validation,
-                "PROJECTION_ADVANCE_ANCHORS_DRIFTED",
-                message,
-            )
-            .with_details(json!({
-                "binding": binding_id,
-                "drifted": drifted,
-                "remedy": "re-pin each named entity's anchor on the artifact (anchors_unset the row and write it fresh in the same update, or supply the current content) or rewrite the claim, then advance again",
-            }))
-        }
-        AdvanceError::ExclusionHeld { artifacts } => {
-            // The machine-readable half: artifact -> the recorded rationale,
-            // so the agent sees the judgement it was about to drop.
-            let excluded: serde_json::Map<String, serde_json::Value> = artifacts
-                .iter()
-                .map(|(art, rationale)| (art.clone(), serde_json::Value::String(rationale.clone())))
-                .collect();
-            CliError::new(
-                ExitKind::Validation,
-                "PROJECTION_ADVANCE_EXCLUSION_HELD",
-                message,
-            )
-            .with_details(json!({
-                "binding": binding_id,
-                "excluded": excluded,
-                "remedy": "omit the artifact from --dispositions (its exclusion row disposes it), or lift the exclusion explicitly with the reasoned form {\"disposition\": \"worked\", \"rationale\": \"...\"}",
-            }))
-        }
-        AdvanceError::Store(_) | AdvanceError::Engine(_) => {
-            CliError::new(ExitKind::Generic, "PROJECTION_ADVANCE_FAILED", message)
-                .with_details(json!({ "binding": binding_id }))
-        }
+    // Code, payload and message are the advance error's own; the exit kind
+    // is this command's.
+    let kind = match &err {
+        AdvanceError::Store(_) | AdvanceError::Engine(_) => ExitKind::Generic,
+        _ => ExitKind::Validation,
+    };
+    CliError {
+        kind,
+        code: err.code(),
+        details: Some(err.details(binding_id)),
+        message: err.to_string(),
     }
 }
 
@@ -1874,67 +1810,17 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
 /// error; store failures are generic. Codes are spelled as literals at each site
 /// so the generated error index picks them up.
 fn map_exclude_err(binding_id: &str, err: ExcludeError) -> CliError {
-    let message = err.to_string();
-    match &err {
-        ExcludeError::MalformedId(_) => {
-            CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
-                .with_details(json!({ "binding": binding_id }))
-        }
-        ExcludeError::NotDestinationEntity { entities, mem } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_EXCLUDE_NOT_DESTINATION_ENTITY",
-            message,
-        )
-        .with_details(json!({
-            "binding": binding_id,
-            "destination_mem": mem,
-            "not_destination_entities": entities,
-        })),
-        // The recovery IS the candidate list, so it rides `details` under a
-        // key a caller can branch on, not only the prose.
-        ExcludeError::AmbiguousArtifact { ambiguous } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_EXCLUDE_AMBIGUOUS_ARTIFACT",
-            message,
-        )
-        .with_details(json!({
-            "binding": binding_id,
-            "ambiguous": ambiguous,
-        })),
-        ExcludeError::NotSourceMember {
-            artifacts, nearest, ..
-        } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER",
-            {
-                let hints: Vec<String> = nearest
-                    .iter()
-                    .filter(|(_, ids)| !ids.is_empty())
-                    .map(|(id, ids)| format!("{id} → nearest known: {}", ids.join(", ")))
-                    .collect();
-                if hints.is_empty() {
-                    message
-                } else {
-                    format!("{message}; {}", hints.join("; "))
-                }
-            },
-        )
-        .with_details(json!({
-            "binding": binding_id,
-            "not_source_members": artifacts,
-            // The nearest known ids per offender: the spelling to repair to.
-            "nearest": nearest,
-        })),
-        ExcludeError::PartialEnumeration { facet, reason } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_EXCLUDE_PARTIAL_ENUMERATION",
-            message,
-        )
-        .with_details(json!({ "binding": binding_id, "facet": facet, "reason": reason })),
-        ExcludeError::Store(_) => {
-            CliError::new(ExitKind::Generic, "PROJECTION_EXCLUDE_FAILED", message)
-                .with_details(json!({ "binding": binding_id }))
-        }
+    // Code, payload and message are the exclude error's own; the exit kind
+    // is this command's.
+    let kind = match &err {
+        ExcludeError::Store(_) => ExitKind::Generic,
+        _ => ExitKind::Validation,
+    };
+    CliError {
+        kind,
+        code: err.code(),
+        details: Some(err.details(binding_id)),
+        message: err.prose_render(),
     }
 }
 

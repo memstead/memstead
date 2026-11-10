@@ -435,6 +435,122 @@ pub enum AdvanceError {
     Engine(String),
 }
 
+impl AdvanceError {
+    /// The wire code: the advance refusal names its own state, so every
+    /// surface reports it alike.
+    pub fn code(&self) -> &'static str {
+        match self {
+            AdvanceError::MalformedId(_) => "PROJECTION_INVALID_NAME",
+            AdvanceError::UnknownArtifact { .. } => "PROJECTION_ADVANCE_UNKNOWN_ARTIFACT",
+            AdvanceError::AnchorsStillDrifted { .. } => "PROJECTION_ADVANCE_ANCHORS_DRIFTED",
+            AdvanceError::ExclusionHeld { .. } => "PROJECTION_ADVANCE_EXCLUSION_HELD",
+            AdvanceError::Store(_) | AdvanceError::Engine(_) => "PROJECTION_ADVANCE_FAILED",
+        }
+    }
+
+    /// The recovery payload, with the binding the call named.
+    pub fn details(&self, binding: &str) -> serde_json::Value {
+        match self {
+            AdvanceError::UnknownArtifact {
+                artifacts,
+                suggestions,
+                ..
+            } => serde_json::json!({
+                "binding": binding,
+                "unknown_artifacts": artifacts,
+                // Each medium-relative-looking id mapped to the
+                // workspace-relative id the slice presented.
+                "corrected_artifacts": suggestions
+                    .iter()
+                    .map(|(s, c)| (s.clone(), serde_json::Value::String(c.clone())))
+                    .collect::<serde_json::Map<_, _>>(),
+            }),
+            AdvanceError::AnchorsStillDrifted { artifacts } => serde_json::json!({
+                "binding": binding,
+                "drifted": artifacts
+                    .iter()
+                    .map(|(a, e)| (a.clone(), serde_json::json!(e)))
+                    .collect::<serde_json::Map<_, _>>(),
+                "remedy": "re-pin each named entity's anchor on the artifact (anchors_unset the row and write it fresh in the same update, or supply the current content) or rewrite the claim, then advance again",
+            }),
+            AdvanceError::ExclusionHeld { artifacts } => serde_json::json!({
+                "binding": binding,
+                "excluded": artifacts
+                    .iter()
+                    .map(|(a, r)| (a.clone(), serde_json::Value::String(r.clone())))
+                    .collect::<serde_json::Map<_, _>>(),
+                "remedy": "omit the artifact from --dispositions (its exclusion row disposes it), or lift the exclusion explicitly with the reasoned form {\"disposition\": \"worked\", \"rationale\": \"...\"}",
+            }),
+            AdvanceError::MalformedId(_) | AdvanceError::Store(_) | AdvanceError::Engine(_) => {
+                serde_json::json!({ "binding": binding })
+            }
+        }
+    }
+}
+
+impl ExcludeError {
+    /// The wire code, as [`AdvanceError::code`].
+    pub fn code(&self) -> &'static str {
+        match self {
+            ExcludeError::MalformedId(_) => "PROJECTION_INVALID_NAME",
+            ExcludeError::NotDestinationEntity { .. } => {
+                "PROJECTION_EXCLUDE_NOT_DESTINATION_ENTITY"
+            }
+            ExcludeError::AmbiguousArtifact { .. } => "PROJECTION_EXCLUDE_AMBIGUOUS_ARTIFACT",
+            ExcludeError::NotSourceMember { .. } => "PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER",
+            ExcludeError::PartialEnumeration { .. } => "PROJECTION_EXCLUDE_PARTIAL_ENUMERATION",
+            ExcludeError::Store(_) => "PROJECTION_EXCLUDE_FAILED",
+        }
+    }
+
+    /// The recovery payload, with the binding the call named.
+    pub fn details(&self, binding: &str) -> serde_json::Value {
+        match self {
+            ExcludeError::NotDestinationEntity { entities, mem } => serde_json::json!({
+                "binding": binding,
+                "destination_mem": mem,
+                "not_destination_entities": entities,
+            }),
+            ExcludeError::AmbiguousArtifact { ambiguous } => serde_json::json!({
+                "binding": binding,
+                "ambiguous": ambiguous,
+            }),
+            ExcludeError::NotSourceMember {
+                artifacts, nearest, ..
+            } => serde_json::json!({
+                "binding": binding,
+                "not_source_members": artifacts,
+                "nearest": nearest,
+            }),
+            ExcludeError::PartialEnumeration { facet, reason } => serde_json::json!({
+                "binding": binding,
+                "facet": facet,
+                "reason": reason,
+            }),
+            ExcludeError::MalformedId(_) | ExcludeError::Store(_) => {
+                serde_json::json!({ "binding": binding })
+            }
+        }
+    }
+
+    /// The message, with the nearest known spelling of each offending id
+    /// inline for a non-member, so the text alone names the repair.
+    pub fn prose_render(&self) -> String {
+        let base = self.to_string();
+        if let ExcludeError::NotSourceMember { nearest, .. } = self {
+            let hints: Vec<String> = nearest
+                .iter()
+                .filter(|(_, ids)| !ids.is_empty())
+                .map(|(id, ids)| format!("{id} → nearest known: {}", ids.join(", ")))
+                .collect();
+            if !hints.is_empty() {
+                return format!("{base}; {}", hints.join("; "));
+            }
+        }
+        base
+    }
+}
+
 /// Render `artifact (rationale)` pairs for the held-exclusion refusal.
 fn fmt_excluded(items: &[(String, String)]) -> String {
     items

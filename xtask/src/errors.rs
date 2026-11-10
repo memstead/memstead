@@ -90,8 +90,13 @@ fn scan_engine_codes(
     // bodies contribute, so delegated violation `code()` impls (e.g.
     // `section_format.rs`, reached via `EngineError::SectionFormatRefused`)
     // are indexed without anyone remembering to register the file.
-    let root = workspace_root.join("crates/memstead-base/src");
-    for path in rust_sources(&root)? {
+    // The engine is the base crate and the projection crate (whose
+    // refusals, the binding run's, carry their own typed codes).
+    let mut paths = rust_sources(&workspace_root.join("crates/memstead-base/src"))?;
+    paths.extend(rust_sources(
+        &workspace_root.join("crates/memstead-projection/src"),
+    )?);
+    for path in paths {
         let rel = pathdiff(workspace_root, &path);
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
@@ -586,7 +591,6 @@ mod surface_codes {
         "PROJECTION_EDIT_INVALID_JSON",
         "PROJECTION_INVALID_DISPOSITIONS",
         "PROJECTION_INVALID_EXCLUSIONS",
-        "PROJECTION_INVALID_NAME",
     ];
 
     /// A failure of the surface's own operation, not workspace, mem or
@@ -629,21 +633,12 @@ mod surface_codes {
         "NO_ACTIVE_BINDING",
         "NO_WORKSPACE",
         "NO_WRITABLE_MEM",
-        "PROJECTION_ADVANCE_ANCHORS_DRIFTED",
-        "PROJECTION_ADVANCE_EXCLUSION_HELD",
-        "PROJECTION_ADVANCE_FAILED",
-        "PROJECTION_ADVANCE_UNKNOWN_ARTIFACT",
         "PROJECTION_BRIEF_BINDING_REQUIRED",
         "PROJECTION_BUILD_NOT_ENABLED",
         "PROJECTION_CAPABILITY_UNSUPPORTED",
         "PROJECTION_EDIT_FAILED",
         "PROJECTION_EDIT_REFUSED",
         "PROJECTION_ENABLE_FAILED",
-        "PROJECTION_EXCLUDE_AMBIGUOUS_ARTIFACT",
-        "PROJECTION_EXCLUDE_FAILED",
-        "PROJECTION_EXCLUDE_NOT_DESTINATION_ENTITY",
-        "PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER",
-        "PROJECTION_EXCLUDE_PARTIAL_ENUMERATION",
         "PROJECTION_EXISTS",
         "PROJECTION_FINDINGS_READ_FAILED",
         "PROJECTION_INIT_FAILED",
@@ -678,6 +673,9 @@ mod surface_codes {
         "INVALID_INPUT",
         "INVALID_OBSERVATION",
         "IO_ERROR",
+        "PROJECTION_ADVANCE_FAILED",
+        "PROJECTION_EXCLUDE_FAILED",
+        "PROJECTION_INVALID_NAME",
         "SCHEMA_NOT_FOUND",
         "SCHEMA_VALIDATION_FAILED",
         "UNKNOWN_ENTITY_TYPE",
