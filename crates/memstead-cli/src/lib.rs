@@ -263,6 +263,7 @@ impl CliError {
             | InvalidTargetSchema { .. }
             | UnknownSchema { .. }
             | UnknownTypes { .. }
+            | EntityIdTooLong { .. }
             | RenameSimilarityOutOfRange { .. }
             | MarkdownExportUnsupportedBackend { .. }
             | EmptyUpdate { .. }

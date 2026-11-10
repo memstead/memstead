@@ -552,6 +552,14 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
             },
         ),
         (
+            "EntityIdTooLong".into(),
+            EngineError::EntityIdTooLong {
+                id: s("x"),
+                length: 600,
+                max: 512,
+            },
+        ),
+        (
             "InvalidWikiLinkTarget".into(),
             EngineError::InvalidWikiLinkTarget {
                 raw: s("[[A B]]"),
@@ -990,6 +998,7 @@ fn covered(e: &EngineError) {
         | EngineError::StubNotUpdatable { .. }
         | EngineError::StubNotRenamable { .. }
         | EngineError::InvalidEntityId { .. }
+        | EngineError::EntityIdTooLong { .. }
         | EngineError::InvalidWikiLinkTarget { .. }
         | EngineError::InvalidWikiLinkMem { .. }
         | EngineError::ConflictingSectionModes { .. }

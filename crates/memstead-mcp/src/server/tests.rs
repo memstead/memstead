@@ -8073,7 +8073,7 @@ fn test_empty_id_returns_validation_error() {
         include_provenance: None,
     }));
     assert!(result.is_error.unwrap_or(false));
-    assert!(extract_text(&result).contains("must not be empty"));
+    assert!(extract_text(&result).contains("malformed: empty"));
 }
 
 #[test]

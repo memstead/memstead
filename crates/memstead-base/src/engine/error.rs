@@ -766,6 +766,13 @@ pub enum EngineError {
     /// downstream wiki-link parse that referenced it.
     #[error("entity id '{id}' is malformed: {reason}")]
     InvalidEntityId { id: String, reason: String },
+    /// An entity id longer than the engine accepts.
+    #[error("entity id is too long: {length} characters, the limit is {max}")]
+    EntityIdTooLong {
+        id: String,
+        length: usize,
+        max: usize,
+    },
     /// A body wiki-link target in a section body failed the strict
     /// slug-form grammar gate. The invariant is that every wiki-link target reaching
     /// `entity.relationships` carries a grammar-valid `EntityId` — the
@@ -1663,6 +1670,7 @@ impl EngineError {
             EngineError::StubNotUpdatable { .. } => "STUB_NOT_UPDATABLE",
             EngineError::StubNotRenamable { .. } => "STUB_NOT_RENAMABLE",
             EngineError::InvalidEntityId { .. } => "INVALID_ENTITY_ID",
+            EngineError::EntityIdTooLong { .. } => "INVALID_ENTITY_ID",
             EngineError::InvalidWikiLinkTarget { .. } => "INVALID_WIKI_LINK_TARGET",
             EngineError::InvalidWikiLinkMem { .. } => "INVALID_MEM_NAME",
             EngineError::ConflictingSectionModes { .. } => "CONFLICTING_SECTION_MODES",
@@ -1912,6 +1920,12 @@ impl EngineError {
             EngineError::InvalidEntityId { id, reason } => {
                 serde_json::json!({ "id": id, "reason": reason })
             }
+            EngineError::EntityIdTooLong { id, length, max } => serde_json::json!({
+                "id": id,
+                "reason": "too_long",
+                "length": length,
+                "max": max,
+            }),
             EngineError::InvalidWikiLinkTarget {
                 raw,
                 suggested,
@@ -3111,6 +3125,26 @@ pub fn suggest_similar(store: &crate::store::Store, input: &str) -> Vec<String> 
 }
 
 impl EngineError {
+    /// The id syntax every surface checks before it asks the engine for
+    /// anything: not empty, not longer than the engine accepts.
+    pub fn check_entity_id_syntax(id: &str) -> Result<(), EngineError> {
+        if id.is_empty() {
+            return Err(EngineError::InvalidEntityId {
+                id: String::new(),
+                reason: "empty".to_string(),
+            });
+        }
+        let length = id.chars().count();
+        if length > crate::ENTITY_ID_MAX_LEN {
+            return Err(EngineError::EntityIdTooLong {
+                id: id.to_string(),
+                length,
+                max: crate::ENTITY_ID_MAX_LEN,
+            });
+        }
+        Ok(())
+    }
+
     /// `SCHEMA_NOT_FOUND` for a schema the built-in registry does not carry
     /// (a command that installs or reads a package needs no engine), with
     /// the built-in names.

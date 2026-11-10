@@ -96,6 +96,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `batch-create` with a template id carries the engine's payload
   (`details.reason`, `details.input`, and the slug facts) where it carried
   none; `batch-create` names the entry in a sentence after the message.
+  The id check every MCP tool runs first is the engine's
+  (`EngineError::check_entity_id_syntax`): `INVALID_ENTITY_ID` with the
+  same payload, and the engine's messages (`entity id '' is malformed:
+  empty`, `entity id is too long: N characters, the limit is M`) in place
+  of the server's own.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

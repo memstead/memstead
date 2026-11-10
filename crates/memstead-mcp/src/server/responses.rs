@@ -24,39 +24,10 @@ pub(super) fn always_load_meta() -> rmcp::model::MetaObject {
 /// the engine's `EngineError::InvalidEntityId` path for downstream
 /// grammar violations.
 pub(super) fn validate_entity_id(id: &str) -> Option<CallToolResult> {
-    if id.is_empty() {
-        let msg = "Entity ID must not be empty.".to_string();
-        return Some(tool_error_with_payload(
-            "INVALID_ENTITY_ID",
-            &msg,
-            envelope(
-                "INVALID_ENTITY_ID",
-                msg.clone(),
-                serde_json::json!({ "id": id, "reason": "empty" }),
-            ),
-        ));
-    }
-    if id.chars().count() > memstead_base::ENTITY_ID_MAX_LEN {
-        let msg = format!(
-            "Entity ID too long (max {} characters).",
-            memstead_base::ENTITY_ID_MAX_LEN
-        );
-        return Some(tool_error_with_payload(
-            "INVALID_ENTITY_ID",
-            &msg,
-            envelope(
-                "INVALID_ENTITY_ID",
-                msg.clone(),
-                serde_json::json!({
-                    "id": id,
-                    "reason": "too_long",
-                    "length": id.chars().count(),
-                    "max": memstead_base::ENTITY_ID_MAX_LEN,
-                }),
-            ),
-        ));
-    }
-    None
+    // The engine's syntax check and the engine's value.
+    memstead_base::EngineError::check_entity_id_syntax(id)
+        .err()
+        .map(engine_err)
 }
 
 /// Validate the optional agent-authored `note` field on a mutation call.

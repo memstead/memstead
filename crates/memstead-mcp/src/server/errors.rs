@@ -23,6 +23,13 @@ use super::*;
 /// match makes that regression class structurally impossible: every
 /// future `EngineError` variant must declare its wire shape here
 /// before it can land.
+/// An engine error, encoded: code, payload and message are the error's own.
+pub(super) fn engine_err(e: memstead_base::EngineError) -> CallToolResult {
+    let message = e.prose_render();
+    let code = e.code();
+    tool_error_with_payload(code, &message, envelope(code, message.clone(), e.details()))
+}
+
 pub(super) fn engine_err_unified(
     e: memstead_base::EngineError,
     _engine: &memstead_base::Engine,
