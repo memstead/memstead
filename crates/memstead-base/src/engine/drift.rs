@@ -300,6 +300,26 @@ impl Engine {
                         );
                     }
                 },
+                // A head that was there and is gone: the mem's storage
+                // was moved or removed under this engine (a mem rename
+                // by another process moves the branch away). The view
+                // is of storage that no longer exists under this name,
+                // and a write would recreate it beside the mem that
+                // moved. The view takes no write; the roster reconcile
+                // of a workspace engine unmounts the mem, and a reload
+                // settles an engine that has no roster.
+                (Some(old), None) if !view_incomplete => {
+                    // Only storage that says it is gone: a backend with
+                    // no head to report (an in-memory mem) is as
+                    // present as ever.
+                    if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == name)
+                        && matches!(state.backend.storage_present(), Ok(false))
+                    {
+                        state.reload_failure = Some(format!(
+                            "the mem's storage is gone: its head was {old} and it has none now"
+                        ));
+                    }
+                }
                 // No drift, and the view in place is known to be
                 // incomplete or behind (its last load could not read
                 // everything): try again, so the mem takes writes again

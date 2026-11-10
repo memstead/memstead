@@ -207,14 +207,15 @@ impl Engine {
         &mut self,
         writes: bool,
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
-        let writable: Vec<String> = self
-            .mounts
-            .iter()
-            .filter(|m| m.mount.capability == crate::workspace::MountCapability::Write)
-            .map(|m| m.mount.mem.clone())
-            .collect();
-        let guard = self.lock_mems_for_write_if(writes, &writable)?;
-        let warnings = self.reload_if_stale_content_only(None);
+        let (guard, mut warnings) = self.lock_on_a_settled_roster(writes, |engine| {
+            engine
+                .mounts
+                .iter()
+                .filter(|m| m.mount.capability == crate::workspace::MountCapability::Write)
+                .map(|m| m.mount.mem.clone())
+                .collect()
+        })?;
+        warnings.extend(self.reload_if_stale_content_only(None));
         if let Some(stale) = self.mounts.iter().find(|m| m.reload_failure.is_some()) {
             return Err(EngineError::StaleView {
                 mem: stale.mount.mem.clone(),
@@ -231,6 +232,41 @@ impl Engine {
             });
         }
         Ok((guard, warnings))
+    }
+
+    /// Take the locks `choose` names, and hold them over a roster that
+    /// did not change while this process waited for them. The process
+    /// that held a lock may have changed the roster before it let go (a
+    /// mem rename takes the mem away under the lock a writer into it
+    /// is waiting on; a mem created meanwhile is one more writable
+    /// mount). So the roster is reconciled once more under the locks;
+    /// when that changes the mounts, the locks are given back and
+    /// chosen again. Nothing is planned before this returns.
+    fn lock_on_a_settled_roster(
+        &mut self,
+        writes: bool,
+        choose: impl Fn(&Self) -> Vec<String>,
+    ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
+        let nested = COVERED.with(|c| !c.borrow().is_empty());
+        if nested || !writes {
+            return Ok((
+                self.lock_mems_for_write_if(writes, &choose(self))?,
+                Vec::new(),
+            ));
+        }
+        let mut warnings = Vec::new();
+        // A roster that keeps changing is not waited out for ever: the
+        // third set of locks is kept as taken.
+        for _ in 0..2 {
+            let guard = self.lock_mems_for_write(&choose(self))?;
+            let changed = self.roster_warnings();
+            if changed.is_empty() {
+                return Ok((guard, warnings));
+            }
+            drop(guard);
+            warnings.extend(changed);
+        }
+        Ok((self.lock_mems_for_write(&choose(self))?, warnings))
     }
 
     /// The lock and the view of a verb that names the mems it writes.
@@ -265,7 +301,9 @@ impl Engine {
             warnings.extend(reloaded);
             return Ok((guard, warnings));
         }
-        let guard = self.lock_mems_for_write_if(writes, locked)?;
+        let names: Vec<String> = locked.iter().map(|m| m.as_ref().to_string()).collect();
+        let (guard, settled) = self.lock_on_a_settled_roster(writes, |_| names.clone())?;
+        warnings.extend(settled);
         warnings.extend(self.level_for_write(written));
         Ok((guard, warnings))
     }
@@ -289,8 +327,10 @@ impl Engine {
         writes: bool,
         mems: &[S],
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
-        let warnings = self.roster_before_locking();
-        let guard = self.lock_mems_for_write_if(writes, mems)?;
+        let mut warnings = self.roster_before_locking();
+        let names: Vec<String> = mems.iter().map(|m| m.as_ref().to_string()).collect();
+        let (guard, settled) = self.lock_on_a_settled_roster(writes, |_| names.clone())?;
+        warnings.extend(settled);
         Ok((guard, warnings))
     }
 

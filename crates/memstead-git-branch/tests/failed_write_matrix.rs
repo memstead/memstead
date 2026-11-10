@@ -829,6 +829,7 @@ const WRITE_HELPERS: &[&str] = &[
     "lock_for_write",
     "lock_for_verb",
     "lock_whole_workspace",
+    "lock_on_a_settled_roster",
     "lock_workspace_for_write_if",
     "commit_staged",
     "commit_staged_pinned",
@@ -983,6 +984,9 @@ const VERBS: &[(&str, &[Verb])] = &[
     // when a call names an entity by a bare slug or adds an edge on an
     // acyclic relationship.
     ("engine/write_lock.rs::lock_whole_workspace", EVERY_VERB),
+    // The locks every verb takes are held over a roster that did not
+    // change while it waited for them.
+    ("engine/write_lock.rs::lock_on_a_settled_roster", EVERY_VERB),
     ("engine/write_lock.rs::drop", EVERY_VERB),
     ("engine/write_lock.rs::discard_strays", EVERY_VERB),
     ("engine/mutation/landing.rs::commit_staged", EVERY_VERB),

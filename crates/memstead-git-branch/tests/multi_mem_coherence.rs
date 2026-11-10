@@ -2147,3 +2147,743 @@ fn the_first_write_into_a_mem_attached_after_the_engine_started_waits_on_its_loc
     created.expect("the write lands once the lock is released");
     assert_ne!(head(), head_before);
 }
+
+// ---------------------------------------------------------------------
+// More interleavings: unconditional second writes, a full mem rename,
+// retype, a deferred peer, single verbs closing a cycle
+// ---------------------------------------------------------------------
+
+// =====================================================================
+// own refutation attempts
+// =====================================================================
+
+fn engine_after_rename(ws: &Workspace, new: &str) -> Engine {
+    let mounts = ws
+        .mounts
+        .iter()
+        .map(|m| {
+            let mut m = m.clone();
+            if m.mem == LEFT {
+                m.mem = new.to_string();
+                if let MountStorage::GitBranch { branch, .. } = &mut m.storage {
+                    *branch = new.to_string();
+                }
+            }
+            let backend = instantiate_full_backend(&m).expect("backend instantiates");
+            (m, backend)
+        })
+        .collect();
+    let mut engine = Engine::from_mounts(mounts).expect("engine boots");
+    engine.set_git_branch_ops(memstead_git_branch::storage::FULL_GIT_BRANCH_OPS);
+    engine.set_backend_factory(instantiate_full_backend);
+    let mut settings = memstead_base::WorkspaceSettings::default();
+    for mem in [new, RIGHT] {
+        settings.cross_mem_links.insert(
+            mem.to_string(),
+            memstead_schema::workspace_config::CrossLinkValue::Wildcard,
+        );
+    }
+    engine.set_settings(settings);
+    engine
+}
+
+fn identity_update(engine: &Engine, target: &EntityId, text: &str) -> UpdateEntityArgs {
+    let mut args = update_args(engine, target, "");
+    args.sections.clear();
+    args.sections
+        .insert("identity".to_string(), text.to_string());
+    args.expected_hash = None;
+    args
+}
+
+fn section(engine: &Engine, target: &EntityId, key: &str) -> String {
+    engine
+        .get_entity(target)
+        .and_then(|e| e.sections.get(key).cloned())
+        .unwrap_or_default()
+}
+
+/// (1) literal reading: an unconditional update sent while the rename /
+/// the sweep is held is present in the final state, next to the
+/// operation's rewrite.
+#[test]
+fn unconditional_update_behind_rename_and_sweep_is_present() {
+    let mut failures = Vec::new();
+    for pair in PAIRS {
+        for op in ["rename", "sweep"] {
+            for target in [(RIGHT, "gamma"), (LEFT, "beta")] {
+                let context = format!("{pair:?} {op} {target:?}");
+                let ws = Workspace::new(pair);
+                link_both_mems_to_alpha(&ws);
+                let tid = id(target.0, target.1);
+                let (done, window, mut engine) = hold_at_commit(
+                    &ws,
+                    {
+                        let tid = tid.clone();
+                        move |second, ready| {
+                            let args = identity_update(second, &tid, "identity, second");
+                            ready();
+                            report(
+                                second
+                                    .update_entity(args, Actor::Cli, None, None)
+                                    .map(|o| o.warnings),
+                            )
+                        }
+                    },
+                    |engine| {
+                        if op == "rename" {
+                            let args = rename_args(engine, &id(LEFT, "alpha"), "Alpha Renamed");
+                            report(
+                                engine
+                                    .rename_entity(args, Actor::Cli, None, None)
+                                    .map(|o| o.warnings),
+                            )
+                        } else {
+                            engine
+                                .rewrite_mem_references(LEFT, "lefty", None)
+                                .map(|o| o.rewritten_mems)
+                                .map_err(|e| e.code().to_string())
+                        }
+                    },
+                );
+                let fresh = ws.engine();
+                let identity = section(&fresh, &tid, "identity");
+                let purpose = section(&fresh, &tid, "purpose");
+                let want = if op == "rename" {
+                    "[[left--alpha-renamed]]"
+                } else {
+                    "[[lefty--alpha]]"
+                };
+                engine.reload_if_stale(None);
+                let level = view(&engine) == view(&fresh);
+                let line = format!(
+                    "{context}: op={done:?} second={:?} both_locked={} identity={identity:?} purpose={purpose:?} level={level}",
+                    window.second, window.both_locked
+                );
+                eprintln!("{line}");
+                if done.is_err()
+                    || !window.both_locked
+                    || window.second.is_err()
+                    || !identity.contains("second")
+                    || !purpose.contains(want)
+                    || !level
+                {
+                    failures.push(line);
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A full mem rename held at its first commit; the second process
+/// writes into the mem being renamed. An acknowledged write must be in
+/// the renamed mem.
+#[test]
+fn write_into_the_renamed_mem_during_a_mem_rename() {
+    let mut failures = Vec::new();
+    for pair in PAIRS {
+        for what in ["update", "create", "update_right"] {
+            let context = format!("{pair:?} {what}");
+            let ws = Workspace::new(pair);
+            link_both_mems_to_alpha(&ws);
+            let (renamed, window, engine) = hold_at_commit(
+                &ws,
+                move |second, ready| match what {
+                    "update" => {
+                        let args = identity_update(second, &id(LEFT, "beta"), "identity, second");
+                        ready();
+                        report(
+                            second
+                                .update_entity(args, Actor::Cli, None, None)
+                                .map(|o| o.warnings),
+                        )
+                    }
+                    "create" => {
+                        ready();
+                        report(
+                            second
+                                .create_entity(
+                                    create_args(LEFT, "Zeta", &[]),
+                                    Actor::Cli,
+                                    None,
+                                    None,
+                                )
+                                .map(|o| o.warnings),
+                        )
+                    }
+                    _ => {
+                        let args = identity_update(second, &id(RIGHT, "gamma"), "identity, second");
+                        ready();
+                        report(
+                            second
+                                .update_entity(args, Actor::Cli, None, None)
+                                .map(|o| o.warnings),
+                        )
+                    }
+                },
+                |engine| run_waiter(Waiter::MemRename, engine),
+            );
+            drop(engine);
+            if renamed.is_err() {
+                failures.push(format!("{context}: rename failed {renamed:?}"));
+                continue;
+            }
+            let fresh = engine_after_rename(&ws, "lefty");
+            let present = match what {
+                "update" => section(&fresh, &id("lefty", "beta"), "identity").contains("second"),
+                "create" => fresh
+                    .get_entity(&id("lefty", "zeta"))
+                    .is_some_and(|e| !e.stub),
+                _ => section(&fresh, &id(RIGHT, "gamma"), "identity").contains("second"),
+            };
+            let ids: Vec<String> = fresh
+                .store()
+                .all_entities()
+                .map(|e| format!("{}{}", e.id, if e.stub { "(stub)" } else { "" }))
+                .collect();
+            let line = format!(
+                "{context}: rename={renamed:?} second={:?} both_locked={} present_in_renamed={present} fresh ids={ids:?}",
+                window.second, window.both_locked
+            );
+            eprintln!("{line}");
+            if !window.both_locked || (window.second.is_ok() && !present) {
+                failures.push(line);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// (2) retype: the guard counts the edge a second process added from
+/// the other mem before the retype ran in an engine loaded earlier.
+#[test]
+fn a_retype_rechecks_a_reference_a_second_process_added() {
+    let mut failures = Vec::new();
+    for pair in PAIRS {
+        for link in [Link::Relation, Link::BodyLink] {
+            for deferred in [false, true] {
+                let context = format!("{pair:?} {link:?} deferred={deferred}");
+                let ws = Workspace::new(pair);
+                let mut engine = if deferred {
+                    ws.engine_with_right_deferred()
+                } else {
+                    ws.engine()
+                };
+                let added = ws
+                    .second_writer(move |second| add_link(second, link, &|| {}))
+                    .join()
+                    .unwrap();
+                assert!(added.is_ok(), "{context}: {added:?}");
+                let args = retype_args(&engine, &id(LEFT, "alpha"));
+                let out = engine.retype_entity(args, Actor::Cli, None, None);
+                let line = format!(
+                    "{context}: retype={:?}",
+                    out.as_ref()
+                        .map(|o| o.edges_rechecked)
+                        .map_err(|e| e.code().to_string())
+                );
+                eprintln!("{line}");
+                match out {
+                    Ok(o) if o.edges_rechecked == 1 => {}
+                    _ => failures.push(line),
+                }
+                let (real, from) = links_to_alpha(&ws);
+                if !real || from.len() != 1 {
+                    failures.push(format!("{context}: real={real} from={from:?}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// (2) retype under the hook.
+#[test]
+fn a_reference_added_while_a_retype_is_held_at_its_commit() {
+    let mut failures = Vec::new();
+    for pair in PAIRS {
+        for link in [Link::Relation, Link::BodyLink] {
+            let context = format!("{pair:?} {link:?}");
+            let ws = Workspace::new(pair);
+            let (retyped, window, mut engine) = hold_at_commit(
+                &ws,
+                move |second, ready| add_link(second, link, ready),
+                |engine| {
+                    let args = retype_args(engine, &id(LEFT, "alpha"));
+                    engine
+                        .retype_entity(args, Actor::Cli, None, None)
+                        .map(|o| o.edges_rechecked)
+                        .map_err(|e| e.code().to_string())
+                },
+            );
+            let fresh = ws.engine();
+            let alpha = fresh.get_entity(&id(LEFT, "alpha")).cloned();
+            let (real, from) = links_to_alpha(&ws);
+            engine.reload_if_stale(None);
+            let level = view(&engine) == view(&fresh);
+            let line = format!(
+                "{context}: retype={retyped:?} second={:?} both_locked={} type={:?} real={real} from={from:?} level={level}",
+                window.second,
+                window.both_locked,
+                alpha.map(|a| a.entity_type)
+            );
+            eprintln!("{line}");
+            if retyped.is_err()
+                || !window.both_locked
+                || !real
+                || (window.second.is_ok() && from.len() != 1)
+                || !level
+            {
+                failures.push(line);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// (2) delete: a referrer in a peer whose loading was deferred, added
+/// by a second process after this engine booted.
+#[test]
+fn a_delete_sees_a_reference_in_a_deferred_peer() {
+    let mut failures = Vec::new();
+    for pair in PAIRS {
+        for link in [Link::Relation, Link::BodyLink] {
+            let context = format!("{pair:?} {link:?}");
+            let ws = Workspace::new(pair);
+            let mut engine = ws.engine_with_right_deferred();
+            assert!(engine.mem_is_deferred(RIGHT));
+            let added = ws
+                .second_writer(move |second| add_link(second, link, &|| {}))
+                .join()
+                .unwrap();
+            assert!(added.is_ok(), "{context}: {added:?}");
+            let args = delete_args(&engine, &id(LEFT, "alpha"));
+            let deleted = report(
+                engine
+                    .delete_entity(args, Actor::Cli, None, None)
+                    .map(|o| o.warnings),
+            );
+            let (real, from) = links_to_alpha(&ws);
+            let line = format!("{context}: delete={deleted:?} real={real} from={from:?}");
+            eprintln!("{line}");
+            if deleted != Err("HAS_INCOMING_REFS".to_string()) || !real || from.len() != 1 {
+                failures.push(line);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The cycle guard with the single-item verbs on both sides.
+#[test]
+fn single_verbs_cannot_close_a_cycle_between_two_mems() {
+    let gamma = id(RIGHT, "gamma");
+    let mut failures = Vec::new();
+    for first in ["update", "relate", "create"] {
+        for second_kind in ["update", "relate", "create"] {
+            for pair in PAIRS {
+                let context = format!("{first}/{second_kind} {pair:?}");
+                let ws = Workspace::new(pair);
+                let source = if first == "create" {
+                    id(LEFT, "delta")
+                } else {
+                    id(LEFT, "alpha")
+                };
+                // the second's source in `right`
+                let back_from = if second_kind == "create" {
+                    id(RIGHT, "epsilon")
+                } else {
+                    gamma.clone()
+                };
+                // first: source DEPENDS_ON back_from; second: back_from DEPENDS_ON source.
+                // For a created back_from the first one's target does not exist yet,
+                // so the first targets gamma and the created epsilon is put between:
+                // epsilon DEPENDS_ON source, and gamma DEPENDS_ON epsilon is seeded? keep simple:
+                if second_kind == "create" && first == "create" {
+                    continue;
+                }
+                let first_target = gamma.clone();
+                if second_kind == "create" {
+                    // seed gamma DEPENDS_ON epsilon is impossible before epsilon exists;
+                    // instead the second creates epsilon with DEPENDS_ON source and
+                    // the first makes source DEPENDS_ON epsilon (a forward reference).
+                }
+                let first_target = if second_kind == "create" {
+                    back_from.clone()
+                } else {
+                    first_target
+                };
+                let (one, window, engine) = hold_at_commit(
+                    &ws,
+                    {
+                        let (source, back_from) = (source.clone(), back_from.clone());
+                        move |second, ready| match second_kind {
+                            "update" => {
+                                let args = depends_update(second, &back_from, &source);
+                                ready();
+                                report(
+                                    second
+                                        .update_entity(args, Actor::Cli, None, None)
+                                        .map(|o| o.warnings),
+                                )
+                            }
+                            "relate" => {
+                                let mut args = relate_args(&back_from, &source);
+                                args.rel_type = "DEPENDS_ON".to_string();
+                                ready();
+                                report(
+                                    second
+                                        .relate_entity(args, Actor::Cli, None, None)
+                                        .map(|o| o.warnings),
+                                )
+                            }
+                            _ => {
+                                let mut args =
+                                    create_args(RIGHT, "Epsilon", std::slice::from_ref(&source));
+                                args.relations[0].rel_type = "DEPENDS_ON".to_string();
+                                ready();
+                                report(
+                                    second
+                                        .create_entity(args, Actor::Cli, None, None)
+                                        .map(|o| o.warnings),
+                                )
+                            }
+                        }
+                    },
+                    |engine| match first {
+                        "update" => {
+                            let args = depends_update(engine, &source, &first_target);
+                            report(
+                                engine
+                                    .update_entity(args, Actor::Cli, None, None)
+                                    .map(|o| o.warnings),
+                            )
+                        }
+                        "relate" => {
+                            let mut args = relate_args(&source, &first_target);
+                            args.rel_type = "DEPENDS_ON".to_string();
+                            report(
+                                engine
+                                    .relate_entity(args, Actor::Cli, None, None)
+                                    .map(|o| o.warnings),
+                            )
+                        }
+                        _ => {
+                            let mut args =
+                                create_args(LEFT, "Delta", std::slice::from_ref(&first_target));
+                            args.relations[0].rel_type = "DEPENDS_ON".to_string();
+                            report(
+                                engine
+                                    .create_entity(args, Actor::Cli, None, None)
+                                    .map(|o| o.warnings),
+                            )
+                        }
+                    },
+                );
+                drop(engine);
+                let fresh = ws.engine();
+                let (out, back) = (
+                    depends_edge(&fresh, &source, &first_target),
+                    depends_edge(&fresh, &back_from, &source),
+                );
+                let line = format!(
+                    "{context}: first={one:?} second={:?} both_locked={} out={out} back={back}",
+                    window.second, window.both_locked
+                );
+                eprintln!("{line}");
+                if (out && back) || (one.is_ok() && !out) || (window.second.is_ok() && !back) {
+                    failures.push(line);
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A failed reload of the peer under the lock: the sweep and the retype.
+#[test]
+fn a_failed_reload_refuses_the_sweep_and_the_retype() {
+    let mut failures = Vec::new();
+    for verb in ["sweep", "retype", "mem_rename"] {
+        for pair in PAIRS {
+            let context = format!("{verb} {pair:?}");
+            let ws = Workspace::new(pair);
+            let armed = Arc::new(AtomicBool::new(false));
+            let fired = Arc::new(Mutex::new(Vec::<String>::new()));
+            let tap: Tap = {
+                let (armed, fired) = (Arc::clone(&armed), Arc::clone(&fired));
+                Arc::new(move |mem: &str, method: &str| {
+                    if mem == RIGHT
+                        && matches!(
+                            method,
+                            "read_all_entities" | "list_entities" | "read_entity"
+                        )
+                        && armed.swap(false, Ordering::SeqCst)
+                    {
+                        fired.lock().unwrap().push(method.to_string());
+                        return true;
+                    }
+                    false
+                })
+            };
+            let mut engine = ws.tapped_engine(tap);
+            let alpha = id(LEFT, "alpha");
+            let added = ws
+                .second_writer(move |second| add_link(second, Link::BodyLink, &|| {}))
+                .join()
+                .unwrap();
+            assert!(added.is_ok(), "{context}: {added:?}");
+            armed.store(true, Ordering::SeqCst);
+            let outcome: Result<String, String> = match verb {
+                "sweep" => engine
+                    .rewrite_mem_references(LEFT, "lefty", None)
+                    .map(|o| format!("{:?}", o.rewritten_mems))
+                    .map_err(|e| e.code().to_string()),
+                "retype" => {
+                    let args = retype_args(&engine, &alpha);
+                    engine
+                        .retype_entity(args, Actor::Cli, None, None)
+                        .map(|o| format!("edges_rechecked={}", o.edges_rechecked))
+                        .map_err(|e| e.code().to_string())
+                }
+                _ => run_waiter(Waiter::MemRename, &mut engine).map(|w| format!("{w:?}")),
+            };
+            armed.store(false, Ordering::SeqCst);
+            let gamma_raw = stored_purpose(&ws);
+            let line = format!(
+                "{context}: fault fired on {:?}; verb returned {outcome:?}; right/gamma.md has old link={} new link={}",
+                fired.lock().unwrap(),
+                gamma_raw.contains("[[left--alpha]]"),
+                gamma_raw.contains("[[lefty--alpha]]"),
+            );
+            eprintln!("{line}");
+            let bad = match verb {
+                "retype" => outcome.as_ref().is_ok_and(|o| o != "edges_rechecked=1"),
+                _ => outcome.is_ok() && gamma_raw.contains("[[left--alpha]]"),
+            };
+            if fired.lock().unwrap().is_empty() || bad {
+                failures.push(line);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+fn stored_purpose(ws: &Workspace) -> String {
+    let mount = ws.mounts.iter().find(|m| m.mem == RIGHT).unwrap();
+    let bytes = instantiate_full_backend(mount)
+        .unwrap()
+        .read_entity(Path::new("gamma.md"))
+        .unwrap()
+        .unwrap_or_default();
+    String::from_utf8_lossy(&bytes).to_string()
+}
+
+/// The same with engines booted from a workspace root, so the roster
+/// reconcile is live in both processes.
+#[test]
+fn workspace_rooted_mem_rename_and_a_write_into_the_renamed_mem() {
+    use memstead_git_branch::workspace_store::engine_from_workspace_root;
+    let mut lines = Vec::new();
+    let mut failures = Vec::new();
+    for what in ["update", "create"] {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead/workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n\n[cross_mem_links]\nleft = \"*\"\nright = \"*\"\n",
+        )
+        .unwrap();
+        init_real_mem_repo(&root, &[(LEFT, SCHEMA), (RIGHT, SCHEMA)]);
+        let mut engine = engine_from_workspace_root(&root).expect("engine boots");
+        for (mem, title) in [(LEFT, "Alpha"), (LEFT, "Beta"), (RIGHT, "Gamma")] {
+            engine
+                .create_entity(create_args(mem, title, &[]), Actor::Cli, None, None)
+                .unwrap_or_else(|e| panic!("seed {mem}--{title}: {e:?}"));
+        }
+        for (target, text) in [
+            (id(RIGHT, "gamma"), "Gamma purpose, see [[left--alpha]]"),
+            (id(LEFT, "beta"), "Beta purpose, see [[left--alpha]]"),
+        ] {
+            let args = update_args(&engine, &target, text);
+            engine
+                .update_entity(args, Actor::Cli, None, None)
+                .unwrap_or_else(|e| panic!("link {target}: {e:?}"));
+        }
+
+        // The hook: `right` again, tapped; at its first landing call the
+        // second process is started and the rename goes on when the
+        // second is about to send its write.
+        let lock_paths: Vec<PathBuf> = [LEFT, RIGHT]
+            .iter()
+            .map(|mem| {
+                instantiate_full_backend(engine.mount(mem).unwrap())
+                    .unwrap()
+                    .write_lock_path()
+                    .unwrap()
+            })
+            .collect();
+        type Second = JoinHandle<(Report, Vec<String>)>;
+        let stage: Arc<Mutex<Option<(bool, Second)>>> = Arc::new(Mutex::new(None));
+        let tap: Tap = {
+            let (stage, root) = (Arc::clone(&stage), root.clone());
+            Arc::new(move |_mem: &str, method: &str| {
+                if !lands(method) {
+                    return false;
+                }
+                let mut stage = stage.lock().unwrap();
+                if stage.is_some() {
+                    return false;
+                }
+                let both_locked = lock_paths.iter().all(|l| !lock_is_free(l));
+                let (ready, is_ready) = std::sync::mpsc::channel::<()>();
+                let root = root.clone();
+                let handle = std::thread::spawn(move || {
+                    let mut second = engine_from_workspace_root(&root).expect("second boots");
+                    let out = if what == "update" {
+                        let args = identity_update(&second, &id(LEFT, "beta"), "identity, second");
+                        let _ = ready.send(());
+                        report(
+                            second
+                                .update_entity(args, Actor::Cli, None, None)
+                                .map(|o| o.warnings),
+                        )
+                    } else {
+                        let _ = ready.send(());
+                        report(
+                            second
+                                .create_entity(
+                                    create_args(LEFT, "Zeta", &[]),
+                                    Actor::Cli,
+                                    None,
+                                    None,
+                                )
+                                .map(|o| o.warnings),
+                        )
+                    };
+                    let mems: Vec<String> = second.mounts().iter().map(|m| m.mem.clone()).collect();
+                    (out, mems)
+                });
+                if both_locked {
+                    is_ready.recv().expect("the second reaches its write");
+                }
+                *stage = Some((both_locked, handle));
+                false
+            })
+        };
+        let mount = engine.mount(RIGHT).unwrap().clone();
+        engine.unregister_writable_mem(RIGHT).unwrap();
+        engine
+            .register_writable_mem(
+                mount.clone(),
+                Box::new(Tapped {
+                    inner: instantiate_full_backend(&mount).unwrap(),
+                    mem: RIGHT,
+                    tap,
+                }) as Box<dyn MemBackend>,
+                memstead_base::MemOrigin::RuntimeCreated {
+                    at: std::time::SystemTime::now(),
+                    by_tool: "test",
+                },
+            )
+            .unwrap();
+
+        let renamed = run_waiter(Waiter::MemRename, &mut engine);
+        let (both_locked, handle) = stage.lock().unwrap().take().expect("the rename committed");
+        let (second, second_mems) = handle.join().unwrap();
+        drop(engine);
+
+        let fresh = engine_from_workspace_root(&root).expect("fresh boots");
+        let mems: Vec<String> = fresh.mounts().iter().map(|m| m.mem.clone()).collect();
+        let ids: Vec<String> = fresh
+            .store()
+            .all_entities()
+            .map(|e| format!("{}{}", e.id, if e.stub { "(stub)" } else { "" }))
+            .collect();
+        let present = if what == "update" {
+            fresh
+                .store()
+                .all_entities()
+                .any(|e| e.sections.values().any(|s| s.contains("identity, second")))
+        } else {
+            fresh
+                .store()
+                .all_entities()
+                .any(|e| e.title == "Zeta" && !e.stub)
+        };
+        let line = format!(
+            "workspace {what}: rename={renamed:?} second={second:?} (second's mems after: {second_mems:?}) both_locked={both_locked} | fresh engine mems={mems:?} ids={ids:?} second's write served={present}"
+        );
+        eprintln!("{line}");
+        if second.is_ok() && !present {
+            failures.push(line.clone());
+        }
+        lines.push(line);
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Unconditional writes behind a batch, and an unconditional update of
+/// the renamed entity itself behind a rename.
+#[test]
+fn unconditional_writes_behind_batches_and_the_renamed_entity() {
+    let mut failures = Vec::new();
+    for pair in PAIRS {
+        for waiter in [Waiter::BatchUpdate, Waiter::BatchRelate, Waiter::Rename] {
+            let context = format!("{pair:?} {waiter:?}");
+            let ws = Workspace::new(pair);
+            link_gamma_to_alpha(&ws);
+            // Rename here renames left--beta; the second updates beta itself.
+            let tid = if matches!(waiter, Waiter::Rename) {
+                id(LEFT, "beta")
+            } else {
+                id(RIGHT, "gamma")
+            };
+            let (done, window, mut engine) = hold_at_commit(
+                &ws,
+                {
+                    let tid = tid.clone();
+                    move |second, ready| {
+                        let args = identity_update(second, &tid, "identity, second");
+                        ready();
+                        report(
+                            second
+                                .update_entity(args, Actor::Cli, None, None)
+                                .map(|o| o.warnings),
+                        )
+                    }
+                },
+                |engine| run_waiter(waiter, engine),
+            );
+            let fresh = ws.engine();
+            let served = fresh
+                .store()
+                .all_entities()
+                .filter(|e| e.sections.values().any(|s| s.contains("identity, second")))
+                .map(|e| e.id.to_string())
+                .collect::<Vec<_>>();
+            let ids: Vec<String> = fresh
+                .store()
+                .all_entities()
+                .map(|e| format!("{}{}", e.id, if e.stub { "(stub)" } else { "" }))
+                .collect();
+            engine.reload_if_stale(None);
+            let level = view(&engine) == view(&fresh);
+            let line = format!(
+                "{context}: op={done:?} second={:?} both_locked={} served_in={served:?} ids={ids:?} level={level}",
+                window.second, window.both_locked
+            );
+            eprintln!("{line}");
+            if done.is_err()
+                || !window.both_locked
+                || (window.second.is_ok() && served.is_empty())
+                || !level
+            {
+                failures.push(line);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

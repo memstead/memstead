@@ -191,6 +191,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   refused with `MEM_VIEW_STALE` while any mem of the workspace is out
   of service.
 
+- **A write that waited out a mem rename no longer lands on the old
+  name.** A process that wanted to write into a mem while another
+  process renamed it waited on the mem's lock, got it when the rename
+  was done, and wrote: with the roster it had read before it waited,
+  onto a branch it created anew under the old name, from its view from
+  before the rename. The write was acknowledged and no engine started
+  afterwards served it. A mutation now reconciles the roster once more
+  when it holds its locks and takes them again if the mounts changed,
+  so the write is refused with `UNKNOWN_MEM`; and a mem whose storage
+  is gone where it had a head before takes no write (`MEM_VIEW_STALE`),
+  which covers an engine that has no roster to reconcile.
+
 - **A delete and a retype check their referrers against every mem as it
   is now.** Both verbs guard on the edges that point at the entity, and
   such an edge can come from any mem. They reloaded their own mem only
