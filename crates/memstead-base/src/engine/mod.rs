@@ -141,6 +141,12 @@ pub(crate) struct MountedBackend {
     /// ([`Engine::commit_staged`] refuses), because a write computed
     /// from a stale view overwrites what the view has not seen.
     reload_failure: Option<String>,
+    /// A discard on this mem's backend failed, so writes of a mutation
+    /// that did not commit may still be staged there. Set by the write
+    /// lock when it is released (it shares the flag, since it cannot
+    /// reach the engine then) and cleared by the discard the engine
+    /// runs before its next operation.
+    strays: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// One quarantined mem: the mem-level boot failure that took it out of

@@ -140,6 +140,20 @@ impl Engine {
             return warnings;
         }
 
+        // Before anything reads a backend: drop what a failed mutation
+        // left staged on it when its discard failed. While that cannot
+        // be done the mem's view takes no write, and no reload reads
+        // the backend (it would read the staged bytes as content).
+        for name in &candidates {
+            if let Err(e) = self.discard_strays(name)
+                && let Some(state) = self.mounts.iter_mut().find(|m| &m.mount.mem == name)
+            {
+                state.reload_failure = Some(format!(
+                    "writes a failed mutation left staged could not be discarded: {e}"
+                ));
+            }
+        }
+
         // Phase 2 — probe every candidate's current head via the
         // backend. A probe error surfaces no warning; it marks the
         // mem's view as unsure, which a reload below settles.

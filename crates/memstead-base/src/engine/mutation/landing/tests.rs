@@ -513,15 +513,26 @@ fn a_boot_completes_a_cut_off_folder_commit_and_reports_it() {
     run("update", &mut engine).expect_err("cut off");
     drop(engine);
 
-    let booted = engine_over(dir.path());
-    assert!(
-        booted
+    let mut booted = engine_over(dir.path());
+    let standing = |engine: &Engine| {
+        engine
             .load_warnings()
             .iter()
-            .any(|w| w.code() == "INTERRUPTED_COMMIT_COMPLETED"),
-        "{:?}",
-        booted.load_warnings()
+            .any(|w| w.code() == "INTERRUPTED_COMMIT_COMPLETED")
+    };
+    assert!(standing(&booted), "{:?}", booted.load_warnings());
+    // A boot has no response to carry the warning, so the first
+    // operation's does. The completion was the engine's own, so that
+    // operation sees no drift, reloads nothing, and the standing copy
+    // among the load warnings stays.
+    let first = booted.reload_if_stale(Some(MEM));
+    let codes: Vec<&str> = first.iter().map(|w| w.code()).collect();
+    assert_eq!(codes, ["INTERRUPTED_COMMIT_COMPLETED"], "{first:?}");
+    assert!(
+        standing(&booted),
+        "the first operation dropped the standing warning"
     );
+    assert!(booted.reload_if_stale(Some(MEM)).is_empty());
     let purpose = booted
         .get_entity(&id("alpha"))
         .and_then(|e| e.sections.get("purpose").cloned())

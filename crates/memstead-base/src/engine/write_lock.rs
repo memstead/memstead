@@ -47,7 +47,17 @@ pub struct MemWriteGuard {
     /// Each covered mem's backend with its lock-file path. A backend
     /// with no shared on-disk state has no path and takes no OS lock,
     /// but its staged writes are discarded like any other's.
-    held: Vec<(Option<PathBuf>, Arc<dyn MemBackend>)>,
+    held: Vec<Held>,
+}
+
+/// One mem a guard covers.
+struct Held {
+    path: Option<PathBuf>,
+    backend: Arc<dyn MemBackend>,
+    /// The mount's record of a discard that failed
+    /// ([`super::MountedBackend::strays`]). The guard cannot reach the
+    /// engine when it drops, so it shares this flag with the mount.
+    strays: Arc<std::sync::atomic::AtomicBool>,
 }
 
 thread_local! {
@@ -66,15 +76,24 @@ impl MemWriteGuard {
         Self { held: Vec::new() }
     }
 
-    fn cover(&mut self, path: Option<PathBuf>, backend: Arc<dyn MemBackend>) {
-        COVERED.with(|c| *c.borrow_mut().entry(backend_key(&backend)).or_insert(0) += 1);
-        self.held.push((path, backend));
+    fn cover(&mut self, held: Held) {
+        COVERED.with(|c| {
+            *c.borrow_mut()
+                .entry(backend_key(&held.backend))
+                .or_insert(0) += 1
+        });
+        self.held.push(held);
     }
 }
 
 impl Drop for MemWriteGuard {
     fn drop(&mut self) {
-        for (path, backend) in self.held.iter().rev() {
+        for Held {
+            path,
+            backend,
+            strays,
+        } in self.held.iter().rev()
+        {
             let outermost = COVERED.with(|c| {
                 let mut covered = c.borrow_mut();
                 let key = backend_key(backend);
@@ -90,12 +109,15 @@ impl Drop for MemWriteGuard {
                 }
             });
             // Discard before the lock goes, so no other writer can
-            // stage between the two. A discard that fails has nothing
-            // better to fall back to; the backends end their own
-            // transaction on a failed commit, which covers the case
-            // that matters.
+            // stage between the two. A discard that fails leaves the
+            // staged writes where a read or the next commit would pick
+            // them up, so the backend is remembered and the engine
+            // discards again before its next operation.
             if outermost {
-                let _ = backend.discard_pending();
+                strays.store(
+                    backend.discard_pending().is_err(),
+                    std::sync::atomic::Ordering::SeqCst,
+                );
             }
             if let Some(path) = path {
                 path_lock::release(path);
@@ -105,6 +127,25 @@ impl Drop for MemWriteGuard {
 }
 
 impl Engine {
+    /// Discard what a failed mutation left staged on `mem`'s backend,
+    /// if an earlier discard failed. Run before every operation, ahead
+    /// of anything that reads the backend: a staged write is served in
+    /// place of the committed bytes, and the next commit would land it.
+    /// An error means the staged writes are still there.
+    pub(super) fn discard_strays(&self, mem: &str) -> Result<(), BackendError> {
+        let Some(state) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
+            return Ok(());
+        };
+        if !state.strays.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
+        state.backend.discard_pending()?;
+        state
+            .strays
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
     /// [`Self::lock_mems_for_write`] when `writes` is true; an empty
     /// guard otherwise. A rehearsal (`dry_run`) commits nothing, so it
     /// takes no lock and leaves the workspace byte-identical, lock files
@@ -133,23 +174,27 @@ impl Engine {
         &self,
         mems: &[S],
     ) -> Result<MemWriteGuard, EngineError> {
-        let mut locks: Vec<(Option<PathBuf>, Arc<dyn MemBackend>)> = mems
+        let mut locks: Vec<Held> = mems
             .iter()
             .filter_map(|name| {
                 let m = self.mounts.iter().find(|m| m.mount.mem == name.as_ref())?;
-                Some((m.backend.write_lock_path(), Arc::clone(&m.backend)))
+                Some(Held {
+                    path: m.backend.write_lock_path(),
+                    backend: Arc::clone(&m.backend),
+                    strays: Arc::clone(&m.strays),
+                })
             })
             .collect();
         // Sorted by lock path so two multi-mem writers take their locks
         // in one order; pathless backends take no lock and sort first.
-        locks.sort_by(|a, b| a.0.cmp(&b.0));
-        locks.dedup_by(|a, b| backend_key(&a.1) == backend_key(&b.1));
+        locks.sort_by(|a, b| a.path.cmp(&b.path));
+        locks.dedup_by(|a, b| backend_key(&a.backend) == backend_key(&b.backend));
         let mut guard = MemWriteGuard::empty();
-        for (path, backend) in locks {
-            if let Some(path) = &path {
+        for held in locks {
+            if let Some(path) = &held.path {
                 path_lock::acquire(path).map_err(|e| EngineError::Backend(BackendError::Io(e)))?;
             }
-            guard.cover(path, backend);
+            guard.cover(held);
         }
         Ok(guard)
     }

@@ -388,6 +388,7 @@ impl Engine {
             // Registered live and loaded in this call — never deferred.
             deferred: false,
             reload_failure: incomplete,
+            strays: Default::default(),
         });
 
         // Step 7: COW snapshot swap on mem_router, branched on the

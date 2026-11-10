@@ -316,6 +316,7 @@ impl Engine {
             // quarantine return-to-service is never deferred.
             deferred: false,
             reload_failure: None,
+            strays: Default::default(),
         });
         self.mem_router = std::sync::Arc::new(crate::engine::boot::build_mem_router_from_mounts(
             &self.mounts,
@@ -385,6 +386,14 @@ impl Engine {
 
         // Walk the backend; surface read-time errors instead of
         // mutating the store on a failed reload.
+        // A backend that still holds the staged writes of a failed
+        // mutation would serve them to this load as content.
+        self.discard_strays(mem).map_err(|e| {
+            EngineError::Mem(format!(
+                "reload of mem `{mem}` refused: writes a failed mutation left staged could not \
+                 be discarded: {e}"
+            ))
+        })?;
         let mut completed_commit = None;
         let read = collect_source_entries(
             mem,

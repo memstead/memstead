@@ -181,7 +181,9 @@ impl Engine {
                 // transaction on a failed commit; a failure that struck
                 // before the backend's commit ran (a refused record, a
                 // wrapping backend) left the set staged, so drop it
-                // here as well.
+                // here as well. The write lock tries once more when it
+                // is released and remembers a backend it could not
+                // clear.
                 let _ = backend.discard_pending();
                 Err(e.into())
             }

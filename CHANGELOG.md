@@ -67,8 +67,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   parent mismatch. Every mutation verb now shares one exit: the write
   lock it already holds discards what is still staged when it is
   released, and both backends end their own transaction on every exit
-  of a commit. After a failed call, storage is byte for byte what it
-  was and the same call sent again is a first call.
+  of a commit. A discard that itself fails is remembered and made good
+  before the next operation reads or writes. After a failed call,
+  storage is byte for byte what it was and the same call sent again is
+  a first call.
 - **A write that landed is never reported as failed.** A step that
   failed after the commit (the ledger line or a file move of a folder
   mem, the refresh of a checked-out worktree, the update of the

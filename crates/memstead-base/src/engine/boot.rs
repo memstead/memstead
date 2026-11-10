@@ -145,6 +145,7 @@ impl Engine {
                 // only the entity load defers.
                 deferred: false,
                 reload_failure: None,
+                strays: Default::default(),
             });
         }
 
@@ -202,6 +203,7 @@ impl Engine {
         let mut deferred_idx: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
         let mut incomplete: Vec<(usize, String)> = Vec::new();
+        let mut completed_at_boot: Vec<(usize, WarningHint)> = Vec::new();
         for (m_idx, m) in mounted.iter().enumerate() {
             // An archive mount whose file is gone is the missing-storage
             // case before anything else: its pin may live only inside the
@@ -420,7 +422,13 @@ impl Engine {
 
             let mut completed = None;
             let read = collect_source_entries(&m.mount.mem, m.backend.as_ref(), &mut completed);
-            load_warnings.extend(completed);
+            if let Some(warning) = completed {
+                // Kept among the load warnings, and handed to the first
+                // operation's response as well: a boot has no response
+                // of its own to carry it.
+                load_warnings.push(warning.clone());
+                completed_at_boot.push((m_idx, warning));
+            }
             let (entries, read_errors) = match read {
                 Ok(read) => {
                     // Boot serves what could be read (one unreadable
@@ -534,6 +542,12 @@ impl Engine {
         for idx in &deferred_idx {
             mounted[*idx].deferred = true;
         }
+        // The head was probed before the load, and a load that completed
+        // a cut-off commit moved it: probe again, or the first operation
+        // would take the engine's own completion for drift and reload.
+        for (idx, _) in &completed_at_boot {
+            mounted[*idx].last_known_head = mounted[*idx].backend.current_head().ok().flatten();
+        }
         for (idx, reason) in incomplete {
             mounted[idx].reload_failure = Some(reason);
         }
@@ -637,7 +651,10 @@ impl Engine {
                 crate::engine::events::SubscriberRegistry::new(),
             )),
             pending_mem_changed: Vec::new(),
-            completed_commits: Vec::new(),
+            completed_commits: completed_at_boot
+                .into_iter()
+                .map(|(_, warning)| warning)
+                .collect(),
             roster_fingerprint: None,
             roster_subscribers: Arc::new(std::sync::Mutex::new((0, Vec::new()))),
             recently_unmounted: std::collections::HashSet::new(),

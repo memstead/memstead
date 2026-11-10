@@ -156,6 +156,8 @@ struct FaultState {
     log: Vec<(Method, bool)>,
     /// Fail the n-th call (1-based) of this method since the reset.
     armed: Option<(Method, usize)>,
+    /// Fail every call of this method as well, until the next reset.
+    always: Option<Method>,
     fired: bool,
     /// The commit had already landed when the fault fired.
     fired_after_landing: bool,
@@ -172,6 +174,11 @@ impl Faults {
     fn arm(&self, method: Method, nth: usize) {
         self.reset();
         self.inner.lock().unwrap().armed = Some((method, nth));
+    }
+
+    /// On top of an armed fault: every call of `method` fails too.
+    fn always_failing(&self, method: Method) {
+        self.inner.lock().unwrap().always = Some(method);
     }
 
     fn fired(&self) -> bool {
@@ -199,6 +206,9 @@ impl Faults {
         if state.armed == Some((method, nth)) && !state.fired {
             state.fired = true;
             state.fired_after_landing = landed;
+            return true;
+        }
+        if state.always == Some(method) {
             return true;
         }
         false
@@ -915,6 +925,7 @@ const VERBS: &[(&str, &[Verb])] = &[
     // The write lock and the one commit call, shared by every verb.
     ("engine/write_lock.rs::lock_mems_for_write_if", EVERY_VERB),
     ("engine/write_lock.rs::drop", EVERY_VERB),
+    ("engine/write_lock.rs::discard_strays", EVERY_VERB),
     ("engine/mutation/landing.rs::commit_staged", EVERY_VERB),
     (
         "engine/mutation/landing.rs::commit_staged_pinned",
@@ -1665,11 +1676,19 @@ fn view(engine: &Engine, hashes: bool) -> BTreeMap<String, String> {
         } else {
             ""
         };
+        // The anchors are read from the sidecar in storage on every
+        // call: a view of their own, compared like the store's.
+        let mut anchors: Vec<String> = engine
+            .entity_anchors(&entity.id)
+            .iter()
+            .map(|a| a.artifact.clone())
+            .collect();
+        anchors.sort();
         out.insert(
             entity.id.to_string(),
             format!(
-                "stub={} type={} title={:?} hash={} out={:?} in={:?}",
-                entity.stub, entity.entity_type, entity.title, hash, outgoing, incoming
+                "stub={} type={} title={:?} hash={} out={:?} in={:?} anchors={:?}",
+                entity.stub, entity.entity_type, entity.title, hash, outgoing, incoming, anchors
             ),
         );
     }
@@ -1704,19 +1723,16 @@ fn view(engine: &Engine, hashes: bool) -> BTreeMap<String, String> {
 /// Methods whose failure the engine absorbs by design, so the call
 /// still succeeds with the undisturbed result. Each has its reason:
 ///
-/// - `current_head`, `write_lock_path`: drift detection is best-effort
-///   and never blocks the operation it accompanies (the trait says so).
-/// - `read_mem_config`, `write_mem_config_cas`, `write_mem_config`: the
-///   version stamp after a commit is best-effort; a failed stamp never
-///   fails the mutation before it.
+/// - `current_head`: before the commit, a failed drift probe makes the
+///   engine reload the mem instead of trusting the head, and the call
+///   goes on from the reloaded view; after the commit it only decides
+///   which cursor is recorded for the engine's own write.
+/// - `write_lock_path`: infallible by signature.
 /// - `discard_pending`: called on exits only; on a successful call
 ///   nothing is staged and its failure has nothing to leave behind.
 const ABSORBED: &[Method] = &[
     Method::CurrentHead,
     Method::WriteLockPath,
-    Method::ReadMemConfig,
-    Method::WriteMemConfigCas,
-    Method::WriteMemConfig,
     Method::DiscardPending,
 ];
 
@@ -1908,6 +1924,80 @@ fn a_failed_commit_is_not_recorded_as_the_engines_own_write() {
             view(&ws.fresh_engine(Peer::Absent), true),
             "{kind:?}: the engine's view differs from a fresh load"
         );
+    }
+}
+
+/// Two faults in one call: a storage call of the commit path fails, and
+/// the discard that should clear what was staged fails as well. The
+/// staged writes outlive the call, and must not outlive the start of
+/// the next operation: no read serves them, the next commit does not
+/// land them, and the engine's view stays level with storage.
+#[test]
+fn a_failed_discard_leaves_no_staged_write_for_the_next_operation() {
+    for kind in [Kind::Folder, Kind::GitBranch] {
+        let template = Workspace::template(kind);
+        let mut cells = 0;
+        for verb in all_verbs() {
+            let control = control(&template, verb);
+            let staging_calls: Vec<(Method, usize)> = [
+                Method::WriteEntity,
+                Method::DeleteEntity,
+                Method::MoveEntity,
+                Method::WriteAnchorsSidecar,
+                Method::ReadAnchorsSidecar,
+                Method::StageProvenance,
+                Method::CommitWithExpectedParent,
+            ]
+            .into_iter()
+            .flat_map(|method| {
+                let calls = control.log.iter().filter(|(m, _)| *m == method).count();
+                (1..=calls).map(move |nth| (method, nth))
+            })
+            .collect();
+            for (method, nth) in staging_calls {
+                let cell = format!("{kind:?} {verb:?} {}#{nth} and the discard", method.name());
+                let ws = template.copy();
+                let peer = verb.peer();
+                let (mut engine, faults, engine_backend) = ws.faulted_engine(peer);
+                let before = ws.storage_snapshot();
+
+                faults.arm(method, nth);
+                faults.always_failing(Method::DiscardPending);
+                let result = run(verb, &mut engine);
+                let staged = faults.staged_paths();
+                faults.reset();
+                assert!(result.is_err(), "{cell}: the call succeeded");
+                assert!(
+                    changed_keys(&before, &ws.storage_snapshot()).is_empty(),
+                    "{cell}: storage changed under a failed call"
+                );
+
+                // The next operation starts: nothing staged is served.
+                engine.reload_if_stale(Some(MEM));
+                assert_nothing_staged(&ws, &staged, &engine_backend, &cell);
+                assert_eq!(
+                    view(&engine, true),
+                    view(&ws.fresh_engine(peer), true),
+                    "{cell}: the engine's view differs from a fresh load"
+                );
+
+                // And the same call, sent again, is a first call: what
+                // it commits is what an undisturbed call commits.
+                run(verb, &mut engine).unwrap_or_else(|e| panic!("{cell}: the retry failed: {e}"));
+                assert_eq!(
+                    view(&engine, false),
+                    control.view,
+                    "{cell}: the retry's result differs from an undisturbed call"
+                );
+                assert_eq!(
+                    view(&engine, true),
+                    view(&ws.fresh_engine(peer), true),
+                    "{cell}: after the retry the engine's view differs from a fresh load"
+                );
+                cells += 1;
+            }
+        }
+        assert!(cells > 0);
     }
 }
 
