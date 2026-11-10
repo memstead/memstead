@@ -190,8 +190,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   new`, `schema install` writing a package) refuses `INTERNAL_IO_ERROR` with `details.path`,
   as quickstart does, where it refused `IO_ERROR`. `WORKSPACE_NOT_INITIALISED`
   from the CLI's workspace walk carries the engine's payload, adding
-  `details.path`. `memstead pull --all` exits with the refused ref's own
-  code where an unlisted code became `INTERNAL`. Three state refusals
+  `details.path`. `memstead push --all` and `pull --all` exit with the
+  refused ref's own code where an unlisted code became `INTERNAL`. Three state refusals
   spelled as input errors are engine values: a git operation on a folder
   mem or a workspace without git-branch mems (`fetch`, `pull`, `push`,
   `branch-reset`, `diff`, `push --all`, `pull --all`, `mem-repo

@@ -349,15 +349,8 @@ fn run_pull_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
         .find(|r| r.ref_name.starts_with("refs/"))
         .or_else(|| outcome.refused.first());
     if let Some(first) = primary {
-        let code: &'static str = match first.code.as_str() {
-            "LOCAL_DIVERGENCE" => "LOCAL_DIVERGENCE",
-            "SCHEMA_VIOLATION_IN_FETCH" => "SCHEMA_VIOLATION_IN_FETCH",
-            "SCHEMA_NOT_FOUND" => "SCHEMA_NOT_FOUND",
-            "UNKNOWN_REF" => "UNKNOWN_REF",
-            "UNKNOWN_REMOTE" => "UNKNOWN_REMOTE",
-            "MEM_ERROR" => "MEM_ERROR",
-            _ => "INTERNAL",
-        };
+        // The refusal's own code, as `push --all` reports it (see there).
+        let code: &'static str = Box::leak(first.code.clone().into_boxed_str());
         let divergence_hint = if outcome.refused.iter().any(|r| r.code == "LOCAL_DIVERGENCE") {
             " A LOCAL_DIVERGENCE ref has local commits the remote lacks and the remote has \
              commits it lacks: push from the other clone first, or reconcile with \
