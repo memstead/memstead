@@ -73,7 +73,14 @@ impl Engine {
                 }],
             }));
         }
-        if let Some(existing) = self.store.get(&new_id) {
+        // A stub at the new id is a forward reference waiting for its
+        // entity, and the rename brings it: the references resolve.
+        // This is also what a rename that landed in part leaves behind
+        // (its peers already point at the new id), so the same call
+        // sent again is not refused by its own first half.
+        if let Some(existing) = self.store.get(&new_id)
+            && !existing.stub
+        {
             return Err(EngineError::AlreadyExists {
                 id: new_id.to_string(),
                 existing_title: existing.title.clone(),

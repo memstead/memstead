@@ -1455,6 +1455,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "details.committed_mems",
             "details.failed_mem",
             "details.failure_cause",
+            "details.mems[]",
             "logical_operation_id",
             "RESIDUAL_STUB_FOR_READONLY_REFERRERS",
             // Shared note/require_notes surface.

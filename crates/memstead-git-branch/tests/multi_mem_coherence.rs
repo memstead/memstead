@@ -34,7 +34,8 @@ use memstead_base::storage::CommitId;
 use memstead_base::vcs::{Actor, CommitContext};
 use memstead_base::{
     CreateEntityArgs, DeleteEntityArgs, Engine, EngineError, EntityId, Mount, MountCapability,
-    MountLifecycle, MountStorage, Provenance, RelateEntityArgs, RetypeEntityArgs, UpdateEntityArgs,
+    MountLifecycle, MountStorage, Provenance, RelateEntityArgs, RenameEntityArgs, RetypeEntityArgs,
+    UpdateEntityArgs,
 };
 use memstead_git_branch::storage::instantiate_full_backend;
 use memstead_git_branch::test_support::init_real_mem_repo;
@@ -63,8 +64,9 @@ const PAIRS: [(Kind, Kind); 4] = [
 // ---------------------------------------------------------------------
 
 /// Called with the mem and the storage method's name before the method
-/// runs, on the thread that runs it.
-type Tap = Arc<dyn Fn(&str, &str) + Send + Sync>;
+/// runs, on the thread that runs it. `true` fails the call in place of
+/// running it: a storage error at that step.
+type Tap = Arc<dyn Fn(&str, &str) -> bool + Send + Sync>;
 
 struct Tapped {
     inner: Box<dyn MemBackend>,
@@ -73,8 +75,15 @@ struct Tapped {
 }
 
 impl Tapped {
-    fn on(&self, method: &str) {
-        (self.tap)(self.mem, method);
+    fn on(&self, method: &str) -> Result<(), BackendError> {
+        if (self.tap)(self.mem, method) {
+            Err(BackendError::Other(format!(
+                "injected failure of {method} on {}",
+                self.mem
+            )))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -94,43 +103,43 @@ fn lands(method: &str) -> bool {
 
 impl MemBackend for Tapped {
     fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
-        self.on("list_entities");
+        self.on("list_entities")?;
         self.inner.list_entities()
     }
     fn read_entity(&self, rel_path: &Path) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_entity");
+        self.on("read_entity")?;
         self.inner.read_entity(rel_path)
     }
     fn entity_exists(&self, rel_path: &Path) -> Result<bool, BackendError> {
-        self.on("entity_exists");
+        self.on("entity_exists")?;
         self.inner.entity_exists(rel_path)
     }
     fn read_all_entities(&self) -> Result<Vec<EntityRead>, BackendError> {
-        self.on("read_all_entities");
+        self.on("read_all_entities")?;
         self.inner.read_all_entities()
     }
     fn storage_present(&self) -> Result<bool, BackendError> {
-        self.on("storage_present");
+        self.on("storage_present")?;
         self.inner.storage_present()
     }
     fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), BackendError> {
-        self.on("write_entity");
+        self.on("write_entity")?;
         self.inner.write_entity(rel_path, content)
     }
     fn delete_entity(&self, rel_path: &Path) -> Result<(), BackendError> {
-        self.on("delete_entity");
+        self.on("delete_entity")?;
         self.inner.delete_entity(rel_path)
     }
     fn move_entity(&self, from: &Path, to: &Path) -> Result<(), BackendError> {
-        self.on("move_entity");
+        self.on("move_entity")?;
         self.inner.move_entity(from, to)
     }
     fn discard_pending(&self) -> Result<(), BackendError> {
-        self.on("discard_pending");
+        self.on("discard_pending")?;
         self.inner.discard_pending()
     }
     fn commit(&self, message: &str, ctx: &CommitContext<'_>) -> Result<CommitId, BackendError> {
-        self.on("commit");
+        self.on("commit")?;
         self.inner.commit(message, ctx)
     }
     fn commit_with_expected_parent(
@@ -139,52 +148,52 @@ impl MemBackend for Tapped {
         ctx: &CommitContext<'_>,
         expected_parent: Option<&str>,
     ) -> Result<CommitId, BackendError> {
-        self.on("commit_with_expected_parent");
+        self.on("commit_with_expected_parent")?;
         self.inner
             .commit_with_expected_parent(message, ctx, expected_parent)
     }
     fn stage_provenance(&self, record: &Provenance) -> Result<(), BackendError> {
-        self.on("stage_provenance");
+        self.on("stage_provenance")?;
         self.inner.stage_provenance(record)
     }
     fn append_provenance(&self, record: &Provenance) -> Result<(), BackendError> {
-        self.on("append_provenance");
+        self.on("append_provenance")?;
         self.inner.append_provenance(record)
     }
     fn complete_interrupted_commit(&self) -> Result<Option<CompletedCommit>, BackendError> {
-        self.on("complete_interrupted_commit");
+        self.on("complete_interrupted_commit")?;
         self.inner.complete_interrupted_commit()
     }
     fn read_provenance(&self, cursor: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
-        self.on("read_provenance");
+        self.on("read_provenance")?;
         self.inner.read_provenance(cursor)
     }
     fn current_head(&self) -> Result<Option<String>, BackendError> {
-        self.on("current_head");
+        self.on("current_head")?;
         self.inner.current_head()
     }
     fn write_lock_path(&self) -> Option<PathBuf> {
-        self.on("write_lock_path");
+        let _ = self.on("write_lock_path");
         self.inner.write_lock_path()
     }
     fn read_mem_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_mem_config");
+        self.on("read_mem_config")?;
         self.inner.read_mem_config()
     }
     fn read_archive_provenance(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_archive_provenance");
+        self.on("read_archive_provenance")?;
         self.inner.read_archive_provenance()
     }
     fn read_archive_checks(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_archive_checks");
+        self.on("read_archive_checks")?;
         self.inner.read_archive_checks()
     }
     fn read_proposal_record(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_proposal_record");
+        self.on("read_proposal_record")?;
         self.inner.read_proposal_record()
     }
     fn write_mem_config(&self, bytes: &[u8], ctx: &CommitContext<'_>) -> Result<(), BackendError> {
-        self.on("write_mem_config");
+        self.on("write_mem_config")?;
         self.inner.write_mem_config(bytes, ctx)
     }
     fn write_mem_config_cas(
@@ -193,7 +202,7 @@ impl MemBackend for Tapped {
         bytes: &[u8],
         ctx: &CommitContext<'_>,
     ) -> Result<bool, BackendError> {
-        self.on("write_mem_config_cas");
+        self.on("write_mem_config_cas")?;
         self.inner.write_mem_config_cas(expected, bytes, ctx)
     }
     fn record_pipeline_edit(
@@ -203,19 +212,19 @@ impl MemBackend for Tapped {
         ctx: &CommitContext<'_>,
         verb: &str,
     ) -> Result<(), BackendError> {
-        self.on("record_pipeline_edit");
+        self.on("record_pipeline_edit")?;
         self.inner.record_pipeline_edit(kind, edits, ctx, verb)
     }
     fn read_anchors_sidecar(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        self.on("read_anchors_sidecar");
+        self.on("read_anchors_sidecar")?;
         self.inner.read_anchors_sidecar()
     }
     fn write_anchors_sidecar(&self, bytes: &[u8]) -> Result<(), BackendError> {
-        self.on("write_anchors_sidecar");
+        self.on("write_anchors_sidecar")?;
         self.inner.write_anchors_sidecar(bytes)
     }
     fn delete_artifacts(&self, ctx: &CommitContext<'_>) -> Result<(), BackendError> {
-        self.on("delete_artifacts");
+        self.on("delete_artifacts")?;
         self.inner.delete_artifacts(ctx)
     }
 }
@@ -293,11 +302,26 @@ impl Workspace {
         self.engine_with(Some(tap))
     }
 
+    /// The same as [`Self::engine`], with `right` mounted lazily: its
+    /// loading is deferred until an operation needs the mem.
+    fn engine_with_right_deferred(&self) -> Engine {
+        self.build_engine(None, true)
+    }
+
     fn engine_with(&self, tap: Option<Tap>) -> Engine {
+        self.build_engine(tap, false)
+    }
+
+    fn build_engine(&self, tap: Option<Tap>, right_deferred: bool) -> Engine {
         let mounts = self
             .mounts
             .iter()
             .map(|mount| {
+                let mut mount = mount.clone();
+                if right_deferred && mount.mem == RIGHT {
+                    mount.lifecycle = MountLifecycle::Lazy;
+                }
+                let mount = &mount;
                 let backend = instantiate_full_backend(mount).expect("backend instantiates");
                 let backend: Box<dyn MemBackend> = match &tap {
                     Some(tap) => Box::new(Tapped {
@@ -568,11 +592,11 @@ fn hold_at_commit<R, T: Send + 'static>(
         let stage = Arc::clone(&stage);
         Arc::new(move |_mem: &str, method: &str| {
             if !lands(method) {
-                return;
+                return false;
             }
             let mut stage = stage.lock().unwrap();
             let Stage::Armed(_) = &*stage else {
-                return;
+                return false;
             };
             let Stage::Armed(spawn) = std::mem::replace(&mut *stage, Stage::Taken) else {
                 unreachable!()
@@ -594,6 +618,7 @@ fn hold_at_commit<R, T: Send + 'static>(
                     second: handle.join().expect("the second writer does not panic"),
                 }
             };
+            false
         })
     };
     let mut engine = ws.tapped_engine(tap);
@@ -789,6 +814,8 @@ enum Waiter {
     Delete,
     /// Retypes `left--beta`; waits on `right`'s lock too.
     Retype,
+    /// Renames `left--beta`; waits on `right`'s lock too.
+    Rename,
     /// One item per mem.
     BatchCreate,
     BatchUpdate,
@@ -811,6 +838,14 @@ fn run_waiter(waiter: Waiter, engine: &mut Engine) -> Report {
             report(
                 engine
                     .retype_entity(args, actor, None, None)
+                    .map(|o| o.warnings),
+            )
+        }
+        Waiter::Rename => {
+            let args = rename_args(engine, &id(LEFT, "beta"), "Beta Renamed");
+            report(
+                engine
+                    .rename_entity(args, actor, None, None)
                     .map(|o| o.warnings),
             )
         }
@@ -892,6 +927,7 @@ fn assert_waits_on_the_peers_lock(waiters: &[Waiter]) {
                             .unwrap()
                             .push(format!("{mem}: {method}"));
                     }
+                    false
                 })
             };
             let verb = {
@@ -930,12 +966,13 @@ fn assert_waits_on_the_peers_lock(waiters: &[Waiter]) {
     }
 }
 
-/// A delete and a retype read every mem for their referrer guard, so
-/// they hold every writable mem's lock: the lock of a mem they do not
-/// write makes them wait.
+/// A delete and a retype read every mem for their referrer guard, and
+/// a rename reads every mem for its referrers, so they hold every
+/// writable mem's lock: the lock of a mem they do not write makes them
+/// wait.
 #[test]
-fn a_delete_and_a_retype_wait_on_the_lock_of_a_mem_they_only_read() {
-    assert_waits_on_the_peers_lock(&[Waiter::Delete, Waiter::Retype]);
+fn a_delete_a_retype_and_a_rename_wait_on_the_lock_of_a_mem_they_only_read() {
+    assert_waits_on_the_peers_lock(&[Waiter::Delete, Waiter::Retype, Waiter::Rename]);
 }
 
 /// A batch holds the lock of every mem its items name before it lands
@@ -1073,5 +1110,276 @@ fn two_batches_over_the_same_mems_in_opposite_order_both_complete() {
             created, 20,
             "{pair:?}: every acknowledged create is in storage"
         );
+    }
+}
+
+// ---------------------------------------------------------------------
+// Entity rename: referrers in other mems
+// ---------------------------------------------------------------------
+
+/// Give `right--gamma` a body link to `left--alpha`, so a rename of
+/// alpha has a referrer to rewrite in the other mem.
+fn link_gamma_to_alpha(ws: &Workspace) {
+    let mut engine = ws.engine();
+    let linked = add_link(&mut engine, Link::BodyLink, &|| {});
+    assert!(linked.is_ok(), "{linked:?}");
+}
+
+fn rename_args(engine: &Engine, target: &EntityId, new_title: &str) -> RenameEntityArgs {
+    RenameEntityArgs {
+        id: target.clone(),
+        expected_hash: engine.get_entity(target).map(|e| e.content_hash.clone()),
+        new_title: new_title.to_string(),
+    }
+}
+
+/// The view without content hashes: two runs of one operation stamp
+/// different times into the bytes and agree on everything else.
+fn shape(engine: &Engine) -> BTreeMap<String, String> {
+    view(engine)
+        .into_iter()
+        .map(|(id, line)| {
+            let hash_at = line.find(" hash=").unwrap();
+            let out_at = line.find(" out=").unwrap();
+            (id, format!("{}{}", &line[..hash_at], &line[out_at..]))
+        })
+        .collect()
+}
+
+/// What an undisturbed rename of `left--alpha` ends in, on a workspace
+/// of its own.
+fn undisturbed_rename(pair: (Kind, Kind)) -> BTreeMap<String, String> {
+    let ws = Workspace::new(pair);
+    link_gamma_to_alpha(&ws);
+    let mut engine = ws.engine();
+    let args = rename_args(&engine, &id(LEFT, "alpha"), "Alpha Renamed");
+    engine
+        .rename_entity(args, Actor::Cli, None, None)
+        .expect("an undisturbed rename lands");
+    shape(&ws.engine())
+}
+
+/// A rename is held at its first commit and a second process rewrites
+/// the referrer the rename is about to rewrite in the other mem. The
+/// second write is never lost: the rename holds that mem's lock, so the
+/// write waits and is then judged against the referrer as the rename
+/// left it.
+#[test]
+fn an_update_to_a_referrer_while_a_rename_is_held_at_its_commit_is_not_lost() {
+    for pair in PAIRS {
+        let context = format!("{pair:?}");
+        let ws = Workspace::new(pair);
+        link_gamma_to_alpha(&ws);
+        let (renamed, window, mut engine) = hold_at_commit(
+            &ws,
+            |second, ready| {
+                let args = update_args(
+                    second,
+                    &id(RIGHT, "gamma"),
+                    "Gamma purpose, second, see [[left--alpha]]",
+                );
+                ready();
+                report(
+                    second
+                        .update_entity(args, Actor::Cli, None, None)
+                        .map(|o| o.warnings),
+                )
+            },
+            |engine| {
+                let args = rename_args(engine, &id(LEFT, "alpha"), "Alpha Renamed");
+                report(
+                    engine
+                        .rename_entity(args, Actor::Cli, None, None)
+                        .map(|o| o.warnings),
+                )
+            },
+        );
+        assert!(renamed.is_ok(), "{context}: {renamed:?}");
+        assert!(
+            window.both_locked,
+            "{context}: the rename holds the write lock of every writable mem at its first commit"
+        );
+        let fresh = ws.engine();
+        let gamma = fresh.get_entity(&id(RIGHT, "gamma")).unwrap();
+        let purpose = gamma.sections.get("purpose").cloned().unwrap_or_default();
+        assert!(
+            purpose.contains("[[left--alpha-renamed]]"),
+            "{context}: the referrer points at the new id: {purpose}"
+        );
+        // An acknowledged second write is in storage; a refused one is
+        // refused on the hash the rename changed.
+        match &window.second {
+            Ok(_) => assert!(
+                purpose.contains("second"),
+                "{context}: the second process's update was acknowledged and is gone: {purpose}"
+            ),
+            Err(code) => assert_eq!(code, "HASH_MISMATCH", "{context}"),
+        }
+        assert!(
+            fresh.get_entity(&id(LEFT, "alpha")).is_none(),
+            "{context}: nothing is left under the old id"
+        );
+        assert_level_with_storage(&ws, &mut engine, &context);
+    }
+}
+
+/// A rename rewrites the referrers in a mem whose loading was deferred
+/// and that no operation has loaded yet.
+#[test]
+fn a_rename_rewrites_the_referrers_in_a_mem_whose_loading_was_deferred() {
+    for pair in PAIRS {
+        let context = format!("{pair:?}");
+        let ws = Workspace::new(pair);
+        link_gamma_to_alpha(&ws);
+        let mut engine = ws.engine_with_right_deferred();
+        assert!(engine.mem_is_deferred(RIGHT), "{context}");
+        let args = rename_args(&engine, &id(LEFT, "alpha"), "Alpha Renamed");
+        engine
+            .rename_entity(args, Actor::Cli, None, None)
+            .unwrap_or_else(|e| panic!("{context}: {e:?}"));
+        assert_eq!(
+            shape(&ws.engine()),
+            undisturbed_rename(pair),
+            "{context}: the deferred peer's referrer follows the rename"
+        );
+    }
+}
+
+/// A storage failure at the last commit of a rename, after the peer
+/// mem's commit landed. The call returns the partial-failure envelope;
+/// no mem holds a staged write; the engine's view of every mem is what
+/// a freshly loaded engine sees; the entity is still under the id and
+/// the hash the caller sent; and the identical call completes the
+/// rename into the state an undisturbed rename produces.
+#[test]
+fn a_rename_that_fails_after_a_peer_landed_reports_what_landed_and_the_same_call_completes_it() {
+    for pair in PAIRS {
+        let context = format!("{pair:?}");
+        let ws = Workspace::new(pair);
+        link_gamma_to_alpha(&ws);
+
+        // Fail the first commit into `left`: the renamed entity's own
+        // mem, which commits after the peer.
+        let failed = Arc::new(AtomicBool::new(false));
+        let order = Arc::new(Mutex::new(Vec::<String>::new()));
+        let tap: Tap = {
+            let (failed, order) = (Arc::clone(&failed), Arc::clone(&order));
+            Arc::new(move |mem: &str, method: &str| {
+                if !matches!(method, "commit" | "commit_with_expected_parent") {
+                    return false;
+                }
+                order.lock().unwrap().push(mem.to_string());
+                mem == LEFT && !failed.swap(true, Ordering::SeqCst)
+            })
+        };
+        let mut engine = ws.tapped_engine(tap);
+        let alpha = id(LEFT, "alpha");
+        let args = rename_args(&engine, &alpha, "Alpha Renamed");
+        let sent_hash = args.expected_hash.clone();
+        let again = RenameEntityArgs {
+            id: args.id.clone(),
+            expected_hash: args.expected_hash.clone(),
+            new_title: args.new_title.clone(),
+        };
+
+        let err = engine
+            .rename_entity(args, Actor::Cli, None, None)
+            .expect_err("the injected failure fails the call");
+        assert_eq!(
+            *order.lock().unwrap(),
+            vec![RIGHT.to_string(), LEFT.to_string()],
+            "{context}: the peer commits first, the renamed entity's own mem last"
+        );
+        let EngineError::RenamePartialFailure {
+            committed_mems,
+            failed_mem,
+            failure_cause,
+            mems,
+        } = &err
+        else {
+            panic!("{context}: expected the partial-failure envelope, got {err:?}");
+        };
+        assert_eq!(committed_mems, &vec![RIGHT.to_string()], "{context}");
+        assert_eq!(failed_mem, LEFT, "{context}");
+        assert_eq!(failure_cause, "storage", "{context}");
+
+        // The envelope against storage, mem by mem and item by item.
+        let fresh = ws.engine();
+        let gamma = id(RIGHT, "gamma");
+        let purpose_of = |engine: &Engine| {
+            engine
+                .get_entity(&gamma)
+                .and_then(|e| e.sections.get("purpose").cloned())
+                .unwrap_or_default()
+        };
+        assert!(
+            purpose_of(&fresh).contains("[[left--alpha-renamed]]"),
+            "{context}: the peer's commit landed"
+        );
+        assert!(
+            fresh.get_entity(&alpha).is_some_and(|e| !e.stub),
+            "{context}: the entity is still under the id the caller used"
+        );
+        assert_eq!(
+            fresh.get_entity(&alpha).map(|e| e.content_hash.clone()),
+            sent_hash,
+            "{context}: with the hash the caller sent"
+        );
+        for reported in mems {
+            let landed_in_storage = match reported.mem.as_str() {
+                RIGHT => true,
+                LEFT => false,
+                other => panic!("{context}: the envelope names a mem nobody wrote: {other}"),
+            };
+            assert_eq!(
+                reported.landed, landed_in_storage,
+                "{context}: {reported:?}"
+            );
+            assert_eq!(
+                reported.error.is_some(),
+                reported.mem == LEFT,
+                "{context}: {reported:?}"
+            );
+            for item in &reported.items {
+                assert_eq!(item.landed, landed_in_storage, "{context}: {item:?}");
+                let (mem, slug) = item.id.split_once("--").unwrap();
+                let now = id(mem, slug);
+                assert_eq!(
+                    item.current_hash,
+                    fresh.get_entity(&now).map(|e| e.content_hash.clone()),
+                    "{context}: {item:?}"
+                );
+            }
+        }
+        let named: Vec<(&str, Vec<&str>)> = mems
+            .iter()
+            .map(|m| {
+                (
+                    m.mem.as_str(),
+                    m.items.iter().map(|i| i.id.as_str()).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            named,
+            vec![(RIGHT, vec!["right--gamma"]), (LEFT, vec!["left--alpha"])],
+            "{context}: every mem and every entity the rename writes is named"
+        );
+
+        // The running engine's view, as it is, equals a fresh load's:
+        // nothing staged is served, nothing landed is missing.
+        assert_eq!(view(&engine), view(&fresh), "{context}");
+
+        // The identical call, with the identical hash, completes it.
+        let completed = engine
+            .rename_entity(again, Actor::Cli, None, None)
+            .unwrap_or_else(|e| panic!("{context}: the same call sent again: {e:?}"));
+        assert_eq!(completed.new_id, id(LEFT, "alpha-renamed"), "{context}");
+        assert_eq!(
+            shape(&ws.engine()),
+            undisturbed_rename(pair),
+            "{context}: the completed rename equals an undisturbed one"
+        );
+        assert_level_with_storage(&ws, &mut engine, &context);
     }
 }

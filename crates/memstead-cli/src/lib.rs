@@ -608,12 +608,14 @@ impl CliError {
                 committed_mems,
                 failed_mem,
                 failure_cause,
+                mems,
             } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "committed_mems": committed_mems,
                     "failed_mem": failed_mem,
                     "failure_cause": failure_cause,
+                    "mems": mems,
                 })),
             ),
             StaleView { mem, detail } => (

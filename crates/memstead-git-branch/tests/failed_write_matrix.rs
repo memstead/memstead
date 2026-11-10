@@ -963,7 +963,7 @@ const VERBS: &[(&str, &[Verb])] = &[
     ),
     (
         "engine/write_lock.rs::lock_workspace_for_write_if",
-        &[Verb::Delete, Verb::DeleteStub, Verb::Retype],
+        &[Verb::Delete, Verb::DeleteStub, Verb::Retype, Verb::Rename],
     ),
     ("engine/write_lock.rs::drop", EVERY_VERB),
     ("engine/write_lock.rs::discard_strays", EVERY_VERB),

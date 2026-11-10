@@ -234,6 +234,29 @@ impl SchemaSourceDiagnostic {
     }
 }
 
+/// One mem's part of an operation over several mems, as a partial
+/// failure reports it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PartialMem {
+    pub mem: String,
+    /// The operation's commit to this mem is in storage.
+    pub landed: bool,
+    /// Why this mem's part failed; set on the mem that failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub items: Vec<PartialItem>,
+}
+
+/// One entity an operation over several mems writes.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PartialItem {
+    /// The entity's id as storage has it now.
+    pub id: String,
+    pub landed: bool,
+    /// The entity's content hash now; `None` when it does not exist.
+    pub current_hash: Option<String>,
+}
+
 /// Errors surfaced by [`Engine`].
 ///
 /// `Backend` lifts [`BackendError`] verbatim through a `#[from]`
@@ -642,24 +665,27 @@ pub enum EngineError {
         rel_type: String,
         body_links: Vec<String>,
     },
-    /// A multi-mem `memstead_rename` partially landed: at least one
-    /// mem committed successfully, then a subsequent per-mem
-    /// commit aborted (typically because a sibling writer advanced
-    /// the failed mem's head between the rename's snapshot and the
-    /// commit attempt — the parent-ref pin tripped via
-    /// `BackendError::ParentMismatch`). The committed mems' state
-    /// has already landed and is durable; the failed mem's writes
-    /// did not land. The agent's recovery options: retry the rename
-    /// (reload the workspace first so the engine re-derives the right
-    /// referrer set), or accept the partial state and reconcile
-    /// manually via subsequent mutations.
+    /// An operation over several mems landed in part: at least one
+    /// mem committed, then another mem's part failed, on a storage
+    /// error (`failure_cause: "storage"`) or because its head was no
+    /// longer the one the operation pinned (`"drift"`). What committed
+    /// is durable and the engine's view is level with it; the failed
+    /// mem holds nothing of the operation. `mems` states, for every mem
+    /// the operation writes and every entity it writes there, whether
+    /// it landed and the entity's hash as it is now.
+    ///
+    /// An entity rename lands the renamed entity's own mem last, so
+    /// after a partial failure the entity is still under the id the
+    /// caller named, with the hash the caller sent: the identical call
+    /// completes the rename.
     #[error(
-        "rename partial-failure: mem `{failed_mem}` aborted with cause {failure_cause:?} after {committed_mems:?} already committed — reload and retry, or reconcile manually"
+        "rename landed in part: mem `{failed_mem}` failed ({failure_cause}) after {committed_mems:?} committed; details.mems states what landed"
     )]
     RenamePartialFailure {
         committed_mems: Vec<String>,
         failed_mem: String,
         failure_cause: String,
+        mems: Vec<PartialMem>,
     },
     /// A folder mem's commit is decided and not yet applied: its commit
     /// record is durable, an error cut off the move of its files into

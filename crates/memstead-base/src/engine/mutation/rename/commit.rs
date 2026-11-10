@@ -1,8 +1,10 @@
-//! Commit phase of a rename: stage and commit the renamed entity's
-//! own mem, then each peer mem pinned to the head the engine saw,
-//! record the engine's own writes, apply the change to the in-memory
-//! store by re-parsing the bytes that hit disk, and shape the outcome.
-//! Every commit of one rename carries the same logical operation id.
+//! Commit phase of a rename: stage and commit each peer mem, pinned to
+//! the head the engine saw, then the renamed entity's own mem; record
+//! the engine's own writes, apply the change to the in-memory store by
+//! re-parsing the bytes that hit disk, and shape the outcome. Every
+//! commit of one rename carries the same logical operation id. A
+//! commit that fails after another landed ends in the partial-failure
+//! envelope.
 
 use crate::engine_fallback_type;
 use crate::entity::parser::parse_markdown;
@@ -13,6 +15,7 @@ use crate::vcs::{Actor, ClientId};
 
 use super::super::make_stub;
 use super::{Engine, EngineError, PreparedRename, RenameEntityOutcome};
+use crate::engine::error::{PartialItem, PartialMem};
 
 impl Engine {
     /// Land a prepared rename. The caller holds the write lock.
@@ -45,63 +48,25 @@ impl Engine {
         let new_slug = derivation.slug.clone();
         let readonly_referrers = readonly_referrers.clone();
 
-        // ----- Apply: renaming entity's own mem first -----
         // Mint a single `logical_operation_id` up front so every
-        // commit produced by this rename — source mem + every peer
+        // commit produced by this rename — every peer mem + the source
         // mem — carries the same correlation id in its provenance
         // entry. Single-mem renames also tag with an id (it just
         // maps to one commit); consumers branch on whether the id
         // recurs to identify a multi-commit logical operation.
         let logical_op_id = crate::provenance::mint_logical_operation_id();
-
-        self.stage_rename_source(&prepared)?;
-        // The check ledger follows the id too. It is workspace state, not
-        // mem content, so it cannot ride the commit; it is carried before
-        // the commit so a ledger that refuses stops the rename the way a
-        // refused check stops a record, and a commit that then fails
-        // leaves at worst a carried line under an id that never came to
-        // be — never a renamed entity that lost its checks.
-        self.carry_checks_across_rename(id, &new_id)?;
-        let commit_subject = format!("memstead: rename {} → {new_id}", id);
-        let mut ctx = self.commit_context(
-            Some("rename_entity"),
-            actor,
-            client.cloned(),
-            note.map(String::from),
-        );
-        ctx.logical_operation_id = Some(logical_op_id.as_str());
         // One record shape for every commit of this rename; each lands
         // with its mem's commit.
         let record = self
             .provenance_record(ProvenanceKind::Rename, &new_id, actor, client, note)
             .with_logical_operation_id(logical_op_id.clone());
-        let landed = self.commit_staged(
-            mount_idx,
-            &commit_subject,
-            &ctx,
-            std::slice::from_ref(&record),
-        )?;
-        let write_id = landed.write_id;
-        let mut follow_up_warnings = landed.warnings;
-        let mut committed_mounts: Vec<usize> = vec![mount_idx];
 
-        self.record_self_write(mount_idx, &write_id);
-        let stamp_warnings = self.stamp_mutation_versions(mount_idx);
-        let mut peer_stamp_warnings: Vec<WarningHint> = Vec::new();
-
-        // ----- Apply: cross-mem peer mems (parent-pinned) -----
-        // Snapshot every peer mem's current head before any peer
-        // writes begin. The snapshots are pinned through
-        // `commit_with_expected_parent`, so a sibling writer that
-        // advances a peer mem's head between snapshot and commit
-        // aborts the commit with `BackendError::ParentMismatch`. The
-        // engine layer maps this to `RENAME_PARTIAL_FAILURE` (the
-        // source mem has already committed by this point — its
-        // state is durable; only the failed peer's writes are lost).
-        // Folder and archive backends inherit the trait's default
-        // `commit_with_expected_parent` (which ignores the parent
-        // and delegates to `commit`); the git-branch backend
-        // overrides to check the per-mem branch tip.
+        // Every peer's head, taken before the first write and pinned
+        // through `commit_with_expected_parent`. Each peer is locked
+        // and was reloaded under its lock, so no writer that takes the
+        // lock can move it; the pin is for one that does not (a git
+        // operation made by hand). The folder backend has no parent to
+        // pin and ignores it.
         let mut peer_snapshots: std::collections::BTreeMap<String, Option<String>> =
             std::collections::BTreeMap::new();
         for plan in peer_plans.values() {
@@ -110,56 +75,89 @@ impl Engine {
             peer_snapshots.insert(plan.mem.clone(), snapshot);
         }
 
-        // Track which mems have already committed in this logical
-        // operation. On a peer-commit failure, the engine surfaces
-        // the partial-state envelope so the agent can decide whether
-        // to retry, reconcile, or accept.
-        let mut committed_mems: Vec<String> = vec![mem.clone()];
+        // ----- Apply: the peer mems first -----
+        // The commit of the renamed entity's own mem is the one that
+        // uses up what the caller sent: after it the old id is gone and
+        // the hash is stale. It lands last, so a rename that fails part
+        // of the way leaves the entity where the caller named it and
+        // the same call completes the rename.
+        let mut committed: Vec<(usize, String)> = Vec::new();
+        let mut follow_up_warnings: Vec<WarningHint> = Vec::new();
+        let mut peer_stamp_warnings: Vec<WarningHint> = Vec::new();
         for plan in peer_plans.values() {
-            self.stage_rename_peer(plan)?;
-            let peer_commit_subject = format!(
-                "memstead: rename {} → {new_id} (cross-mem rewrite in `{}`)",
-                id, plan.mem
-            );
-            let mut peer_ctx = self.commit_context(
-                Some("rename_entity"),
-                actor,
-                client.cloned(),
-                note.map(String::from),
-            );
-            peer_ctx.logical_operation_id = Some(logical_op_id.as_str());
-            let expected = peer_snapshots.get(&plan.mem).cloned().unwrap_or(None);
-            let peer_commit_result = self.commit_staged_pinned(
-                plan.mount_idx,
-                &peer_commit_subject,
-                &peer_ctx,
-                std::slice::from_ref(&record),
-                expected.as_deref(),
-            );
-            let peer_write_id = match peer_commit_result {
-                Ok(landed) => {
-                    follow_up_warnings.extend(landed.warnings);
-                    landed.write_id
+            let landed = self.stage_rename_peer(plan).and_then(|()| {
+                let peer_commit_subject = format!(
+                    "memstead: rename {} → {new_id} (cross-mem rewrite in `{}`)",
+                    id, plan.mem
+                );
+                let mut peer_ctx = self.commit_context(
+                    Some("rename_entity"),
+                    actor,
+                    client.cloned(),
+                    note.map(String::from),
+                );
+                peer_ctx.logical_operation_id = Some(logical_op_id.as_str());
+                let expected = peer_snapshots.get(&plan.mem).cloned().unwrap_or(None);
+                self.commit_staged_pinned(
+                    plan.mount_idx,
+                    &peer_commit_subject,
+                    &peer_ctx,
+                    std::slice::from_ref(&record),
+                    expected.as_deref(),
+                )
+            });
+            let landed = match landed {
+                Ok(landed) => landed,
+                Err(cause) => {
+                    return Err(self.rename_failed_at(&prepared, &plan.mem, committed, cause));
                 }
-                Err(EngineError::Backend(crate::backend::BackendError::ParentMismatch {
-                    ..
-                })) => {
-                    return Err(EngineError::RenamePartialFailure {
-                        committed_mems: std::mem::take(&mut committed_mems),
-                        failed_mem: plan.mem.clone(),
-                        failure_cause: "drift".to_string(),
-                    });
-                }
-                Err(e) => return Err(e),
             };
-            committed_mounts.push(plan.mount_idx);
-            self.record_self_write(plan.mount_idx, &peer_write_id);
+            follow_up_warnings.extend(landed.warnings);
+            self.record_self_write(plan.mount_idx, &landed.write_id);
             // Per peer mount, not only the source mem: a rename touches every
             // pinned peer, and each one's config write can meet its own
             // intervening writer.
             peer_stamp_warnings.extend(self.stamp_mutation_versions(plan.mount_idx));
-            committed_mems.push(plan.mem.clone());
+            committed.push((plan.mount_idx, landed.write_id));
         }
+
+        // ----- Apply: the renamed entity's own mem, last -----
+        let landed = self
+            .stage_rename_source(&prepared)
+            // The check ledger follows the id too. It is workspace state, not
+            // mem content, so it cannot ride the commit; it is carried before
+            // the commit so a ledger that refuses stops the rename the way a
+            // refused check stops a record, and a commit that then fails
+            // leaves at worst a carried line under an id that never came to
+            // be — never a renamed entity that lost its checks.
+            .and_then(|()| self.carry_checks_across_rename(id, &new_id).map(|_| ()))
+            .and_then(|()| {
+                let commit_subject = format!("memstead: rename {} → {new_id}", id);
+                let mut ctx = self.commit_context(
+                    Some("rename_entity"),
+                    actor,
+                    client.cloned(),
+                    note.map(String::from),
+                );
+                ctx.logical_operation_id = Some(logical_op_id.as_str());
+                self.commit_staged(
+                    mount_idx,
+                    &commit_subject,
+                    &ctx,
+                    std::slice::from_ref(&record),
+                )
+            });
+        let landed = match landed {
+            Ok(landed) => landed,
+            Err(cause) => return Err(self.rename_failed_at(&prepared, &mem, committed, cause)),
+        };
+        let write_id = landed.write_id;
+        follow_up_warnings.extend(landed.warnings);
+        let mut committed_mounts: Vec<usize> = committed.iter().map(|(idx, _)| *idx).collect();
+        committed_mounts.push(mount_idx);
+
+        self.record_self_write(mount_idx, &write_id);
+        let stamp_warnings = self.stamp_mutation_versions(mount_idx);
 
         // ----- Re-parse and push -----
         // A failed re-parse reloads every committed mem from storage,
@@ -296,5 +294,74 @@ impl Engine {
             write_id,
             warnings: outcome_warnings,
         })
+    }
+
+    /// The report for a rename that failed at `failed_mem`. With
+    /// nothing committed the rename failed as a whole and `cause` is
+    /// the report: storage is as it was, and the same call sent again
+    /// is a first call. With a commit landed the report is the
+    /// partial-failure envelope, built from a view that is level with
+    /// storage: the mems that committed are reloaded first, and each
+    /// entry carries the hash its entity has now. What the failed mem
+    /// had staged is discarded when the write lock is released, before
+    /// any other operation can read it.
+    fn rename_failed_at(
+        &mut self,
+        prepared: &PreparedRename,
+        failed_mem: &str,
+        committed: Vec<(usize, String)>,
+        cause: EngineError,
+    ) -> EngineError {
+        if committed.is_empty() {
+            return cause;
+        }
+        self.level_committed_mounts(&committed);
+        let failure_cause = match &cause {
+            EngineError::Backend(crate::backend::BackendError::ParentMismatch { .. }) => "drift",
+            _ => "storage",
+        };
+        let landed_in = |mount_idx: usize| committed.iter().any(|(idx, _)| *idx == mount_idx);
+        let item = |id: &crate::entity::EntityId, landed: bool| PartialItem {
+            id: id.to_string(),
+            landed,
+            current_hash: self
+                .store
+                .get(id)
+                .filter(|e| !e.stub)
+                .map(|e| e.content_hash.clone()),
+        };
+        let error_for = |mem: &str| (mem == failed_mem).then(|| cause.to_string());
+        let mut mems: Vec<PartialMem> = prepared
+            .peers
+            .values()
+            .map(|plan| {
+                let landed = landed_in(plan.mount_idx);
+                PartialMem {
+                    mem: plan.mem.clone(),
+                    landed,
+                    error: error_for(&plan.mem),
+                    items: plan.rewrites.iter().map(|r| item(&r.id, landed)).collect(),
+                }
+            })
+            .collect();
+        // The renamed entity's own mem never landed here: it commits
+        // last. Its entity is listed under the id it still has.
+        mems.push(PartialMem {
+            mem: prepared.mem.clone(),
+            landed: false,
+            error: error_for(&prepared.mem),
+            items: std::iter::once(item(&prepared.id, false))
+                .chain(prepared.same_mem.iter().map(|r| item(&r.id, false)))
+                .collect(),
+        });
+        EngineError::RenamePartialFailure {
+            committed_mems: committed
+                .iter()
+                .map(|(idx, _)| self.mounts[*idx].mount.mem.clone())
+                .collect(),
+            failed_mem: failed_mem.to_string(),
+            failure_cause: failure_cause.to_string(),
+            mems,
+        }
     }
 }

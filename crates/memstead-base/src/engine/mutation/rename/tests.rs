@@ -989,7 +989,7 @@ impl crate::backend::MemBackend for DriftingBackend {
 }
 
 #[test]
-fn rename_entity_surfaces_partial_failure_when_peer_mem_drifts() {
+fn a_rename_whose_only_peer_drifts_before_anything_landed_fails_whole() {
     use crate::engine::CreateEntityArgs;
     use indexmap::IndexMap;
     use memstead_schema::workspace_config::CrossLinkValue;
@@ -1078,26 +1078,175 @@ fn rename_entity_surfaces_partial_failure_when_peer_mem_drifts() {
             None,
         )
         .unwrap_err();
-    match err {
-        EngineError::RenamePartialFailure {
-            committed_mems,
-            failed_mem,
-            failure_cause,
-        } => {
-            // The renaming entity's own mem committed before
-            // the peer-mem commit was attempted, so it must be
-            // listed as already-committed.
-            assert_eq!(committed_mems, vec!["specs".to_string()]);
-            assert_eq!(failed_mem, "memos");
-            assert_eq!(failure_cause, "drift");
-        }
-        other => panic!("expected RenamePartialFailure, got {other:?}"),
+    // The peer commits before the renamed entity's own mem, and it is
+    // the only peer: nothing had landed when its pin tripped, so the
+    // rename failed as a whole and the cause is the report. The
+    // partial-failure envelope is for a failure after a commit landed.
+    assert!(
+        matches!(
+            err,
+            EngineError::Backend(crate::backend::BackendError::ParentMismatch { .. })
+        ),
+        "{err:?}"
+    );
+    // The entity is where the caller named it, with the hash it sent.
+    assert!(!specs_dir.join("renamed-spec.md").exists());
+    assert!(specs_dir.join(&target.file_path).exists());
+    assert_eq!(
+        engine
+            .get_entity(&target.id)
+            .map(|e| e.content_hash.clone()),
+        Some(target.content_hash.clone())
+    );
+    // The referrer's staged rewrite went with the failed commit.
+    let memo = std::fs::read_to_string(memos_dir.join("cross-note.md")).unwrap();
+    assert!(memo.contains("[[specs:target-spec]]"), "{memo}");
+}
+
+/// Two peer mems hold a referrer each. The first peer's commit lands,
+/// the second peer's pin trips. The call returns the partial-failure
+/// envelope with cause `drift`, in the shape a storage failure gets:
+/// what landed and what did not, mem by mem, with each entity's hash as
+/// it is now. The renamed entity's own mem commits last, so it did not
+/// land and the entity is still under the id the caller named.
+#[test]
+fn a_peer_that_drifts_after_another_peer_landed_gets_the_partial_failure_envelope() {
+    use crate::engine::CreateEntityArgs;
+    use indexmap::IndexMap;
+    use memstead_schema::workspace_config::CrossLinkValue;
+
+    let dirs: Vec<TempDir> = (0..3).map(|_| TempDir::new().unwrap()).collect();
+    let (specs_dir, first_dir, second_dir) = (
+        dirs[0].path().to_path_buf(),
+        dirs[1].path().to_path_buf(),
+        dirs[2].path().to_path_buf(),
+    );
+    // Peers commit in the order of their names: `amemos` lands, then
+    // `memos` meets a pin that no longer holds.
+    let drifting = DriftingBackend::new(Box::new(FilesystemBackend::new(second_dir.clone())));
+    let mut engine = Engine::from_mounts(vec![
+        (
+            folder_mount("specs", specs_dir.clone()),
+            Box::new(FilesystemBackend::new(specs_dir.clone())) as Box<dyn MemBackend>,
+        ),
+        (
+            folder_mount("amemos", first_dir.clone()),
+            Box::new(FilesystemBackend::new(first_dir.clone())) as Box<dyn MemBackend>,
+        ),
+        (
+            folder_mount("memos", second_dir.clone()),
+            Box::new(drifting) as Box<dyn MemBackend>,
+        ),
+    ])
+    .unwrap();
+    let mut settings = crate::workspace::WorkspaceSettings::default();
+    for mem in ["specs", "amemos", "memos"] {
+        settings
+            .cross_mem_links
+            .insert(mem.to_string(), CrossLinkValue::Wildcard);
     }
-    // The renaming entity's own mem has the new file (its
-    // commit landed) — that's the whole point of the partial-
-    // failure envelope: source mem is durable, peer is not.
-    assert!(specs_dir.join("renamed-spec.md").exists());
-    assert!(!specs_dir.join(&target.file_path).exists());
+    engine.set_settings(settings);
+
+    let (actor, client) = cli_actor();
+    let target = engine
+        .create_entity(
+            empty_create_args("specs", "Target Spec"),
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    for mem in ["amemos", "memos"] {
+        let mut sections: IndexMap<String, String> = IndexMap::new();
+        sections.insert("claim".to_string(), "the claim".to_string());
+        sections.insert(
+            "context".to_string(),
+            "see [[specs:target-spec]]".to_string(),
+        );
+        engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: mem.to_string(),
+                    title: "Cross Note".to_string(),
+                    entity_type: "memo".to_string(),
+                    sections,
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+    }
+
+    let err = engine
+        .rename_entity(
+            RenameEntityArgs {
+                id: target.id.clone(),
+                expected_hash: Some(target.content_hash.clone()),
+                new_title: "Renamed Spec".to_string(),
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap_err();
+    assert_eq!(err.code(), "RENAME_PARTIAL_FAILURE");
+    let EngineError::RenamePartialFailure {
+        committed_mems,
+        failed_mem,
+        failure_cause,
+        mems,
+    } = &err
+    else {
+        panic!("{err:?}")
+    };
+    assert_eq!(committed_mems, &vec!["amemos".to_string()]);
+    assert_eq!(failed_mem, "memos");
+    assert_eq!(failure_cause, "drift");
+
+    let landed: Vec<(&str, bool, bool)> = mems
+        .iter()
+        .map(|m| (m.mem.as_str(), m.landed, m.error.is_some()))
+        .collect();
+    assert_eq!(
+        landed,
+        vec![
+            ("amemos", true, false),
+            ("memos", false, true),
+            ("specs", false, false)
+        ]
+    );
+    for reported in mems {
+        for item in &reported.items {
+            assert_eq!(item.landed, reported.landed, "{item:?}");
+            let (mem, slug) = item.id.split_once("--").unwrap();
+            let now = crate::entity::EntityId::new(mem, slug);
+            assert_eq!(
+                item.current_hash,
+                engine.get_entity(&now).map(|e| e.content_hash.clone()),
+                "{item:?}"
+            );
+        }
+    }
+
+    // Storage agrees with the envelope.
+    let first = std::fs::read_to_string(first_dir.join("cross-note.md")).unwrap();
+    assert!(first.contains("[[specs:renamed-spec]]"), "{first}");
+    let second = std::fs::read_to_string(second_dir.join("cross-note.md")).unwrap();
+    assert!(second.contains("[[specs:target-spec]]"), "{second}");
+    assert!(specs_dir.join(&target.file_path).exists());
+    assert!(!specs_dir.join("renamed-spec.md").exists());
+    // The entity is where the caller named it, with the hash it sent.
+    assert_eq!(
+        engine
+            .get_entity(&target.id)
+            .map(|e| e.content_hash.clone()),
+        Some(target.content_hash.clone())
+    );
 }
 
 #[test]

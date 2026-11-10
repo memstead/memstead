@@ -977,6 +977,7 @@ pub(super) fn engine_err_unified(
             committed_mems,
             failed_mem,
             failure_cause,
+            mems,
         } => tool_error_with_payload(
             "RENAME_PARTIAL_FAILURE",
             &message,
@@ -987,6 +988,7 @@ pub(super) fn engine_err_unified(
                     "committed_mems": committed_mems,
                     "failed_mem": failed_mem,
                     "failure_cause": failure_cause,
+                    "mems": mems,
                 }),
             ),
         ),

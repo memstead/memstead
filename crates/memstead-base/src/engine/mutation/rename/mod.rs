@@ -27,7 +27,6 @@ use crate::entity::id::SlugDerivation;
 use crate::entity::{Entity, EntityId};
 use crate::ops::WarningHint;
 use crate::vcs::{Actor, ClientId, CommitContext};
-use crate::workspace::MountCapability;
 
 use super::super::{Engine, EngineError, RenameEntityArgs, RenameEntityOutcome};
 
@@ -145,6 +144,12 @@ impl Engine {
     /// peer mem in its own commit pinned to the parent the scan saw,
     /// gated by the cross-mem link policy; a ReadOnly-mount referrer
     /// is left as it is and reported as a residual stub.
+    ///
+    /// The peer mems commit first and the renamed entity's own mem
+    /// last. If a commit fails after another landed, the call returns
+    /// `RENAME_PARTIAL_FAILURE`; the entity is then still under the id
+    /// and the hash the caller named, and the identical call completes
+    /// the rename.
     pub fn rename_entity(
         &mut self,
         args: RenameEntityArgs,
@@ -159,22 +164,16 @@ impl Engine {
         let id = &args.id;
         let mem = id.mem().to_string();
 
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem)
-            .ok_or_else(|| self.unknown_mem_error(&mem))?;
-        if self.mounts[mount_idx].mount.capability != MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem));
-        }
-
-        // Reload-before-operation: reload if a sibling advanced the
-        // mem ref so the `expected_hash` compare below runs against
-        // current truth. The drift notice rides the outcome's
-        // `warnings` (real-rename path).
+        // A rename learns what it writes by reading the workspace: who
+        // refers to the entity, in which mems. So it takes every
+        // writable mount's lock, reloads every mem and loads the
+        // deferred ones before it looks for a referrer; a referrer in a
+        // mem that was never loaded is rewritten like any other, and no
+        // peer's rewrite is computed from a view older than its lock.
+        let (_write_lock, reloaded) = self.lock_workspace_for_write_if(true)?;
         let mut drift_warnings: Vec<WarningHint> = short_hint.into_iter().collect();
-        let _write_lock = self.lock_mems_for_write(&[&mem])?;
-        drift_warnings.extend(self.reload_if_stale(Some(&mem)));
+        drift_warnings.extend(reloaded);
+        let mount_idx = self.writable_mount_index(&mem)?;
 
         let validated = match self.validate_rename(&args, mount_idx)? {
             RenameValidation::Noop(outcome) => return Ok(outcome),

@@ -69,6 +69,30 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **An entity rename with referrers in other mems loses no concurrent
+  write, reaches a mem that was not loaded yet, and can be completed
+  after a partial failure.** A rename locked and reloaded the renamed
+  entity's own mem only. It rewrote the referrers in other mems from
+  the view it had loaded earlier, so an update a second process made to
+  such a referrer was overwritten; it never loaded a lazily mounted
+  mem, whose referrers kept the old id; and it committed the entity's
+  own mem first, so after a failure at a peer the old id was gone, the
+  caller's hash was stale and the call could not be sent again. A
+  rename now takes the write lock of every writable mem, reloads every
+  mem and loads the deferred ones before it looks for a referrer. It
+  commits the peer mems first and the entity's own mem last. A commit
+  that fails after another landed returns `RENAME_PARTIAL_FAILURE` for
+  a storage failure as for a moved head (`details.failure_cause`:
+  `storage` or `drift`), and `details.mems[]` now states for every mem
+  and every entity the rename writes whether it landed and the
+  entity's current hash; the running engine serves exactly what is in
+  storage. The entity is then still under the id and the hash the
+  caller sent, and the identical call completes the rename. A failure
+  before any commit landed fails the rename as a whole, with the cause
+  as the error. A stub at the new id no longer refuses a rename with
+  `ENTITY_ALREADY_EXISTS`: the rename brings the entity the forward
+  references were waiting for.
+
 - **A delete and a retype check their referrers against every mem as it
   is now.** Both verbs guard on the edges that point at the entity, and
   such an edge can come from any mem. They reloaded their own mem only
@@ -91,9 +115,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   had and reconciled the roster afterwards, so a mem that another
   process had attached since was written without its write lock. The
   roster is now reconciled before the lock set is computed, in
-  `create`, `update`, `relate` and their batch forms, in `delete` and
-  `retype`, and in the writes of a mem's settings, review mark and
-  anchor observations.
+  `create`, `update`, `relate` and their batch forms, in `delete`,
+  `retype` and `rename`, and in the writes of a mem's settings, review
+  mark and anchor observations.
 
 - **A load no longer sweeps the files of a commit that was decided a
   moment before.** A load of a folder mem that found no commit record

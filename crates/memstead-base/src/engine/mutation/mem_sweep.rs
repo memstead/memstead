@@ -212,6 +212,7 @@ impl Engine {
                         committed_mems: rewritten_mems,
                         failed_mem: mem_name,
                         failure_cause: "drift".to_string(),
+                        mems: Vec::new(),
                     });
                 }
                 Err(e) => return Err(e.into()),
