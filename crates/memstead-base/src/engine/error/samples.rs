@@ -2,15 +2,18 @@
 //! surfaces to one rendering of it.
 //!
 //! WHY it lives in the engine: the list must be complete, and only the
-//! crate that defines the errors can make the compiler say so. `covered`
-//! matches every variant without a wildcard, so an error added to the
-//! engine without a sample here fails the build of every test that reads
-//! the list. The inner errors whose variants change the wire code
-//! (validation, section format, title, anchor) get one sample per variant
-//! for the same reason; lists carry one element, so an element's shape is
-//! compared too.
+//! crate that defines the errors can make the compiler say so. Each error
+//! type, the engine's two and the inner ones it wraps (validation, section
+//! format, title, parse, backend, anchor), has a tag enum generated from a
+//! list of its variant names, with a `match` over the error that has no
+//! wildcard: a variant added to an error without its name here fails the
+//! build. [`missing_samples`] then names every tag no sample carries, and
+//! the parity test refuses a non-empty answer, so a variant named here
+//! without a sample fails the test. Lists carry one element, so an
+//! element's shape is compared too.
 
 use super::{BlockedReferrer, EngineError, MissingWikiLink, PartialMem, ReferrerInfo};
+use crate::FullEngineError;
 use crate::anchor::AnchorValidationError;
 use crate::backend::BackendError;
 use crate::entity::EntityId;
@@ -20,6 +23,230 @@ use crate::runtime_validator::{
     MissingRequiredField, MissingRequiredSection, RelationshipHint, ValidationError,
 };
 use crate::section_format::SectionFormatViolation;
+
+/// A tag per variant of `$ty`, the list of all tags, and the tag of a
+/// value. The match has no wildcard and each arm names the variant it
+/// tags, so the list cannot omit a variant or tag one as another.
+macro_rules! variant_tags {
+    ($tag:ident, $ty:ident, [$($v:ident),* $(,)?]) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        enum $tag {
+            $($v),*
+        }
+        impl $tag {
+            const ALL: &'static [$tag] = &[$($tag::$v),*];
+            fn of(e: &$ty) -> $tag {
+                match e {
+                    $($ty::$v { .. } => $tag::$v),*
+                }
+            }
+        }
+    };
+}
+
+variant_tags!(
+    EngineTag,
+    EngineError,
+    [
+        DuplicateMem,
+        UnknownMem,
+        MemUnmounted,
+        MemQuarantined,
+        ReadOnlyMount,
+        CheckNotRecorded,
+        UnknownType,
+        InvalidTitle,
+        AlreadyExists,
+        ConstraintUnsatisfied,
+        SectionFormatRefused,
+        RequiredOutgoingUnsatisfied,
+        RetypeRefused,
+        RetypeNoOp,
+        InvalidCheckFinding,
+        RetypeReferrerUnprobeable,
+        NotFound,
+        ExpectedHashRequired,
+        HashMismatch,
+        HasIncomingRefs,
+        MemHasIncomingRefs,
+        CrossMemLinkNotAllowed,
+        CrossMemTargetNotFound,
+        EntityIdMissingMem,
+        CrossMemEdgeNotDeclared,
+        RepairNotNeeded,
+        RenameNoOp,
+        EmptyUpdate,
+        RenameBlockedByCrossMemPolicy,
+        WikiLinkWithoutRelation,
+        RelationHasBodyLinks,
+        RenamePartialFailure,
+        CommitNotApplied,
+        StaleView,
+        StubCannotRelate,
+        StubNotUpdatable,
+        StubNotRenamable,
+        InvalidEntityId,
+        EntityIdTooLong,
+        InvalidWikiLinkTarget,
+        InvalidWikiLinkMem,
+        ConflictingSectionModes,
+        RelationshipCycle,
+        SetAndUnsetConflict,
+        RequiredFieldUnset,
+        MissingRequiredSection,
+        PatchSectionEmpty,
+        PatchOldNotFound,
+        UnterminatedFenceInStoredBody,
+        Validation,
+        ParseAfterWrite,
+        Parse,
+        Backend,
+        SchemaNotFound,
+        EmbeddedSchemaInvalid,
+        SchemaPackageInvalid,
+        SchemaResolverInit,
+        Mem,
+        MemNameCollision,
+        ProcessMemNotEligible,
+        InvalidInput,
+        AnchorsSidecarUnreadable,
+        AmbiguousQuery,
+        ContextNotComputable,
+        MemNotReadOnly,
+        NotGitBacked,
+        NoWritableMem,
+        AmbiguousMem,
+        UnknownTypes,
+        UnknownSchema,
+        InvalidTargetSchema,
+        MergeConflictUnsupportedBackend,
+        NotConflicted,
+        UnknownRemote,
+        LocalDivergence,
+        NonFastForward,
+        LocalInvalidState,
+        SchemaViolationInFetch,
+        PushedCommitsProtected,
+        BranchResetHeadMoved,
+        UnknownRef,
+        ProposalDispositionsIncomplete,
+        ProposalConflict,
+        ProposalStale,
+        ProposalUnattributed,
+        ProposalLinksRejected,
+        RenameSimilarityOutOfRange,
+        InvalidChangesCursor,
+        InvalidTimestampCursor,
+        ReviewMarkNotSet,
+        MemConfigIncomplete,
+        MissingRequiredDescription,
+        DescriptionNotPermitted,
+        RelationManualAuthoringForbidden,
+        SearchUnavailable,
+        MarkdownExportUnsupportedBackend,
+        InvalidAnchor,
+        InEntity,
+    ]
+);
+
+variant_tags!(
+    FullTag,
+    FullEngineError,
+    [
+        Engine,
+        MemPathNotAllowed,
+        InvalidMemName,
+        MemReferencedByPolicy,
+        MemSchemaNotAllowed,
+        ConfigAlreadyExists,
+        MemStorageResidueDetected,
+        MemNameRefConflict,
+    ]
+);
+
+variant_tags!(
+    ValidationTag,
+    ValidationError,
+    [
+        UnknownSection,
+        UnknownMetadata,
+        InvalidEnumValue,
+        ReadOnlyField,
+        SectionNotUpdatable,
+        InvalidRelationshipType,
+        InvalidRelationshipShape,
+        SectionContentInvalid,
+        EmptyUndeclaredHeading,
+        UnterminatedFence,
+        SectionContentControlByte,
+        InvalidFieldValue,
+    ]
+);
+
+variant_tags!(
+    SectionFormatTag,
+    SectionFormatViolation,
+    [
+        ContentMismatch,
+        ItemPatternMismatch,
+        TableColumns,
+        SetextReserved,
+    ]
+);
+
+variant_tags!(
+    SlugTag,
+    SlugError,
+    [IdTooLong, TitleEmpty, TitleHasControlChars,]
+);
+
+variant_tags!(
+    ParseTag,
+    ParseError,
+    [MissingFrontmatter, InvalidFrontmatter, MissingTitle, Io,]
+);
+
+variant_tags!(
+    BackendTag,
+    BackendError,
+    [
+        Sealed,
+        Io,
+        HashMismatch,
+        Path,
+        Other,
+        ParentMismatch,
+        CommitNotApplied,
+        FollowUpFailed,
+    ]
+);
+
+variant_tags!(
+    AnchorTag,
+    AnchorValidationError,
+    [
+        UnknownClass,
+        UnknownGrain,
+        UnknownHashStability,
+        MissingArtifact,
+        HashOnNonHashClass,
+        ContentAndHash,
+        ContentNotAcceptedForGrain,
+        UnitAbsentFromContent,
+        SpanLocatorUnusable,
+        SpanOutsideContent,
+        DuplicateAnchorTriple,
+        SpanAndHash,
+        SpanEmpty,
+        SpanNotAcceptedForGrain,
+        SpanAbsentFromContent,
+        EmptySource,
+        SourceNotDeclared,
+        ArtifactUnresolvable,
+        GrainNamespaceUnsupported,
+        PathGrainOnUrlArtifact,
+    ]
+);
 
 fn s(v: &str) -> String {
     v.to_string()
@@ -978,9 +1205,6 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
             EngineError::InvalidAnchor(e),
         ));
     }
-    for (_, e) in &out {
-        covered(e);
-    }
     out
 }
 
@@ -991,110 +1215,6 @@ fn label(e: &impl std::fmt::Debug) -> String {
         .next()
         .unwrap_or_default()
         .to_string()
-}
-
-/// No wildcard: an error variant without a sample fails the build here.
-fn covered(e: &EngineError) {
-    match e {
-        EngineError::DuplicateMem(_)
-        | EngineError::UnknownMem { .. }
-        | EngineError::MemUnmounted { .. }
-        | EngineError::MemQuarantined { .. }
-        | EngineError::ReadOnlyMount(_)
-        | EngineError::CheckNotRecorded { .. }
-        | EngineError::UnknownType { .. }
-        | EngineError::InvalidTitle(_)
-        | EngineError::AlreadyExists { .. }
-        | EngineError::ConstraintUnsatisfied { .. }
-        | EngineError::SectionFormatRefused { .. }
-        | EngineError::RequiredOutgoingUnsatisfied { .. }
-        | EngineError::RetypeRefused { .. }
-        | EngineError::RetypeNoOp { .. }
-        | EngineError::InvalidCheckFinding { .. }
-        | EngineError::RetypeReferrerUnprobeable { .. }
-        | EngineError::NotFound { .. }
-        | EngineError::ExpectedHashRequired { .. }
-        | EngineError::HashMismatch { .. }
-        | EngineError::HasIncomingRefs { .. }
-        | EngineError::MemHasIncomingRefs { .. }
-        | EngineError::CrossMemLinkNotAllowed { .. }
-        | EngineError::CrossMemTargetNotFound { .. }
-        | EngineError::EntityIdMissingMem { .. }
-        | EngineError::CrossMemEdgeNotDeclared { .. }
-        | EngineError::RepairNotNeeded { .. }
-        | EngineError::RenameNoOp { .. }
-        | EngineError::EmptyUpdate { .. }
-        | EngineError::RenameBlockedByCrossMemPolicy { .. }
-        | EngineError::WikiLinkWithoutRelation { .. }
-        | EngineError::RelationHasBodyLinks { .. }
-        | EngineError::RenamePartialFailure { .. }
-        | EngineError::CommitNotApplied { .. }
-        | EngineError::StaleView { .. }
-        | EngineError::StubCannotRelate { .. }
-        | EngineError::StubNotUpdatable { .. }
-        | EngineError::StubNotRenamable { .. }
-        | EngineError::InvalidEntityId { .. }
-        | EngineError::EntityIdTooLong { .. }
-        | EngineError::InvalidWikiLinkTarget { .. }
-        | EngineError::InvalidWikiLinkMem { .. }
-        | EngineError::ConflictingSectionModes { .. }
-        | EngineError::RelationshipCycle { .. }
-        | EngineError::SetAndUnsetConflict { .. }
-        | EngineError::RequiredFieldUnset { .. }
-        | EngineError::MissingRequiredSection { .. }
-        | EngineError::PatchSectionEmpty { .. }
-        | EngineError::PatchOldNotFound { .. }
-        | EngineError::UnterminatedFenceInStoredBody { .. }
-        | EngineError::Validation(_)
-        | EngineError::ParseAfterWrite(_)
-        | EngineError::Parse(_)
-        | EngineError::Backend(_)
-        | EngineError::SchemaNotFound { .. }
-        | EngineError::EmbeddedSchemaInvalid { .. }
-        | EngineError::SchemaPackageInvalid { .. }
-        | EngineError::SchemaResolverInit(_)
-        | EngineError::Mem(_)
-        | EngineError::MemNameCollision { .. }
-        | EngineError::ProcessMemNotEligible { .. }
-        | EngineError::InvalidInput(_)
-        | EngineError::InvalidTargetSchema { .. }
-        | EngineError::UnknownSchema { .. }
-        | EngineError::UnknownTypes { .. }
-        | EngineError::MergeConflictUnsupportedBackend { .. }
-        | EngineError::NotConflicted { .. }
-        | EngineError::UnknownRemote(_)
-        | EngineError::LocalDivergence { .. }
-        | EngineError::NonFastForward { .. }
-        | EngineError::LocalInvalidState { .. }
-        | EngineError::SchemaViolationInFetch { .. }
-        | EngineError::PushedCommitsProtected { .. }
-        | EngineError::BranchResetHeadMoved { .. }
-        | EngineError::UnknownRef(_)
-        | EngineError::ProposalDispositionsIncomplete { .. }
-        | EngineError::ProposalConflict { .. }
-        | EngineError::ProposalStale { .. }
-        | EngineError::ProposalUnattributed { .. }
-        | EngineError::ProposalLinksRejected { .. }
-        | EngineError::RenameSimilarityOutOfRange { .. }
-        | EngineError::InvalidChangesCursor { .. }
-        | EngineError::InvalidTimestampCursor { .. }
-        | EngineError::ReviewMarkNotSet { .. }
-        | EngineError::MemConfigIncomplete { .. }
-        | EngineError::MissingRequiredDescription { .. }
-        | EngineError::DescriptionNotPermitted { .. }
-        | EngineError::RelationManualAuthoringForbidden { .. }
-        | EngineError::SearchUnavailable
-        | EngineError::NoWritableMem
-        | EngineError::AnchorsSidecarUnreadable { .. }
-        | EngineError::AmbiguousQuery { .. }
-        | EngineError::ContextNotComputable { .. }
-        | EngineError::MemNotReadOnly { .. }
-        | EngineError::NotGitBacked { .. }
-        | EngineError::AmbiguousMem { .. }
-        | EngineError::MarkdownExportUnsupportedBackend { .. }
-        | EngineError::InvalidAnchor(_)
-        | EngineError::InEntity { .. } => {}
-    }
 }
 
 /// Every mem-management error (the engine's second error type), labelled.
@@ -1165,23 +1285,76 @@ pub fn every_full_engine_error() -> Vec<(String, crate::FullEngineError)> {
             },
         ),
     ];
-    for (_, e) in &out {
-        full_covered(e);
-    }
     out
 }
 
-/// No wildcard: a mem-management error without a sample fails the build.
-fn full_covered(e: &crate::FullEngineError) {
-    use crate::FullEngineError as F;
-    match e {
-        F::Engine(_)
-        | F::MemPathNotAllowed { .. }
-        | F::InvalidMemName { .. }
-        | F::MemReferencedByPolicy { .. }
-        | F::MemSchemaNotAllowed { .. }
-        | F::ConfigAlreadyExists { .. }
-        | F::MemStorageResidueDetected { .. }
-        | F::MemNameRefConflict { .. } => {}
+/// The tags of `all` no sample in `samples` carries, as `Type::Variant`.
+fn missing<T: Copy + Ord + std::fmt::Debug>(
+    ty: &str,
+    all: &[T],
+    samples: impl IntoIterator<Item = T>,
+) -> Vec<String> {
+    let have: std::collections::BTreeSet<T> = samples.into_iter().collect();
+    all.iter()
+        .filter(|t| !have.contains(t))
+        .map(|t| format!("{ty}::{t:?}"))
+        .collect()
+}
+
+/// Every variant, of the engine's errors and of the inner errors they wrap,
+/// that no sample carries. Empty when the lists are complete; the parity
+/// test refuses anything else.
+pub fn missing_samples() -> Vec<String> {
+    let mut out = Vec::new();
+    out.extend(missing(
+        "EngineError",
+        EngineTag::ALL,
+        every_engine_error().iter().map(|(_, e)| EngineTag::of(e)),
+    ));
+    out.extend(missing(
+        "FullEngineError",
+        FullTag::ALL,
+        every_full_engine_error()
+            .iter()
+            .map(|(_, e)| FullTag::of(e)),
+    ));
+    out.extend(missing(
+        "ValidationError",
+        ValidationTag::ALL,
+        validation_samples().iter().map(ValidationTag::of),
+    ));
+    out.extend(missing(
+        "SectionFormatViolation",
+        SectionFormatTag::ALL,
+        section_format_samples().iter().map(SectionFormatTag::of),
+    ));
+    out.extend(missing(
+        "SlugError",
+        SlugTag::ALL,
+        slug_samples().iter().map(SlugTag::of),
+    ));
+    out.extend(missing(
+        "ParseError",
+        ParseTag::ALL,
+        parse_samples().iter().map(ParseTag::of),
+    ));
+    out.extend(missing(
+        "BackendError",
+        BackendTag::ALL,
+        backend_samples().iter().map(BackendTag::of),
+    ));
+    out.extend(missing(
+        "AnchorValidationError",
+        AnchorTag::ALL,
+        anchor_samples().iter().map(AnchorTag::of),
+    ));
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_variant_of_every_error_has_a_sample() {
+        assert_eq!(super::missing_samples(), Vec::<String>::new());
     }
 }

@@ -3,7 +3,8 @@
 //!
 //! (Lives in xtask, the one crate that depends on both surfaces; the MCP
 //! crate must not depend on the CLI.) The engine's sample list (`memstead_base::engine::error::samples`) is
-//! complete by construction: its `covered` match has no wildcard. This test
+//! complete: a variant missing from its tag lists fails the build, and one
+//! without a sample is refused below (`missing_samples`). This test
 //! raises each sample through both surfaces' real mappers and records where
 //! the code, the recovery payload or the message differ.
 //!
@@ -13,7 +14,9 @@
 //! `$ERROR_PARITY_OUT` when set; `$ERROR_PARITY_SNAPSHOT` writes every
 //! rendering as JSON).
 
-use memstead_base::engine::error::samples::{every_engine_error, every_full_engine_error};
+use memstead_base::engine::error::samples::{
+    every_engine_error, every_full_engine_error, missing_samples,
+};
 use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
 fn engine(tmp: &std::path::Path) -> memstead_base::Engine {
@@ -155,6 +158,11 @@ fn cases(engine: &memstead_base::Engine) -> Vec<Case> {
 
 #[test]
 fn every_engine_error_carries_the_same_code_payload_and_message_on_mcp_and_cli() {
+    assert_eq!(
+        missing_samples(),
+        Vec::<String>::new(),
+        "every variant of every engine error needs a sample"
+    );
     let tmp = tempfile::TempDir::new().unwrap();
     let engine = engine(tmp.path());
     let mut rows = Vec::new();
