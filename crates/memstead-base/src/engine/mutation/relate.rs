@@ -1385,7 +1385,17 @@ impl Engine {
                     self.store = store_snapshot;
                     self.discard_all_pending();
                     self.level_committed_mounts(&mount_commits);
-                    return Err(e);
+                    let items: Vec<(usize, EntityId)> = prepared
+                        .iter()
+                        .map(|p| (p.mount_idx, p.from.clone()))
+                        .collect();
+                    return Err(self.batch_commit_failed(
+                        &distinct_mounts,
+                        &items,
+                        &mount_commits,
+                        m,
+                        e,
+                    ));
                 }
             }
         }

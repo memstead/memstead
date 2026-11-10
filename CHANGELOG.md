@@ -147,6 +147,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   wait for a write in progress in any mem, and one mem that cannot be
   read blocks them across the workspace until it can.
 
+- **A batch that fails after one mem committed says what landed.** A
+  batch over several mems commits once per mem. When a later mem's
+  commit failed, the batch returned the storage error alone, and the
+  caller could not tell which items were in storage. It now returns
+  `RENAME_PARTIAL_FAILURE`, the one partial-failure report (the code
+  keeps its name), with `details.mems[]` naming every mem and every
+  item of the batch, whether it landed, and the item's current hash.
+  Sending the items named as not landed completes the batch. A batch
+  whose first commit fails still fails as a whole.
+
 - **A delete and a retype check their referrers against every mem as it
   is now.** Both verbs guard on the edges that point at the entity, and
   such an edge can come from any mem. They reloaded their own mem only

@@ -1848,3 +1848,302 @@ fn a_short_id_is_resolved_under_the_lock_not_from_the_view_before_it() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+// ---------------------------------------------------------------------
+// A batch that fails after one mem committed
+// ---------------------------------------------------------------------
+
+/// The item of each batch form that goes to `right`, on its own: what
+/// a caller sends after the envelope named it as not landed.
+fn resend_the_right_item(waiter: Waiter, engine: &mut Engine) -> Report {
+    let actor = Actor::Cli;
+    match waiter {
+        Waiter::BatchCreate => batch_report(engine.batch_create(
+            vec![(create_args(RIGHT, "Epsilon", &[]), None)],
+            actor,
+            None,
+            false,
+        )),
+        Waiter::BatchUpdate => {
+            let updates = vec![(
+                update_args(engine, &id(RIGHT, "gamma"), "Gamma purpose, batch"),
+                None,
+            )];
+            batch_report(engine.batch_update(updates, actor, None, false))
+        }
+        Waiter::BatchRelate => batch_report(engine.batch_relate(
+            vec![(relate_args(&id(RIGHT, "gamma"), &id(LEFT, "beta")), None)],
+            actor,
+            None,
+            false,
+        )),
+        other => panic!("{other:?} is no batch form"),
+    }
+}
+
+/// A storage failure at a batch's second commit, after its first mem
+/// committed. The batch returns the partial-failure envelope, which
+/// names every mem and every item with whether it landed and its hash
+/// now; no mem holds a staged write; the engine serves what storage
+/// holds, the first mem's commit included; and sending the item the
+/// envelope names as not landed completes the batch into the state an
+/// undisturbed batch produces.
+#[test]
+fn a_batch_that_fails_after_one_mem_committed_reports_what_landed_and_the_rest_completes_it() {
+    for pair in PAIRS {
+        for waiter in [
+            Waiter::BatchCreate,
+            Waiter::BatchUpdate,
+            Waiter::BatchRelate,
+        ] {
+            let context = format!("{pair:?} {waiter:?}");
+            let undisturbed = {
+                let ws = Workspace::new(pair);
+                let done = run_waiter(waiter, &mut ws.engine());
+                assert!(done.is_ok(), "{context}: {done:?}");
+                shape(&ws.engine())
+            };
+
+            let ws = Workspace::new(pair);
+            let failed = Arc::new(AtomicBool::new(false));
+            let tap: Tap = {
+                let failed = Arc::clone(&failed);
+                Arc::new(move |mem: &str, method: &str| {
+                    matches!(method, "commit" | "commit_with_expected_parent")
+                        && mem == RIGHT
+                        && !failed.swap(true, Ordering::SeqCst)
+                })
+            };
+            let mut engine = ws.tapped_engine(tap);
+            let actor = Actor::Cli;
+            let err = match waiter {
+                Waiter::BatchCreate => engine
+                    .batch_create(
+                        vec![
+                            (create_args(LEFT, "Delta", &[]), None),
+                            (create_args(RIGHT, "Epsilon", &[]), None),
+                        ],
+                        actor,
+                        None,
+                        false,
+                    )
+                    .err(),
+                Waiter::BatchUpdate => {
+                    let updates = vec![
+                        (
+                            update_args(&engine, &id(LEFT, "alpha"), "Alpha purpose, batch"),
+                            None,
+                        ),
+                        (
+                            update_args(&engine, &id(RIGHT, "gamma"), "Gamma purpose, batch"),
+                            None,
+                        ),
+                    ];
+                    engine.batch_update(updates, actor, None, false).err()
+                }
+                _ => engine
+                    .batch_relate(
+                        vec![
+                            (relate_args(&id(LEFT, "alpha"), &id(LEFT, "beta")), None),
+                            (relate_args(&id(RIGHT, "gamma"), &id(LEFT, "beta")), None),
+                        ],
+                        actor,
+                        None,
+                        false,
+                    )
+                    .err(),
+            };
+            let Some(EngineError::RenamePartialFailure {
+                committed_mems,
+                failed_mem,
+                failure_cause,
+                mems,
+            }) = &err
+            else {
+                panic!("{context}: expected the partial-failure envelope, got {err:?}");
+            };
+            assert_eq!(committed_mems, &vec![LEFT.to_string()], "{context}");
+            assert_eq!(failed_mem, RIGHT, "{context}");
+            assert_eq!(failure_cause, "storage", "{context}");
+
+            // The envelope against storage, mem by mem and item by item.
+            let fresh = ws.engine();
+            let (left_item, right_item) = match waiter {
+                Waiter::BatchCreate => ("left--delta", "right--epsilon"),
+                _ => ("left--alpha", "right--gamma"),
+            };
+            let reported: Vec<String> = mems
+                .iter()
+                .map(|m| {
+                    let items: Vec<String> = m
+                        .items
+                        .iter()
+                        .map(|i| format!("{} landed={}", i.id, i.landed))
+                        .collect();
+                    format!(
+                        "{} landed={} error={} [{}]",
+                        m.mem,
+                        m.landed,
+                        m.error.is_some(),
+                        items.join(", ")
+                    )
+                })
+                .collect();
+            assert_eq!(
+                reported,
+                vec![
+                    format!("left landed=true error=false [{left_item} landed=true]"),
+                    format!("right landed=false error=true [{right_item} landed=false]"),
+                ],
+                "{context}: every mem and every item of the batch is named"
+            );
+            for item in mems.iter().flat_map(|m| &m.items) {
+                let (mem, slug) = item.id.split_once("--").unwrap();
+                assert_eq!(
+                    item.current_hash,
+                    fresh
+                        .get_entity(&id(mem, slug))
+                        .filter(|e| !e.stub)
+                        .map(|e| e.content_hash.clone()),
+                    "{context}: {item:?}"
+                );
+            }
+            // The first mem's item is in storage, the second mem's is
+            // not, as the envelope says.
+            let in_storage = |mem: &str, slug: &str| match waiter {
+                Waiter::BatchCreate => fresh.get_entity(&id(mem, slug)).is_some(),
+                Waiter::BatchUpdate => purpose(&fresh, &id(mem, slug)).contains("batch"),
+                _ => !fresh.store().outgoing(&id(mem, slug)).is_empty(),
+            };
+            let (left_slug, right_slug) = (
+                left_item.split_once("--").unwrap().1,
+                right_item.split_once("--").unwrap().1,
+            );
+            assert!(
+                in_storage(LEFT, left_slug),
+                "{context}: the first mem's commit landed"
+            );
+            assert!(
+                !in_storage(RIGHT, right_slug),
+                "{context}: the second mem's did not"
+            );
+            // The running engine serves what storage holds, as it is.
+            assert_eq!(view(&engine), view(&fresh), "{context}");
+
+            // The item named as not landed, sent on its own.
+            let rest = resend_the_right_item(waiter, &mut engine);
+            assert!(rest.is_ok(), "{context}: {rest:?}");
+            assert_eq!(shape(&ws.engine()), undisturbed, "{context}");
+            assert_eq!(view(&engine), view(&ws.engine()), "{context}");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// A mem attached to the workspace after the engine started
+// ---------------------------------------------------------------------
+
+/// An engine boots from a workspace; a second process then creates a
+/// mem in it. The first engine's first write into that mem is made
+/// under the mem's write lock: the roster is reconciled before the lock
+/// set is computed, so the mem is mounted, and locked, before the write
+/// is planned.
+///
+/// Another process holds the new mem's lock, as an open file held by a
+/// second thread. That thread releases it when the write has returned
+/// (which is then a write that did not wait) or after half a second,
+/// and notes the mem's head at that moment.
+#[test]
+fn the_first_write_into_a_mem_attached_after_the_engine_started_waits_on_its_lock() {
+    use memstead_base::mem_management;
+    use memstead_git_branch::workspace_store::engine_from_workspace_root;
+
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", SCHEMA)]);
+    let mut first = engine_from_workspace_root(tmp.path()).expect("the first engine boots");
+
+    // The second process: it creates the mem and is gone.
+    {
+        let mut second = engine_from_workspace_root(tmp.path()).expect("the second engine boots");
+        mem_management::create_mem(
+            &mut second,
+            mem_management::MemCreateParams {
+                name: "late".to_string(),
+                location: PathBuf::from("late"),
+                schema_ref: SCHEMA.parse().unwrap(),
+                vcs: None,
+                note: None,
+                operator_mode: true,
+                recovery: None,
+                write_guidance: Default::default(),
+                storage: Some(mem_management::StorageKind::GitBranch),
+                actor: Actor::Cli,
+                client: None,
+            },
+        )
+        .expect("the mem is created");
+    }
+    assert!(
+        first.mount("late").is_none(),
+        "the first engine has not seen the new mem yet"
+    );
+
+    let late = engine_from_workspace_root(tmp.path())
+        .expect("a fresh engine boots")
+        .mount("late")
+        .expect("a fresh engine mounts the new mem")
+        .clone();
+    let head = move || {
+        instantiate_full_backend(&late)
+            .unwrap()
+            .current_head()
+            .unwrap()
+    };
+    let lock_path = {
+        let fresh = engine_from_workspace_root(tmp.path()).unwrap();
+        instantiate_full_backend(fresh.mount("late").unwrap())
+            .unwrap()
+            .write_lock_path()
+            .expect("a git-branch mem has a write lock")
+    };
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .unwrap();
+    lock.lock().unwrap();
+    let head_before = head();
+
+    let returned = Arc::new(AtomicBool::new(false));
+    let holder = {
+        let returned = Arc::clone(&returned);
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+            while !returned.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            let returned_while_held = returned.load(Ordering::SeqCst);
+            let head_while_held = head();
+            lock.unlock().unwrap();
+            (returned_while_held, head_while_held, head)
+        })
+    };
+
+    let created = first.create_entity(create_args("late", "Delta", &[]), Actor::Cli, None, None);
+    returned.store(true, Ordering::SeqCst);
+    let (returned_while_held, head_while_held, head) = holder.join().unwrap();
+
+    assert!(
+        !returned_while_held,
+        "the write returned while another process held the new mem's lock: {created:?}"
+    );
+    assert_eq!(
+        head_while_held, head_before,
+        "the write landed while another process held the new mem's lock"
+    );
+    created.expect("the write lands once the lock is released");
+    assert_ne!(head(), head_before);
+}

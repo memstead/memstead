@@ -258,6 +258,70 @@ impl Engine {
         }
     }
 
+    /// The report for a batch whose commit into `failed_mount` failed.
+    /// With nothing committed the batch failed as a whole and `cause`
+    /// is the report. With another mem's commit landed the report is
+    /// the partial-failure envelope: for every mem the batch writes,
+    /// in commit order, whether its commit landed, and for every
+    /// entity the batch writes there, whether it landed and its hash
+    /// now. Sending the items it names as not landed completes the
+    /// batch. The caller has rolled the store back and reloaded the
+    /// mems that committed, so the hashes are read from a view that is
+    /// level with storage.
+    pub(in crate::engine) fn batch_commit_failed(
+        &self,
+        mounts: &[usize],
+        items: &[(usize, EntityId)],
+        committed: &[(usize, String)],
+        failed_mount: usize,
+        cause: EngineError,
+    ) -> EngineError {
+        use crate::engine::error::{PartialItem, PartialMem};
+        if committed.is_empty() {
+            return cause;
+        }
+        let failure_cause = match &cause {
+            EngineError::Backend(BackendError::ParentMismatch { .. }) => "drift",
+            _ => "storage",
+        };
+        let name = |mount_idx: usize| self.mounts[mount_idx].mount.mem.clone();
+        let mems = mounts
+            .iter()
+            .map(|&mount_idx| {
+                let landed = committed.iter().any(|(idx, _)| *idx == mount_idx);
+                let mut ids: Vec<&EntityId> = items
+                    .iter()
+                    .filter(|(idx, _)| *idx == mount_idx)
+                    .map(|(_, id)| id)
+                    .collect();
+                ids.dedup();
+                PartialMem {
+                    mem: name(mount_idx),
+                    landed,
+                    error: (mount_idx == failed_mount).then(|| cause.to_string()),
+                    items: ids
+                        .into_iter()
+                        .map(|id| PartialItem {
+                            id: id.to_string(),
+                            landed,
+                            current_hash: self
+                                .store
+                                .get(id)
+                                .filter(|e| !e.stub)
+                                .map(|e| e.content_hash.clone()),
+                        })
+                        .collect(),
+                }
+            })
+            .collect();
+        EngineError::RenamePartialFailure {
+            committed_mems: committed.iter().map(|(idx, _)| name(*idx)).collect(),
+            failed_mem: name(failed_mount),
+            failure_cause: failure_cause.to_string(),
+            mems,
+        }
+    }
+
     /// Bring the engine's view level with storage for mems whose commit
     /// landed inside an operation that then failed on another mem: the
     /// operation's store rollback put the view behind what those

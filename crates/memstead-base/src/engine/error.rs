@@ -677,9 +677,11 @@ pub enum EngineError {
     /// An entity rename lands the renamed entity's own mem last, so
     /// after a partial failure the entity is still under the id the
     /// caller named, with the hash the caller sent: the identical call
-    /// completes the rename.
+    /// completes the rename. A batch is completed by sending the items
+    /// reported as not landed. The code keeps the name it had when
+    /// only renames reported it.
     #[error(
-        "rename landed in part: mem `{failed_mem}` failed ({failure_cause}) after {committed_mems:?} committed; details.mems states what landed"
+        "the operation landed in part: mem `{failed_mem}` failed ({failure_cause}) after {committed_mems:?} committed; details.mems states what landed"
     )]
     RenamePartialFailure {
         committed_mems: Vec<String>,
@@ -706,7 +708,10 @@ pub enum EngineError {
     /// caller's hash may even match the stale view, so `HASH_MISMATCH`
     /// would be false, and the storage failure itself belongs to the
     /// reload, not to this write. The next operation on the mem retries
-    /// the reload; resend the write after it.
+    /// the reload; resend the write after it. The named mem is the one
+    /// that could not be reloaded: the mem being written, a mem whose
+    /// entity the write relates to, or, for a write whose guard reads
+    /// every mem, any mem.
     #[error(
         "mem `{mem}` changed in storage and could not be reloaded before this write ({detail}) — nothing was written; the next operation retries the reload, resend the write then"
     )]
