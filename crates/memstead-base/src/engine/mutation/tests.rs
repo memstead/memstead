@@ -1286,6 +1286,29 @@ mod hash_rule {
     }
 
     #[test]
+    fn a_batch_entry_marked_dry_run_is_still_compared() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine(&tmp);
+        let (id, hash) = seed(&mut engine, "Alpha");
+        // The batch decides dry-run for the whole call; an entry's own flag
+        // must not become a way past the compare.
+        let entry = UpdateEntityArgs {
+            dry_run: true,
+            ..update(&id, ExpectedHash::Current("stale".into()), "x")
+        };
+        let batch = engine
+            .batch_update(vec![(entry, None)], crate::vcs::Actor::Cli, None, false)
+            .unwrap();
+        assert!(!batch.applied);
+        assert_eq!(
+            batch.results[0].error.as_ref().map(|e| e.code.as_str()),
+            Some("HASH_MISMATCH"),
+            "{batch:?}"
+        );
+        assert_eq!(engine.get_entity(&id).unwrap().content_hash, hash);
+    }
+
+    #[test]
     fn a_stub_deletes_with_no_hash() {
         let tmp = TempDir::new().unwrap();
         let mut engine = engine(&tmp);

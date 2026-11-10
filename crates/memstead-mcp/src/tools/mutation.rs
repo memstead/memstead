@@ -390,7 +390,13 @@ pub struct DeleteParams {
     #[schemars(
         description = "Hash from memstead_entity response (_hash field). Required for real entities — read first. Mirrors memstead_update / memstead_rename. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash. Stubs carry an empty `_hash` (they have no on-disk file); pass the empty string to delete a stub, which has no content to protect. An empty string on a real entity states no hash and refuses EXPECTED_HASH_REQUIRED."
     )]
-    pub expected_hash: String,
+    // Required in the schema, so a client is told to read first; optional
+    // in the parser, so an omitted hash reaches the engine and is refused
+    // there with EXPECTED_HASH_REQUIRED like on every other verb, instead of
+    // an uncoded parameter error.
+    #[schemars(required)]
+    #[serde(default)]
+    pub expected_hash: Option<String>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
     #[schemars(description = ROLE_PARAM_DESCRIPTION)]
@@ -408,9 +414,12 @@ pub struct RenameParams {
     #[schemars(description = "New title for the entity")]
     pub new_title: String,
     #[schemars(
-        description = "Hash from memstead_entity (_hash). Required. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash."
+        description = "Hash from memstead_entity (_hash). Required; omitted refuses EXPECTED_HASH_REQUIRED. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash."
     )]
-    pub expected_hash: String,
+    // Required in the schema, optional in the parser: see DeleteParams.
+    #[schemars(required)]
+    #[serde(default)]
+    pub expected_hash: Option<String>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
     #[schemars(description = ROLE_PARAM_DESCRIPTION)]

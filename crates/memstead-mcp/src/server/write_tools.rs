@@ -618,11 +618,9 @@ impl McpServer {
         // stub without one (it has no content to protect) and refuses a
         // real entity `EXPECTED_HASH_REQUIRED`; the parameter stays a
         // required string so the schema keeps asking for the read.
-        let expected_hash = if p.expected_hash.is_empty() {
-            memstead_base::ExpectedHash::Missing
-        } else {
-            memstead_base::ExpectedHash::Current(p.expected_hash.clone())
-        };
+        let expected_hash = memstead_base::ExpectedHash::from_token(
+            p.expected_hash.clone().filter(|h| !h.is_empty()),
+        );
 
         let (role, identity) =
             match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
@@ -870,7 +868,9 @@ impl McpServer {
         };
         let args = memstead_base::RenameEntityArgs {
             id: id.clone(),
-            expected_hash: memstead_base::ExpectedHash::Current(p.expected_hash.clone()),
+            // An omitted hash is Missing and the engine refuses it; an empty one
+            // stays a stated hash and mismatches, as it always has.
+            expected_hash: memstead_base::ExpectedHash::from_token(p.expected_hash.clone()),
             new_title: p.new_title.clone(),
         };
         let client = self.client.get().cloned();

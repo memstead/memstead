@@ -454,6 +454,53 @@ fn shared_prefix_len(a: &str, b: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
+    /// `force` and `auto_hash` on a batch entry present the entity's current
+    /// hash; neither may become the engine override or no hash at all. The
+    /// engine's compare under its lock is what refuses a write landing after
+    /// this read, so the read is what this pins.
+    #[test]
+    fn a_forced_or_auto_hashed_entry_presents_the_current_hash() {
+        use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("specs");
+        std::fs::create_dir_all(dir.join(".memstead")).unwrap();
+        std::fs::write(
+            dir.join(".memstead/config.json"),
+            r#"{"version":"0.1.0","schema":"default@1.0.0","mediums":{},"projections":{}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("alpha.md"),
+            "---\ntype: spec\nlevel: M0\n---\n# Alpha\n\n## Identity\n\nA.\n\n## Purpose\n\nB.\n",
+        )
+        .unwrap();
+        let mount = Mount {
+            mem: "specs".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder { path: dir },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let backend = memstead_base::instantiate_local_backend(&mount).unwrap();
+        let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        let id = memstead_base::EntityId::new("specs", "alpha");
+        let current = engine.get_entity(&id).unwrap().content_hash.clone();
+        for (mode, short) in [("force", "specs--alpha"), ("auto_hash", "alpha")] {
+            let entry: EntryPayload = serde_json::from_value(serde_json::json!({
+                "id": short, mode: true, "sections": { "purpose": "changed" },
+            }))
+            .unwrap();
+            let (args, _) = super::build_update_args(&mut engine, entry).unwrap();
+            assert_eq!(
+                args.expected_hash,
+                memstead_base::ExpectedHash::Current(current.clone()),
+                "{mode} on {short}"
+            );
+        }
+    }
+
     /// The batch entry's own content predicate must answer as the engine's
     /// does. It is hand-rolled because the hash mode is resolved before the
     /// engine args exist, so drift between the two is possible and this is

@@ -3752,7 +3752,7 @@ fn test_unified_mutation_handlers_emit_typed_error_envelopes() {
     let missing = server.memstead_rename(Parameters(RenameParams {
         id: "specs--definitely-not-here".to_string(),
         new_title: "New Name".to_string(),
-        expected_hash: "anything".to_string(),
+        expected_hash: Some("anything".to_string()),
         note: None,
         role: None,
         identity: None,
@@ -3781,7 +3781,7 @@ fn generic_not_found_envelopes_carry_recovery_details() {
     let missing = server.memstead_rename(Parameters(RenameParams {
         id: "specs--definitely-not-here".to_string(),
         new_title: "X".to_string(),
-        expected_hash: "anything".to_string(),
+        expected_hash: Some("anything".to_string()),
         note: None,
         role: None,
         identity: None,
@@ -3903,7 +3903,7 @@ fn text_channel_carries_typed_error_code_inline() {
     let missing = server.memstead_rename(Parameters(RenameParams {
         id: "specs--definitely-not-here".to_string(),
         new_title: "New Name".to_string(),
-        expected_hash: "anything".to_string(),
+        expected_hash: Some("anything".to_string()),
         note: None,
         role: None,
         identity: None,
@@ -5252,7 +5252,7 @@ fn test_memstead_delete_via_unified_engine_path() {
 
     let result = server.memstead_delete(Parameters(DeleteParams {
         id: "specs--entity-a".to_string(),
-        expected_hash: entity_hash,
+        expected_hash: Some(entity_hash),
         note: None,
         role: None,
         identity: None,
@@ -5330,7 +5330,7 @@ fn test_memstead_rename_via_unified_engine_path() {
     let result = server.memstead_rename(Parameters(RenameParams {
         id: "specs--entity-a".to_string(),
         new_title: "Renamed Entity A".to_string(),
-        expected_hash: entity_hash.clone(),
+        expected_hash: Some(entity_hash.clone()),
         note: None,
         role: None,
         identity: None,
@@ -5367,7 +5367,7 @@ fn test_memstead_rename_via_unified_engine_path() {
     let noop = server.memstead_rename(Parameters(RenameParams {
         id: "specs--entity-b".to_string(),
         new_title: "Entity  B".to_string(), // collapses to entity-b
-        expected_hash: entity_b_hash,
+        expected_hash: Some(entity_b_hash),
         note: None,
         role: None,
         identity: None,
@@ -7500,7 +7500,7 @@ fn test_create_update_delete_cycle() {
     // `expected_hash` is mandatory on `memstead_delete`.
     let result = server.memstead_delete(Parameters(DeleteParams {
         id: id.clone(),
-        expected_hash: post_update_hash,
+        expected_hash: Some(post_update_hash),
 
         note: None,
 
@@ -8540,8 +8540,9 @@ fn delete_rejects_stale_hash() {
 
     let result = server.memstead_delete(Parameters(DeleteParams {
         id: id.clone(),
-        expected_hash: "0000000000000000000000000000000000000000000000000000000000000000"
-            .to_string(),
+        expected_hash: Some(
+            "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+        ),
 
         note: None,
 
@@ -8628,7 +8629,7 @@ fn rename_response_wire_shape() {
     let real = server.memstead_rename(Parameters(RenameParams {
         id: id.clone(),
         new_title: "Rename Wire Changed".to_string(),
-        expected_hash: create_hash.clone(),
+        expected_hash: Some(create_hash.clone()),
 
         note: None,
 
@@ -8654,7 +8655,7 @@ fn rename_response_wire_shape() {
     let noop = server.memstead_rename(Parameters(RenameParams {
         id: real_json["new_id"].as_str().unwrap().to_string(),
         new_title: "RENAME WIRE CHANGED".to_string(), // case-only — same slug
-        expected_hash: real_hash.to_string(),
+        expected_hash: Some(real_hash.to_string()),
 
         note: None,
 
@@ -13811,6 +13812,22 @@ fn a_missing_hash_refuses_with_the_engines_one_code_on_both_backends() {
         }))
         .unwrap();
         expect_missing(&server.memstead_delete(Parameters(delete)), "delete \"\"");
+        // Omitted entirely: still the engine's refusal, never an uncoded
+        // parameter error (the schema keeps the field required).
+        let delete: DeleteParams =
+            serde_json::from_value(serde_json::json!({ "id": "specs--entity-a" })).unwrap();
+        expect_missing(
+            &server.memstead_delete(Parameters(delete)),
+            "delete omitted",
+        );
+        let rename: RenameParams = serde_json::from_value(serde_json::json!({
+            "id": "specs--entity-a", "new_title": "Entity Renamed",
+        }))
+        .unwrap();
+        expect_missing(
+            &server.memstead_rename(Parameters(rename)),
+            "rename omitted",
+        );
 
         // Nothing moved: the entity is still there and still a spec.
         let read: EntityParams =

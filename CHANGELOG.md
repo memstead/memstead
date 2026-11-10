@@ -37,7 +37,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (1) the CLI's `HASH_FLAG_REQUIRED`, MCP retype's `INVALID_INPUT` and a
   batch-update entry's `INVALID_INPUT` ("exactly one of `expected_hash`,
   `auto_hash`, or `force`") are retired for this case and answer
-  `EXPECTED_HASH_REQUIRED`; (2) `batch-update`'s per-entry `force` reads
+  `EXPECTED_HASH_REQUIRED`, and so does a `memstead_delete` or
+  `memstead_rename` call that omits `expected_hash`, which used to fail
+  as an uncoded parameter error (the schema still marks it required); (2) `batch-update`'s per-entry `force` reads
   the current hash and presents it, as `--force` on `memstead update`
   always did, instead of sending none: a write that lands between that
   read and the commit is now refused with `HASH_MISMATCH` where it used
