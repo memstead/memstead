@@ -261,6 +261,7 @@ impl CliError {
             | SchemaPackageInvalid { .. }
             | InvalidInput { .. }
             | InvalidTargetSchema { .. }
+            | UnknownSchema { .. }
             | RenameSimilarityOutOfRange { .. }
             | MarkdownExportUnsupportedBackend { .. }
             | EmptyUpdate { .. }

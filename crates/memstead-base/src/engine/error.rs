@@ -1101,6 +1101,13 @@ pub enum EngineError {
     /// length, malformed path, etc.) is the message text.
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// A schema asked for by name that no mounted, workspace-installed or
+    /// built-in schema carries.
+    #[error("schema not found: {name:?}")]
+    UnknownSchema {
+        name: String,
+        available: Vec<String>,
+    },
     /// A `target_schema` argument that does not parse as a schema pin.
     #[error("invalid target_schema {raw:?}: {reason}")]
     InvalidTargetSchema { raw: String, reason: String },
@@ -1673,6 +1680,7 @@ impl EngineError {
             EngineError::MemNameCollision { .. } => "MEM_NAME_COLLISION",
             EngineError::ProcessMemNotEligible { .. } => "PROCESS_MEM_NOT_ELIGIBLE",
             EngineError::InvalidInput(_) => "INVALID_INPUT",
+            EngineError::UnknownSchema { .. } => "SCHEMA_NOT_FOUND",
             EngineError::InvalidTargetSchema { .. } => "INVALID_INPUT",
             EngineError::MergeConflictUnsupportedBackend { .. } => {
                 "CONFLICT_RESOLVE_UNSUPPORTED_BACKEND"
@@ -2274,6 +2282,10 @@ impl EngineError {
                 "name": name,
                 "known_mems": known_mems,
                 "writable_mems": writable_mems,
+            }),
+            EngineError::UnknownSchema { name, available } => serde_json::json!({
+                "name": name,
+                "available": available,
             }),
             EngineError::InvalidTargetSchema { raw, reason } => serde_json::json!({
                 "target_schema": raw,
@@ -3082,6 +3094,32 @@ pub fn suggest_similar(store: &crate::store::Store, input: &str) -> Vec<String> 
 }
 
 impl super::Engine {
+    /// `SCHEMA_NOT_FOUND` for a schema asked for by name, with every name
+    /// the engine can serve (mounted, workspace-installed, built-in).
+    pub fn unknown_schema(&self, name: &str) -> EngineError {
+        let mut available: Vec<String> = self
+            .schemas()
+            .values()
+            .map(|s| s.manifest.name.clone())
+            .chain(
+                self.workspace_schemas()
+                    .iter()
+                    .map(|s| s.manifest.name.clone()),
+            )
+            .chain(
+                self.builtin_schemas()
+                    .iter()
+                    .map(|s| s.manifest.name.clone()),
+            )
+            .collect();
+        available.sort();
+        available.dedup();
+        EngineError::UnknownSchema {
+            name: name.to_string(),
+            available,
+        }
+    }
+
     /// `ENTITY_NOT_FOUND` for `id`, with the ids that look like it.
     pub fn not_found(&self, id: &str) -> EngineError {
         EngineError::NotFound {

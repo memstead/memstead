@@ -598,20 +598,9 @@ impl McpServer {
         let schema = match schema_arc {
             Some(s) => s,
             None => {
-                let msg = format!("schema not found: \"{effective_name}\"");
+                let err = engine.unknown_schema(&effective_name);
                 return attach_drift_to_error(
-                    tool_error_with_payload(
-                        "ENTITY_NOT_FOUND",
-                        &msg,
-                        envelope(
-                            "ENTITY_NOT_FOUND",
-                            msg.clone(),
-                            serde_json::json!({
-                                "id": effective_name,
-                                "suggestions": Vec::<String>::new(),
-                            }),
-                        ),
-                    ),
+                    engine_err_unified(err, &engine),
                     &drift_warnings,
                     mem_changed_notices,
                 );

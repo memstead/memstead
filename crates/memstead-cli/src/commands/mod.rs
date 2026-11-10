@@ -288,13 +288,7 @@ pub fn hash_statement(
     if refetch {
         let current = refetched_hash(engine, id);
         if current.is_missing() {
-            return Err(crate::CliError::new(
-                crate::ExitKind::NotFound,
-                "ENTITY_NOT_FOUND",
-                format!("entity not found: {id}"),
-            )
-            .with_details(serde_json::json!({ "id": id.to_string() }))
-            .into());
+            return Err(crate::CliError::from_engine_op(engine.not_found(id.as_ref())).into());
         }
         return Ok(current);
     }

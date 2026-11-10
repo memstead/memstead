@@ -13,7 +13,7 @@ use memstead_base::vcs::Actor;
 use memstead_base::{DeleteEntityArgs, EntityId};
 
 use crate::CliError;
-use crate::output::{ExitKind, print_json, print_markdown};
+use crate::output::{print_json, print_markdown};
 use crate::setup::{CliContext, CliEngine};
 
 #[derive(Parser, Debug)]
@@ -54,14 +54,7 @@ fn run_mem_repo(
     if args.dry_run {
         let entity = engine
             .get_entity(&lookup_id)
-            .ok_or_else(|| {
-                CliError::new(
-                    ExitKind::NotFound,
-                    "ENTITY_NOT_FOUND",
-                    format!("entity not found: {}", id),
-                )
-                .with_details(serde_json::json!({ "id": id.to_string() }))
-            })?
+            .ok_or_else(|| CliError::from_engine_op(engine.not_found(id.as_ref())))?
             .clone();
         let referrers = engine.classify_delete_referrers(&id);
         let outgoing = engine.store().outgoing(&id).len();
@@ -86,14 +79,7 @@ fn run_mem_repo(
     // `memstead_delete` description state this same design.
     let current_hash = engine
         .get_entity(&lookup_id)
-        .ok_or_else(|| {
-            CliError::new(
-                ExitKind::NotFound,
-                "ENTITY_NOT_FOUND",
-                format!("entity not found: {}", id),
-            )
-            .with_details(serde_json::json!({ "id": id.to_string() }))
-        })?
+        .ok_or_else(|| CliError::from_engine_op(engine.not_found(id.as_ref())))?
         .content_hash
         .clone();
     let result = engine
@@ -137,14 +123,7 @@ fn run_filesystem(
     if args.dry_run {
         let entity = engine
             .get_entity(&lookup_id)
-            .ok_or_else(|| {
-                CliError::new(
-                    ExitKind::NotFound,
-                    "ENTITY_NOT_FOUND",
-                    format!("entity not found: {}", id),
-                )
-                .with_details(serde_json::json!({ "id": id.to_string() }))
-            })?
+            .ok_or_else(|| CliError::from_engine_op(engine.not_found(id.as_ref())))?
             .clone();
         let referrers = engine.classify_delete_referrers(&id);
         let outgoing = engine.store().outgoing(&id).len();
@@ -161,14 +140,7 @@ fn run_filesystem(
     // Same hash-snapshot posture as the mem-repo path.
     let current_hash = engine
         .get_entity(&lookup_id)
-        .ok_or_else(|| {
-            CliError::new(
-                ExitKind::NotFound,
-                "ENTITY_NOT_FOUND",
-                format!("entity not found: {}", id),
-            )
-            .with_details(serde_json::json!({ "id": id.to_string() }))
-        })?
+        .ok_or_else(|| CliError::from_engine_op(engine.not_found(id.as_ref())))?
         .content_hash
         .clone();
     let outcome = engine

@@ -54,12 +54,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "Could not compute context",
         )
         .into()),
-        ContextOutcome::NotFound { query } => Err(CliError::new(
-            ExitKind::NotFound,
-            "ENTITY_NOT_FOUND",
-            format!("no entity found for: {query}"),
+        // The search found nothing, so there is nothing similar to suggest.
+        ContextOutcome::NotFound { query } => Err(CliError::from_engine_op(
+            memstead_base::EngineError::NotFound {
+                id: query,
+                suggestions: Vec::new(),
+            },
         )
-        .with_details(json!({ "id": query }))
         .into()),
         ContextOutcome::Ambiguous { query, candidates } => Err(CliError::new(
             ExitKind::Validation,

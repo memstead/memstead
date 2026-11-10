@@ -68,7 +68,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `memstead export`), both lists sorted; each command's own recovery hint
   follows the engine's message. On `memstead_overview` / `memstead
   overview`, `details.writable_mems` now lists the writable mems only;
-  the visible roster it used to carry is `details.known_mems`.
+  the visible roster it used to carry is `details.known_mems`. A schema
+  name `memstead_schema` cannot serve is `SCHEMA_NOT_FOUND`, the code the
+  CLI reports for the same state (it was `ENTITY_NOT_FOUND`, a declared
+  retirement), with the name under `details.name` (was `details.id`) and
+  the names it can serve under `details.available`; the always-empty
+  `details.suggestions` is gone. The remaining hand-built
+  `ENTITY_NOT_FOUND` on the CLI (`delete`, `context`, `check`, the
+  `--force` / `--auto-hash` read) is the engine's too, with
+  `details.suggestions` and the engine's message (`context`'s read
+  `no entity found for: ...` before).
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

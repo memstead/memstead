@@ -499,9 +499,11 @@ fn run_batch(ctx: &CliContext, path: &std::path::Path) -> anyhow::Result<()> {
             .all_entities()
             .any(|e| !e.stub && e.mem == id.mem() && e.id.0 == *id.as_ref());
         if !exists {
+            let e = engine.not_found(id.as_ref());
             entry_errors.push(serde_json::json!({
-                "code": "ENTITY_NOT_FOUND",
-                "message": format!("entity not found: {}", id.as_ref()),
+                "code": e.code(),
+                "message": e.prose_render(),
+                "details": e.details(),
             }));
         }
         if let Some(raw) = entry.observed_at.as_deref()

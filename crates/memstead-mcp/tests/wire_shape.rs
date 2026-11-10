@@ -398,17 +398,15 @@ fn full_memstead_overview_succeeds_on_empty_seeded_workspace() {
 }
 
 // ---------------------------------------------------------------------------
-// `memstead_schema` error pin: the server emits `ENTITY_NOT_FOUND` for
-// names that don't match the workspace's pinned schema. Helps confirm
-// the pre-extraction message divergence story applies symmetrically
-// across tools, not just `memstead_entity`.
+// `memstead_schema` error pin: an unknown schema name is the engine's
+// `SCHEMA_NOT_FOUND` (it was `ENTITY_NOT_FOUND` until the error-payload
+// convergence), the code the CLI reports for the same state.
 // ---------------------------------------------------------------------------
 
 /// Full pin: an unknown name on a mem-repo-seeded single-mem workspace.
-/// The message is `"schema not found: \"<name>\""` with no
-/// workspace-pin suffix.
+/// The message is `"schema not found: \"<name>\""`.
 #[test]
-fn full_memstead_schema_unknown_name_emits_entity_not_found() {
+fn full_memstead_schema_unknown_name_emits_schema_not_found() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
 
@@ -416,7 +414,7 @@ fn full_memstead_schema_unknown_name_emits_entity_not_found() {
     let result = harness.call_tool("memstead_schema", json!({ "name": "not-a-schema" }));
     assert_error_envelope(
         &result,
-        "ENTITY_NOT_FOUND",
+        "SCHEMA_NOT_FOUND",
         "schema not found: \"not-a-schema\"",
     );
 }
