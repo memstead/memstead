@@ -133,7 +133,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `WORKSPACE_NOT_INITIALISED` (the engine's boot refusal), where it refused
   `NO_WORKSPACE`; `memstead workspace show` on an unreadable store reports
   the store's own code (`WORKSPACE_STORE_PARSE`, ...) where it reported
-  `WORKSPACE_CONFIG_READ_FAILED`.
+  `WORKSPACE_CONFIG_READ_FAILED`. The refusals of `memstead init` and
+  `quickstart` for where a workspace cannot go (inside another, over one
+  already there, over a foreign `.memstead/`, into a folder with content)
+  are one engine type (`workspace_create::WorkspaceCreateError`), so both
+  commands serve one payload per state: `WORKSPACE_ALREADY_EXISTS_ABOVE`
+  carries `details.found_at` and `details.hint` on both (the hint is now
+  the engine's, naming no command; each command's own advice follows the
+  message), and `TARGET_NOT_EMPTY` carries `details.path` and
+  `details.found` on both, `details.retry` where quickstart has one.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

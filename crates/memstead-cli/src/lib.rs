@@ -26,21 +26,9 @@ use output::ExitKind;
 /// comment explaining why no recoverable typed code applies.
 pub const INTERNAL_CODE: &str = "INTERNAL";
 
-/// `memstead init <target>` refusal: target directory is non-empty (the
-/// init refuses to scribble over existing files / pre-existing
-/// workspaces).
-pub const TARGET_NOT_EMPTY_CODE: &str = "TARGET_NOT_EMPTY";
-
 /// `memstead overview --chunk <N>` refusal: requested chunk index is
 /// beyond the actual chunk count.
 pub const CHUNK_OUT_OF_RANGE_CODE: &str = "CHUNK_OUT_OF_RANGE";
-
-/// `memstead init` refusal: ancestor walk found an existing
-/// `.memstead/workspace.toml` above the target. Without this guard a
-/// standalone init would silently nest a fresh filesystem-mem
-/// workspace inside an existing one, with neither workspace aware of
-/// the other.
-pub const WORKSPACE_ALREADY_EXISTS_ABOVE_CODE: &str = "WORKSPACE_ALREADY_EXISTS_ABOVE";
 
 /// `memstead install <archive>` refusal: archive failed strict
 /// validation (any of the variants the strict-archive validator can
@@ -150,6 +138,24 @@ impl CliError {
         let mut err = Self::from_engine_op(e);
         err.message = format!("{} {hint}", err.message);
         err
+    }
+
+    /// A workspace-creation refusal at exit `Validation`, with this
+    /// command's recovery sentence after the engine's message.
+    pub fn from_workspace_create(
+        e: memstead_base::workspace_create::WorkspaceCreateError,
+        hint: &str,
+    ) -> Self {
+        Self {
+            kind: ExitKind::Validation,
+            code: e.code(),
+            details: Some(e.details()),
+            message: if hint.is_empty() {
+                e.to_string()
+            } else {
+                format!("{e}. {hint}")
+            },
+        }
     }
 
     pub fn from_engine_op(e: memstead_base::EngineError) -> Self {

@@ -133,21 +133,13 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // at the target's parent (target itself is what we're initialising)
     // and stops at the filesystem root.
     if let Some(found_at) = find_ancestor_workspace(&target)? {
-        return Err(CliError {
-            code: crate::WORKSPACE_ALREADY_EXISTS_ABOVE_CODE,
-            kind: ExitKind::Validation,
-            message: format!(
-                "an existing memstead workspace lives above {} at {}; \
-                 `memstead init` refuses to nest workspaces. {}",
-                target.display(),
-                found_at.display(),
-                NESTED_WORKSPACE_HINT,
-            ),
-            details: Some(serde_json::json!({
-                "found_at": found_at.display().to_string(),
-                "hint": NESTED_WORKSPACE_HINT,
-            })),
-        }
+        return Err(CliError::from_workspace_create(
+            memstead_base::workspace_create::WorkspaceCreateError::AlreadyExistsAbove {
+                target: target.clone(),
+                found_at,
+            },
+            NESTED_WORKSPACE_HINT,
+        )
         .into());
     }
 
@@ -268,25 +260,15 @@ fn unresolved_pin_warning(
 /// Shared with `memstead quickstart`, which enforces the same
 /// no-nested-workspaces rule.
 pub(crate) fn find_ancestor_workspace(target: &Path) -> anyhow::Result<Option<PathBuf>> {
-    let abs = std::fs::canonicalize(target).map_err(|e| CliError {
-        code: crate::INTERNAL_CODE,
-        kind: ExitKind::Generic,
-        message: format!("canonicalize {}: {e}", target.display()),
-        details: None,
-    })?;
-    // Skip `abs` itself — the target is what we're initialising; we
-    // only care about ancestors. `ancestors()` yields `abs` first,
-    // then each parent.
-    for ancestor in abs.ancestors().skip(1) {
-        if memstead_base::is_workspace_root(ancestor) {
-            return Ok(Some(
-                ancestor
-                    .join(memstead_base::WORKSPACE_STORE_DIR)
-                    .join("workspace.toml"),
-            ));
+    memstead_base::workspace_create::ancestor_workspace(target).map_err(|e| {
+        CliError {
+            code: crate::INTERNAL_CODE,
+            kind: ExitKind::Generic,
+            message: format!("canonicalize {}: {e}", target.display()),
+            details: None,
         }
-    }
-    Ok(None)
+        .into()
+    })
 }
 
 /// Strict-mode emptiness check. The folder is "empty" when it contains
@@ -308,21 +290,15 @@ fn ensure_empty(target: &Path) -> anyhow::Result<()> {
         details: None,
     })? {
         let found = entry.file_name().to_string_lossy().to_string();
-        return Err(CliError {
-            code: crate::TARGET_NOT_EMPTY_CODE,
-            message: format!(
-                "target {} is not empty (found `{}`); \
-                 memstead init refuses to ingest existing content — clear or move files first, \
-                 or pick a fresh folder",
-                target.display(),
-                found,
-            ),
-            kind: ExitKind::Validation,
-            details: Some(serde_json::json!({
-                "path": target.display().to_string(),
-                "found": [found],
-            })),
-        }
+        return Err(CliError::from_workspace_create(
+            memstead_base::workspace_create::WorkspaceCreateError::TargetNotEmpty {
+                path: target.to_path_buf(),
+                found: vec![found],
+                retry: None,
+            },
+            "memstead init refuses to ingest existing content: clear or move files first, \
+             or pick a fresh folder.",
+        )
         .into());
     }
     Ok(())

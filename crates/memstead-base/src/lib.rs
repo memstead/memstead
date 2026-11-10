@@ -53,6 +53,7 @@ pub mod validator;
 pub mod vcs;
 pub mod workspace;
 pub mod workspace_config_edit;
+pub mod workspace_create;
 pub mod workspace_root;
 pub mod workspace_store;
 

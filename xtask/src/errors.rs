@@ -629,7 +629,6 @@ mod surface_codes {
         "ANCHORS_SIDECAR_UNREADABLE",
         "CONTEXT_NOT_COMPUTABLE",
         "FINDINGS_STORE_ERROR",
-        "FOREIGN_MEMSTEAD_DIR",
         "MEM_NOT_READ_ONLY",
         "NO_ACTIVE_BINDING",
         "PROJECTION_ENABLE_FAILED",
@@ -639,9 +638,6 @@ mod surface_codes {
         "READ_MEM_SHADOWS_WRITABLE",
         "SCHEMA_MIGRATE_FAILED",
         "SCHEMA_PACKAGE_EXISTS",
-        "TARGET_NOT_EMPTY",
-        "WORKSPACE_ALREADY_EXISTS_ABOVE",
-        "WORKSPACE_ALREADY_INITIALISED",
     ];
 
     /// Engine codes a surface still builds by hand at some site instead of
@@ -664,6 +660,7 @@ mod surface_codes {
         "PROJECTION_VERIFY_FAILED",
         "SCHEMA_NOT_FOUND",
         "SCHEMA_VALIDATION_FAILED",
+        "TARGET_NOT_EMPTY",
         "UNKNOWN_ENTITY_TYPE",
         "UNKNOWN_MEM",
         "WORKSPACE_NOT_INITIALISED",

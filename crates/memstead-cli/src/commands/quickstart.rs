@@ -273,19 +273,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // separate one — never at `memstead mem init`, which refuses on
     // both counts there.
     if let Some(found_at) = find_ancestor_workspace(&target)? {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            crate::WORKSPACE_ALREADY_EXISTS_ABOVE_CODE,
-            format!(
-                "{} is already inside the memstead workspace at {} — quickstart \
-                 refuses to nest workspaces. Work in that workspace (memstead \
-                 overview), or start a separate graph outside it: mkdir my-graph && \
-                 cd my-graph && memstead quickstart",
-                target.display(),
-                found_at.display(),
-            ),
+        return Err(CliError::from_workspace_create(
+            memstead_base::workspace_create::WorkspaceCreateError::AlreadyExistsAbove {
+                target: target.clone(),
+                found_at,
+            },
+            "Work in that workspace (memstead overview), or start a separate graph outside it: \
+             mkdir my-graph && cd my-graph && memstead quickstart",
         )
-        .with_details(json!({ "found_at": found_at.display().to_string() }))
         .into());
     }
 
@@ -332,35 +327,28 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             }
             .render()
         });
-        let message = match &repo_retry {
+        // The engine names the folder and what blocks it; this command adds
+        // why a `.md` file matters and the way forward.
+        let hint = match &repo_retry {
             Some(retry) => format!(
-                "target {} has content quickstart won't touch: {}{md_note}. It is a git \
-                 repository: {retry} keeps the mem in a folder of its own and leaves your \
-                 files alone. Or start in a fresh folder: mkdir my-graph && cd my-graph && \
-                 memstead quickstart",
-                mem_dir.display(),
-                blocking.join(", "),
+                "Quickstart won't touch it{md_note}. It is a git repository: {retry} keeps \
+                 the mem in a folder of its own and leaves your files alone. Or start in a \
+                 fresh folder: mkdir my-graph && cd my-graph && memstead quickstart"
             ),
             None => format!(
-                "target {} has content quickstart won't touch: {}{md_note} — move it \
-                 out, or start in a fresh folder: mkdir my-graph && cd my-graph && \
-                 memstead quickstart",
-                mem_dir.display(),
-                blocking.join(", "),
+                "Quickstart won't touch it{md_note}: move it out, or start in a fresh folder: \
+                 mkdir my-graph && cd my-graph && memstead quickstart"
             ),
         };
-        let mut details = json!({
-            "path": mem_dir.display().to_string(),
-            "found": blocking,
-        });
-        if let Some(retry) = repo_retry {
-            details["retry"] = json!(retry);
-        }
-        return Err(
-            CliError::new(ExitKind::Validation, crate::TARGET_NOT_EMPTY_CODE, message)
-                .with_details(details)
-                .into(),
-        );
+        return Err(CliError::from_workspace_create(
+            memstead_base::workspace_create::WorkspaceCreateError::TargetNotEmpty {
+                path: mem_dir.to_path_buf(),
+                found: blocking,
+                retry: repo_retry,
+            },
+            &hint,
+        )
+        .into());
     }
 
     // Agent targets: flag > TTY prompt > default (Claude Code, stated).
@@ -478,33 +466,34 @@ fn guard_guided_mem_folder(repo: &Path, mem_dir: &Path, name: &str) -> anyhow::R
         .arg(format!("{name}-mem"))
         .render();
     if !mem_dir.is_dir() {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            crate::TARGET_NOT_EMPTY_CODE,
-            format!(
-                "the mem would take the folder {}, and that path already exists as a file \
-                 — name the mem something else: {retry}",
-                mem_dir.display(),
+        return Err(CliError::from_workspace_create(
+            memstead_base::workspace_create::WorkspaceCreateError::TargetNotEmpty {
+                path: mem_dir.to_path_buf(),
+                found: vec![mem_dir.display().to_string()],
+                retry: Some(retry.clone()),
+            },
+            &format!(
+                "The mem would take that path, and it exists as a file: name the mem something \
+                 else: {retry}"
             ),
         )
-        .with_details(json!({ "path": mem_dir.display().to_string() }))
         .into());
     }
     let occupied = std::fs::read_dir(mem_dir)
         .map(|entries| entries.count() > 0)
         .unwrap_or(true);
     if occupied {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            crate::TARGET_NOT_EMPTY_CODE,
-            format!(
-                "the mem would take the folder {}, and that folder already exists and is \
-                 not empty — quickstart won't adopt a folder the repository already uses. \
-                 Name the mem something else: {retry}",
-                mem_dir.display(),
+        return Err(CliError::from_workspace_create(
+            memstead_base::workspace_create::WorkspaceCreateError::TargetNotEmpty {
+                path: mem_dir.to_path_buf(),
+                found: Vec::new(),
+                retry: Some(retry.clone()),
+            },
+            &format!(
+                "The mem would take that folder, and quickstart won't adopt a folder the \
+                 repository already uses. Name the mem something else: {retry}"
             ),
         )
-        .with_details(json!({ "path": mem_dir.display().to_string() }))
         .into());
     }
     Ok(())
@@ -655,30 +644,19 @@ fn check_no_local_memstead(target: &Path) -> anyhow::Result<()> {
         return Ok(());
     }
     if memstead_base::is_workspace_root(target) {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "WORKSPACE_ALREADY_INITIALISED",
-            format!(
-                "{} is already a Memstead workspace — nothing to bootstrap. \
-                 Inspect it with: memstead overview",
-                target.display(),
-            ),
+        return Err(CliError::from_workspace_create(
+            memstead_base::workspace_create::WorkspaceCreateError::AlreadyInitialised {
+                path: target.to_path_buf(),
+            },
+            "Nothing to bootstrap. Inspect it with: memstead overview",
         )
-        .with_details(json!({ "path": target.display().to_string() }))
         .into());
     }
-    Err(CliError::new(
-        ExitKind::Validation,
-        "FOREIGN_MEMSTEAD_DIR",
-        format!(
-            "{} contains a `.memstead/` directory that is not a workspace \
-             (no workspace.toml) — quickstart won't adopt or overwrite it. \
-             Move it aside, or start fresh: mkdir my-graph && cd my-graph && \
-             memstead quickstart",
-            target.display(),
-        ),
+    Err(CliError::from_workspace_create(
+        memstead_base::workspace_create::WorkspaceCreateError::ForeignMemsteadDir { store },
+        "Quickstart won't adopt or overwrite it. Move it aside, or start fresh: mkdir my-graph \
+         && cd my-graph && memstead quickstart",
     )
-    .with_details(json!({ "path": store.display().to_string() }))
     .into())
 }
 
