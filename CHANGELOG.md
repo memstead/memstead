@@ -100,6 +100,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the unread entity, and a write of that id then landed over the file.
   A mem that booted with an unreadable file serves what was read and
   takes no write until a reload reads all of it.
+- **A batch's receipt carries what its reloads report.** `batch_create`,
+  `batch_update` and `batch_relate` dropped the warnings of the reload
+  they run before writing, so a batch that met a sibling's commit
+  (`MEM_RELOADED`) or whose load completed a cut-off commit
+  (`INTERRUPTED_COMMIT_COMPLETED`) said nothing where a single verb
+  says it. The receipt's `warnings` now carry them.
 - **`memstead rename` rewrites a self-prefixed link inside a hierarchical
   mem.** Inside mem `library/a`, a body link spelled by the full id
   (`[[library/a--first-note]]`) is accepted at write (the resolver strips
