@@ -857,6 +857,28 @@ const VERBS: &[(&str, &[Verb])] = &[
         "discard_all_pending",
         &[Verb::BatchCreate, Verb::BatchUpdate, Verb::BatchRelate],
     ),
+    // The write lock and the one commit call, shared by every verb.
+    ("lock_mems_for_write_if", EVERY_VERB),
+    ("drop", EVERY_VERB),
+    ("commit_staged", EVERY_VERB),
+    ("commit_staged_pinned", EVERY_VERB),
+    ("settle", EVERY_VERB),
+    ("append_record", &[Verb::DeleteStub]),
+];
+
+/// Every verb of the matrix, for the functions all of them share.
+const EVERY_VERB: &[Verb] = &[
+    Verb::Create,
+    Verb::CreateIntoDeferredMem,
+    Verb::BatchCreate,
+    Verb::Update,
+    Verb::BatchUpdate,
+    Verb::Delete,
+    Verb::DeleteStub,
+    Verb::Relate,
+    Verb::BatchRelate,
+    Verb::Retype,
+    Verb::Rename,
 ];
 
 /// Functions that write to a mem and are not a mutation verb on one
@@ -873,6 +895,14 @@ const NOT_VERBS: &[(&str, &str)] = &[
     ("set_mem_process_mem", "the mem's config"),
     ("set_mem_sync_state", "the mem's config"),
     ("write_mem_config_merged", "the mem's config"),
+    (
+        "commit_with_expected_parent",
+        "a default method of the storage trait, a backend delegating to itself",
+    ),
+    (
+        "write_mem_config_cas",
+        "a default method of the storage trait, a backend delegating to itself",
+    ),
     (
         "bump_backend_schema_pin",
         "the mem's config: the schema pin",
@@ -977,6 +1007,12 @@ fn the_verb_list_is_the_engines_writers() {
                 rest = rest[rest.find(')')? + 1..].trim_start();
             }
         }
+        while let Some(after) = ["async ", "const ", "unsafe "]
+            .iter()
+            .find_map(|q| rest.strip_prefix(q))
+        {
+            rest = after.trim_start();
+        }
         let name: String = rest
             .strip_prefix("fn ")?
             .chars()
@@ -1010,43 +1046,53 @@ fn the_verb_list_is_the_engines_writers() {
                 .any(|(hook, writes)| *writes && line.contains(&format!(".{hook})(")))
     }
 
-    fn scan(dir: &Path, found: &mut BTreeSet<String>) {
+    fn scan(dir: &Path, skip: &[std::path::PathBuf], found: &mut BTreeSet<String>) {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             let name = path.file_name().unwrap().to_string_lossy().to_string();
+            if skip.contains(&path) {
+                continue;
+            }
             if path.is_dir() {
-                // The backends are what is written to; the search index
-                // commits to itself.
-                if !["tests", "storage", "search_index"].contains(&name.as_str()) {
-                    scan(&path, found);
+                // A `tests` directory holds test modules, which call
+                // verbs and are no writers of the engine.
+                if name != "tests" {
+                    scan(&path, skip, found);
                 }
                 continue;
             }
-            // The trait, the lock and the commit call define what the
-            // writers call; test modules call verbs.
-            if !name.ends_with(".rs")
-                || ["backend.rs", "write_lock.rs", "landing.rs"].contains(&name.as_str())
-                || name.ends_with("tests.rs")
-            {
+            if !name.ends_with(".rs") || name.ends_with("tests.rs") {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();
             let lines: Vec<&str> = text.lines().collect();
             let mut current: Option<String> = None;
             let mut next_is_a_test = false;
+            // Depth inside an inline test module, whose lines are
+            // skipped; production code can follow such a module.
+            let mut test_module_depth: Option<i32> = None;
             for (i, line) in lines.iter().enumerate() {
                 let trimmed = line.trim();
+                if let Some(depth) = test_module_depth.as_mut() {
+                    *depth += line.matches('{').count() as i32;
+                    *depth -= line.matches('}').count() as i32;
+                    if *depth <= 0 {
+                        test_module_depth = None;
+                        current = None;
+                    }
+                    continue;
+                }
                 if trimmed.starts_with("//") {
                     continue;
                 }
-                // An inline test module runs to the end of its file.
                 if trimmed == "#[cfg(test)]"
                     && lines.get(i + 1).is_some_and(|next| {
                         let next = next.trim();
                         next.contains("mod ") && next.ends_with('{')
                     })
                 {
-                    break;
+                    test_module_depth = Some(0);
+                    continue;
                 }
                 if trimmed == "#[test]" {
                     next_is_a_test = true;
@@ -1088,8 +1134,12 @@ fn the_verb_list_is_the_engines_writers() {
         "the git hook table and the fault matrix's hook list differ"
     );
 
+    // The backends are what is written to, and the search index commits
+    // to itself: these two directories, and nothing else of the crate,
+    // are left out.
+    let skip = [source.join("storage"), source.join("search_index")];
     let mut in_engine = BTreeSet::new();
-    scan(&source, &mut in_engine);
+    scan(&source, &skip, &mut in_engine);
     let placed: BTreeSet<String> = VERBS
         .iter()
         .map(|(name, _)| name.to_string())
