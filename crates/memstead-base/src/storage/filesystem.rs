@@ -167,6 +167,9 @@ pub struct FilesystemBackend {
     /// power loss bring the record back after later writes. Reads
     /// refuse meanwhile, as they do while a record is on disk.
     removal_sync_owed: Mutex<Option<Vec<String>>>,
+    /// This backend has synced the mem root since it was built, so the
+    /// name of `.memstead/` is durable.
+    meta_named: std::sync::atomic::AtomicBool,
 }
 
 impl FilesystemBackend {
@@ -178,6 +181,7 @@ impl FilesystemBackend {
             pending: Mutex::new(Pending::new()),
             io: Box::new(RealIo),
             removal_sync_owed: Mutex::new(None),
+            meta_named: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -190,6 +194,7 @@ impl FilesystemBackend {
             pending: Mutex::new(Pending::new()),
             io: Box::new(io),
             removal_sync_owed: Mutex::new(None),
+            meta_named: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -285,8 +290,20 @@ impl FilesystemBackend {
                 dirs.insert(parent.to_path_buf());
             }
         }
+        // `.memstead/` itself must be named durably before a record is
+        // put in it. This backend cannot know who created the directory
+        // (the write lock makes it for its lock file, outside any
+        // commit), so the first commit of each backend syncs the mem
+        // root once, whatever it found.
+        let name_meta = !self.meta_named.load(Ordering::SeqCst);
+        if name_meta {
+            dirs.insert(self.root.clone());
+        }
         for dir in &dirs {
             self.io.sync_dir(dir)?;
+        }
+        if name_meta {
+            self.meta_named.store(true, Ordering::SeqCst);
         }
 
         let record = CommitRecord {

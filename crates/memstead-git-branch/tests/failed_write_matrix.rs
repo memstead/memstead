@@ -931,6 +931,11 @@ const NOT_VERBS: &[(&str, &str)] = &[
         "transport: moves a branch to a fetched commit",
     ),
     ("branch_reset", "resets a mem's branch to an earlier commit"),
+    (
+        "export_markdown",
+        "writes every entity of a folder mem back to its files from the store, a whole-mem \
+         export; it writes the files itself and not through the backend",
+    ),
     ("install_schema", "writes a schema, not a mem's entities"),
     (
         "write_to_local_schema_source",
@@ -982,14 +987,18 @@ fn the_verb_list_is_the_engines_writers() {
 
     /// Does the line call a mutating storage method or a write helper?
     fn writes(line: &str) -> bool {
+        // A method is called on a value (`backend.commit(…)`) or by
+        // path (`MemBackend::commit(backend, …)`).
         let method_call = Method::ALL.iter().filter(|m| m.mutates()).any(|m| {
-            match line.find(&format!(".{}(", m.name())) {
-                // The search index's argument-less `commit()` is its
-                // own and no backend's.
-                Some(at) if *m == Method::Commit => !line[at..].starts_with(".commit()"),
-                Some(_) => true,
-                None => false,
-            }
+            [".", "::"].iter().any(|prefix| {
+                match line.find(&format!("{prefix}{}(", m.name())) {
+                    // The search index's argument-less `commit()` is its
+                    // own and no backend's.
+                    Some(at) if *m == Method::Commit => !line[at..].starts_with(".commit()"),
+                    Some(_) => true,
+                    None => false,
+                }
+            })
         });
         method_call
             || WRITE_HELPERS

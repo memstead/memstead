@@ -818,6 +818,13 @@ fn a_commit_whose_removal_sync_is_owed_stays_unfinished_until_completed() {
     seed(&root);
     let io = FaultIo::new();
     let backend = FilesystemBackend::with_io(root.clone(), io.clone());
+    // A backend's first commit carries one sync more (the mem root, for
+    // the name of `.memstead/`); get it out of the way so the commit
+    // probed below and the commit under test take the same steps.
+    backend.write_entity(Path::new("warm-up.md"), NEW).unwrap();
+    backend
+        .commit("warm-up", &CommitContext::internal())
+        .unwrap();
     let before = backend.current_head().unwrap();
 
     // A commit with no provenance record: one file, no ledger line.
@@ -914,4 +921,67 @@ fn a_record_appended_on_its_own_goes_through_the_commit_point() {
             assert_eq!(ledger_of(tmp.path()), after, "step {n}");
         }
     }
+}
+
+/// `.memstead/` can exist before a mem's first commit without ever
+/// having been synced: the write lock creates it for its lock file. The
+/// first commit of a backend therefore syncs the mem root before it
+/// puts a record into the directory, whoever made it, and also when
+/// the commit is a ledger line and no file (the delete of a stub).
+#[test]
+fn the_first_commit_names_the_metadata_directory_durably() {
+    let record_rename = |trace: &[IoOp], root: &Path| {
+        trace
+            .iter()
+            .position(
+                |op| matches!(op, IoOp::Rename { to, .. } if to == &root.join(COMMIT_RECORD_REL)),
+            )
+            .expect("the commit puts its record in place")
+    };
+
+    // The directory as the write lock leaves it.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    std::fs::create_dir_all(root.join(".memstead/locks")).unwrap();
+    let io = FaultIo::new();
+    let backend = FilesystemBackend::with_io(root.clone(), io.clone());
+    backend
+        .append_provenance(&record(
+            at(1_700_000_030),
+            ProvenanceKind::Delete,
+            "m--stub",
+        ))
+        .unwrap();
+    let trace = io.trace();
+    let point = record_rename(&trace, &root);
+    assert!(
+        trace[..point].contains(&IoOp::SyncDir(root.clone())),
+        "the mem root is not synced before the commit point: {:?}",
+        &trace[..point]
+    );
+
+    // Once per backend: the next commit has no name to make durable.
+    io.reset();
+    backend.write_entity(Path::new("a.md"), NEW).unwrap();
+    backend
+        .commit("second", &CommitContext::internal())
+        .unwrap();
+    let trace = io.trace();
+    let point = record_rename(&trace, &root);
+    assert!(
+        trace[..point].contains(&IoOp::SyncDir(root.clone())),
+        "a.md's own directory"
+    );
+    io.reset();
+    backend.write_entity(Path::new("sub/b.md"), NEW).unwrap();
+    backend.commit("third", &CommitContext::internal()).unwrap();
+    let trace = io.trace();
+    // `sub/` is new, so the root is synced for its name; nothing else is.
+    assert_eq!(
+        trace
+            .iter()
+            .filter(|op| **op == IoOp::SyncDir(root.clone()))
+            .count(),
+        1
+    );
 }
