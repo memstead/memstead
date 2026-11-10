@@ -77,7 +77,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `ENTITY_NOT_FOUND` on the CLI (`delete`, `context`, `check`, the
   `--force` / `--auto-hash` read) is the engine's too, with
   `details.suggestions` and the engine's message (`context`'s read
-  `no entity found for: ...` before).
+  `no entity found for: ...` before). `memstead schema` (readme and
+  install) raises the same `SCHEMA_NOT_FOUND` for a name the built-in
+  registry does not carry, so the CLI's refusal now has `details.name` and
+  `details.available` where it had no details; the built-in names leave
+  its message for `details.available`, and the hint to pass a path or a
+  pin stays as its own sentence.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

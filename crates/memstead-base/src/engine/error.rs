@@ -3093,6 +3093,25 @@ pub fn suggest_similar(store: &crate::store::Store, input: &str) -> Vec<String> 
         .collect()
 }
 
+impl EngineError {
+    /// `SCHEMA_NOT_FOUND` for a schema the built-in registry does not carry
+    /// (a command that installs or reads a package needs no engine), with
+    /// the built-in names.
+    pub fn unknown_builtin_schema(name: &str) -> EngineError {
+        let mut available: Vec<String> = memstead_schema::SchemaRegistry::builtin()
+            .identities()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        available.sort();
+        available.dedup();
+        EngineError::UnknownSchema {
+            name: name.to_string(),
+            available,
+        }
+    }
+}
+
 impl super::Engine {
     /// `SCHEMA_NOT_FOUND` for a schema asked for by name, with every name
     /// the engine can serve (mounted, workspace-installed, built-in).

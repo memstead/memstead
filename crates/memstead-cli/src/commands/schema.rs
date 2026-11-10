@@ -233,12 +233,9 @@ fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
                     Some(bytes),
                 ),
                 None => {
-                    return Err(CliError::new(
-                        ExitKind::Validation,
-                        "SCHEMA_NOT_FOUND",
-                        format!(
-                            "no built-in or workspace-installed schema {}",
-                            schema_ref.as_display()
+                    return Err(CliError::from_engine_op(
+                        memstead_base::EngineError::unknown_builtin_schema(
+                            &schema_ref.as_display(),
                         ),
                     )
                     .into());
@@ -334,23 +331,23 @@ fn resolve_builtin_read_ref(reference: &str) -> anyhow::Result<SchemaRef> {
     versions.sort();
     match versions.pop() {
         Some(v) => Ok(SchemaRef::new(reference.to_string(), v)),
-        None => Err(CliError::new(
-            ExitKind::Validation,
-            "SCHEMA_NOT_FOUND",
-            format!(
-                "no built-in schema named {reference:?}; built-ins: {}",
-                builtin_names_joined(&reg)
-            ),
-        )
-        .into()),
+        None => {
+            let e = memstead_base::EngineError::unknown_builtin_schema(reference);
+            // The roster in the message too, read from the engine's payload.
+            let names: Vec<String> = e.details()["available"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|n| n.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Err(
+                CliError::from_engine_with_hint(e, &format!("Built-ins: {}.", names.join(", ")))
+                    .into(),
+            )
+        }
     }
-}
-
-fn builtin_names_joined(reg: &memstead_schema::SchemaRegistry) -> String {
-    let mut names: Vec<String> = reg.identities().into_iter().map(|(n, _)| n).collect();
-    names.sort();
-    names.dedup();
-    names.join(", ")
 }
 
 /// Version every scaffolded package starts at.
@@ -1244,12 +1241,9 @@ fn resolve_builtin_ref(source: &str) -> anyhow::Result<SchemaRef> {
             )
         })?;
         if reg.get(&r.name, &r.version).is_none() {
-            return Err(CliError::new(
-                ExitKind::Validation,
-                "SCHEMA_NOT_FOUND",
-                format!(
-                    "no built-in schema {source} — pass a path to install a non-built-in package"
-                ),
+            return Err(CliError::from_engine_with_hint(
+                memstead_base::EngineError::unknown_builtin_schema(source),
+                "Pass a path to install a non-built-in package.",
             )
             .into());
         }
@@ -1260,13 +1254,9 @@ fn resolve_builtin_ref(source: &str) -> anyhow::Result<SchemaRef> {
                 let (n, v) = s.id();
                 Ok(SchemaRef::new(n, v))
             }
-            Ok(None) => Err(CliError::new(
-                ExitKind::Validation,
-                "SCHEMA_NOT_FOUND",
-                format!(
-                    "no built-in schema named {source:?} — pass a path to install a non-built-in \
-                     package, or a `name@version` pin"
-                ),
+            Ok(None) => Err(CliError::from_engine_with_hint(
+                memstead_base::EngineError::unknown_builtin_schema(source),
+                "Pass a path to install a non-built-in package, or a `name@version` pin.",
             )
             .into()),
             Err(e) => Err(CliError::new(
