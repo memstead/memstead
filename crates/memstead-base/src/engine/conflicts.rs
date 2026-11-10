@@ -239,11 +239,14 @@ impl Engine {
         note: Option<&str>,
     ) -> Result<ResolveConflictOutcome, EngineError> {
         let mem = id.mem().to_string();
-        // The mem's write lock is held from before the conflicted file
-        // is read until its resolution is committed, like any other
+        // The write lock is held from before the conflicted file is
+        // read until its resolution is committed, like any other
         // write: a second process cannot change the file in between.
-        let (_write_lock, mut warnings) = self.lock_for_write(true, &[&mem])?;
-        warnings.extend(self.level_for_write(&[&mem]));
+        // The side it writes can hold relationship rows and links into
+        // any mem, so it holds every mem's lock: a delete or a rename
+        // of something the resolved entity refers to cannot run beside
+        // it.
+        let (_write_lock, mut warnings) = self.lock_workspace_for_write_if(true)?;
         let (mount_idx, root) = self.folder_mount(&mem)?;
 
         // Locate the file whose path derives to the requested id. The

@@ -828,6 +828,7 @@ const WRITE_HELPERS: &[&str] = &[
     "lock_mems_for_write_if",
     "lock_for_write",
     "lock_for_verb",
+    "lock_for_verb_referring",
     "lock_whole_workspace",
     "lock_on_a_settled_roster",
     "lock_workspace_for_write_if",
@@ -975,6 +976,12 @@ const VERBS: &[(&str, &[Verb])] = &[
             Verb::Relate,
             Verb::BatchRelate,
         ],
+    ),
+    // An update's references depend on the stored text, so its lock
+    // set is settled under the locks.
+    (
+        "engine/write_lock.rs::lock_for_verb_referring",
+        &[Verb::Update, Verb::BatchUpdate],
     ),
     (
         "engine/write_lock.rs::lock_workspace_for_write_if",

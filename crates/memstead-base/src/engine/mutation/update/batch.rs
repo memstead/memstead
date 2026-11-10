@@ -100,24 +100,34 @@ impl Engine {
         touched_mems.dedup();
         let (_write_lock, drift_warnings) = {
             let items = &updates;
-            // Each item's own mem, and the mems it refers to.
-            let mut locked = touched_mems.clone();
-            for (a, _) in items {
-                locked.extend(crate::engine::write_lock::referred_mems(
-                    a.id.mem(),
-                    a.declare_relations.iter().map(|r| &r.target),
-                    super::update_texts(a),
-                ));
-            }
-            self.lock_for_verb(!dry_run, &locked, &touched_mems, |engine| {
-                items.iter().any(|(a, _)| {
-                    a.id.mem().is_empty()
-                        || a.declare_relations.iter().any(|r| {
-                            r.target.mem().is_empty()
-                                || engine.rel_type_is_acyclic(a.id.mem(), &r.rel_type)
-                        })
-                })
-            })?
+            // Each item's own mem, and the mems its result refers to.
+            self.lock_for_verb_referring(
+                !dry_run,
+                &touched_mems,
+                |engine| {
+                    let mut referred = Vec::new();
+                    for (a, _) in items {
+                        let texts = super::update_result_texts(engine, a);
+                        referred.extend(crate::engine::write_lock::referred_mems(
+                            a.id.mem(),
+                            a.declare_relations.iter().map(|r| &r.target),
+                            texts.iter().map(String::as_str),
+                        ));
+                    }
+                    referred.sort();
+                    referred.dedup();
+                    referred
+                },
+                |engine| {
+                    items.iter().any(|(a, _)| {
+                        a.id.mem().is_empty()
+                            || a.declare_relations.iter().any(|r| {
+                                r.target.mem().is_empty()
+                                    || engine.rel_type_is_acyclic(a.id.mem(), &r.rel_type)
+                            })
+                    })
+                },
+            )?
         };
         // An item whose short id does not resolve fails as its own
         // error below, never the whole batch.

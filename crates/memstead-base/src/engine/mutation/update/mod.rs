@@ -19,22 +19,53 @@ mod compose;
 mod outcome;
 mod resolve;
 mod stage;
-/// The text an update brings: whole sections, appended text, and the
-/// new side of each patch. A wiki-link in it is a reference the update
-/// may add.
-pub(in crate::engine::mutation) fn update_texts(
+/// The sections an update leaves behind where it writes them: the
+/// stored text with the call's text worked in the way the compose
+/// phase does it (a whole section replaces, an append joins with a
+/// newline, patches apply in order). A wiki-link in them is a
+/// reference the update may add, and it can be one that neither the
+/// stored text nor the call's text holds alone. A patch that does not
+/// apply is skipped here; the compose phase refuses it.
+pub(in crate::engine::mutation) fn update_result_texts(
+    engine: &Engine,
     args: &UpdateEntityArgs,
-) -> impl Iterator<Item = &str> {
+) -> Vec<String> {
+    let mut sections = engine
+        .store
+        .get(&args.id)
+        .map(|e| e.sections.clone())
+        .unwrap_or_default();
+    for (key, body) in &args.sections {
+        sections.insert(key.clone(), body.clone());
+    }
+    for (key, value) in &args.append_sections {
+        let existing = sections.get(key).cloned().unwrap_or_default();
+        let joined = if existing.trim().is_empty() {
+            value.clone()
+        } else {
+            format!("{existing}\n{value}")
+        };
+        sections.insert(key.clone(), joined);
+    }
+    for (key, patches) in &args.patch_sections {
+        for patch in patches {
+            let Some(existing) = sections.get(key).cloned() else {
+                continue;
+            };
+            let patched = if patch.all {
+                existing.replace(&patch.old, &patch.new)
+            } else {
+                existing.replacen(&patch.old, &patch.new, 1)
+            };
+            sections.insert(key.clone(), patched);
+        }
+    }
     args.sections
-        .values()
-        .chain(args.append_sections.values())
-        .map(String::as_str)
-        .chain(
-            args.patch_sections
-                .values()
-                .flatten()
-                .map(|patch| patch.new.as_str()),
-        )
+        .keys()
+        .chain(args.append_sections.keys())
+        .chain(args.patch_sections.keys())
+        .filter_map(|key| sections.get(key).cloned())
+        .collect()
 }
 
 #[cfg(test)]
@@ -167,17 +198,19 @@ impl Engine {
                 .any(|r| r.target.mem().is_empty());
         let (_write_lock, reloaded) = {
             let declared = &args.declare_relations;
-            // Its own mem, and the mems it refers to.
-            let mut locked = crate::engine::write_lock::referred_mems(
-                &named_mem,
-                declared.iter().map(|r| &r.target),
-                update_texts(&args),
-            );
-            locked.push(named_mem.clone());
-            self.lock_for_verb(
+            let update = &args;
+            // Its own mem, and the mems its result refers to.
+            self.lock_for_verb_referring(
                 !args.dry_run,
-                &locked,
                 std::slice::from_ref(&named_mem),
+                |engine| {
+                    let texts = update_result_texts(engine, update);
+                    crate::engine::write_lock::referred_mems(
+                        &named_mem,
+                        declared.iter().map(|r| &r.target),
+                        texts.iter().map(String::as_str),
+                    )
+                },
                 |engine| {
                     short
                         || declared

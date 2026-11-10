@@ -305,7 +305,7 @@ impl Engine {
         writes: bool,
         locked: &[S],
         written: &[S],
-        reads_workspace: impl FnOnce(&Self) -> bool,
+        reads_workspace: impl Fn(&Self) -> bool,
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
         let nested = COVERED.with(|c| !c.borrow().is_empty());
         let mut warnings = self.roster_before_locking();
@@ -318,7 +318,59 @@ impl Engine {
         let (guard, settled) = self.lock_on_a_settled_roster(writes, |_| names.clone())?;
         warnings.extend(settled);
         warnings.extend(self.level_for_write(written));
+        // The question again, on the view taken under the locks: what
+        // it reads (a schema's relationships) may have changed since
+        // it was asked. A yes now gives the locks back and takes every
+        // mount, before anything is planned.
+        if writes && !nested && reads_workspace(self) {
+            drop(guard);
+            let (guard, reloaded) = self.lock_whole_workspace(writes)?;
+            warnings.extend(reloaded);
+            return Ok((guard, warnings));
+        }
         Ok((guard, warnings))
+    }
+
+    /// [`Self::lock_for_verb`] for a verb whose references depend on
+    /// what is in storage: an update that appends to a section or
+    /// patches one adds whatever link the resulting body holds, and
+    /// that body is the stored text with the call's text worked in.
+    /// `refer` names the mems the verb's result refers to, from the
+    /// engine's view. It is asked before the locks are taken and again
+    /// under them, on the reloaded view; when the second answer names
+    /// a mem the first did not, the locks are given back and taken
+    /// again with it. Nothing is planned before the two agree.
+    pub(in crate::engine) fn lock_for_verb_referring(
+        &mut self,
+        writes: bool,
+        written: &[String],
+        refer: impl Fn(&Self) -> Vec<String>,
+        reads_workspace: impl Fn(&Self) -> bool,
+    ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
+        let mut warnings = Vec::new();
+        let mut referred = refer(self);
+        for _ in 0..3 {
+            let mut locked = referred.clone();
+            locked.extend(written.iter().cloned());
+            let (guard, more) =
+                self.lock_for_verb(writes, &locked, written, |engine| reads_workspace(engine))?;
+            warnings.extend(more);
+            let under_lock = refer(self);
+            if !writes || under_lock.iter().all(|mem| referred.contains(mem)) {
+                return Ok((guard, warnings));
+            }
+            drop(guard);
+            for mem in under_lock {
+                if !referred.contains(&mem) {
+                    referred.push(mem);
+                }
+            }
+        }
+        Err(EngineError::Backend(BackendError::Other(
+            "what this write refers to changed each time it had taken its write locks; nothing \
+             was written, send the call again"
+                .to_string(),
+        )))
     }
 
     /// Whether an edge of `rel_type` out of `mem` is guarded against

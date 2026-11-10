@@ -86,9 +86,19 @@ fn workspace(root: &Path) {
     init_real_mem_repo(root, &[(LEFT, SCHEMA)]);
 }
 
+/// How the second process writes its link.
+#[derive(Debug, Clone, Copy)]
+enum LinkBy {
+    /// The link stands whole in the section text the update sends.
+    Text,
+    /// Two patches whose new texts hold no link; the section they leave
+    /// behind holds one.
+    Patches,
+}
+
 /// The second process: creates the mem `late`, an entity in it, and a
 /// body link from it to `left--alpha`.
-fn second_process(root: &Path) -> Vec<String> {
+fn second_process(root: &Path, by: LinkBy) -> Vec<String> {
     use memstead_base::mem_management;
     let mut out = Vec::new();
     let mut second = engine_from_workspace_root(root).expect("second boots");
@@ -114,15 +124,48 @@ fn second_process(root: &Path) -> Vec<String> {
     }
     let created = report(
         second
-            .create_entity(create_args(LATE, "Delta"), Actor::Cli, None, None)
+            .create_entity(
+                {
+                    let mut args = create_args(LATE, "Delta");
+                    if matches!(by, LinkBy::Patches) {
+                        // No link yet: the id stands in plain brackets.
+                        args.sections.insert(
+                            "purpose".to_string(),
+                            "Delta purpose, see (left--alpha) end".to_string(),
+                        );
+                    }
+                    args
+                },
+                Actor::Cli,
+                None,
+                None,
+            )
             .map(|o| o.warnings),
     );
     out.push(format!("create late--delta: {created:?}"));
-    let args = update_args(
+    let mut args = update_args(
         &second,
         &id(LATE, "delta"),
         "Delta purpose, see [[left--alpha]]",
     );
+    if matches!(by, LinkBy::Patches) {
+        args.sections.clear();
+        args.patch_sections.insert(
+            "purpose".to_string(),
+            vec![
+                memstead_base::ops::PatchArg {
+                    old: "(".to_string(),
+                    new: "[[".to_string(),
+                    all: false,
+                },
+                memstead_base::ops::PatchArg {
+                    old: ")".to_string(),
+                    new: "]]".to_string(),
+                    all: false,
+                },
+            ],
+        );
+    }
     let linked = report(
         second
             .update_entity(args, Actor::Cli, None, None)
@@ -181,7 +224,7 @@ fn control_a_link_from_a_mem_attached_before_the_delete_refuses_it() {
     engine
         .create_entity(create_args(LEFT, "Alpha"), Actor::Cli, None, None)
         .expect("seed alpha");
-    let second = second_process(&root);
+    let second = second_process(&root, LinkBy::Text);
     let args = DeleteEntityArgs {
         id: id(LEFT, "alpha"),
         expected_hash: engine
@@ -214,7 +257,7 @@ type Held = (
     Vec<String>,
 );
 
-fn held_verb(verb: &str) -> Held {
+fn held_verb(verb: &str, by: LinkBy) -> Held {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().to_path_buf();
     workspace(&root);
@@ -249,7 +292,7 @@ fn held_verb(verb: &str) -> Held {
             let (done, is_done) = std::sync::mpsc::channel::<Vec<String>>();
             let root = root.clone();
             std::thread::spawn(move || {
-                let _ = done.send(second_process(&root));
+                let _ = done.send(second_process(&root, by));
             });
             // A second process that does not wait is done well within
             // this time; one that waits for the verb is not done at
@@ -345,12 +388,16 @@ fn assert_the_link_waited_and_knows(verb: &str, held: &Held) {
 /// a mem to the workspace and writes a link to the entity from it.
 #[test]
 fn a_link_from_a_mem_attached_while_a_delete_is_held_at_its_commit_waits_for_it() {
-    assert_the_link_waited_and_knows("delete", &held_verb("delete"));
+    for by in [LinkBy::Text, LinkBy::Patches] {
+        assert_the_link_waited_and_knows("delete", &held_verb("delete", by));
+    }
 }
 
 /// The same window on a rename: the link is written after it, to an id
 /// its writer knows to be gone.
 #[test]
 fn a_link_from_a_mem_attached_while_a_rename_is_held_at_its_commit_waits_for_it() {
-    assert_the_link_waited_and_knows("rename", &held_verb("rename"));
+    for by in [LinkBy::Text, LinkBy::Patches] {
+        assert_the_link_waited_and_knows("rename", &held_verb("rename", by));
+    }
 }

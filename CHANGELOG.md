@@ -228,10 +228,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   landed and left the new reference pointing at nothing its writer
   knew of. A `create` or `update` (single or batch) now locks, with its
   own mem, the mems of its declared relation targets and of the
-  wiki-links in the text it brings, as `relate` already locked its
+  wiki-links in the sections it leaves behind (for an append or a
+  patch that is the stored text with the call's text worked in, so a
+  link completed by a patch counts), as `relate` already locked its
   target's mem. Such a write waits for a delete, rename or retype of
-  its target, reloads, and is told the target is gone. Writes that
-  refer to other mems therefore wait for a write in progress there.
+  its target, reloads, and is told the target is gone. A conflict
+  resolution, whose chosen side can refer to any mem, holds every
+  mem's lock. Writes that refer to other mems therefore wait for a
+  write in progress there.
 
 - **A delete and a retype check their referrers against every mem as it
   is now.** Both verbs guard on the edges that point at the entity, and
