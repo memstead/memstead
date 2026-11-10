@@ -1056,6 +1056,7 @@ fn binding_miss_error(configs: &memstead_base::BindingConfigs, binding_id: &str)
         memstead_base::pipeline_store::BindingLookupError::NotFound { .. } => {
             (ExitKind::NotFound, " — scaffold one with `projection init`")
         }
+        memstead_base::pipeline_store::BindingLookupError::NoActive => (ExitKind::NotFound, ""),
     };
     CliError {
         kind,
@@ -1394,12 +1395,13 @@ fn check_path(ctx: &CliContext, args: CheckPathArgs) -> anyhow::Result<()> {
     let binding_id = match args.binding.clone() {
         Some(id) => id,
         None => memstead_projection::read_active_binding_file(&root).ok_or_else(|| {
-            CliError::new(
-                ExitKind::NotFound,
-                "NO_ACTIVE_BINDING",
-                "no active binding — no consuming brief render has published one; name a \
-                 binding explicitly with --binding <mem>/<stem>",
-            )
+            let e = memstead_base::pipeline_store::BindingLookupError::NoActive;
+            CliError {
+                kind: ExitKind::NotFound,
+                code: e.code(),
+                details: Some(e.details()),
+                message: format!("{e}; name a binding explicitly with --binding <mem>/<stem>"),
+            }
         })?,
     };
 
@@ -1894,23 +1896,18 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     // findings exit. Same posture the binding store takes when its own
     // record fails to load.
     if let Some(err) = engine.anchors_sidecar_error(&resolved.destination_mem) {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "ANCHORS_SIDECAR_UNREADABLE",
-            format!(
-                "verify refused for `{binding_id}`: the anchors sidecar for mem `{}` \
-does not parse ({err}) — every anchor would read as absent and every artifact \
-as uncovered, which is a measurement this run cannot honestly make. Repair or \
-remove the sidecar and re-run",
-                resolved.destination_mem
+        return Err(CliError::from_engine_in_run(
+            memstead_base::EngineError::AnchorsSidecarUnreadable {
+                mem: resolved.destination_mem.clone(),
+                reason: err.to_string(),
+            },
+            json!({ "binding": binding_id }),
+            &format!(
+                "Verify refused for `{binding_id}`: every anchor would read as absent and every \
+                 artifact as uncovered, which is a measurement this run cannot honestly make. \
+                 Repair or remove the sidecar and re-run."
             ),
         )
-        .with_details(json!({
-            "binding": binding_id,
-            "mem": resolved.destination_mem,
-            // The same key every other surface uses for this condition.
-            "reason": err,
-        }))
         .into());
     }
 

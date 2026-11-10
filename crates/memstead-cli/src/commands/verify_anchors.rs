@@ -157,26 +157,22 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // finding is recorded — a findings store fed from an unread sidecar
     // would close every prior finding as "verified clean".
     if let Some(why) = &report.sidecar_error {
-        return Err(CliError::new(
-            crate::output::ExitKind::Validation,
-            "ANCHORS_SIDECAR_UNREADABLE",
-            format!(
-                "mem `{}`: the anchors sidecar could not be read ({why}); nothing was \
-                 measured, so no state is reported and nothing was recorded. Fix or remove \
-                 the sidecar, then run again.",
-                report.mem
-            ),
+        return Err(CliError::from_engine_in_run(
+            memstead_base::EngineError::AnchorsSidecarUnreadable {
+                mem: report.mem.clone(),
+                reason: why.clone(),
+            },
+            json!({
+                "fully_adjudicated": report.figure.fully_adjudicated(),
+                "population": report.figure.population(),
+                "verdict_coverage": crate::coverage::VERIFY_ANCHORS
+                    .axis_coverage()
+                    .expect("verify-anchors is a verdict surface")
+                    .wire_line(),
+            }),
+            "Nothing was measured, so no state is reported and nothing was recorded. Fix or \
+             remove the sidecar, then run again.",
         )
-        .with_details(json!({
-            "mem": report.mem,
-            "reason": why,
-            "fully_adjudicated": report.figure.fully_adjudicated(),
-            "population": report.figure.population(),
-            "verdict_coverage": crate::coverage::VERIFY_ANCHORS
-                .axis_coverage()
-                .expect("verify-anchors is a verdict surface")
-                .wire_line(),
-        }))
         .into());
     }
 

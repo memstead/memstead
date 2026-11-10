@@ -158,6 +158,23 @@ impl CliError {
         }
     }
 
+    /// An engine error with facts of this run beside its payload (the
+    /// binding it named, the figures it measured) and this command's
+    /// recovery sentence after the message.
+    pub fn from_engine_in_run(
+        e: memstead_base::EngineError,
+        run: serde_json::Value,
+        hint: &str,
+    ) -> Self {
+        let mut err = Self::from_engine_with_hint(e, hint);
+        if let (Some(d), serde_json::Value::Object(extra)) =
+            (err.details.as_mut().and_then(|d| d.as_object_mut()), run)
+        {
+            d.extend(extra);
+        }
+        err
+    }
+
     pub fn from_engine_op(e: memstead_base::EngineError) -> Self {
         use memstead_base::EngineError::*;
         // The per-entity wrapper of a batch act: the source decides the
@@ -199,7 +216,8 @@ impl CliError {
             | Parse { .. }
             | Backend { .. }
             | SearchUnavailable
-            | NoWritableMem => ExitKind::Generic,
+            | NoWritableMem
+            | ContextNotComputable { .. } => ExitKind::Generic,
             HashMismatch { .. } => ExitKind::HashMismatch,
             NotFound { .. }
             | EntityIdMissingMem { .. }
@@ -271,6 +289,9 @@ impl CliError {
             | UnknownSchema { .. }
             | UnknownTypes { .. }
             | AmbiguousMem { .. }
+            | AnchorsSidecarUnreadable { .. }
+            | AmbiguousQuery { .. }
+            | MemNotReadOnly { .. }
             | EntityIdTooLong { .. }
             | RenameSimilarityOutOfRange { .. }
             | MarkdownExportUnsupportedBackend { .. }

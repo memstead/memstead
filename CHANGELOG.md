@@ -147,7 +147,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   quickstart's guided mode reports the binding store's or the binding
   edit's own code (`PROJECTION_EDIT_FAILED`, `PROJECTION_EDIT_REFUSED`
   with the refusals, the store's `WORKSPACE_STORE_*`), as `projection
-  edit` does for the same write.
+  edit` does for the same write. `ANCHORS_SIDECAR_UNREADABLE`,
+  `AMBIGUOUS_QUERY`, `CONTEXT_NOT_COMPUTABLE`, `MEM_NOT_READ_ONLY` and
+  `NO_ACTIVE_BINDING` are engine values too; `CONTEXT_NOT_COMPUTABLE`
+  carries `details.id` and the `projection verify` sidecar refusal
+  carries the same `mem` and `reason` as every other sidecar refusal,
+  beside its `binding`.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

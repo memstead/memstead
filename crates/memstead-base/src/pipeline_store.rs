@@ -298,6 +298,8 @@ pub enum BindingLookupError {
         reason_message: String,
         path: String,
     },
+    #[error("no active binding: no consuming brief render has published one")]
+    NoActive,
     #[error("no binding `{binding}` in this workspace")]
     NotFound {
         binding: String,
@@ -310,6 +312,7 @@ impl BindingLookupError {
         match self {
             BindingLookupError::Quarantined { .. } => "PROJECTION_QUARANTINED",
             BindingLookupError::NotFound { .. } => "PROJECTION_NOT_FOUND",
+            BindingLookupError::NoActive => "NO_ACTIVE_BINDING",
         }
     }
 
@@ -326,6 +329,7 @@ impl BindingLookupError {
                 "reason_message": reason_message,
                 "path": path,
             }),
+            BindingLookupError::NoActive => serde_json::json!({}),
             BindingLookupError::NotFound { binding, available } => serde_json::json!({
                 "binding": binding,
                 "available": available,

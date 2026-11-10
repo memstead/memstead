@@ -1108,6 +1108,22 @@ pub enum EngineError {
     /// length, malformed path, etc.) is the message text.
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// A mem's anchors sidecar does not parse: its anchors are unknown, not
+    /// absent.
+    #[error("the anchors sidecar of mem `{mem}` could not be read ({reason})")]
+    AnchorsSidecarUnreadable { mem: String, reason: String },
+    /// A query that resolves to more than one entity where one is needed.
+    #[error("ambiguous query: {} candidates match `{query}`", candidates.len())]
+    AmbiguousQuery {
+        query: String,
+        candidates: Vec<serde_json::Value>,
+    },
+    /// The context of an entity that resolved could not be computed.
+    #[error("could not compute context for `{id}`")]
+    ContextNotComputable { id: String },
+    /// A call that acts on installed read-mems only, given a writable one.
+    #[error("`{mem}` is a writable mem, not an installed read-mem")]
+    MemNotReadOnly { mem: String },
     /// A call that needs a writable mem, in a workspace that mounts none.
     #[error("no writable mem loaded")]
     NoWritableMem,
@@ -1702,6 +1718,10 @@ impl EngineError {
             EngineError::ProcessMemNotEligible { .. } => "PROCESS_MEM_NOT_ELIGIBLE",
             EngineError::InvalidInput(_) => "INVALID_INPUT",
             EngineError::NoWritableMem => "NO_WRITABLE_MEM",
+            EngineError::AnchorsSidecarUnreadable { .. } => "ANCHORS_SIDECAR_UNREADABLE",
+            EngineError::AmbiguousQuery { .. } => "AMBIGUOUS_QUERY",
+            EngineError::ContextNotComputable { .. } => "CONTEXT_NOT_COMPUTABLE",
+            EngineError::MemNotReadOnly { .. } => "MEM_NOT_READ_ONLY",
             EngineError::AmbiguousMem { .. } => "AMBIGUOUS_MEM",
             EngineError::UnknownTypes { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::UnknownSchema { .. } => "SCHEMA_NOT_FOUND",
@@ -1757,6 +1777,16 @@ impl EngineError {
     /// Returns an empty object for variants whose recovery payload
     /// is the message text alone (no structured fields beyond
     /// `code` + `message`).
+    /// The error as a condition carried inside a successful response: its
+    /// code beside its own payload keys.
+    pub fn as_condition(&self) -> serde_json::Value {
+        let mut v = self.details();
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("code".into(), serde_json::json!(self.code()));
+        }
+        v
+    }
+
     pub fn details(&self) -> serde_json::Value {
         match self {
             EngineError::RetypeRefused {
@@ -2488,6 +2518,16 @@ impl EngineError {
             }),
             EngineError::SearchUnavailable | EngineError::NoWritableMem => serde_json::json!({}),
             EngineError::AmbiguousMem { mems } => serde_json::json!({ "mems": mems }),
+            EngineError::AnchorsSidecarUnreadable { mem, reason } => serde_json::json!({
+                "mem": mem,
+                "reason": reason,
+            }),
+            EngineError::AmbiguousQuery { query, candidates } => serde_json::json!({
+                "query": query,
+                "candidates": candidates,
+            }),
+            EngineError::ContextNotComputable { id } => serde_json::json!({ "id": id }),
+            EngineError::MemNotReadOnly { mem } => serde_json::json!({ "mem": mem }),
         }
     }
 

@@ -8,7 +8,7 @@ use clap::Parser;
 use serde_json::json;
 
 use crate::CliError;
-use crate::output::{ExitKind, print_json, print_markdown};
+use crate::output::{print_json, print_markdown};
 use crate::setup::CliContext;
 
 /// Remove an installed read-mem's workspace-level mount. The global
@@ -72,17 +72,16 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .into());
     };
     if mount.capability != memstead_base::MountCapability::ReadOnly {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "MEM_NOT_READ_ONLY",
-            format!(
-                "`{}` is a writable mem — uninstall removes installed read-mems only; \
-                 use `memstead mem unregister {}` (keep storage) or \
-                 `memstead mem delete {}` (destroy storage)",
-                args.name, args.name, args.name
+        return Err(CliError::from_engine_with_hint(
+            memstead_base::EngineError::MemNotReadOnly {
+                mem: args.name.clone(),
+            },
+            &format!(
+                "Uninstall removes installed read-mems only; use `memstead mem unregister {}` \
+                 (keep storage) or `memstead mem delete {}` (destroy storage)",
+                args.name, args.name
             ),
         )
-        .with_details(json!({ "mem": args.name }))
         .into());
     }
 

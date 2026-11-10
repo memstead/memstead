@@ -625,12 +625,7 @@ mod surface_codes {
     /// Workspace, mem or entity state still built at a surface: each moves
     /// into the engine.
     const MOVE_TO_ENGINE: &[&str] = &[
-        "AMBIGUOUS_QUERY",
-        "ANCHORS_SIDECAR_UNREADABLE",
-        "CONTEXT_NOT_COMPUTABLE",
         "FINDINGS_STORE_ERROR",
-        "MEM_NOT_READ_ONLY",
-        "NO_ACTIVE_BINDING",
         "READ_MEM_SHADOWS_WRITABLE",
         "SCHEMA_MIGRATE_FAILED",
         "SCHEMA_PACKAGE_EXISTS",

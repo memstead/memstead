@@ -48,10 +48,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        ContextOutcome::Resolved(None) => Err(CliError::new(
-            ExitKind::Generic,
-            "CONTEXT_NOT_COMPUTABLE",
-            "Could not compute context",
+        ContextOutcome::Resolved(None) => Err(CliError::from_engine_op(
+            memstead_base::EngineError::ContextNotComputable {
+                id: args.id_or_query.clone(),
+            },
         )
         .into()),
         // The search found nothing, so there is nothing similar to suggest.
@@ -62,15 +62,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             },
         )
         .into()),
-        ContextOutcome::Ambiguous { query, candidates } => Err(CliError::new(
-            ExitKind::Validation,
-            "AMBIGUOUS_QUERY",
-            format!(
-                "ambiguous query: {} candidates match `{query}` — pass an exact entity id",
-                candidates.len()
-            ),
+        ContextOutcome::Ambiguous { query, candidates } => Err(CliError::from_engine_with_hint(
+            memstead_base::EngineError::AmbiguousQuery { query, candidates },
+            "Pass an exact entity id.",
         )
-        .with_details(json!({ "query": query, "candidates": candidates }))
         .into()),
     }
 }

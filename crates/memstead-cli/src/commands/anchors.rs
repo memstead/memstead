@@ -117,16 +117,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if (args.id.is_some() || args.mem.is_some())
         && let Some(c) = unreadable.first()
     {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "ANCHORS_SIDECAR_UNREADABLE",
-            format!(
-                "mem `{}`: the anchors sidecar could not be read ({}); the entity's anchors \
-                 are unknown, not absent",
-                c.mem, c.reason
-            ),
+        return Err(CliError::from_engine_with_hint(
+            memstead_base::EngineError::AnchorsSidecarUnreadable {
+                mem: c.mem.clone(),
+                reason: c.reason.clone(),
+            },
+            "The entity's anchors are unknown, not absent.",
         )
-        .with_details(serde_json::json!({ "mem": c.mem, "reason": c.reason }))
         .into());
     }
 
@@ -164,11 +161,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "mem": args.mem,
             "sidecar_unreadable": unreadable
                 .iter()
-                .map(|c| serde_json::json!({
-                    "code": "ANCHORS_SIDECAR_UNREADABLE",
-                    "mem": c.mem,
-                    "reason": c.reason,
-                }))
+                .map(|c| {
+                    memstead_base::EngineError::AnchorsSidecarUnreadable {
+                        mem: c.mem.clone(),
+                        reason: c.reason.clone(),
+                    }
+                    .as_condition()
+                })
                 .collect::<Vec<_>>(),
         }))?;
     } else if rows.is_empty() && unreadable.is_empty() {

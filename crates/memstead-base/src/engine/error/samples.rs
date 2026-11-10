@@ -893,6 +893,28 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
         ("SearchUnavailable".into(), EngineError::SearchUnavailable),
         ("NoWritableMem".into(), EngineError::NoWritableMem),
         (
+            "AnchorsSidecarUnreadable".into(),
+            EngineError::AnchorsSidecarUnreadable {
+                mem: s("specs"),
+                reason: s("bad json"),
+            },
+        ),
+        (
+            "AmbiguousQuery".into(),
+            EngineError::AmbiguousQuery {
+                query: s("alp"),
+                candidates: vec![serde_json::json!({ "id": "specs--alpha" })],
+            },
+        ),
+        (
+            "ContextNotComputable".into(),
+            EngineError::ContextNotComputable { id: id() },
+        ),
+        (
+            "MemNotReadOnly".into(),
+            EngineError::MemNotReadOnly { mem: s("specs") },
+        ),
+        (
             "AmbiguousMem".into(),
             EngineError::AmbiguousMem {
                 mems: v(&["a", "b"]),
@@ -1056,6 +1078,10 @@ fn covered(e: &EngineError) {
         | EngineError::RelationManualAuthoringForbidden { .. }
         | EngineError::SearchUnavailable
         | EngineError::NoWritableMem
+        | EngineError::AnchorsSidecarUnreadable { .. }
+        | EngineError::AmbiguousQuery { .. }
+        | EngineError::ContextNotComputable { .. }
+        | EngineError::MemNotReadOnly { .. }
         | EngineError::AmbiguousMem { .. }
         | EngineError::MarkdownExportUnsupportedBackend { .. }
         | EngineError::InvalidAnchor(_)

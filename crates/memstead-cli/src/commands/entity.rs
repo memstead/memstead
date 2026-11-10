@@ -241,11 +241,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         if let (Some(why), Some(obj)) = (&sidecar_error, envelope.as_object_mut()) {
             obj.insert(
                 "anchors_sidecar_error".into(),
-                serde_json::json!({
-                    "code": "ANCHORS_SIDECAR_UNREADABLE",
-                    "mem": id.mem(),
-                    "reason": why,
-                }),
+                memstead_base::EngineError::AnchorsSidecarUnreadable {
+                    mem: id.mem().to_string(),
+                    reason: why.to_string(),
+                }
+                .as_condition(),
             );
         }
         // Same contract for the proposal record: a mem whose record cannot be
