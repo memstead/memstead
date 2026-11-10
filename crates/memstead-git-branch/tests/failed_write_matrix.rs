@@ -38,9 +38,24 @@ use memstead_git_branch::test_support::init_real_mem_repo;
 use tempfile::TempDir;
 
 const MEM: &str = "notes";
-/// A second mem, mounted lazily and never loaded: a relation into it is
-/// verified against its storage, before the commit and again after it.
+/// A second mem beside the one under test, for the two verbs that need
+/// one (see [`Peer`]).
 const PEER: &str = "peer";
+
+/// How a verb wants the second mem mounted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Peer {
+    /// Not at all: the verb is a mutation of one mem, and a second mem
+    /// would bring in what an operation does to mems it does not write.
+    Absent,
+    /// Lazily and never loaded: a relation into it is verified against
+    /// its storage.
+    Lazy,
+    /// Loaded and read-only: its entity links to a target that does not
+    /// exist in the mem under test, which keeps a stub alive there that
+    /// only a read-only mem refers to (the one stub a delete accepts).
+    ReadOnly,
+}
 
 // ---------------------------------------------------------------------
 // The storage trait's methods
@@ -407,14 +422,19 @@ impl Workspace {
         ws
     }
 
-    fn peer_mount(&self, lifecycle: MountLifecycle) -> Mount {
+    fn peer_mount(&self, peer: Peer) -> Mount {
+        let (capability, lifecycle) = match peer {
+            Peer::Lazy => (MountCapability::Write, MountLifecycle::Lazy),
+            Peer::ReadOnly => (MountCapability::ReadOnly, MountLifecycle::Eager),
+            Peer::Absent => (MountCapability::Write, MountLifecycle::Eager),
+        };
         Mount {
             mem: PEER.to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
             storage: MountStorage::Folder {
                 path: self._tmp.path().join(PEER),
             },
-            capability: MountCapability::Write,
+            capability,
             lifecycle,
             cross_linkable: true,
             migration_target: None,
@@ -481,11 +501,11 @@ impl Workspace {
     }
 
     /// An engine loaded from storage, with no fault wrapper. `peer`
-    /// mounts the second mem lazily beside the one under test.
-    fn fresh_engine(&self, peer: bool) -> Engine {
+    /// says whether and how the second mem is mounted beside it.
+    fn fresh_engine(&self, peer: Peer) -> Engine {
         let mut mounts = vec![(self.mount.clone(), self.raw_backend())];
-        if peer {
-            let mount = self.peer_mount(MountLifecycle::Lazy);
+        if peer != Peer::Absent {
+            let mount = self.peer_mount(peer);
             let backend = instantiate_full_backend(&mount).expect("peer backend");
             mounts.push((mount, backend));
         }
@@ -496,7 +516,7 @@ impl Workspace {
     /// `peer`, the lazy peer's share one fault handle), plus that
     /// handle and the backend instance the engine stages the mem's
     /// writes into.
-    fn faulted_engine(&self, peer: bool) -> (Engine, Arc<Faults>, Arc<dyn MemBackend>) {
+    fn faulted_engine(&self, peer: Peer) -> (Engine, Arc<Faults>, Arc<dyn MemBackend>) {
         let inner: Arc<dyn MemBackend> = Arc::from(self.raw_backend());
         let faults = Arc::new(Faults::default());
         let wrapper = FaultBackend {
@@ -504,8 +524,8 @@ impl Workspace {
             faults: Arc::clone(&faults),
         };
         let mut mounts = vec![(self.mount.clone(), Box::new(wrapper) as Box<dyn MemBackend>)];
-        if peer {
-            let mount = self.peer_mount(MountLifecycle::Lazy);
+        if peer != Peer::Absent {
+            let mount = self.peer_mount(peer);
             let wrapper = FaultBackend {
                 inner: Arc::from(instantiate_full_backend(&mount).expect("peer backend")),
                 faults: Arc::clone(&faults),
@@ -517,7 +537,7 @@ impl Workspace {
     }
 
     fn seed(&self) {
-        let mut engine = self.fresh_engine(false);
+        let mut engine = self.fresh_engine(Peer::Absent);
         for title in ["Alpha", "Beta", "Gamma"] {
             engine
                 .create_entity(create_args(title, &[]), Actor::Cli, None, None)
@@ -527,15 +547,16 @@ impl Workspace {
             .relate_entity(relate_args("alpha", "beta"), Actor::Cli, None, None)
             .expect("seed relation");
 
-        let peer = self.peer_mount(MountLifecycle::Eager);
-        let peer_backend = instantiate_full_backend(&peer).expect("peer backend");
-        let mut peer_engine =
-            Engine::from_mounts(vec![(peer, peer_backend)]).expect("peer engine boots");
-        let mut target = create_args("Target", &[]);
-        target.mem = PEER.to_string();
-        peer_engine
-            .create_entity(target, Actor::Cli, None, None)
-            .expect("seed the peer's entity");
+        // The peer's one entity, written as a file: it links to
+        // `notes--ghost`, which does not exist, and no engine verb
+        // authors a link to a missing target in another mem.
+        std::fs::write(
+            self._tmp.path().join(PEER).join("target.md"),
+            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n\n\
+             # Target\n\n## Identity\nTarget identity\n\n## Purpose\nTarget purpose\n\n\
+             ## Relationships\n- **USES**: [[notes--ghost]]\n",
+        )
+        .unwrap();
     }
 
     /// Storage, byte for byte: the folder's files (ledger included,
@@ -608,12 +629,14 @@ fn snapshot_dir(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
 enum Verb {
     Create,
     /// A create whose relation points into the lazy peer: the engine
-    /// asks the peer's storage about the target before the commit and
-    /// again after it, so this verb has a fallible step after the
-    /// commit that a storage fault can reach.
+    /// reads the target from the peer's storage before the commit, so
+    /// this verb has a storage call on a second backend to fail.
     CreateIntoDeferredMem,
     Update,
     Delete,
+    /// The delete of a stub: no file and so no commit, the provenance
+    /// record appended on its own is the whole write.
+    DeleteStub,
     Relate,
     Retype,
     Rename,
@@ -623,11 +646,13 @@ enum Verb {
 }
 
 impl Verb {
-    /// Only the verb that relates into the second mem mounts it. The
-    /// others are mutations of one mem; a second mem beside them would
-    /// bring in what an operation does to mems it does not write.
-    fn needs_peer(self) -> bool {
-        self == Verb::CreateIntoDeferredMem
+    /// Whether and how the verb wants the second mem mounted.
+    fn peer(self) -> Peer {
+        match self {
+            Verb::CreateIntoDeferredMem => Peer::Lazy,
+            Verb::DeleteStub => Peer::ReadOnly,
+            _ => Peer::Absent,
+        }
     }
 }
 
@@ -638,7 +663,7 @@ fn verbs_of(kind: ProvenanceKind) -> &'static [Verb] {
     match kind {
         ProvenanceKind::Create => &[Verb::Create, Verb::CreateIntoDeferredMem, Verb::BatchCreate],
         ProvenanceKind::Update => &[Verb::Update, Verb::BatchUpdate],
-        ProvenanceKind::Delete => &[Verb::Delete],
+        ProvenanceKind::Delete => &[Verb::Delete, Verb::DeleteStub],
         ProvenanceKind::Relate => &[Verb::Relate, Verb::BatchRelate],
         ProvenanceKind::Rename => &[Verb::Rename],
         ProvenanceKind::Retype => &[Verb::Retype],
@@ -709,7 +734,14 @@ fn update_args(engine: &Engine, slug: &str, text: &str) -> UpdateEntityArgs {
         metadata_unset: Vec::new(),
         dry_run: false,
         declare_relations: Vec::new(),
-        anchors: Vec::new(),
+        // An anchor, so an update is a commit of two files like a
+        // create and the sidecar's calls are cells of its own.
+        anchors: vec![memstead_base::anchor::AnchorInput {
+            artifact: Some(format!("docs/{slug}-update.md")),
+            grain: Some("file".to_string()),
+            class: Some("informed-by".to_string()),
+            ..Default::default()
+        }],
         anchors_unset: Vec::new(),
         relations_unset: Vec::new(),
     }
@@ -733,7 +765,28 @@ fn hash_of(engine: &Engine, slug: &str) -> Option<String> {
 
 /// Run one verb. The arguments are rebuilt from the engine's current
 /// view on every call, so "the same call sent again" is literal.
-fn run(verb: Verb, engine: &mut Engine) -> Result<Vec<String>, EngineError> {
+fn run(verb: Verb, engine: &mut Engine) -> Result<Vec<String>, String> {
+    run_verb(verb, engine).map_err(|e| e.code().to_string())?
+}
+
+/// A batch that refused: the code of the item that refused it. A batch
+/// reports a refusal in its receipt (`applied: false`), not as an error.
+fn batch_outcome(result: memstead_base::ops::BatchResult) -> Result<Vec<String>, String> {
+    if result.applied {
+        return Ok(result
+            .warnings
+            .iter()
+            .map(|w| w.code().to_string())
+            .collect());
+    }
+    Err(result
+        .results
+        .iter()
+        .find_map(|entry| entry.error.as_ref().map(|e| e.code.clone()))
+        .unwrap_or_else(|| "BATCH_NOT_APPLIED".to_string()))
+}
+
+fn run_verb(verb: Verb, engine: &mut Engine) -> Result<Result<Vec<String>, String>, EngineError> {
     let (actor, note) = (Actor::Cli, Some("matrix"));
     let warnings = match verb {
         Verb::Create => {
@@ -758,6 +811,17 @@ fn run(verb: Verb, engine: &mut Engine) -> Result<Vec<String>, EngineError> {
             let args = DeleteEntityArgs {
                 id: id("gamma"),
                 expected_hash: hash_of(engine, "gamma"),
+            };
+            engine.delete_entity(args, actor, None, note)?.warnings
+        }
+        Verb::DeleteStub => {
+            assert!(
+                engine.get_entity(&id("ghost")).is_some_and(|e| e.stub),
+                "the fixture keeps a stub that only the read-only peer refers to"
+            );
+            let args = DeleteEntityArgs {
+                id: id("ghost"),
+                expected_hash: Some(String::new()),
             };
             engine.delete_entity(args, actor, None, note)?.warnings
         }
@@ -794,9 +858,9 @@ fn run(verb: Verb, engine: &mut Engine) -> Result<Vec<String>, EngineError> {
                 (create_args("Delta", &["alpha"]), Some("first".to_string())),
                 (create_args("Epsilon", &[]), None),
             ];
-            let result = engine.batch_create(creates, actor, None, false)?;
-            assert!(result.applied, "batch create applies: {result:?}");
-            result.warnings
+            return Ok(batch_outcome(
+                engine.batch_create(creates, actor, None, false)?,
+            ));
         }
         Verb::BatchUpdate => {
             let updates = vec![
@@ -806,21 +870,21 @@ fn run(verb: Verb, engine: &mut Engine) -> Result<Vec<String>, EngineError> {
                 ),
                 (update_args(engine, "gamma", "Gamma purpose, batch"), None),
             ];
-            let result = engine.batch_update(updates, actor, None, false)?;
-            assert!(result.applied, "batch update applies: {result:?}");
-            result.warnings
+            return Ok(batch_outcome(
+                engine.batch_update(updates, actor, None, false)?,
+            ));
         }
         Verb::BatchRelate => {
             let relates = vec![
                 (relate_args("gamma", "alpha"), Some("first".to_string())),
                 (relate_args("gamma", "beta"), None),
             ];
-            let result = engine.batch_relate(relates, actor, None, false)?;
-            assert!(result.applied, "batch relate applies: {result:?}");
-            result.warnings
+            return Ok(batch_outcome(
+                engine.batch_relate(relates, actor, None, false)?,
+            ));
         }
     };
-    Ok(warnings.iter().map(|w| w.code().to_string()).collect())
+    Ok(Ok(warnings.iter().map(|w| w.code().to_string()).collect()))
 }
 
 // ---------------------------------------------------------------------
@@ -917,7 +981,7 @@ struct Control {
 
 fn control(template: &Workspace, verb: Verb) -> Control {
     let (kind, ws) = (template.kind, template.copy());
-    let peer = verb.needs_peer();
+    let peer = verb.peer();
     let (mut engine, faults, _inner) = ws.faulted_engine(peer);
     faults.reset();
     run(verb, &mut engine).unwrap_or_else(|e| panic!("{kind:?} {verb:?} undisturbed: {e:?}"));
@@ -957,7 +1021,7 @@ fn run_cell(template: &Workspace, verb: Verb, method: Method, nth: usize, contro
     let kind = template.kind;
     let cell = format!("{kind:?} {verb:?} {}#{nth}", method.name());
     let ws = template.copy();
-    let peer = verb.needs_peer();
+    let peer = verb.peer();
     let (mut engine, faults, engine_backend) = ws.faulted_engine(peer);
     let before = ws.storage_snapshot();
 
@@ -972,7 +1036,7 @@ fn run_cell(template: &Workspace, verb: Verb, method: Method, nth: usize, contro
         // Before the commit landed, refused: nothing is left behind and
         // the same call sent again is a first call.
         (Err(e), false) => {
-            assert!(!e.code().is_empty(), "{cell}: the error carries no code");
+            assert!(!e.is_empty(), "{cell}: the error carries no code");
             let changed = changed_keys(&before, &ws.storage_snapshot());
             assert!(
                 changed.is_empty(),
@@ -1079,13 +1143,13 @@ fn every_failed_storage_call_leaves_nothing_behind_on_the_git_branch_backend() {
 fn a_failed_commit_is_not_recorded_as_the_engines_own_write() {
     for kind in [Kind::Folder, Kind::GitBranch] {
         let ws = Workspace::template(kind);
-        let (mut engine, faults, _backend) = ws.faulted_engine(false);
+        let (mut engine, faults, _backend) = ws.faulted_engine(Peer::Absent);
         faults.arm(Method::CommitWithExpectedParent, 1);
         run(Verb::Update, &mut engine).expect_err("the commit fails");
         faults.reset();
 
         // A sibling process writes to the same mem.
-        run(Verb::Relate, &mut ws.fresh_engine(false)).expect("the sibling's write lands");
+        run(Verb::Relate, &mut ws.fresh_engine(Peer::Absent)).expect("the sibling's write lands");
 
         let warnings = engine.reload_if_stale(Some(MEM));
         assert!(
@@ -1094,7 +1158,7 @@ fn a_failed_commit_is_not_recorded_as_the_engines_own_write() {
         );
         assert_eq!(
             view(&engine, true),
-            view(&ws.fresh_engine(false), true),
+            view(&ws.fresh_engine(Peer::Absent), true),
             "{kind:?}: the engine's view differs from a fresh load"
         );
     }
@@ -1126,7 +1190,7 @@ fn a_failed_worktree_refresh_is_a_warning_on_a_landed_write() {
             .unwrap();
         assert!(status.success(), "git {args:?}");
     }
-    let mut engine = ws.fresh_engine(false);
+    let mut engine = ws.fresh_engine(Peer::Absent);
 
     // A worktree that takes no file: the commit lands, its checkout
     // cannot.
@@ -1148,7 +1212,7 @@ fn a_failed_worktree_refresh_is_a_warning_on_a_landed_write() {
     );
     assert_eq!(
         view(&engine, true),
-        view(&ws.fresh_engine(false), true),
+        view(&ws.fresh_engine(Peer::Absent), true),
         "the engine's view differs from a fresh load"
     );
     assert!(

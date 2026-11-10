@@ -229,11 +229,6 @@ fn fail_at_every_step(setup: fn(&Path)) {
                 matches!(result, Err(BackendError::CommitNotApplied { .. })),
                 "step {n} ({step:?}) is after the commit point: {result:?}"
             );
-            assert_eq!(
-                backend.read_entity(Path::new("gone.md")).unwrap().is_some(),
-                root.join("gone.md").exists(),
-                "step {n}: nothing staged shadows the disk"
-            );
             complete_and_compare(root, &control, n);
         }
     }
@@ -489,7 +484,6 @@ fn an_interrupted_commit_moves_the_drift_cursor_twice() {
         matches!(blocked, Err(BackendError::Other(_))),
         "{blocked:?}"
     );
-    assert_eq!(backend.read_entity(Path::new("later.md")).unwrap(), None);
     assert!(!root.join("later.md").exists());
 
     assert!(backend.complete_interrupted_commit().unwrap().is_some());
@@ -758,4 +752,111 @@ fn a_completion_redoes_every_sync_the_cut_off_commit_owed() {
             }
         }
     }
+}
+
+/// A read that goes to storage never returns part of a cut-off commit.
+/// While the commit cannot be completed (the fault persists) every
+/// read of a file a commit can move refuses; once it can, the first
+/// read completes the commit and returns the committed bytes.
+#[test]
+fn a_read_completes_a_cut_off_commit_or_refuses() {
+    let control = control(seed);
+    for n in control.commit_point + 1..control.trace.len() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        seed(root);
+        let io = FaultIo::new();
+        let backend = FilesystemBackend::with_io(root.to_path_buf(), io.clone());
+        stage(&backend);
+        io.reset();
+        io.arm_fail_from(n);
+        let result = backend.commit("under test", &CommitContext::internal());
+        assert!(
+            matches!(result, Err(BackendError::CommitNotApplied { .. })),
+            "step {n}: {result:?}"
+        );
+
+        // The fault persists: no read serves what is on disk.
+        assert!(
+            backend.read_entity(Path::new("notes/old.md")).is_err(),
+            "step {n}"
+        );
+        assert!(
+            backend.entity_exists(Path::new("gone.md")).is_err(),
+            "step {n}"
+        );
+        assert!(backend.list_entities().is_err(), "step {n}");
+        assert!(backend.read_all_entities().is_err(), "step {n}");
+        assert!(backend.read_anchors_sidecar().is_err(), "step {n}");
+        assert!(backend.read_provenance(None).is_err(), "step {n}");
+
+        // Storage works again: the first read completes the commit.
+        io.reset();
+        assert_eq!(
+            backend.read_anchors_sidecar().unwrap(),
+            Some(ANCHORS.to_vec()),
+            "step {n}"
+        );
+        assert_eq!(tree(root), control.after, "step {n}");
+        assert_eq!(
+            backend.read_entity(Path::new("notes/old.md")).unwrap(),
+            Some(NEW.to_vec()),
+            "step {n}"
+        );
+        assert_eq!(
+            backend.read_entity(Path::new("gone.md")).unwrap(),
+            None,
+            "step {n}"
+        );
+    }
+}
+
+/// A first commit that stages no sidecar: nothing else of the commit
+/// lives under `.memstead/`, so the sync that names the new ledger is
+/// the only one of that directory after the commit point. When it fails
+/// once, the completion makes it good, although by then the ledger
+/// exists and no longer looks new.
+#[test]
+fn a_completion_syncs_the_name_of_a_ledger_the_cut_off_run_created() {
+    let stage_one = |backend: &FilesystemBackend| {
+        backend.write_entity(Path::new("a.md"), NEW).unwrap();
+        backend
+            .stage_provenance(&record(at(1_700_000_010), ProvenanceKind::Create, "m--a"))
+            .unwrap();
+    };
+
+    let tmp = TempDir::new().unwrap();
+    let io = FaultIo::new();
+    let backend = FilesystemBackend::with_io(tmp.path().to_path_buf(), io.clone());
+    stage_one(&backend);
+    backend.commit("first", &CommitContext::internal()).unwrap();
+    let trace = io.trace();
+    let appended = trace
+        .iter()
+        .position(|op| op == &IoOp::Append(changelog_path(tmp.path())))
+        .unwrap();
+    let name_sync = appended
+        + trace[appended..]
+            .iter()
+            .position(|op| op == &IoOp::SyncDir(tmp.path().join(".memstead")))
+            .expect("the new ledger's name is synced");
+
+    let tmp = TempDir::new().unwrap();
+    let io = FaultIo::fail_at(name_sync);
+    let backend = FilesystemBackend::with_io(tmp.path().to_path_buf(), io.clone());
+    stage_one(&backend);
+    let result = backend.commit("first", &CommitContext::internal());
+    assert!(
+        matches!(result, Err(BackendError::CommitNotApplied { .. })),
+        "{result:?}"
+    );
+    backend.complete_interrupted_commit().unwrap();
+    let trace = io.trace();
+    assert!(
+        trace[name_sync + 1..]
+            .iter()
+            .any(|op| op == &IoOp::SyncDir(tmp.path().join(".memstead"))),
+        "the completion did not sync the new ledger's name: {:?}",
+        &trace[name_sync + 1..]
+    );
 }

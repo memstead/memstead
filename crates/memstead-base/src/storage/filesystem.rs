@@ -427,6 +427,26 @@ impl FilesystemBackend {
         Ok(())
     }
 
+    /// Refuse to read storage that holds part of a commit. Every read
+    /// of files a commit can move (entities, the sidecars, the ledger)
+    /// starts here: while a commit record is on disk the commit is
+    /// decided and possibly half applied, so the read first completes
+    /// it, and when that fails it returns the failure instead of bytes.
+    /// This is what keeps a cut-off commit from being served in part
+    /// by a reader that goes to storage directly (an anchor read, an
+    /// export) while the engine's own view still shows the state before
+    /// it. One existence check when there is nothing to complete.
+    fn ensure_whole(&self) -> Result<(), BackendError> {
+        if !self
+            .io
+            .exists(&self.record_path())
+            .map_err(BackendError::Io)?
+        {
+            return Ok(());
+        }
+        <Self as MemBackend>::complete_interrupted_commit(self).map(|_| ())
+    }
+
     /// Is a temp file of an abandoned attempt on disk? The read-only
     /// half of [`Self::sweep_leftovers`], so a mem with nothing to
     /// remove is never locked or written for the asking.
@@ -512,6 +532,15 @@ impl FilesystemBackend {
     }
 }
 
+/// Complete the cut-off commit of the folder mem at `root`, if it holds
+/// one. For readers that walk a mem's directory without a backend in
+/// hand; the backend's own reads do the same through
+/// `FilesystemBackend::ensure_whole`. A directory with no commit record
+/// costs one existence check and is not touched.
+pub(crate) fn complete_cut_off_commit(root: &Path) -> Result<(), BackendError> {
+    FilesystemBackend::new(root.to_path_buf()).ensure_whole()
+}
+
 /// Normalise a mem-relative path to a forward-slash key. Rejects
 /// empty paths, absolute paths, and any path that escapes the mem
 /// root via `..`. Mirrors `git_tree::normalise_rel_path` so the two
@@ -555,6 +584,7 @@ pub(crate) fn normalise_rel_path(rel_path: &Path) -> Result<String, BackendError
 
 impl crate::backend::MemBackend for FilesystemBackend {
     fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
+        self.ensure_whole()?;
         let mut out = Vec::new();
         if !self.root.exists() {
             return Ok(out);
@@ -630,6 +660,8 @@ impl crate::backend::MemBackend for FilesystemBackend {
                 PendingState::Delete => None,
             });
         }
+        drop(pending);
+        self.ensure_whole()?;
         let full = self.root.join(&key);
         match std::fs::read(&full) {
             Ok(bytes) => Ok(Some(bytes)),
@@ -658,6 +690,7 @@ impl crate::backend::MemBackend for FilesystemBackend {
             return Ok(matches!(state, PendingState::Upsert(_)));
         }
         drop(pending);
+        self.ensure_whole()?;
         match std::fs::symlink_metadata(self.root.join(&key)) {
             Ok(md) => Ok(md.is_file()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -971,6 +1004,7 @@ impl crate::backend::MemBackend for FilesystemBackend {
     }
 
     fn read_provenance(&self, cursor: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
+        self.ensure_whole()?;
         let log_path = changelog_path(&self.root);
         let raw = match std::fs::read_to_string(&log_path) {
             Ok(s) => s,

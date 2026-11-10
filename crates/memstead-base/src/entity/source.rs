@@ -66,6 +66,12 @@ fn read_directory(root: &Path) -> Result<(Vec<SourceEntry>, Vec<SourceReadError>
     if !root.exists() {
         return Err(LoadError::DirNotFound(root.display().to_string()));
     }
+    // A folder mem whose last commit was cut off is completed before a
+    // file is read, here as on the backend's own reads: this walk goes
+    // to the directory directly (a publish, a conflict scan) and would
+    // otherwise serve part of that commit.
+    crate::storage::filesystem::complete_cut_off_commit(root)
+        .map_err(|e| LoadError::Io(std::io::Error::other(e.to_string())))?;
 
     let mut files = Vec::new();
     find_markdown_files(root, &mut files)?;

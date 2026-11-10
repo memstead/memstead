@@ -511,3 +511,92 @@ fn a_boot_completes_a_cut_off_folder_commit_and_reports_it() {
         .unwrap_or_default();
     assert!(purpose.contains("rewritten purpose"), "{purpose:?}");
 }
+
+/// While a cut-off commit cannot be completed, nothing of it is served:
+/// not by the engine's own view, and not by a read that goes to storage
+/// (the anchors of an entity are read from the sidecar file on every
+/// call). The commit here writes an entity and its first anchor; the
+/// fault persists from each step after the commit point in turn.
+#[test]
+fn a_cut_off_commit_is_not_served_in_part_by_a_read_that_goes_to_storage() {
+    let template = seeded();
+    let with_anchor = |engine: &mut Engine| {
+        let mut args = update_args(engine, "alpha", "rewritten purpose");
+        args.anchors = vec![crate::anchor::AnchorInput {
+            artifact: Some("docs/alpha.md".to_string()),
+            grain: Some("file".to_string()),
+            class: Some("informed-by".to_string()),
+            ..Default::default()
+        }];
+        let (actor, client) = cli_actor();
+        engine.update_entity(args, actor, Some(&client), None)
+    };
+
+    let probe_dir = TempDir::new().unwrap();
+    copy_dir(template.path(), probe_dir.path());
+    let io = FaultIo::new();
+    let mut probe = faulted_engine(probe_dir.path(), &io);
+    io.reset();
+    with_anchor(&mut probe).unwrap();
+    let commit_point = io.commit_point().unwrap();
+    let steps = io.op_count();
+    assert_eq!(probe.entity_anchors(&id("alpha")).len(), 1);
+
+    for step in commit_point + 1..steps {
+        let dir = TempDir::new().unwrap();
+        copy_dir(template.path(), dir.path());
+        let io = FaultIo::new();
+        let mut engine = faulted_engine(dir.path(), &io);
+        let body_before = engine
+            .get_entity(&id("alpha"))
+            .unwrap()
+            .content_hash
+            .clone();
+        assert!(engine.entity_anchors(&id("alpha")).is_empty());
+
+        io.reset();
+        io.arm_fail_from(step);
+        let err = with_anchor(&mut engine).expect_err("the commit is cut off");
+        assert_eq!(err.code(), "COMMIT_NOT_APPLIED", "step {step}: {err}");
+
+        // The reads an entity lookup makes, with the fault still there.
+        engine.reload_if_stale(Some(MEM));
+        assert_eq!(
+            engine.get_entity(&id("alpha")).unwrap().content_hash,
+            body_before,
+            "step {step}: the new body is served from a commit that is not applied"
+        );
+        assert!(
+            engine.entity_anchors(&id("alpha")).is_empty(),
+            "step {step}: the new anchor is served from a commit that is not applied"
+        );
+        // A walk of the mem's directory that bypasses the backend (a
+        // publish reads this way) completes the commit before it reads:
+        // it sees the whole commit, never the part that had landed.
+        let (entries, _) = crate::entity::source::EntitySource::Directory {
+            root: dir.path().to_path_buf(),
+        }
+        .read_all()
+        .expect("the directory read completes the commit");
+        let alpha = entries
+            .iter()
+            .find(|e| e.relative_path == "alpha.md")
+            .expect("alpha is read");
+        assert!(alpha.content.contains("rewritten purpose"), "step {step}");
+        assert!(
+            !dir.path().join(".memstead/commit.json").exists(),
+            "step {step}: a directory read left the commit half applied"
+        );
+
+        // Storage works again: the next operation completes the commit
+        // and both halves of it are there.
+        io.reset();
+        engine.reload_if_stale(Some(MEM));
+        assert_ne!(
+            engine.get_entity(&id("alpha")).unwrap().content_hash,
+            body_before,
+            "step {step}"
+        );
+        assert_eq!(engine.entity_anchors(&id("alpha")).len(), 1, "step {step}");
+    }
+}
