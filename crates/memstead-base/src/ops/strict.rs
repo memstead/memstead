@@ -209,6 +209,64 @@ impl StrictAxis {
     }
 }
 
+/// A strict health run that found violations: the refusal a caller gating
+/// on `--strict` raises, after the report.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("strict mode: {violations} violation(s) ({summary})")]
+pub struct StrictViolations {
+    pub violations: usize,
+    pub violations_by_code: BTreeMap<String, usize>,
+    pub acknowledged: usize,
+    pub stale_acknowledgements: usize,
+    summary: String,
+}
+
+impl StrictViolations {
+    pub fn code(&self) -> &'static str {
+        "HEALTH_STRICT_VIOLATIONS"
+    }
+
+    pub fn details(&self) -> serde_json::Value {
+        serde_json::json!({
+            "violations": self.violations,
+            "violations_by_code": self.violations_by_code,
+            "acknowledged": self.acknowledged,
+            "stale_acknowledgements": self.stale_acknowledgements,
+        })
+    }
+
+    /// The refusal for a strict axis as the health report serves it
+    /// (`strict` in the report JSON), when it counts any violation.
+    pub fn from_axis_json(axis: &serde_json::Value) -> Option<Self> {
+        let violations = axis["violations"].as_u64().unwrap_or(0) as usize;
+        if violations == 0 {
+            return None;
+        }
+        let violations_by_code: BTreeMap<String, usize> = axis["violations_by_code"]
+            .as_object()
+            .map(|m| {
+                m.iter()
+                    .map(|(k, v)| (k.clone(), v.as_u64().unwrap_or(0) as usize))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let summary = violations_by_code
+            .iter()
+            .map(|(code, n)| format!("{code}: {n}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(StrictViolations {
+            violations,
+            violations_by_code,
+            acknowledged: axis["acknowledged"].as_u64().unwrap_or(0) as usize,
+            stale_acknowledgements: axis["stale_acknowledgements"]
+                .as_array()
+                .map_or(0, |a| a.len()),
+            summary,
+        })
+    }
+}
+
 /// The mem half of a mem-qualified entity id (`mem--slug`, where the mem
 /// may carry slashes but never a double dash).
 fn mem_of(entity_id: &str) -> &str {

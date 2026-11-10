@@ -202,6 +202,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `details.mems`) where it refused `INVALID_INPUT`; and `init` or
   `quickstart` pointed at a file refuses `TARGET_NOT_EMPTY` (with
   `details.path` and `details.found`) where it refused `INVALID_INPUT`.
+  The gate refusals a command raises after its report are engine values
+  too, payloads unchanged: `REMOTE_STALE` (`status --remote`,
+  `RemoteStatusOutcome::stale_refusal`), `HEALTH_STRICT_VIOLATIONS`
+  (`health --strict`, `ops::strict::StrictViolations`) and
+  `PROJECTION_VERIFY_FINDINGS` / `PROJECTION_VERIFY_INCONCLUSIVE`
+  (`projection verify --fail-on-findings` / `--fail-on-inconclusive`,
+  `Rollup::gate_refusal`); `REMOTE_STALE` and the verify gates read `;`
+  or `:` where they read a dash.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

@@ -414,33 +414,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// (`REMOTE_STALE`) after the report. Everything else, the fail-open
 /// notices included, exits 0.
 fn remote_exit(remote: Option<&memstead_base::ops::RemoteStatusOutcome>) -> anyhow::Result<()> {
-    let Some(r) = remote else {
+    let Some(e) = remote.and_then(|r| r.stale_refusal()) else {
         return Ok(());
     };
-    if !r.stale {
-        return Ok(());
+    Err(crate::CliError {
+        kind: ExitKind::Findings,
+        code: e.code(),
+        details: Some(e.details()),
+        message: format!("{e}; reconcile with `memstead pull --all` before mutating"),
     }
-    let stale: Vec<String> = r
-        .refs
-        .iter()
-        .filter(|x| x.state.is_stale())
-        .map(|x| format!("{} ({})", x.ref_name, x.state.as_wire()))
-        .collect();
-    Err(crate::CliError::new(
-        ExitKind::Findings,
-        "REMOTE_STALE",
-        format!(
-            "the local graph lags remote `{}`: {} — reconcile with `memstead pull --all` \
-             before mutating",
-            r.remote,
-            stale.join(", ")
-        ),
-    )
-    .with_details(json!({
-        "remote": r.remote,
-        "stale": stale,
-        "counts": r.counts,
-    }))
     .into())
 }
 

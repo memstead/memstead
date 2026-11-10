@@ -2054,49 +2054,21 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     // --strict` uses, with the ambiguity that one has removed — this code is
     // dedicated, so a job can tell "the mem drifted" from "the engine failed
     // to boot".
-    if args.fail_on_findings && rollup.findings_total > 0 {
-        return Err(CliError::new(
-            ExitKind::Findings,
-            "PROJECTION_VERIFY_FINDINGS",
-            format!(
-                "verify completed for `{binding_id}` and recorded {} finding(s) — {}",
-                rollup.findings_total, rollup.because
-            ),
-        )
-        .with_details(json!({
-            "binding": binding_id,
-            "verdict": rollup.verdict.wire(),
-            "findings_total": rollup.findings_total,
-            "findings_by_class": report.findings_by_class,
-            "actions": rollup.actions,
-        }))
-        .into());
-    }
-    // --- Inconclusive gate (opt-in) ---
-    // Same report-first ordering; evaluated AFTER the findings gate, so
-    // a findings run with both flags exits with the findings code (a
-    // substantive result outranks a blindness report). Without this
-    // flag an inconclusive run keeps its long-standing exit 0 — the
-    // gate exists because that 0 is indistinguishable from a
-    // substantive clean pass to a code-only consumer.
-    if args.fail_on_inconclusive
-        && rollup.verdict == memstead_projection::report::RollupVerdict::Inconclusive
-    {
-        return Err(CliError::new(
-            ExitKind::Findings,
-            "PROJECTION_VERIFY_INCONCLUSIVE",
-            format!(
-                "verify completed for `{binding_id}` but the measurement was blind — verdict \
-                 inconclusive: {}",
-                rollup.because
-            ),
-        )
-        .with_details(json!({
-            "binding": binding_id,
-            "verdict": rollup.verdict.wire(),
-            "blind_spots": rollup.blind_spots,
-            "actions": rollup.actions,
-        }))
+    // The findings gate outranks the inconclusive one (a substantive
+    // result outranks a blindness report); without either flag an
+    // inconclusive run keeps its exit 0.
+    if let Some(e) = rollup.gate_refusal(
+        &binding_id,
+        &report.findings_by_class,
+        args.fail_on_findings,
+        args.fail_on_inconclusive,
+    ) {
+        return Err(CliError {
+            kind: ExitKind::Findings,
+            code: e.code(),
+            details: Some(e.details()),
+            message: e.to_string(),
+        }
         .into());
     }
     Ok(())

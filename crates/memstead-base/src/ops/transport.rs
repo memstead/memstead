@@ -324,3 +324,47 @@ pub struct RemoteStatusOutcome {
     /// `true` when any ref is behind, forked or missing locally.
     pub stale: bool,
 }
+
+/// A remote comparison whose refs lag: behind, forked or missing locally.
+/// The refusal a caller gating on staleness raises, after the report.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("the local graph lags remote `{remote}`: {}", stale.join(", "))]
+pub struct RemoteStale {
+    pub remote: String,
+    /// Each stale ref as `<ref> (<state>)`.
+    pub stale: Vec<String>,
+    pub counts: std::collections::BTreeMap<String, usize>,
+}
+
+impl RemoteStale {
+    pub fn code(&self) -> &'static str {
+        "REMOTE_STALE"
+    }
+
+    pub fn details(&self) -> serde_json::Value {
+        serde_json::json!({
+            "remote": self.remote,
+            "stale": self.stale,
+            "counts": self.counts,
+        })
+    }
+}
+
+impl RemoteStatusOutcome {
+    /// The staleness refusal, when any ref lags.
+    pub fn stale_refusal(&self) -> Option<RemoteStale> {
+        if !self.stale {
+            return None;
+        }
+        Some(RemoteStale {
+            remote: self.remote.clone(),
+            stale: self
+                .refs
+                .iter()
+                .filter(|x| x.state.is_stale())
+                .map(|x| format!("{} ({})", x.ref_name, x.state.as_wire()))
+                .collect(),
+            counts: self.counts.clone(),
+        })
+    }
+}

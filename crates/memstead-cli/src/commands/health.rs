@@ -921,34 +921,16 @@ fn strict_exit(strict: bool, report: &Value) -> anyhow::Result<()> {
     if !strict {
         return Ok(());
     }
-    let axis = &report["strict"];
-    let violations = axis["violations"].as_u64().unwrap_or(0);
-    if violations == 0 {
+    let Some(e) = memstead_base::ops::strict::StrictViolations::from_axis_json(&report["strict"])
+    else {
         return Ok(());
+    };
+    Err(crate::CliError {
+        kind: ExitKind::Generic,
+        code: e.code(),
+        details: Some(e.details()),
+        message: e.to_string(),
     }
-    let by_code = axis["violations_by_code"]
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
-    let summary = by_code
-        .iter()
-        .map(|(code, n)| format!("{code}: {}", n.as_u64().unwrap_or(0)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    Err(crate::CliError::new(
-        ExitKind::Generic,
-        "HEALTH_STRICT_VIOLATIONS",
-        format!("strict mode: {violations} violation(s) ({summary})"),
-    )
-    .with_details(serde_json::json!({
-        "violations": violations,
-        "violations_by_code": by_code,
-        "acknowledged": axis["acknowledged"],
-        "stale_acknowledgements": axis["stale_acknowledgements"]
-            .as_array()
-            .map(|a| a.len())
-            .unwrap_or(0),
-    }))
     .into())
 }
 

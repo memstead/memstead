@@ -482,6 +482,105 @@ pub struct Rollup {
     pub actions: Vec<String>,
 }
 
+/// A verify run a caller gates on: findings recorded, or a measurement that
+/// was blind. Raised after the report, so the report is always read first.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum VerifyGateRefusal {
+    #[error("verify completed for `{binding}` and recorded {findings_total} finding(s): {because}")]
+    Findings {
+        binding: String,
+        verdict: &'static str,
+        findings_total: usize,
+        because: String,
+        findings_by_class: BTreeMap<String, usize>,
+        actions: Vec<String>,
+    },
+    #[error(
+        "verify completed for `{binding}` but the measurement was blind, verdict inconclusive: \
+         {because}"
+    )]
+    Inconclusive {
+        binding: String,
+        verdict: &'static str,
+        because: String,
+        blind_spots: Vec<String>,
+        actions: Vec<String>,
+    },
+}
+
+impl VerifyGateRefusal {
+    pub fn code(&self) -> &'static str {
+        match self {
+            VerifyGateRefusal::Findings { .. } => "PROJECTION_VERIFY_FINDINGS",
+            VerifyGateRefusal::Inconclusive { .. } => "PROJECTION_VERIFY_INCONCLUSIVE",
+        }
+    }
+
+    pub fn details(&self) -> serde_json::Value {
+        match self {
+            VerifyGateRefusal::Findings {
+                binding,
+                verdict,
+                findings_total,
+                findings_by_class,
+                actions,
+                ..
+            } => serde_json::json!({
+                "binding": binding,
+                "verdict": verdict,
+                "findings_total": findings_total,
+                "findings_by_class": findings_by_class,
+                "actions": actions,
+            }),
+            VerifyGateRefusal::Inconclusive {
+                binding,
+                verdict,
+                blind_spots,
+                actions,
+                ..
+            } => serde_json::json!({
+                "binding": binding,
+                "verdict": verdict,
+                "blind_spots": blind_spots,
+                "actions": actions,
+            }),
+        }
+    }
+}
+
+impl Rollup {
+    /// The gate refusal a caller asked for, findings outranking blindness:
+    /// a substantive result is the more specific answer.
+    pub fn gate_refusal(
+        &self,
+        binding: &str,
+        findings_by_class: &BTreeMap<String, usize>,
+        fail_on_findings: bool,
+        fail_on_inconclusive: bool,
+    ) -> Option<VerifyGateRefusal> {
+        if fail_on_findings && self.findings_total > 0 {
+            return Some(VerifyGateRefusal::Findings {
+                binding: binding.to_string(),
+                verdict: self.verdict.wire(),
+                findings_total: self.findings_total,
+                because: self.because.clone(),
+                findings_by_class: findings_by_class.clone(),
+                actions: self.actions.clone(),
+            });
+        }
+        if fail_on_inconclusive && self.verdict == RollupVerdict::Inconclusive {
+            return Some(VerifyGateRefusal::Inconclusive {
+                binding: binding.to_string(),
+                verdict: self.verdict.wire(),
+                because: self.because.clone(),
+                blind_spots: self.blind_spots.clone(),
+                actions: self.actions.clone(),
+            });
+        }
+        None
+    }
+}
+
 /// Finding classes in the order a reader should act on them: a wrong
 /// projection misleads, drift is stale, an unresolvable anchor is broken
 /// bookkeeping, uncovered is unwritten work, and a queued item is not yet
