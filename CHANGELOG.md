@@ -60,7 +60,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   and `memstead relations` is the engine's, so its message reads `entity
   not found: <id>` (then `Did you mean: ...` when there are suggestions)
   instead of `Entity not found: ...`, and the CLI ones gain
-  `details.suggestions`.
+  `details.suggestions`. Every hand-built `UNKNOWN_MEM` on the CLI
+  (`memstead type`, `list`, `search`, `export`, `create`, `changes`,
+  `uninstall`) and on `memstead_schema` is the engine's too: the mem is
+  under `details.name` (the retired key `details.mem`), the mounted mems
+  under `details.known_mems` (the retired key `details.loaded` on
+  `memstead export`), both lists sorted; each command's own recovery hint
+  follows the engine's message. On `memstead_overview` / `memstead
+  overview`, `details.writable_mems` now lists the writable mems only;
+  the visible roster it used to carry is `details.known_mems`.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

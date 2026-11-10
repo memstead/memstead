@@ -65,15 +65,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         return Ok(());
     }
     let Some(mount) = engine.mount(&args.name) else {
-        return Err(CliError::new(
-            ExitKind::NotFound,
-            "UNKNOWN_MEM",
-            format!(
-                "no installed read-mem named `{}` — `memstead mem list` shows what is mounted",
-                args.name
-            ),
+        return Err(CliError::from_engine_with_hint(
+            engine.unknown_mem(&args.name),
+            "`memstead mem list` shows what is mounted.",
         )
-        .with_details(json!({ "mem": args.name }))
         .into());
     };
     if mount.capability != memstead_base::MountCapability::ReadOnly {

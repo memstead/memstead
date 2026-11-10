@@ -332,16 +332,7 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let selected: Vec<String> = match chain.as_ref().map(|(m, _)| m).or(args.mem_name.as_ref()) {
         Some(name) => {
             if !all_names.iter().any(|n| n == name) {
-                return Err(CliError::new(
-                    ExitKind::NotFound,
-                    "UNKNOWN_MEM",
-                    format!(
-                        "unknown mem '{name}' — loaded mems: {}",
-                        all_names.join(", ")
-                    ),
-                )
-                .with_details(json!({ "mem": name, "loaded": all_names }))
-                .into());
+                return Err(CliError::from_engine_op(engine.unknown_mem(name)).into());
             }
             vec![name.clone()]
         }

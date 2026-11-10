@@ -143,6 +143,15 @@ impl CliError {
         }
     }
 
+    /// An engine error with one sentence of this surface's own appended
+    /// to the message: the recovery step in CLI terms (a command or a
+    /// flag). The code and the payload stay the engine's.
+    pub fn from_engine_with_hint(e: memstead_base::EngineError, hint: &str) -> Self {
+        let mut err = Self::from_engine_op(e);
+        err.message = format!("{} {hint}", err.message);
+        err
+    }
+
     pub fn from_engine_op(e: memstead_base::EngineError) -> Self {
         use memstead_base::EngineError::*;
         // The per-entity wrapper of a batch act: the source decides the

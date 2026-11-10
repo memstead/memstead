@@ -3093,15 +3093,20 @@ impl super::Engine {
     /// `UNKNOWN_MEM` for `name`, with the mems mounted now and the
     /// writable ones among them.
     pub fn unknown_mem(&self, name: &str) -> EngineError {
+        // Sorted, so the payload does not depend on mount order.
+        let mut known_mems: Vec<String> = self.mounts().iter().map(|m| m.mem.clone()).collect();
+        known_mems.sort();
+        let mut writable_mems: Vec<String> = self
+            .mounts()
+            .iter()
+            .filter(|m| m.capability == crate::workspace::MountCapability::Write)
+            .map(|m| m.mem.clone())
+            .collect();
+        writable_mems.sort();
         EngineError::UnknownMem {
             name: name.to_string(),
-            known_mems: self.mounts().iter().map(|m| m.mem.clone()).collect(),
-            writable_mems: self
-                .mounts()
-                .iter()
-                .filter(|m| m.capability == crate::workspace::MountCapability::Write)
-                .map(|m| m.mem.clone())
-                .collect(),
+            known_mems,
+            writable_mems,
         }
     }
 }

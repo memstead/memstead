@@ -569,22 +569,9 @@ impl McpServer {
                     );
                 }
                 None => {
-                    let known_mems: Vec<String> =
-                        engine.mounts().iter().map(|m| m.mem.clone()).collect();
-                    let msg = format!("unknown mem: \"{mem}\"");
+                    let err = engine.unknown_mem(mem);
                     return attach_drift_to_error(
-                        tool_error_with_payload(
-                            "UNKNOWN_MEM",
-                            &msg,
-                            envelope(
-                                "UNKNOWN_MEM",
-                                msg.clone(),
-                                serde_json::json!({
-                                    "name": mem,
-                                    "known_mems": known_mems,
-                                }),
-                            ),
-                        ),
+                        engine_err_unified(err, &engine),
                         &drift_warnings,
                         mem_changed_notices,
                     );

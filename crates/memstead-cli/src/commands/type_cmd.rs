@@ -166,18 +166,7 @@ fn resolve_schema(ctx: &CliContext, mem: Option<&str>) -> anyhow::Result<Resolve
                 if engine.quarantine_reason(name).is_some() {
                     return Err(CliError::from_engine_op(engine.unknown_mem_error(name)).into());
                 }
-                let known = if all_loaded.is_empty() {
-                    "no mems loaded".to_string()
-                } else {
-                    format!("known mems: [{}]", all_loaded.join(", "))
-                };
-                return Err(CliError {
-                    code: "UNKNOWN_MEM",
-                    kind: ExitKind::NotFound,
-                    message: format!("unknown mem: {name} — {known}"),
-                    details: Some(json!({ "mem": name, "known_mems": all_loaded })),
-                }
-                .into());
+                return Err(CliError::from_engine_op(engine.unknown_mem(name)).into());
             }
             name
         }

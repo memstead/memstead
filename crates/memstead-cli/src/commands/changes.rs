@@ -238,14 +238,11 @@ fn run_filesystem(
     if let Some(name) = args.mem.as_deref()
         && name != workspace_mem
     {
-        return Err(CliError::new(
-                ExitKind::NotFound,
-                "UNKNOWN_MEM",
-                format!(
-                    "filesystem-mem is single-mem: workspace mem is `{workspace_mem}`, --mem `{name}` does not match"
-                ),
-            )
-            .into());
+        return Err(CliError::from_engine_with_hint(
+            engine.unknown_mem(name),
+            &format!("A filesystem workspace holds one mem, `{workspace_mem}`."),
+        )
+        .into());
     }
 
     run_report(ctx, &engine, workspace_mem, args)

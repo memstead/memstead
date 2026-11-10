@@ -379,14 +379,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             if let Some(requested) = payload.mem.as_deref()
                 && requested != workspace_mem
             {
-                return Err(CliError::new(
-                        ExitKind::NotFound,
-                        "UNKNOWN_MEM",
-                        format!(
-                            "filesystem-mem is single-mem: workspace mem is `{workspace_mem}`, request specified `{requested}`"
-                        ),
-                    )
-                    .into());
+                return Err(CliError::from_engine_with_hint(
+                    engine.unknown_mem(requested),
+                    &format!("A filesystem workspace holds one mem, `{workspace_mem}`."),
+                )
+                .into());
             }
             // `--relation` IS honoured here: `Engine::create_entity`
             // and `create_entity_with_ctx` share one `prepare_create`,

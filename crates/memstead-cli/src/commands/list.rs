@@ -6,7 +6,6 @@ use memstead_base::ops::SearchScope;
 use memstead_base::render;
 
 use crate::CliError;
-use crate::output::ExitKind;
 use crate::output::{print_json, print_markdown};
 use crate::setup::{CliContext, CliEngine};
 
@@ -112,19 +111,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// behaviour: read-side commands now reject unknown names instead of silently
 /// returning empty results.
 pub(super) fn unknown_mem_error(name: &str, engine: &memstead_base::Engine) -> CliError {
-    let known: Vec<&str> = engine.mem_names();
-    let detail = if known.is_empty() {
-        "no mems loaded — run `memstead workspace dump` for the workspace state".to_string()
-    } else {
-        format!(
-            "known mems: [{}]. Run `memstead workspace dump` for the full snapshot.",
-            known.join(", ")
-        )
-    };
-    CliError {
-        code: "UNKNOWN_MEM",
-        kind: ExitKind::NotFound,
-        message: format!("unknown mem: {name} — {detail}"),
-        details: Some(serde_json::json!({ "mem": name })),
-    }
+    CliError::from_engine_with_hint(
+        engine.unknown_mem(name),
+        "Run `memstead workspace dump` for the full snapshot.",
+    )
 }
