@@ -719,47 +719,26 @@ fn unserved_destination_error(
 /// spelled as literals at each construction site so the generated error index
 /// (xtask) picks them up.
 fn map_brief_err(binding_id: &str, err: RenderBriefError) -> CliError {
-    let message = err.to_string();
-    let mapped = match &err {
-        // Carries its own details (the mem, and the boot reason for a
-        // quarantine), so it returns before the generic details below.
-        RenderBriefError::DestinationUnserved { unserved, .. } => {
-            return unserved_destination_error(binding_id, message, unserved);
-        }
-        RenderBriefError::ConfigLoad(_) => {
-            CliError::new(ExitKind::Generic, "PROJECTION_LOAD_FAILED", message)
-        }
-        // D6/AC4: the binding declares no build op — refuse with the
-        // `projection enable build` remedy the error message already carries.
-        RenderBriefError::BuildOperationAbsent { .. } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_BUILD_NOT_ENABLED",
-            message,
-        ),
-        // A malformed findings store while rendering a verify / sync brief.
-        RenderBriefError::FindingsRead { .. } => CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_FINDINGS_READ_FAILED",
-            message,
-        ),
-        RenderBriefError::Resolve(inner) => match inner {
-            ResolveError::BindingNotFound { .. } => {
-                CliError::new(ExitKind::NotFound, "PROJECTION_NOT_FOUND", message)
-            }
-            ResolveError::MalformedProjectionRef { .. } => {
-                CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
-            }
-            // A scope nothing can interpret is a declaration defect the
-            // author must fix — Validation, with the legal forms named in
-            // the message rather than left for the reader to find.
-            ResolveError::UninterpretableScope { .. } => CliError::new(
-                ExitKind::Validation,
-                "PROJECTION_SCOPE_UNINTERPRETABLE",
-                message,
-            ),
+    // Code, payload and message are the brief error's own; the exit kind is
+    // this command's.
+    let kind = match &err {
+        RenderBriefError::DestinationUnserved { unserved, .. } => match &unserved.error {
+            memstead_base::EngineError::MemQuarantined { .. } => ExitKind::Validation,
+            _ => ExitKind::NotFound,
         },
+        RenderBriefError::ConfigLoad(_) | RenderBriefError::FindingsRead { .. } => {
+            ExitKind::Generic
+        }
+        RenderBriefError::BuildOperationAbsent { .. } => ExitKind::Validation,
+        RenderBriefError::Resolve(ResolveError::BindingNotFound { .. }) => ExitKind::NotFound,
+        RenderBriefError::Resolve(_) => ExitKind::Validation,
     };
-    mapped.with_details(json!({ "binding": binding_id }))
+    CliError {
+        kind,
+        code: err.code(),
+        details: Some(err.details(binding_id)),
+        message: err.to_string(),
+    }
 }
 
 fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
@@ -1663,19 +1642,17 @@ fn batch_invalid(reason: String) -> CliError {
 /// sources the dangling facet/medium refusals are gone; a malformed id is the
 /// Validation-shaped name error, everything else generic.
 fn map_resolve_err(binding_id: &str, err: ResolveError) -> CliError {
-    let message = err.to_string();
-    let mapped = match err {
-        ResolveError::MalformedProjectionRef { .. } => {
-            CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
-        }
-        ResolveError::UninterpretableScope { .. } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_SCOPE_UNINTERPRETABLE",
-            message,
-        ),
-        _ => CliError::new(ExitKind::Generic, "PROJECTION_ADVANCE_FAILED", message),
+    // Code and payload are the resolve error's own; the exit kind is ours.
+    let kind = match &err {
+        ResolveError::BindingNotFound { .. } => ExitKind::NotFound,
+        _ => ExitKind::Validation,
     };
-    mapped.with_details(json!({ "binding": binding_id }))
+    CliError {
+        kind,
+        code: err.code(),
+        details: Some(err.details(binding_id)),
+        message: err.to_string(),
+    }
 }
 
 /// Map an [`AdvanceError`] to a typed CLI error. The unknown-artifact refusal

@@ -102,6 +102,34 @@ pub enum ResolveError {
     },
 }
 
+impl ResolveError {
+    /// The wire code: one per state, whichever command resolves the binding.
+    pub fn code(&self) -> &'static str {
+        match self {
+            ResolveError::BindingNotFound { .. } => "PROJECTION_NOT_FOUND",
+            ResolveError::MalformedProjectionRef { .. } => "PROJECTION_INVALID_NAME",
+            ResolveError::UninterpretableScope { .. } => "PROJECTION_SCOPE_UNINTERPRETABLE",
+        }
+    }
+
+    /// The recovery payload, with the binding the call named.
+    pub fn details(&self, binding: &str) -> serde_json::Value {
+        match self {
+            ResolveError::BindingNotFound { available, .. } => serde_json::json!({
+                "binding": binding,
+                "available": available,
+            }),
+            ResolveError::UninterpretableScope { reason, .. } => serde_json::json!({
+                "binding": binding,
+                "reason": reason,
+            }),
+            ResolveError::MalformedProjectionRef { .. } => {
+                serde_json::json!({ "binding": binding })
+            }
+        }
+    }
+}
+
 /// Render a name list for an error message: `a, b, c` or `(none)`.
 fn fmt_list(names: &[String]) -> String {
     if names.is_empty() {

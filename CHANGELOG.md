@@ -107,6 +107,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `MEM_ERROR`; `memstead publish`'s missing-workspace refusal is the
   engine's boot refusal (`WORKSPACE_NOT_INITIALISED`, its message and
   details, exit 3 kept, with "Or supply an archive path." after it).
+  The projection refusals state their own code and payload in the
+  engine (advance, exclude, brief, binding resolution); `projection
+  advance` on a binding that does not exist now refuses
+  `PROJECTION_NOT_FOUND` (exit 3), the code `projection brief` gives the
+  same state, where it refused `PROJECTION_ADVANCE_FAILED` (a declared
+  retirement for this state); `PROJECTION_NOT_FOUND` carries
+  `details.available`, the bindings there are, and
+  `PROJECTION_SCOPE_UNINTERPRETABLE` carries `details.reason`.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

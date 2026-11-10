@@ -80,6 +80,35 @@ pub enum RenderBriefError {
     },
 }
 
+impl RenderBriefError {
+    /// The wire code of a brief refusal.
+    pub fn code(&self) -> &'static str {
+        match self {
+            RenderBriefError::ConfigLoad(_) => "PROJECTION_LOAD_FAILED",
+            RenderBriefError::Resolve(inner) => inner.code(),
+            RenderBriefError::BuildOperationAbsent { .. } => "PROJECTION_BUILD_NOT_ENABLED",
+            RenderBriefError::FindingsRead { .. } => "PROJECTION_FINDINGS_READ_FAILED",
+            RenderBriefError::DestinationUnserved { unserved, .. } => unserved.code(),
+        }
+    }
+
+    /// The recovery payload, with the binding the call named. An unserved
+    /// destination carries the engine's lookup payload for the mem.
+    pub fn details(&self, binding: &str) -> serde_json::Value {
+        match self {
+            RenderBriefError::Resolve(inner) => inner.details(binding),
+            RenderBriefError::DestinationUnserved { unserved, .. } => {
+                let mut d = unserved.error.details();
+                d["binding"] = serde_json::json!(binding);
+                d
+            }
+            RenderBriefError::ConfigLoad(_)
+            | RenderBriefError::BuildOperationAbsent { .. }
+            | RenderBriefError::FindingsRead { .. } => serde_json::json!({ "binding": binding }),
+        }
+    }
+}
+
 /// If any primary source declares a preparation the engine's registry
 /// ([`memstead_base::preparation`]) does not know, return the unsupported-and-skipped
 /// message; `None` when every declared preparation is registered (or none
