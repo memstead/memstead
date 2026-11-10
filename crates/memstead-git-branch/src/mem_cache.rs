@@ -135,6 +135,39 @@ pub enum InstallError {
     // class it guarded no longer exists. No engine surface can produce it.
 }
 
+impl InstallError {
+    /// The wire code every surface reports for this refusal.
+    pub fn code(&self) -> &'static str {
+        match self {
+            InstallError::Validation(v) => v.code(),
+            InstallError::ShadowsWritable { .. } => "READ_MEM_SHADOWS_WRITABLE",
+            InstallError::Archive(_)
+            | InstallError::Io(_)
+            | InstallError::Config(_)
+            | InstallError::MemRepo(_) => "ARCHIVE_VALIDATION_FAILED",
+        }
+    }
+
+    /// The recovery payload: the archive's name and the writable mount it
+    /// shadows; every other refusal carries its reason in the message.
+    pub fn details(&self) -> serde_json::Value {
+        match self {
+            InstallError::ShadowsWritable {
+                archive_name,
+                shadows_writable,
+            } => serde_json::json!({
+                "archive_name": archive_name,
+                "shadows_writable": shadows_writable,
+            }),
+            InstallError::Validation(_)
+            | InstallError::Archive(_)
+            | InstallError::Io(_)
+            | InstallError::Config(_)
+            | InstallError::MemRepo(_) => serde_json::json!({}),
+        }
+    }
+}
+
 /// Short content-address for an installed archive: the first 16 hex chars
 /// of `sha256(canonical_bytes)`. Used as the cache-file key
 /// (`<name>-<key>.mem`) and carried on the archive mount so the loader

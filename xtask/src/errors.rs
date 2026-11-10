@@ -90,12 +90,18 @@ fn scan_engine_codes(
     // bodies contribute, so delegated violation `code()` impls (e.g.
     // `section_format.rs`, reached via `EngineError::SectionFormatRefused`)
     // are indexed without anyone remembering to register the file.
-    // The engine is the base crate and the projection crate (whose
-    // refusals, the binding run's, carry their own typed codes).
-    let mut paths = rust_sources(&workspace_root.join("crates/memstead-base/src"))?;
-    paths.extend(rust_sources(
-        &workspace_root.join("crates/memstead-projection/src"),
-    )?);
+    // The engine is the base crate, the projection crate (whose
+    // refusals, the binding run's, carry their own typed codes), the
+    // schema crate (package authoring) and the mem-repo crate (install).
+    let mut paths = Vec::new();
+    for root in [
+        "crates/memstead-base/src",
+        "crates/memstead-projection/src",
+        "crates/memstead-schema/src",
+        "crates/memstead-git-branch/src",
+    ] {
+        paths.extend(rust_sources(&workspace_root.join(root))?);
+    }
     for path in paths {
         let rel = pathdiff(workspace_root, &path);
         let text = std::fs::read_to_string(&path)
@@ -601,7 +607,6 @@ mod surface_codes {
         "ARCHIVE_ASSEMBLY_FAILED",
         "ARCHIVE_INVALID",
         "ARCHIVE_READ_FAILED",
-        "ARCHIVE_VALIDATION_FAILED",
         "BATCH_REFUSED",
         "DOMAIN_KEYGEN_FAILED",
         "DOMAIN_KEY_NOT_FOUND",
@@ -624,12 +629,7 @@ mod surface_codes {
 
     /// Workspace, mem or entity state still built at a surface: each moves
     /// into the engine.
-    const MOVE_TO_ENGINE: &[&str] = &[
-        "FINDINGS_STORE_ERROR",
-        "READ_MEM_SHADOWS_WRITABLE",
-        "SCHEMA_MIGRATE_FAILED",
-        "SCHEMA_PACKAGE_EXISTS",
-    ];
+    const MOVE_TO_ENGINE: &[&str] = &[];
 
     /// Engine codes a surface still builds by hand at some site instead of
     /// raising the engine's value: each site moves to the engine's value
@@ -637,7 +637,6 @@ mod surface_codes {
     /// syntax spelled with the engine's code).
     const ENGINE_CODE_BUILT_AT_SURFACE: &[&str] = &[
         "AMBIGUOUS_MEM",
-        "EMBEDDED_SCHEMA_INVALID",
         "INVALID_INPUT",
         "INVALID_OBSERVATION",
         "IO_ERROR",
@@ -651,7 +650,6 @@ mod surface_codes {
         "PROJECTION_VERIFY_FAILED",
         "SCHEMA_NOT_FOUND",
         "SCHEMA_VALIDATION_FAILED",
-        "TARGET_NOT_EMPTY",
         "UNKNOWN_ENTITY_TYPE",
         "UNKNOWN_MEM",
         "WORKSPACE_NOT_INITIALISED",

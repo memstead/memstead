@@ -188,6 +188,40 @@ pub enum MigrateError {
     Unfaithful { detail: String },
 }
 
+impl MigrateError {
+    /// The wire code every surface reports for a refused migration.
+    pub fn code(&self) -> &'static str {
+        match self {
+            MigrateError::NotAPackage { .. }
+            | MigrateError::SealedPackage { .. }
+            | MigrateError::Io { .. }
+            | MigrateError::NotUtf8 { .. }
+            | MigrateError::UnmigratableValue { .. }
+            | MigrateError::PackageDoesNotLoad { .. }
+            | MigrateError::RewriteLeavesViolations { .. }
+            | MigrateError::Unfaithful { .. } => "SCHEMA_MIGRATE_FAILED",
+        }
+    }
+
+    /// Which of the refusals this is, as a stable token a caller branches on.
+    pub fn reason(&self) -> &'static str {
+        match self {
+            MigrateError::NotAPackage { .. } => "not_a_package",
+            MigrateError::SealedPackage { .. } => "sealed_package",
+            MigrateError::Io { .. } | MigrateError::NotUtf8 { .. } => "io",
+            MigrateError::UnmigratableValue { .. } => "unmigratable_value",
+            MigrateError::PackageDoesNotLoad { .. } => "package_does_not_load",
+            MigrateError::RewriteLeavesViolations { .. } => "rewrite_leaves_violations",
+            MigrateError::Unfaithful { .. } => "unfaithful_rewrite",
+        }
+    }
+
+    /// The recovery payload for a migration of the package at `path`.
+    pub fn details(&self, path: &Path) -> serde_json::Value {
+        serde_json::json!({ "path": path, "reason": self.reason(), "error": self.to_string() })
+    }
+}
+
 /// What one rewrite did to one line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RewriteAction {

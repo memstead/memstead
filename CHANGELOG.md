@@ -152,7 +152,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `NO_ACTIVE_BINDING` are engine values too; `CONTEXT_NOT_COMPUTABLE`
   carries `details.id` and the `projection verify` sidecar refusal
   carries the same `mem` and `reason` as every other sidecar refusal,
-  beside its `binding`.
+  beside its `binding`. The last state refusals a command built itself are
+  the engine's: `READ_MEM_SHADOWS_WRITABLE` and `ARCHIVE_VALIDATION_FAILED`
+  under `memstead install` (`InstallError::code`, `details`), with
+  `EMBEDDED_SCHEMA_INVALID` and `ARCHIVE_VALIDATION_FAILED` now one
+  archive-validator value that `export --self-contained` reports too;
+  `SCHEMA_MIGRATE_FAILED` (`MigrateError::code`, `reason`, `details`,
+  payload unchanged); and `memstead schema new`'s `SCHEMA_PACKAGE_EXISTS`
+  and `TARGET_NOT_EMPTY`, which join the creation refusals of `init` and
+  `quickstart` (`TARGET_NOT_EMPTY` now carries `details.retry` here too).
+  `FINDINGS_STORE_ERROR` retires: a findings store that cannot be written
+  under `verify-anchors` reports the store's own code
+  (`WORKSPACE_STORE_*`).
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

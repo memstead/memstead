@@ -274,6 +274,19 @@ pub enum ValidationError {
     CommunityDetectionFailed(String),
 }
 
+impl ValidationError {
+    /// The wire code every surface reports for this refusal: a schema the
+    /// archive carries that does not hold is its own condition, every other
+    /// reason is the archive failing validation.
+    pub fn code(&self) -> &'static str {
+        match self {
+            ValidationError::EmbeddedSchemaInvalid { .. }
+            | ValidationError::EmbeddedSchemaMismatch { .. } => "EMBEDDED_SCHEMA_INVALID",
+            _ => "ARCHIVE_VALIDATION_FAILED",
+        }
+    }
+}
+
 /// The single ingress entry point. Callers (registry publish, CLI
 /// install, MCP read-mem attach) hand in
 /// bytes and receive either a `ValidatedMem` with canonical bytes

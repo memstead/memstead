@@ -696,7 +696,7 @@ fn make_self_contained_on_disk(
         let _ = std::fs::remove_file(path);
         CliError::new(
             ExitKind::Generic,
-            "ARCHIVE_VALIDATION_FAILED",
+            e.code(),
             format!(
                 "self-contained re-pack of {}: {e}; the archive was removed, nothing was written",
                 path.display()

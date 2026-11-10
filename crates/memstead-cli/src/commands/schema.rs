@@ -44,6 +44,7 @@ use std::path::{Path, PathBuf};
 use clap::{Args as ClapArgs, Subcommand};
 use serde_json::json;
 
+use memstead_base::workspace_create::WorkspaceCreateError;
 use memstead_schema::SchemaRef;
 
 use crate::CliError;
@@ -376,17 +377,12 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
 
     let pkg_dir = PathBuf::from(&args.name);
     if pkg_dir.join("schema.yaml").is_file() {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "SCHEMA_PACKAGE_EXISTS",
-            format!(
-                "{} already contains a schema package — `memstead schema new` \
-                 never overwrites. Check it with: memstead schema validate {}",
-                pkg_dir.display(),
-                args.name,
-            ),
+        return Err(CliError::from_workspace_create(
+            WorkspaceCreateError::SchemaPackageExists {
+                path: pkg_dir.clone(),
+            },
+            &format!("Check it with: memstead schema validate {}", args.name),
         )
-        .with_details(json!({ "path": pkg_dir }))
         .into());
     }
     if pkg_dir.is_dir()
@@ -409,17 +405,15 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
             })?
     {
         let found = entry.file_name().to_string_lossy().to_string();
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "TARGET_NOT_EMPTY",
-            format!(
-                "{} exists and is not empty (found `{found}`) — clear it or \
-                     pick a different name: memstead schema new {}-schema",
-                pkg_dir.display(),
-                args.name,
-            ),
+        let retry = format!("memstead schema new {}-schema", args.name);
+        return Err(CliError::from_workspace_create(
+            WorkspaceCreateError::TargetNotEmpty {
+                path: pkg_dir.clone(),
+                found: vec![found],
+                retry: Some(retry.clone()),
+            },
+            &format!("Clear it or pick a different name: {retry}"),
         )
-        .with_details(json!({ "path": pkg_dir, "found": [found] }))
         .into());
     }
 
@@ -879,21 +873,12 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
     use memstead_schema::migrate::{MigrateError, migrate_package, next_steps, write_migration};
 
     let map_err = |e: MigrateError| -> anyhow::Error {
-        let reason = match &e {
-            MigrateError::NotAPackage { .. } => "not_a_package",
-            MigrateError::SealedPackage { .. } => "sealed_package",
-            MigrateError::Io { .. } | MigrateError::NotUtf8 { .. } => "io",
-            MigrateError::UnmigratableValue { .. } => "unmigratable_value",
-            MigrateError::PackageDoesNotLoad { .. } => "package_does_not_load",
-            MigrateError::RewriteLeavesViolations { .. } => "rewrite_leaves_violations",
-            MigrateError::Unfaithful { .. } => "unfaithful_rewrite",
-        };
         CliError::new(
             ExitKind::Validation,
-            "SCHEMA_MIGRATE_FAILED",
+            e.code(),
             format!("schema migrate at {}: {e}", args.path.display()),
         )
-        .with_details(json!({ "path": args.path, "reason": reason, "error": e.to_string() }))
+        .with_details(e.details(&args.path))
         .into()
     };
 

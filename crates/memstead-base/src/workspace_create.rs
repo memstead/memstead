@@ -1,8 +1,9 @@
-//! The refusals a command meets when it creates a workspace or a mem's
-//! folder where one cannot go: inside another workspace, over a workspace
-//! already there, over a `.memstead/` that is not one, or into a folder
-//! with content. One type, so `init` and `quickstart` report each state
-//! with one code and one payload.
+//! The refusals a command meets when it creates a workspace, a mem's
+//! folder or a schema package where one cannot go: inside another
+//! workspace, over a workspace already there, over a `.memstead/` that is
+//! not one, over a schema package already there, or into a folder with
+//! content. One type, so `init`, `quickstart` and `schema new` report each
+//! state with one code and one payload.
 
 use std::path::{Path, PathBuf};
 
@@ -22,6 +23,8 @@ pub enum WorkspaceCreateError {
         store.display()
     )]
     ForeignMemsteadDir { store: PathBuf },
+    #[error("{} already contains a schema package, which is never overwritten", path.display())]
+    SchemaPackageExists { path: PathBuf },
     #[error("{} is not empty (found {})", path.display(), found.join(", "))]
     TargetNotEmpty {
         path: PathBuf,
@@ -44,6 +47,7 @@ impl WorkspaceCreateError {
             WorkspaceCreateError::AlreadyExistsAbove { .. } => "WORKSPACE_ALREADY_EXISTS_ABOVE",
             WorkspaceCreateError::AlreadyInitialised { .. } => "WORKSPACE_ALREADY_INITIALISED",
             WorkspaceCreateError::ForeignMemsteadDir { .. } => "FOREIGN_MEMSTEAD_DIR",
+            WorkspaceCreateError::SchemaPackageExists { .. } => "SCHEMA_PACKAGE_EXISTS",
             WorkspaceCreateError::TargetNotEmpty { .. } => "TARGET_NOT_EMPTY",
         }
     }
@@ -54,7 +58,8 @@ impl WorkspaceCreateError {
                 "found_at": found_at.display().to_string(),
                 "hint": NESTED_WORKSPACE_HINT,
             }),
-            WorkspaceCreateError::AlreadyInitialised { path } => {
+            WorkspaceCreateError::AlreadyInitialised { path }
+            | WorkspaceCreateError::SchemaPackageExists { path } => {
                 serde_json::json!({ "path": path.display().to_string() })
             }
             WorkspaceCreateError::ForeignMemsteadDir { store } => {

@@ -226,10 +226,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .workspace_root()
         .map(|root| {
             memstead_projection::findings::record_standalone_findings(root, &report).map_err(|e| {
-                anyhow::Error::from(CliError::new(
-                    crate::output::ExitKind::Generic,
-                    "FINDINGS_STORE_ERROR",
-                    e.to_string(),
+                anyhow::Error::from(crate::setup::boot_error_to_cli(
+                    root,
+                    memstead_base::BootError::Store(e),
                 ))
             })
         })

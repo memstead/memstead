@@ -247,68 +247,30 @@ fn emit_outcome(
     Ok(())
 }
 
-/// Map `InstallError` into the CLI error envelope. The
-/// `ShadowsWritable` variant gets a typed
-/// `READ_MEM_SHADOWS_WRITABLE` wire code with structured
-/// `details.archive_name` + `details.shadows_writable` so callers
-/// branch on the code rather than parsing the message. Other
-/// variants stay on the generic exit code with the underlying error
-/// message — they already carry the right shape for the CLI.
+/// Map `InstallError` into the CLI error envelope. Code and payload are
+/// the engine's (`InstallError::code` / `details`); only the exit kind is
+/// the CLI's: a schema the archive carries that does not hold, and a name
+/// a writable mount already holds, are validation refusals.
 fn install_err_to_cli(e: memstead_git_branch::mem_cache::InstallError) -> anyhow::Error {
     use memstead_base::validator::ValidationError;
     use memstead_git_branch::mem_cache::InstallError;
-    // An archive whose own embedded schema will not load is its own
-    // refusal class, not a generic validation failure and emphatically
-    // not `SCHEMA_NOT_FOUND`: the package is inside the archive the
-    // user just handed us, so no amount of `memstead schema install`
-    // helps. Same code the engine raises when the staging half catches
-    // it, so one class reads as one code whichever gate fires.
-    if let InstallError::Validation(
-        ValidationError::EmbeddedSchemaInvalid { .. }
-        | ValidationError::EmbeddedSchemaMismatch { .. },
-    ) = &e
-    {
-        return CliError::new(
-            ExitKind::Validation,
-            "EMBEDDED_SCHEMA_INVALID",
-            e.to_string(),
+    let kind = match &e {
+        InstallError::Validation(
+            ValidationError::EmbeddedSchemaInvalid { .. }
+            | ValidationError::EmbeddedSchemaMismatch { .. },
         )
-        .into();
+        | InstallError::ShadowsWritable { .. } => ExitKind::Validation,
+        _ => ExitKind::Generic,
+    };
+    let details = e.details();
+    let details = (details.as_object().is_some_and(|m| !m.is_empty())).then_some(details);
+    let mut err = CliError::new(kind, e.code(), e.to_string());
+    if let Some(d) = details {
+        err = err.with_details(d);
     }
-    if let InstallError::ShadowsWritable {
-        archive_name,
-        shadows_writable,
-    } = &e
-    {
-        return CliError::new(
-            ExitKind::Validation,
-            "READ_MEM_SHADOWS_WRITABLE",
-            e.to_string(),
-        )
-        .with_details(json!({
-            "archive_name": archive_name,
-            "shadows_writable": shadows_writable,
-        }))
-        .into();
-    }
-    // There is no `CACHE_NAME_COLLISION` mapping: the cache is
-    // content-addressed (`<name>-<content_key>.mem`), so distinct bytes
-    // under the same mem name don't collide and the engine cannot produce
-    // `InstallError::CacheNameCollision`.
-    // Install-archive validation failures route through the typed
-    // ARCHIVE_VALIDATION_FAILED code (F10 of the 2026-05-18 CLI probe).
-    // Other InstallError variants (write failures, etc.) flow through the
-    // same envelope but the wire-shape captures the refusal source via the
-    // message text.
-    CliError::new(
-        ExitKind::Generic,
-        crate::ARCHIVE_VALIDATION_FAILED_CODE,
-        e.to_string(),
-    )
-    .into()
+    err.into()
 }
 
-/// Map engine-side registration errors into the typed CLI envelope.
 fn engine_err_to_cli(e: memstead_base::EngineError) -> anyhow::Error {
     CliError::from_engine_op(e).into()
 }

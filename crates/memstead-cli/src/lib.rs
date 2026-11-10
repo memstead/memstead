@@ -30,11 +30,6 @@ pub const INTERNAL_CODE: &str = "INTERNAL";
 /// beyond the actual chunk count.
 pub const CHUNK_OUT_OF_RANGE_CODE: &str = "CHUNK_OUT_OF_RANGE";
 
-/// `memstead install <archive>` refusal: archive failed strict
-/// validation (any of the variants the strict-archive validator can
-/// produce).
-pub const ARCHIVE_VALIDATION_FAILED_CODE: &str = "ARCHIVE_VALIDATION_FAILED";
-
 /// Typed CLI error that carries an exit-code kind, a stable
 /// `UPPER_SNAKE_CASE` code (matching `EngineError::code()` for
 /// engine-sourced errors), and an optional structured details payload.
