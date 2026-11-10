@@ -131,19 +131,48 @@ impl Engine {
     /// if an earlier discard failed. Run before every operation, ahead
     /// of anything that reads the backend: a staged write is served in
     /// place of the committed bytes, and the next commit would land it.
-    /// An error means the staged writes are still there.
-    pub(super) fn discard_strays(&self, mem: &str) -> Result<(), BackendError> {
-        let Some(state) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
+    ///
+    /// When the discard fails again, the backend is replaced by a fresh
+    /// one over the same storage: what is staged lives in the backend
+    /// value and nowhere on disk, so a new value has none of it. Only a
+    /// mount whose storage is on disk is replaced (an in-memory mem is
+    /// its backend), and not while a mutation of this thread holds the
+    /// backend. An error means the staged writes are still there.
+    pub(super) fn discard_strays(&mut self, mem: &str) -> Result<(), BackendError> {
+        use std::sync::atomic::Ordering;
+        let Some(idx) = self.mounts.iter().position(|m| m.mount.mem == mem) else {
             return Ok(());
         };
-        if !state.strays.load(std::sync::atomic::Ordering::SeqCst) {
+        let state = &self.mounts[idx];
+        if !state.strays.load(Ordering::SeqCst) {
             return Ok(());
         }
-        state.backend.discard_pending()?;
-        state
-            .strays
-            .store(false, std::sync::atomic::Ordering::SeqCst);
-        Ok(())
+        let failure = match state.backend.discard_pending() {
+            Ok(()) => {
+                state.strays.store(false, Ordering::SeqCst);
+                return Ok(());
+            }
+            Err(e) => e,
+        };
+        let on_disk = matches!(
+            state.mount.storage,
+            crate::workspace::MountStorage::Folder { .. }
+                | crate::workspace::MountStorage::GitBranch { .. }
+        );
+        let held_by_a_mutation = COVERED.with(|c| {
+            c.borrow()
+                .get(&backend_key(&state.backend))
+                .is_some_and(|count| *count > 0)
+        });
+        if on_disk
+            && !held_by_a_mutation
+            && let Ok(fresh) = (self.backend_factory)(&state.mount)
+        {
+            self.mounts[idx].backend = Arc::from(fresh);
+            self.mounts[idx].strays = Default::default();
+            return Ok(());
+        }
+        Err(failure)
     }
 
     /// [`Self::lock_mems_for_write`] when `writes` is true; an empty

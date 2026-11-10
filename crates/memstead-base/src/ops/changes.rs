@@ -267,6 +267,10 @@ pub fn folder_changes_since(
         // `EngineError::InvalidTimestampCursor` (code INVALID_CURSOR).
         return Err(BackendError::Other(format!("INVALID_TS_CURSOR:{since}")));
     }
+    // The ledger is a file a commit appends to: while a commit of this
+    // mem is cut off, the feed is not read, like every other read that
+    // goes to the mem's files.
+    crate::storage::filesystem::refuse_cut_off_commit(mem_root)?;
     let log_path = crate::filesystem::changelog::changelog_path(mem_root);
     let raw = match std::fs::read_to_string(&log_path) {
         Ok(s) => s,

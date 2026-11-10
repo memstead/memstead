@@ -68,7 +68,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   lock it already holds discards what is still staged when it is
   released, and both backends end their own transaction on every exit
   of a commit. A discard that itself fails is remembered and made good
-  before the next operation reads or writes. After a failed call,
+  before the next operation reads or writes; a backend whose staged
+  writes cannot be discarded at all is replaced by a fresh one over the
+  same storage. After a failed call,
   storage is byte for byte what it was and the same call sent again is
   a first call.
 - **A write that landed is never reported as failed.** A step that

@@ -531,6 +531,9 @@ impl Workspace {
 
     fn settle(mut engine: Engine) -> Engine {
         engine.set_git_branch_ops(memstead_git_branch::storage::FULL_GIT_BRANCH_OPS);
+        // As an engine over a mem-repo workspace has it: the factory
+        // that can build a backend for either kind of mount.
+        engine.set_backend_factory(instantiate_full_backend);
         let mut settings = memstead_base::WorkspaceSettings::default();
         settings.cross_mem_links.insert(
             PEER.to_string(),
@@ -1928,10 +1931,12 @@ fn a_failed_commit_is_not_recorded_as_the_engines_own_write() {
 }
 
 /// Two faults in one call: a storage call of the commit path fails, and
-/// the discard that should clear what was staged fails as well. The
-/// staged writes outlive the call, and must not outlive the start of
-/// the next operation: no read serves them, the next commit does not
-/// land them, and the engine's view stays level with storage.
+/// the discard that should clear what was staged fails as well, once or
+/// for good. The staged writes outlive the call, and must not outlive
+/// the start of the next operation: no read serves them, the next
+/// commit does not land them, and the engine's view stays level with
+/// storage. A backend whose discard keeps failing is replaced by a
+/// fresh one over the same storage, which has nothing staged.
 #[test]
 fn a_failed_discard_leaves_no_staged_write_for_the_next_operation() {
     for kind in [Kind::Folder, Kind::GitBranch] {
@@ -1955,46 +1960,61 @@ fn a_failed_discard_leaves_no_staged_write_for_the_next_operation() {
             })
             .collect();
             for (method, nth) in staging_calls {
-                let cell = format!("{kind:?} {verb:?} {}#{nth} and the discard", method.name());
-                let ws = template.copy();
-                let peer = verb.peer();
-                let (mut engine, faults, engine_backend) = ws.faulted_engine(peer);
-                let before = ws.storage_snapshot();
+                for discard_fails_for_good in [false, true] {
+                    let cell = format!(
+                        "{kind:?} {verb:?} {}#{nth} and the discard (for good: \
+                         {discard_fails_for_good})",
+                        method.name()
+                    );
+                    let ws = template.copy();
+                    let peer = verb.peer();
+                    let (mut engine, faults, engine_backend) = ws.faulted_engine(peer);
+                    let before = ws.storage_snapshot();
 
-                faults.arm(method, nth);
-                faults.always_failing(Method::DiscardPending);
-                let result = run(verb, &mut engine);
-                let staged = faults.staged_paths();
-                faults.reset();
-                assert!(result.is_err(), "{cell}: the call succeeded");
-                assert!(
-                    changed_keys(&before, &ws.storage_snapshot()).is_empty(),
-                    "{cell}: storage changed under a failed call"
-                );
+                    faults.arm(method, nth);
+                    faults.always_failing(Method::DiscardPending);
+                    let result = run(verb, &mut engine);
+                    let staged = faults.staged_paths();
+                    assert!(result.is_err(), "{cell}: the call succeeded");
+                    assert!(
+                        changed_keys(&before, &ws.storage_snapshot()).is_empty(),
+                        "{cell}: storage changed under a failed call"
+                    );
 
-                // The next operation starts: nothing staged is served.
-                engine.reload_if_stale(Some(MEM));
-                assert_nothing_staged(&ws, &staged, &engine_backend, &cell);
-                assert_eq!(
-                    view(&engine, true),
-                    view(&ws.fresh_engine(peer), true),
-                    "{cell}: the engine's view differs from a fresh load"
-                );
+                    // The next operation starts: nothing staged is served.
+                    if !discard_fails_for_good {
+                        faults.reset();
+                    }
+                    engine.reload_if_stale(Some(MEM));
+                    if !discard_fails_for_good {
+                        // The backend the engine staged into is clean
+                        // again. (When the discard never succeeds the
+                        // engine has left that backend behind.)
+                        assert_nothing_staged(&ws, &staged, &engine_backend, &cell);
+                    }
+                    assert_eq!(
+                        view(&engine, true),
+                        view(&ws.fresh_engine(peer), true),
+                        "{cell}: the engine's view differs from a fresh load"
+                    );
+                    faults.reset();
 
-                // And the same call, sent again, is a first call: what
-                // it commits is what an undisturbed call commits.
-                run(verb, &mut engine).unwrap_or_else(|e| panic!("{cell}: the retry failed: {e}"));
-                assert_eq!(
-                    view(&engine, false),
-                    control.view,
-                    "{cell}: the retry's result differs from an undisturbed call"
-                );
-                assert_eq!(
-                    view(&engine, true),
-                    view(&ws.fresh_engine(peer), true),
-                    "{cell}: after the retry the engine's view differs from a fresh load"
-                );
-                cells += 1;
+                    // And the same call, sent again, is a first call: what
+                    // it commits is what an undisturbed call commits.
+                    run(verb, &mut engine)
+                        .unwrap_or_else(|e| panic!("{cell}: the retry failed: {e}"));
+                    assert_eq!(
+                        view(&engine, false),
+                        control.view,
+                        "{cell}: the retry's result differs from an undisturbed call"
+                    );
+                    assert_eq!(
+                        view(&engine, true),
+                        view(&ws.fresh_engine(peer), true),
+                        "{cell}: after the retry the engine's view differs from a fresh load"
+                    );
+                    cells += 1;
+                }
             }
         }
         assert!(cells > 0);
