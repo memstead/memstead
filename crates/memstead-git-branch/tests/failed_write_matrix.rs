@@ -14,10 +14,11 @@
 //!   failed write: the call succeeds, the write is in storage, and the
 //!   running engine's view equals a freshly loaded engine's.
 //!
-//! The method list is checked against the trait's source, so a method
-//! added to the trait fails `the_method_list_is_the_trait` until it
-//! joins the matrix; the verb list is tied to `ProvenanceKind` by an
-//! exhaustive match, so a new kind does not compile until it is placed.
+//! Both lists are checked against the engine's source. A method added
+//! to the storage trait fails `the_method_list_is_the_trait` until it
+//! joins the matrix, and a function that takes the write lock fails
+//! `the_verb_list_is_the_engines_write_entry_points` until it is a
+//! matrix verb or is named with the reason it is not one.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -25,7 +26,6 @@ use std::sync::{Arc, Mutex};
 
 use indexmap::IndexMap;
 use memstead_base::backend::{BackendError, CompletedCommit, EntityRead, MemBackend};
-use memstead_base::provenance::ProvenanceKind;
 use memstead_base::storage::CommitId;
 use memstead_base::vcs::{Actor, CommitContext};
 use memstead_base::{
@@ -656,36 +656,111 @@ impl Verb {
     }
 }
 
-/// Every kind of mutation the engine records, with the verbs that
-/// produce it. Exhaustive on purpose: a kind added to the engine does
-/// not compile here until its verbs are named.
-fn verbs_of(kind: ProvenanceKind) -> &'static [Verb] {
-    match kind {
-        ProvenanceKind::Create => &[Verb::Create, Verb::CreateIntoDeferredMem, Verb::BatchCreate],
-        ProvenanceKind::Update => &[Verb::Update, Verb::BatchUpdate],
-        ProvenanceKind::Delete => &[Verb::Delete, Verb::DeleteStub],
-        ProvenanceKind::Relate => &[Verb::Relate, Verb::BatchRelate],
-        ProvenanceKind::Rename => &[Verb::Rename],
-        ProvenanceKind::Retype => &[Verb::Retype],
-        // The batch forms record one line per item under the item's
-        // own kind; no verb records this kind by itself.
-        ProvenanceKind::Batch => &[],
-    }
-}
+/// The engine's write entry points (every function that takes the
+/// per-mem write lock), each with the matrix verbs that drive it.
+const VERBS: &[(&str, &[Verb])] = &[
+    (
+        "create_entity",
+        &[Verb::Create, Verb::CreateIntoDeferredMem],
+    ),
+    ("batch_create", &[Verb::BatchCreate]),
+    ("update_entity", &[Verb::Update]),
+    ("batch_update", &[Verb::BatchUpdate]),
+    ("delete_entity", &[Verb::Delete, Verb::DeleteStub]),
+    ("relate_entity", &[Verb::Relate]),
+    ("batch_relate", &[Verb::BatchRelate]),
+    ("retype_entity", &[Verb::Retype]),
+    ("rename_entity", &[Verb::Rename]),
+];
+
+/// Write entry points that are not mutation verbs of an entity, each
+/// with the reason it stays out of the matrix.
+const NOT_VERBS: &[(&str, &str)] = &[
+    (
+        "set_mem_version",
+        "writes the mem's config, which no entity commit carries",
+    ),
+    ("set_mem_description", "the mem's config"),
+    ("set_mem_title", "the mem's config"),
+    ("set_mem_subject", "the mem's config"),
+    ("set_mem_internal", "the mem's config"),
+    ("set_mem_process_mem", "the mem's config"),
+    ("set_mem_sync_state", "the mem's config"),
+    (
+        "set_review_mark",
+        "a review mark is a provenance line of its own, with no entity write",
+    ),
+    (
+        "record_anchor_observed_hashes",
+        "the verify pass's observation record on the anchors sidecar, not an entity verb",
+    ),
+    (
+        "record_anchor_observations",
+        "the verify pass's observation record on the anchors sidecar, not an entity verb",
+    ),
+];
 
 fn all_verbs() -> Vec<Verb> {
-    [
-        ProvenanceKind::Create,
-        ProvenanceKind::Update,
-        ProvenanceKind::Delete,
-        ProvenanceKind::Relate,
-        ProvenanceKind::Rename,
-        ProvenanceKind::Retype,
-        ProvenanceKind::Batch,
-    ]
-    .into_iter()
-    .flat_map(|kind| verbs_of(kind).iter().copied())
-    .collect()
+    VERBS
+        .iter()
+        .flat_map(|(_, verbs)| verbs.iter().copied())
+        .collect()
+}
+
+/// The matrix's verb list is the engine's list of write entry points.
+/// Read from the engine's source: every function that takes the per-mem
+/// write lock is either driven by a matrix verb or named above with the
+/// reason it is not one, so a write path added later fails here until
+/// it is placed.
+#[test]
+fn the_verb_list_is_the_engines_write_entry_points() {
+    fn scan(dir: &Path, found: &mut BTreeSet<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            if path.is_dir() {
+                if name != "tests" {
+                    scan(&path, found);
+                }
+                continue;
+            }
+            // The lock's own module defines the calls; test modules
+            // call verbs, not the lock.
+            if !name.ends_with(".rs") || name == "write_lock.rs" || name.ends_with("tests.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for call in ["lock_mems_for_write(", "lock_mems_for_write_if("] {
+                let mut from = 0;
+                while let Some(at) = text[from..].find(call) {
+                    let at = from + at;
+                    from = at + call.len();
+                    // The function the call sits in: the last `fn`
+                    // before it.
+                    let Some(decl) = text[..at].rfind("fn ") else {
+                        continue;
+                    };
+                    let name: String = text[decl + 3..]
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    found.insert(name);
+                }
+            }
+        }
+    }
+    let engine = Path::new(env!("CARGO_MANIFEST_DIR")).join("../memstead-base/src/engine");
+    let mut in_engine = BTreeSet::new();
+    scan(&engine, &mut in_engine);
+    let placed: BTreeSet<String> = VERBS
+        .iter()
+        .map(|(name, _)| name.to_string())
+        .chain(NOT_VERBS.iter().map(|(name, _)| name.to_string()))
+        .collect();
+    assert_eq!(
+        in_engine, placed,
+        "the engine's write entry points and the fault matrix's verb list differ"
+    );
 }
 
 fn id(slug: &str) -> EntityId {

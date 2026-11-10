@@ -571,22 +571,19 @@ fn a_cut_off_commit_is_not_served_in_part_by_a_read_that_goes_to_storage() {
             "step {step}: the new anchor is served from a commit that is not applied"
         );
         // A walk of the mem's directory that bypasses the backend (a
-        // publish reads this way) completes the commit before it reads:
-        // it sees the whole commit, never the part that had landed.
-        let (entries, _) = crate::entity::source::EntitySource::Directory {
-            root: dir.path().to_path_buf(),
+        // publish reads this way) refuses as well, as long as the
+        // record is on disk. At the last step it is gone and the files
+        // are whole; only the sync of its removal is owed.
+        if dir.path().join(".memstead/commit.json").exists() {
+            assert!(
+                crate::entity::source::EntitySource::Directory {
+                    root: dir.path().to_path_buf(),
+                }
+                .read_all()
+                .is_err(),
+                "step {step}: the directory reader served a mem with a cut-off commit"
+            );
         }
-        .read_all()
-        .expect("the directory read completes the commit");
-        let alpha = entries
-            .iter()
-            .find(|e| e.relative_path == "alpha.md")
-            .expect("alpha is read");
-        assert!(alpha.content.contains("rewritten purpose"), "step {step}");
-        assert!(
-            !dir.path().join(".memstead/commit.json").exists(),
-            "step {step}: a directory read left the commit half applied"
-        );
 
         // Storage works again: the next operation completes the commit
         // and both halves of it are there.

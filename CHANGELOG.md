@@ -85,8 +85,7 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   decided and must not be resent, and the next operation on the mem
   completes it first. Until then nothing of the commit is served: a
   read that goes to the files (an anchor lookup, a publish, a conflict
-  scan) completes the commit before it reads, or refuses while it
-  cannot.
+  scan) refuses until a load has completed the commit.
 - **`memstead rename` rewrites a self-prefixed link inside a hierarchical
   mem.** Inside mem `library/a`, a body link spelled by the full id
   (`[[library/a--first-note]]`) is accepted at write (the resolver strips

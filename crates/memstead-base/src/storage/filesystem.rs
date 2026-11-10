@@ -26,10 +26,8 @@
 //!    is the commit point; syncing `.memstead/` makes it durable.
 //! 2. **After.** The temps are renamed into place, the deletes are
 //!    applied, the touched directories are synced, the ledger lines
-//!    are appended and synced, and the record is removed. Only then
-//!    does the commit return success. The removal is not synced: a
-//!    record a power loss brings back is applied again by the next
-//!    load, which finds every step done.
+//!    are appended and synced, the record is removed and `.memstead/`
+//!    is synced. Only then does the commit return success.
 //!
 //! A failure before the commit point removes what the attempt wrote
 //! and returns the IO error: storage is what it was. A failure after
@@ -144,12 +142,6 @@ struct CommitRecord {
     ops: Vec<RecordOp>,
     /// The commit's ledger lines, in order, without their newline.
     ledger: Vec<String>,
-    /// The ledger file did not exist when the commit was decided, so
-    /// applying it creates the file and must sync the name. Recorded,
-    /// because a completion that runs after the file was created can
-    /// no longer tell.
-    #[serde(default)]
-    ledger_new: bool,
 }
 
 /// What one commit attempt has put on disk before its commit point,
@@ -168,6 +160,13 @@ pub struct FilesystemBackend {
     root: PathBuf,
     pending: Mutex<Pending>,
     io: Box<dyn FolderIo>,
+    /// Set while the record of an applied commit is removed and the
+    /// sync of that removal has not succeeded: the files of that
+    /// commit. The commit has not returned success, and must not until
+    /// the sync is made good: a removal that is not durable lets a
+    /// power loss bring the record back after later writes. Reads
+    /// refuse meanwhile, as they do while a record is on disk.
+    removal_sync_owed: Mutex<Option<Vec<String>>>,
 }
 
 impl FilesystemBackend {
@@ -178,6 +177,7 @@ impl FilesystemBackend {
             root,
             pending: Mutex::new(Pending::new()),
             io: Box::new(RealIo),
+            removal_sync_owed: Mutex::new(None),
         }
     }
 
@@ -189,6 +189,7 @@ impl FilesystemBackend {
             root,
             pending: Mutex::new(Pending::new()),
             io: Box::new(io),
+            removal_sync_owed: Mutex::new(None),
         }
     }
 
@@ -288,13 +289,10 @@ impl FilesystemBackend {
             self.io.sync_dir(dir)?;
         }
 
-        let ledger = self.render_ledger(records)?;
-        let ledger_new = !ledger.is_empty() && !self.io.exists(&changelog_path(&self.root))?;
         let record = CommitRecord {
             v: 1,
             ops: record_ops,
-            ledger,
-            ledger_new,
+            ledger: self.render_ledger(records)?,
         };
         let bytes =
             serde_json::to_vec(&record).map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -325,6 +323,13 @@ impl FilesystemBackend {
     /// in place, a ledger line already written is not written twice.
     /// Shared by the commit itself and by the completion at load.
     fn apply_record(&self, record: &CommitRecord) -> std::io::Result<()> {
+        // The record's own name first, on every run: it is what makes
+        // the commit point durable, and a completion cannot know
+        // whether the run it finishes got this far. Without it a power
+        // loss could bring back the record of an older commit, whose
+        // deletes would then be applied over this one's files.
+        self.io.sync_dir(&self.meta_dir())?;
+
         let mut dirs: BTreeSet<PathBuf> = BTreeSet::new();
         for op in &record.ops {
             let target = self.root.join(op.path());
@@ -386,20 +391,38 @@ impl FilesystemBackend {
                 self.io.append(&log, out.as_bytes())?;
             }
             self.io.sync_file(&log)?;
-            // A ledger this commit creates gets its name synced too:
-            // `.memstead/` was last synced before the file existed.
-            if record.ledger_new {
-                self.io.sync_dir(&self.meta_dir())?;
-            }
         }
 
-        // The removal is not synced: if a power loss brings the record
-        // back, the next load runs this again and finds every step done.
         match self.io.remove_file(&self.record_path()) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
         }
+        // The removal is synced like everything else. A record that a
+        // power loss brought back would be applied again by the next
+        // load, and its deletes would then hit whatever was written to
+        // those paths since. The same sync names a ledger file this
+        // commit created, which lives in the same directory.
+        *self.owed() = Some(record.ops.iter().map(|op| op.path().to_string()).collect());
+        self.sync_record_removal().map(|_| ())
+    }
+
+    fn owed(&self) -> std::sync::MutexGuard<'_, Option<Vec<String>>> {
+        self.removal_sync_owed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Sync the removal of the commit record, if that sync is still
+    /// owed, and return the files of the commit it belonged to. The
+    /// record is gone by then, so nothing on disk says the sync is
+    /// missing; the backend remembers it until it succeeds.
+    fn sync_record_removal(&self) -> std::io::Result<Option<Vec<String>>> {
+        let mut owed = self.owed();
+        if owed.is_some() {
+            self.io.sync_dir(&self.meta_dir())?;
+        }
+        Ok(owed.take())
     }
 
     /// Remove the temp files of attempts that never reached their
@@ -429,22 +452,40 @@ impl FilesystemBackend {
 
     /// Refuse to read storage that holds part of a commit. Every read
     /// of files a commit can move (entities, the sidecars, the ledger)
-    /// starts here: while a commit record is on disk the commit is
-    /// decided and possibly half applied, so the read first completes
-    /// it, and when that fails it returns the failure instead of bytes.
-    /// This is what keeps a cut-off commit from being served in part
-    /// by a reader that goes to storage directly (an anchor read, an
-    /// export) while the engine's own view still shows the state before
-    /// it. One existence check when there is nothing to complete.
+    /// starts here. While a commit record is on disk the commit is
+    /// decided and possibly half applied: a live writer is given the
+    /// time to finish it (the read waits for the mem's write lock), and
+    /// a record that is still there afterwards belongs to a commit that
+    /// was cut off, so the read returns that condition instead of
+    /// bytes. Completing it is left to a load, the one place that
+    /// reports what it completed. This is what keeps a cut-off commit
+    /// from being served in part by a reader that goes to storage
+    /// directly (an anchor read, a publish) while the engine's own view
+    /// still shows the state before it. One existence check when no
+    /// record is on disk.
     fn ensure_whole(&self) -> Result<(), BackendError> {
-        if !self
-            .io
-            .exists(&self.record_path())
-            .map_err(BackendError::Io)?
-        {
+        if self.owed().is_some() {
+            return Err(BackendError::CommitNotApplied {
+                detail: "the removal of the last commit's record is not synced yet; \
+                         loading the mem makes it good"
+                    .to_string(),
+            });
+        }
+        let record = self.record_path();
+        if !self.io.exists(&record).map_err(BackendError::Io)? {
             return Ok(());
         }
-        <Self as MemBackend>::complete_interrupted_commit(self).map(|_| ())
+        let lock = self.root.join(".memstead").join("locks").join("write.lock");
+        if path_lock::acquire(&lock).is_ok() {
+            path_lock::release(&lock);
+        }
+        if !self.io.exists(&record).map_err(BackendError::Io)? {
+            return Ok(());
+        }
+        Err(BackendError::CommitNotApplied {
+            detail: "the mem holds a commit that was cut off; loading the mem completes it"
+                .to_string(),
+        })
     }
 
     /// Is a temp file of an abandoned attempt on disk? The read-only
@@ -532,12 +573,12 @@ impl FilesystemBackend {
     }
 }
 
-/// Complete the cut-off commit of the folder mem at `root`, if it holds
-/// one. For readers that walk a mem's directory without a backend in
-/// hand; the backend's own reads do the same through
+/// Refuse to read the folder mem at `root` while it holds a commit that
+/// was cut off. For readers that walk a mem's directory without a
+/// backend in hand; the backend's own reads refuse through
 /// `FilesystemBackend::ensure_whole`. A directory with no commit record
 /// costs one existence check and is not touched.
-pub(crate) fn complete_cut_off_commit(root: &Path) -> Result<(), BackendError> {
+pub(crate) fn refuse_cut_off_commit(root: &Path) -> Result<(), BackendError> {
     FilesystemBackend::new(root.to_path_buf()).ensure_whole()
 }
 
@@ -815,7 +856,6 @@ impl crate::backend::MemBackend for FilesystemBackend {
         let not_applied = |e: std::io::Error| BackendError::CommitNotApplied {
             detail: e.to_string(),
         };
-        self.io.sync_dir(&self.meta_dir()).map_err(not_applied)?;
         self.apply_record(&record).map_err(not_applied)?;
         Ok(make_commit_id())
     }
@@ -829,6 +869,17 @@ impl crate::backend::MemBackend for FilesystemBackend {
     /// and a load must not wait on hygiene. A mem with nothing to
     /// recover is not touched at all, lock file included.
     fn complete_interrupted_commit(&self) -> Result<Option<CompletedCommit>, BackendError> {
+        // A commit of this backend that is applied except for the sync
+        // of its record's removal: make the sync good, and that commit
+        // is the one this call completed.
+        if let Some(files) =
+            self.sync_record_removal()
+                .map_err(|e| BackendError::CommitNotApplied {
+                    detail: e.to_string(),
+                })?
+        {
+            return Ok(Some(CompletedCommit { files }));
+        }
         let lock = self.root.join(".memstead").join("locks").join("write.lock");
         if self
             .io
