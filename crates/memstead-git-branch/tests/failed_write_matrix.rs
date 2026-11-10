@@ -910,7 +910,24 @@ const VERBS: &[(&str, &[Verb])] = &[
         "engine/mutation/mod.rs::stage_proposal_marks_retype",
         &[Verb::Retype],
     ),
-    ("engine/mutation/rename.rs::rename_entity", &[Verb::Rename]),
+    (
+        "engine/mutation/rename/mod.rs::rename_entity",
+        &[Verb::Rename],
+    ),
+    (
+        "engine/mutation/rename/stage.rs::stage_rename_source",
+        &[Verb::Rename],
+    ),
+    // The matrix's rename has no referrer in another mem; a rename
+    // that writes a peer mem is an operation over several mems.
+    (
+        "engine/mutation/rename/stage.rs::stage_rename_peer",
+        &[Verb::Rename],
+    ),
+    (
+        "engine/mutation/rename/commit.rs::commit_prepared_rename",
+        &[Verb::Rename],
+    ),
     (
         "engine/mutation/mod.rs::stage_anchors_rename",
         &[Verb::Rename],

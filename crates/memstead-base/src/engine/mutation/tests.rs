@@ -666,7 +666,7 @@ fn every_wikilink_rewrite_call_site_is_accounted_for() {
     // through the same, and the export through `rekey_proposal_marks`.
     let accounted = [
         "engine/mutation/mem_sweep.rs",
-        "engine/mutation/rename.rs",
+        "engine/mutation/rename/compose.rs",
         "ops/export.rs",
     ];
     let unaccounted: Vec<&String> = found
