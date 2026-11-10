@@ -128,6 +128,21 @@ impl CliError {
     /// `--json` callers consume the same `{code, message, details}`
     /// envelope they get over MCP — bit-identical wire shape across
     /// surfaces is the agent contract this method delivers.
+    /// A mem-management error: the wrapped engine error as
+    /// [`Self::from_engine_op`], every lifecycle refusal at exit 5, with
+    /// the engine's code, payload and message.
+    pub fn from_full_engine_op(err: memstead_base::FullEngineError) -> Self {
+        match err {
+            memstead_base::FullEngineError::Engine(inner) => Self::from_engine_op(inner),
+            lifecycle => Self {
+                kind: ExitKind::Validation,
+                code: lifecycle.code(),
+                details: Some(lifecycle.details()),
+                message: lifecycle.prose_render(),
+            },
+        }
+    }
+
     pub fn from_engine_op(e: memstead_base::EngineError) -> Self {
         use memstead_base::EngineError::*;
         // The per-entity wrapper of a batch act: the source decides the
@@ -236,6 +251,7 @@ impl CliError {
             | EmbeddedSchemaInvalid { .. }
             | SchemaPackageInvalid { .. }
             | InvalidInput { .. }
+            | InvalidTargetSchema { .. }
             | RenameSimilarityOutOfRange { .. }
             | MarkdownExportUnsupportedBackend { .. }
             | EmptyUpdate { .. }

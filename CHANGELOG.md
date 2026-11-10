@@ -37,10 +37,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `known_mems` on the CLI's `UNKNOWN_MEM`, `suggestions` on the CLI's
   `ENTITY_NOT_FOUND` (bare and inside a batch entry), `expected` on the
   CLI's `UNTERMINATED_FENCE_IN_STORED_BODY`, and `proposed_slug` on
-  `INVALID_WIKI_LINK_TARGET` on both. In the Rust interface
-  `EngineError::UnknownMem` becomes `{ name, known_mems }` and
-  `EngineError::NotFound` gains `suggestions`, filled where the error is
-  raised (`Engine::unknown_mem`, `Engine::not_found`).
+  `INVALID_WIKI_LINK_TARGET` on both. The mem-management refusals render
+  the same way, and so do the refusals of `memstead_health` /
+  `memstead health` and `memstead_overview` / `memstead overview`, which
+  each surface used to build itself: every `UNKNOWN_MEM` now carries both
+  `known_mems` and `writable_mems` (the two had served one list each under
+  different keys, and the text names the writable ones as the health and
+  overview refusals did); a malformed `target_schema` carries
+  `details.target_schema` and `details.reason` on the CLI too; the removed
+  `schema_types` include key carries `details.message` on the CLI too,
+  and its value on MCP is now the engine's sentence, with each surface's
+  own recovery step (`memstead_schema(name=...)`, `memstead type <name>`)
+  appended to the message. In the Rust interface `EngineError::UnknownMem`
+  becomes `{ name, known_mems, writable_mems }`, `EngineError::NotFound`
+  gains `suggestions` (both filled where raised: `Engine::unknown_mem`,
+  `Engine::not_found`), `EngineError::InvalidTargetSchema` is new, and the
+  compose errors convert through `into_engine_error`.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

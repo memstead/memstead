@@ -9,9 +9,7 @@ use crate::setup::CliContext;
 
 // Routes through the shared engine composer so the CLI renders the
 // same rich content the MCP `memstead_overview` tool emits.
-use memstead_base::overview::{
-    ComposeOverviewError, DEFAULT_OVERVIEW_BUDGET, OverviewArgs, Surface, compose_overview,
-};
+use memstead_base::overview::{DEFAULT_OVERVIEW_BUDGET, OverviewArgs, Surface, compose_overview};
 const DEFAULT_CHUNK_BUDGET: usize = 25_000;
 
 /// All clusters with summaries and member lists.
@@ -78,37 +76,18 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
     let out = match compose_overview(&mut engine, composer_args, Surface::Cli) {
         Ok(o) => o,
-        Err(ComposeOverviewError::InvalidIncludeKeySchemaTypes) => {
-            return Err(CliError {
-                code: "INVALID_INPUT",
-                kind: ExitKind::Validation,
-                message:
-                    "include key 'schema_types' was removed; run `memstead type <name>` for full schema bodies."
-                        .to_string(),
-                details: None,
+        Err(e) => {
+            let schema_types = matches!(
+                e,
+                memstead_base::overview::ComposeOverviewError::InvalidIncludeKeySchemaTypes
+            );
+            let mut err = crate::CliError::from_engine_op(e.into_engine_error(&engine));
+            if schema_types {
+                // This surface's own recovery sentence, after the engine's.
+                err.message
+                    .push_str(" Run `memstead type <name>` for full schema bodies.");
             }
-            .into());
-        }
-        Err(ComposeOverviewError::MemQuarantined(name)) => {
-            return Err(crate::CliError::from_engine_op(engine.unknown_mem_error(&name)).into());
-        }
-        Err(ComposeOverviewError::UnknownMem {
-            name,
-            writable_mems,
-        }) => {
-            return Err(CliError {
-                code: "UNKNOWN_MEM",
-                kind: ExitKind::NotFound,
-                message: format!(
-                    "unknown mem: \"{name}\". Writable mems: [{}]",
-                    writable_mems.join(", ")
-                ),
-                details: Some(json!({
-                    "name": name,
-                    "writable_mems": writable_mems,
-                })),
-            }
-            .into());
+            return Err(err.into());
         }
     };
 

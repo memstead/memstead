@@ -13,7 +13,7 @@
 //! `$ERROR_PARITY_OUT` when set; `$ERROR_PARITY_SNAPSHOT` writes every
 //! rendering as JSON).
 
-use memstead_base::engine::error::samples::every_engine_error;
+use memstead_base::engine::error::samples::{every_engine_error, every_full_engine_error};
 use memstead_base::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
 fn engine(tmp: &std::path::Path) -> memstead_base::Engine {
@@ -49,7 +49,10 @@ struct Rendered {
 }
 
 fn mcp(e: memstead_base::EngineError, engine: &memstead_base::Engine) -> Rendered {
-    let r = memstead_mcp::server::render_engine_error(e, engine);
+    decode_mcp(memstead_mcp::server::render_engine_error(e, engine))
+}
+
+fn decode_mcp(r: rmcp::model::CallToolResult) -> Rendered {
     let sc = r.structured_content.unwrap_or_default();
     Rendered {
         code: sc["code"].as_str().unwrap_or_default().to_string(),
@@ -62,7 +65,18 @@ fn mcp(e: memstead_base::EngineError, engine: &memstead_base::Engine) -> Rendere
 }
 
 fn cli(e: memstead_base::EngineError) -> Rendered {
-    let c = memstead_cli::CliError::from_engine_op(e);
+    encode_cli(memstead_cli::CliError::from_engine_op(e))
+}
+
+fn mcp_full(e: memstead_base::FullEngineError, engine: &memstead_base::Engine) -> Rendered {
+    decode_mcp(memstead_mcp::server::render_full_engine_error(e, engine))
+}
+
+fn cli_full(e: memstead_base::FullEngineError) -> Rendered {
+    encode_cli(memstead_cli::CliError::from_full_engine_op(e))
+}
+
+fn encode_cli(c: memstead_cli::CliError) -> Rendered {
     let (_, line) =
         memstead_cli::output::render_cli_error(c.code, &c.message, true, c.details.as_ref());
     let v: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -99,6 +113,46 @@ fn key_diff(
     (only_a, only_b, differ)
 }
 
+struct Case {
+    label: String,
+    code: String,
+    message: String,
+    details: serde_json::Value,
+    mcp: Rendered,
+    cli: Rendered,
+}
+
+/// Every error type the engine defines, each value rendered by both
+/// surfaces. The error types are not Clone (they can carry an
+/// io::Error), so each list is built twice, deterministically.
+fn cases(engine: &memstead_base::Engine) -> Vec<Case> {
+    let mut out = Vec::new();
+    for ((label, e), (_, e2)) in every_engine_error().into_iter().zip(every_engine_error()) {
+        out.push(Case {
+            label,
+            code: e.code().to_string(),
+            message: e.prose_render(),
+            details: e.details(),
+            mcp: mcp(e, engine),
+            cli: cli(e2),
+        });
+    }
+    for ((label, e), (_, e2)) in every_full_engine_error()
+        .into_iter()
+        .zip(every_full_engine_error())
+    {
+        out.push(Case {
+            label,
+            code: e.code().to_string(),
+            message: e.prose_render(),
+            details: e.details(),
+            mcp: mcp_full(e, engine),
+            cli: cli_full(e2),
+        });
+    }
+    out
+}
+
 #[test]
 fn every_engine_error_carries_the_same_code_payload_and_message_on_mcp_and_cli() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -106,16 +160,17 @@ fn every_engine_error_carries_the_same_code_payload_and_message_on_mcp_and_cli()
     let mut rows = Vec::new();
     let mut snapshot = serde_json::Map::new();
     let mut agree = 0usize;
-    // EngineError is not Clone (it can carry an io::Error); the list is
-    // built twice, deterministically, once per surface.
-    let samples = every_engine_error();
-    let total = samples.len();
-    for ((label, e), (_, e2)) in samples.into_iter().zip(every_engine_error()) {
-        let engine_code = e.code().to_string();
-        let engine_message = e.prose_render();
-        let engine_details = e.details();
-        let m = mcp(e, &engine);
-        let c = cli(e2);
+    let all = cases(&engine);
+    let total = all.len();
+    for Case {
+        label,
+        code: engine_code,
+        message: engine_message,
+        details: engine_details,
+        mcp: m,
+        cli: c,
+    } in all
+    {
         assert!(!m.code.is_empty(), "{label}: MCP rendered no code");
         assert!(!c.code.is_empty(), "{label}: CLI rendered no code");
         snapshot.insert(

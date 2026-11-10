@@ -1156,21 +1156,7 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
 /// automatically reaches the CLI envelope without a hand-maintained
 /// translation table to update.
 fn full_engine_err_to_cli(err: memstead_base::FullEngineError) -> anyhow::Error {
-    match err {
-        memstead_base::FullEngineError::Engine(inner) => CliError::from_engine_op(inner).into(),
-        lifecycle => {
-            let code = lifecycle.code();
-            let details = lifecycle.details();
-            let message = lifecycle.prose_render();
-            CliError {
-                kind: ExitKind::Validation,
-                code,
-                message,
-                details: Some(details),
-            }
-            .into()
-        }
-    }
+    CliError::from_full_engine_op(err).into()
 }
 
 /// `memstead mem set-version <NAME> <VERSION>` — bump the mem's

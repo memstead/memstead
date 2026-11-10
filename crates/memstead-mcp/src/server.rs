@@ -402,6 +402,15 @@ pub fn render_engine_error(
 ) -> rmcp::model::CallToolResult {
     errors::engine_err_unified(e, engine)
 }
+
+/// The MCP rendering of a mem-management error, as a tool call returns it.
+#[doc(hidden)]
+pub fn render_full_engine_error(
+    e: memstead_base::FullEngineError,
+    engine: &memstead_base::Engine,
+) -> rmcp::model::CallToolResult {
+    errors::full_engine_err_unified(e, engine)
+}
 mod mem_tools;
 mod read_tools;
 mod responses;

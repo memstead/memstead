@@ -289,6 +289,7 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
             EngineError::UnknownMem {
                 name: s("nope"),
                 known_mems: v(&["specs"]),
+                writable_mems: v(&["specs"]),
             },
         ),
         (
@@ -701,6 +702,13 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
         ),
         ("InvalidInput".into(), EngineError::InvalidInput(s("bad"))),
         (
+            "InvalidTargetSchema".into(),
+            EngineError::InvalidTargetSchema {
+                raw: s("x@"),
+                reason: s("no version"),
+            },
+        ),
+        (
             "MergeConflictUnsupportedBackend".into(),
             EngineError::MergeConflictUnsupportedBackend { mem: s("specs") },
         ),
@@ -989,6 +997,7 @@ fn covered(e: &EngineError) {
         | EngineError::MemNameCollision { .. }
         | EngineError::ProcessMemNotEligible { .. }
         | EngineError::InvalidInput(_)
+        | EngineError::InvalidTargetSchema { .. }
         | EngineError::MergeConflictUnsupportedBackend { .. }
         | EngineError::NotConflicted { .. }
         | EngineError::UnknownRemote(_)
@@ -1016,5 +1025,94 @@ fn covered(e: &EngineError) {
         | EngineError::MarkdownExportUnsupportedBackend { .. }
         | EngineError::InvalidAnchor(_)
         | EngineError::InEntity { .. } => {}
+    }
+}
+
+/// Every mem-management error (the engine's second error type), labelled.
+pub fn every_full_engine_error() -> Vec<(String, crate::FullEngineError)> {
+    use crate::FullEngineError as F;
+    let out = vec![
+        (
+            "Full::Engine(NotFound)".to_string(),
+            F::Engine(EngineError::NotFound {
+                id: s("specs--alpha"),
+                suggestions: v(&["specs--alpha"]),
+            }),
+        ),
+        (
+            "Full::MemPathNotAllowed".to_string(),
+            F::MemPathNotAllowed {
+                attempted: std::path::PathBuf::from("/x/y"),
+                candidate: s("y"),
+                patterns: v(&["mems/*"]),
+                reason: "no_match",
+                policy_table: "mem_management.create",
+            },
+        ),
+        (
+            "Full::InvalidMemName".to_string(),
+            F::InvalidMemName {
+                name: s("A B"),
+                reason: "space",
+            },
+        ),
+        (
+            "Full::MemReferencedByPolicy".to_string(),
+            F::MemReferencedByPolicy {
+                name: s("specs"),
+                referring_mems: v(&["notes"]),
+            },
+        ),
+        (
+            "Full::MemSchemaNotAllowed".to_string(),
+            F::MemSchemaNotAllowed {
+                candidate: s("y"),
+                matched_pattern: s("mems/*"),
+                requested_schema: s("default@1.3.0"),
+                allowed_schemas: v(&["planning@0.7.0"]),
+            },
+        ),
+        (
+            "Full::ConfigAlreadyExists".to_string(),
+            F::ConfigAlreadyExists {
+                path: std::path::PathBuf::from("/x/.memstead/config.json"),
+            },
+        ),
+        (
+            "Full::MemStorageResidueDetected".to_string(),
+            F::MemStorageResidueDetected {
+                branch_ref: s("refs/heads/y"),
+                config_blob: Some(s("abc")),
+                entity_count: 3,
+            },
+        ),
+        (
+            "Full::MemNameRefConflict".to_string(),
+            F::MemNameRefConflict {
+                name: s("a/b"),
+                branch_ref: s("refs/heads/a/b"),
+                conflicting_branches: v(&["refs/heads/a"]),
+                suggestion: Some(s("a-b")),
+            },
+        ),
+    ];
+    for (_, e) in &out {
+        full_covered(e);
+    }
+    out
+}
+
+/// No wildcard: a mem-management error without a sample fails the build.
+fn full_covered(e: &crate::FullEngineError) {
+    use crate::FullEngineError as F;
+    match e {
+        F::Engine(_)
+        | F::MemPathNotAllowed { .. }
+        | F::InvalidMemName { .. }
+        | F::MemReferencedByPolicy { .. }
+        | F::MemSchemaNotAllowed { .. }
+        | F::ConfigAlreadyExists { .. }
+        | F::MemStorageResidueDetected { .. }
+        | F::MemNameRefConflict { .. } => {}
     }
 }

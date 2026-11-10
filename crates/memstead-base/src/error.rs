@@ -501,6 +501,7 @@ mod tests {
         let e: FullEngineError = EngineError::UnknownMem {
             name: "specs".into(),
             known_mems: Vec::new(),
+            writable_mems: Vec::new(),
         }
         .into();
         assert_eq!(e.code(), "UNKNOWN_MEM");

@@ -1328,3 +1328,16 @@ pub fn compose_overview(
         hints,
     })
 }
+
+impl ComposeOverviewError {
+    /// The engine error this refusal is: the one value both surfaces render.
+    pub fn into_engine_error(self, engine: &crate::Engine) -> crate::EngineError {
+        match self {
+            ComposeOverviewError::InvalidIncludeKeySchemaTypes => {
+                crate::EngineError::InvalidInput(self.to_string())
+            }
+            ComposeOverviewError::UnknownMem { name, .. } => engine.unknown_mem(&name),
+            ComposeOverviewError::MemQuarantined(name) => engine.unknown_mem_error(&name),
+        }
+    }
+}

@@ -45,111 +45,33 @@ pub(super) fn engine_err_unified(
 /// bit-identical to what `engine_err_unified` produced for the same
 /// variants before the lifecycle variants moved off
 /// `memstead_base::EngineError`; the move is pure plumbing.
+/// An engine error with one sentence of this surface's own appended to
+/// the message: the recovery step named in MCP terms (a tool or a
+/// parameter). The code and the payload stay the engine's.
+pub(super) fn engine_err_with_surface_hint(
+    e: memstead_base::EngineError,
+    hint: &str,
+) -> CallToolResult {
+    let message = format!("{} {hint}", e.prose_render());
+    let code = e.code();
+    tool_error_with_payload(code, &message, envelope(code, message.clone(), e.details()))
+}
+
 pub(super) fn full_engine_err_unified(
     e: memstead_base::FullEngineError,
     engine: &memstead_base::Engine,
 ) -> CallToolResult {
-    use memstead_base::FullEngineError as PE;
-    // The text-channel message uses the rich-prose renderer so lifecycle
-    // refusals (MEM_PATH_NOT_ALLOWED, MEM_SCHEMA_NOT_ALLOWED,
-    // MEM_REFERENCED_BY_POLICY) inline their full recovery payload
-    // inline rather than relying on the structured channel for
-    // recovery context.
-    let message = e.prose_render();
-    // Shared structured payload — computed before the match so the
-    // lifecycle arms cannot drift from the CLI envelope, which lifts
-    // the same `details()`.
-    let shared_details = e.details();
     match e {
-        // #55: thread the engine so the wrapped base-engine path enriches
-        // not-found envelopes the same as every other call site.
-        PE::Engine(inner) => engine_err_unified(inner, engine),
-        PE::MemPathNotAllowed { .. } => tool_error_with_payload(
-            "MEM_PATH_NOT_ALLOWED",
-            &message,
-            envelope("MEM_PATH_NOT_ALLOWED", message.clone(), shared_details),
-        ),
-        PE::InvalidMemName { name, reason } => tool_error_with_payload(
-            "INVALID_MEM_NAME",
-            &message,
-            envelope(
-                "INVALID_MEM_NAME",
-                message.clone(),
-                serde_json::json!({
-                    "name": name,
-                    "reason": reason,
-                }),
-            ),
-        ),
-        PE::MemSchemaNotAllowed {
-            candidate,
-            matched_pattern,
-            requested_schema,
-            allowed_schemas,
-        } => tool_error_with_payload(
-            "MEM_SCHEMA_NOT_ALLOWED",
-            &message,
-            envelope(
-                "MEM_SCHEMA_NOT_ALLOWED",
-                message.clone(),
-                serde_json::json!({
-                    "candidate": candidate,
-                    "matched_pattern": matched_pattern,
-                    "requested_schema": requested_schema,
-                    "allowed_schemas": allowed_schemas,
-                }),
-            ),
-        ),
-        PE::MemReferencedByPolicy {
-            name,
-            referring_mems,
-        } => tool_error_with_payload(
-            "MEM_REFERENCED_BY_POLICY",
-            &message,
-            envelope(
-                "MEM_REFERENCED_BY_POLICY",
-                message.clone(),
-                serde_json::json!({
-                    "name": name,
-                    "referring_mems": referring_mems,
-                }),
-            ),
-        ),
-        PE::ConfigAlreadyExists { path } => tool_error_with_payload(
-            "CONFIG_ERROR",
-            &message,
-            envelope(
-                "CONFIG_ERROR",
-                message.clone(),
-                serde_json::json!({
-                    "path": path.display().to_string(),
-                    "reason": "config_already_exists",
-                }),
-            ),
-        ),
-        PE::MemStorageResidueDetected {
-            branch_ref,
-            config_blob,
-            entity_count,
-        } => tool_error_with_payload(
-            "MEM_STORAGE_RESIDUE_DETECTED",
-            &message,
-            envelope(
-                "MEM_STORAGE_RESIDUE_DETECTED",
-                message.clone(),
-                serde_json::json!({
-                    "branch_ref": branch_ref,
-                    "config_blob": config_blob,
-                    "entity_count": entity_count,
-                    "recovery": ["reattach", "force_overwrite", "hard_cleanup_first"],
-                }),
-            ),
-        ),
-        PE::MemNameRefConflict { .. } => tool_error_with_payload(
-            "MEM_NAME_REF_CONFLICT",
-            &message,
-            envelope("MEM_NAME_REF_CONFLICT", message.clone(), e.details()),
-        ),
+        memstead_base::FullEngineError::Engine(inner) => engine_err_unified(inner, engine),
+        lifecycle => {
+            let message = lifecycle.prose_render();
+            let code = lifecycle.code();
+            tool_error_with_payload(
+                code,
+                &message,
+                envelope(code, message.clone(), lifecycle.details()),
+            )
+        }
     }
 }
 

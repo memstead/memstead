@@ -463,44 +463,19 @@ impl McpServer {
             memstead_base::overview::Surface::Mcp,
         ) {
             Ok(o) => o,
-            Err(memstead_base::overview::ComposeOverviewError::InvalidIncludeKeySchemaTypes) => {
-                let msg = "include key 'schema_types' was removed; \
-                           call memstead_schema(name=...) for full schema bodies."
-                    .to_string();
-                return tool_error_with_payload(
-                    "INVALID_INPUT",
-                    &msg,
-                    envelope(
-                        "INVALID_INPUT",
-                        msg.clone(),
-                        serde_json::json!({ "message": msg }),
-                    ),
+            Err(e) => {
+                let schema_types = matches!(
+                    e,
+                    memstead_base::overview::ComposeOverviewError::InvalidIncludeKeySchemaTypes
                 );
-            }
-            Err(memstead_base::overview::ComposeOverviewError::MemQuarantined(name)) => {
-                let err = engine.unknown_mem_error(&name);
+                let err = e.into_engine_error(&engine);
+                if schema_types {
+                    return engine_err_with_surface_hint(
+                        err,
+                        "Call memstead_schema(name=...) for full schema bodies.",
+                    );
+                }
                 return engine_err_unified(err, &engine);
-            }
-            Err(memstead_base::overview::ComposeOverviewError::UnknownMem {
-                name,
-                writable_mems,
-            }) => {
-                let msg = format!(
-                    "unknown mem: \"{name}\". Writable mems: [{}]",
-                    writable_mems.join(", ")
-                );
-                return tool_error_with_payload(
-                    "UNKNOWN_MEM",
-                    &msg,
-                    envelope(
-                        "UNKNOWN_MEM",
-                        msg.clone(),
-                        serde_json::json!({
-                            "name": name,
-                            "writable_mems": writable_mems,
-                        }),
-                    ),
-                );
             }
         };
 
@@ -841,48 +816,9 @@ impl McpServer {
             &config,
         ) {
             Ok(v) => v,
-            Err(memstead_base::ops::health_compose::ComposeHealthError::MemQuarantined(name)) => {
-                let err = engine.unknown_mem_error(&name);
+            Err(e) => {
+                let err = e.into_engine_error(&engine);
                 return engine_err_unified(err, &engine);
-            }
-            Err(memstead_base::ops::health_compose::ComposeHealthError::UnknownMem {
-                name,
-                writable_mems,
-            }) => {
-                let msg = format!(
-                    "unknown mem: \"{name}\". Writable mems: [{}]",
-                    writable_mems.join(", ")
-                );
-                return tool_error_with_payload(
-                    "UNKNOWN_MEM",
-                    &msg,
-                    envelope(
-                        "UNKNOWN_MEM",
-                        msg.clone(),
-                        serde_json::json!({
-                            "name": name,
-                            "writable_mems": writable_mems,
-                        }),
-                    ),
-                );
-            }
-            Err(memstead_base::ops::health_compose::ComposeHealthError::InvalidTargetSchema {
-                raw,
-                reason,
-            }) => {
-                let msg = format!("invalid target_schema {raw:?}: {reason}");
-                return tool_error_with_payload(
-                    "INVALID_INPUT",
-                    &msg,
-                    envelope(
-                        "INVALID_INPUT",
-                        msg.clone(),
-                        serde_json::json!({ "target_schema": raw, "reason": reason }),
-                    ),
-                );
-            }
-            Err(memstead_base::ops::health_compose::ComposeHealthError::Engine(e)) => {
-                return engine_err_unified(e, &engine);
             }
         };
 

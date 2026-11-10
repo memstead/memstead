@@ -279,6 +279,8 @@ pub enum EngineError {
         name: String,
         /// The mems mounted when it was raised: the recovery set.
         known_mems: Vec<String>,
+        /// The writable ones among them, for a call that writes.
+        writable_mems: Vec<String>,
     },
     /// The mem left the mount roster during this engine's lifetime (it
     /// was unregistered or deleted by another process and the roster
@@ -1099,6 +1101,9 @@ pub enum EngineError {
     /// length, malformed path, etc.) is the message text.
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// A `target_schema` argument that does not parse as a schema pin.
+    #[error("invalid target_schema {raw:?}: {reason}")]
+    InvalidTargetSchema { raw: String, reason: String },
     /// Merge-conflict listing/resolution targeted a mem whose backend
     /// cannot acquire git merge conflicts through supported use — the
     /// git-branch mem-repo is engine-managed, archives and in-memory
@@ -1668,6 +1673,7 @@ impl EngineError {
             EngineError::MemNameCollision { .. } => "MEM_NAME_COLLISION",
             EngineError::ProcessMemNotEligible { .. } => "PROCESS_MEM_NOT_ELIGIBLE",
             EngineError::InvalidInput(_) => "INVALID_INPUT",
+            EngineError::InvalidTargetSchema { .. } => "INVALID_INPUT",
             EngineError::MergeConflictUnsupportedBackend { .. } => {
                 "CONFLICT_RESOLVE_UNSUPPORTED_BACKEND"
             }
@@ -2260,9 +2266,18 @@ impl EngineError {
             // mappers until the error-payload plan moved them here; each
             // carries every key either surface served.
             EngineError::DuplicateMem(name) => serde_json::json!({ "name": name }),
-            EngineError::UnknownMem { name, known_mems } => serde_json::json!({
+            EngineError::UnknownMem {
+                name,
+                known_mems,
+                writable_mems,
+            } => serde_json::json!({
                 "name": name,
                 "known_mems": known_mems,
+                "writable_mems": writable_mems,
+            }),
+            EngineError::InvalidTargetSchema { raw, reason } => serde_json::json!({
+                "target_schema": raw,
+                "reason": reason,
             }),
             EngineError::MemUnmounted { mem } => serde_json::json!({ "mem": mem }),
             EngineError::ReadOnlyMount(mem) => serde_json::json!({ "mem": mem }),
@@ -2447,6 +2462,12 @@ impl EngineError {
     /// and other non-agent consumers.
     pub fn prose_render(&self) -> String {
         match self {
+            // The writable mems are the recovery set for a call that
+            // writes; the text channel names them as the overview and
+            // health refusals always did.
+            EngineError::UnknownMem { writable_mems, .. } if !writable_mems.is_empty() => {
+                format!("{self}. Writable mems: [{}]", writable_mems.join(", "))
+            }
             // The echoed conforming `example` is the highest-leverage
             // part of a format refusal — inline it on the text channel
             // too, not only under `details.example`.
@@ -3064,11 +3085,18 @@ impl super::Engine {
         }
     }
 
-    /// `UNKNOWN_MEM` for `name`, with the mems mounted now.
+    /// `UNKNOWN_MEM` for `name`, with the mems mounted now and the
+    /// writable ones among them.
     pub fn unknown_mem(&self, name: &str) -> EngineError {
         EngineError::UnknownMem {
             name: name.to_string(),
             known_mems: self.mounts().iter().map(|m| m.mem.clone()).collect(),
+            writable_mems: self
+                .mounts()
+                .iter()
+                .filter(|m| m.capability == crate::workspace::MountCapability::Write)
+                .map(|m| m.mem.clone())
+                .collect(),
         }
     }
 }

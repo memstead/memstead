@@ -102,7 +102,13 @@ pub fn set_mem_schema_below_boot(
         .ok_or_else(|| {
             BootError::Engine(EngineError::UnknownMem {
                 name: mem.to_string(),
-                known_mems: Vec::new(),
+                known_mems: workspace.mounts.iter().map(|m| m.mem.clone()).collect(),
+                writable_mems: workspace
+                    .mounts
+                    .iter()
+                    .filter(|m| m.capability == memstead_base::workspace::MountCapability::Write)
+                    .map(|m| m.mem.clone())
+                    .collect(),
             })
         })?;
 

@@ -7,7 +7,7 @@
 //! and the markdown rendering.
 
 use clap::Parser;
-use memstead_base::ops::health_compose::{ComposeHealthError, HealthArgs, HealthConfig};
+use memstead_base::ops::health_compose::{HealthArgs, HealthConfig};
 use memstead_projection::health::compose_health;
 use serde_json::Value;
 
@@ -150,37 +150,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
     let result = match compose_health(&mut engine, &health_args, drift_warnings, &config) {
         Ok(v) => v,
-        Err(ComposeHealthError::MemQuarantined(name)) => {
-            return Err(crate::CliError::from_engine_op(engine.unknown_mem_error(&name)).into());
-        }
-        Err(ComposeHealthError::UnknownMem {
-            name,
-            writable_mems,
-        }) => {
-            return Err(crate::CliError {
-                code: "UNKNOWN_MEM",
-                kind: ExitKind::NotFound,
-                message: format!(
-                    "unknown mem: \"{name}\". Writable mems: [{}]",
-                    writable_mems.join(", ")
-                ),
-                details: Some(serde_json::json!({
-                    "name": name,
-                    "writable_mems": writable_mems,
-                })),
-            }
-            .into());
-        }
-        Err(ComposeHealthError::InvalidTargetSchema { raw, reason }) => {
-            return Err(crate::CliError::new(
-                ExitKind::Validation,
-                "INVALID_INPUT",
-                format!("invalid target_schema {raw:?}: {reason}"),
-            )
-            .into());
-        }
-        Err(ComposeHealthError::Engine(e)) => {
-            return Err(crate::CliError::from_engine_op(e).into());
+        Err(e) => {
+            return Err(crate::CliError::from_engine_op(e.into_engine_error(&engine)).into());
         }
     };
 

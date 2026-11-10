@@ -1305,6 +1305,22 @@ pub fn render_check_finding_line(entity: &str, f: &serde_json::Value) -> String 
     )
 }
 
+impl ComposeHealthError {
+    /// The engine error this refusal is, with the recovery facts the
+    /// engine supplies (the mounted and writable mems, a quarantine
+    /// reason): the one value both surfaces render.
+    pub fn into_engine_error(self, engine: &crate::Engine) -> crate::EngineError {
+        match self {
+            ComposeHealthError::UnknownMem { name, .. } => engine.unknown_mem(&name),
+            ComposeHealthError::MemQuarantined(name) => engine.unknown_mem_error(&name),
+            ComposeHealthError::InvalidTargetSchema { raw, reason } => {
+                crate::EngineError::InvalidTargetSchema { raw, reason }
+            }
+            ComposeHealthError::Engine(e) => e,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::render_health_markdown;
