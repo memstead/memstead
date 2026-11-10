@@ -87,16 +87,28 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<CreateEntityOutcome, EngineError> {
-        // A create locks its own mem; one that declares a relation on
-        // an acyclic relationship takes the whole workspace, because
-        // its cycle guard walks edges in every mem.
+        // A create locks its own mem and the mems it refers to; one
+        // that declares a relation on an acyclic relationship takes the
+        // whole workspace, because its cycle guard walks edges in every
+        // mem.
         let (_write_lock, drift_warnings) = {
             let (mem, relations) = (&args.mem, &args.relations);
-            self.lock_for_verb(!args.dry_run, &[mem], &[mem], |engine| {
-                relations
-                    .iter()
-                    .any(|r| engine.rel_type_is_acyclic(mem, &r.rel_type))
-            })?
+            let mut locked = crate::engine::write_lock::referred_mems(
+                mem,
+                relations.iter().map(|r| &r.target),
+                args.sections.values().map(String::as_str),
+            );
+            locked.push(mem.clone());
+            self.lock_for_verb(
+                !args.dry_run,
+                &locked,
+                std::slice::from_ref(mem),
+                |engine| {
+                    relations
+                        .iter()
+                        .any(|r| engine.rel_type_is_acyclic(mem, &r.rel_type))
+                },
+            )?
         };
         // Declared relations on an ACYCLIC rel-type (or one in an
         // `acyclic_sets` set, whose guard walks the set's UNION

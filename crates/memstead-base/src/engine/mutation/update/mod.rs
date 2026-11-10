@@ -19,6 +19,24 @@ mod compose;
 mod outcome;
 mod resolve;
 mod stage;
+/// The text an update brings: whole sections, appended text, and the
+/// new side of each patch. A wiki-link in it is a reference the update
+/// may add.
+pub(in crate::engine::mutation) fn update_texts(
+    args: &UpdateEntityArgs,
+) -> impl Iterator<Item = &str> {
+    args.sections
+        .values()
+        .chain(args.append_sections.values())
+        .map(String::as_str)
+        .chain(
+            args.patch_sections
+                .values()
+                .flatten()
+                .map(|patch| patch.new.as_str()),
+        )
+}
+
 #[cfg(test)]
 mod tests;
 mod validate;
@@ -149,12 +167,24 @@ impl Engine {
                 .any(|r| r.target.mem().is_empty());
         let (_write_lock, reloaded) = {
             let declared = &args.declare_relations;
-            self.lock_for_verb(!args.dry_run, &[&named_mem], &[&named_mem], |engine| {
-                short
-                    || declared
-                        .iter()
-                        .any(|r| engine.rel_type_is_acyclic(&named_mem, &r.rel_type))
-            })?
+            // Its own mem, and the mems it refers to.
+            let mut locked = crate::engine::write_lock::referred_mems(
+                &named_mem,
+                declared.iter().map(|r| &r.target),
+                update_texts(&args),
+            );
+            locked.push(named_mem.clone());
+            self.lock_for_verb(
+                !args.dry_run,
+                &locked,
+                std::slice::from_ref(&named_mem),
+                |engine| {
+                    short
+                        || declared
+                            .iter()
+                            .any(|r| engine.rel_type_is_acyclic(&named_mem, &r.rel_type))
+                },
+            )?
         };
         let (resolved, short_hint) = self.resolve_entity_id(&args.id)?;
         args.id = resolved;

@@ -75,7 +75,16 @@ impl Engine {
         // completed) rides the receipt like on a single verb.
         let (_write_lock, drift_warnings) = {
             let items = &creates;
-            self.lock_for_verb(!dry_run, &touched_mems, &touched_mems, |engine| {
+            // Each item's own mem, and the mems it refers to.
+            let mut locked = touched_mems.clone();
+            for (a, _) in items {
+                locked.extend(crate::engine::write_lock::referred_mems(
+                    &a.mem,
+                    a.relations.iter().map(|r| &r.target),
+                    a.sections.values().map(String::as_str),
+                ));
+            }
+            self.lock_for_verb(!dry_run, &locked, &touched_mems, |engine| {
                 items.iter().any(|(a, _)| {
                     a.relations
                         .iter()

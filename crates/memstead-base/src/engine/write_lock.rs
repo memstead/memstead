@@ -262,9 +262,11 @@ impl Engine {
             ));
         }
         let mut warnings = Vec::new();
-        // A roster that keeps changing is not waited out for ever: the
-        // third set of locks is kept as taken.
-        for _ in 0..2 {
+        // A roster that keeps changing is not waited out for ever, and
+        // no lock set is kept over a roster that changed under it: the
+        // call is refused, and sent again it starts from the roster as
+        // it is then.
+        for _ in 0..3 {
             let guard = self.lock_mems_for_write(&choose(self))?;
             let changed = self.roster_warnings();
             if changed.is_empty() {
@@ -273,7 +275,11 @@ impl Engine {
             drop(guard);
             warnings.extend(changed);
         }
-        Ok((self.lock_mems_for_write(&choose(self))?, warnings))
+        Err(EngineError::Backend(BackendError::Other(
+            "the workspace's mount roster changed each time this operation had taken its write \
+             locks; nothing was written, send the call again"
+                .to_string(),
+        )))
     }
 
     /// The lock and the view of a verb that names the mems it writes.
@@ -349,19 +355,18 @@ impl Engine {
         Ok((guard, warnings))
     }
 
-    /// The view a verb plans from, taken under its lock: the mems it
+    /// The view a verb plans from, taken under its locks: the mems it
     /// writes are reloaded (a deferred one is loaded: a write into a
-    /// mem needs the mem), and so is every other mem that is loaded,
-    /// because the verb checks its relation targets against them. What
-    /// such a check relies on (that the target exists, what type it
-    /// has) changes only through a delete, a rename or a retype, and
-    /// each of those holds every writable mount's lock: while this verb
-    /// holds one lock, a view reloaded now stays true of those facts
-    /// until it commits. A check that relies on more than that, the
-    /// cycle guard, does not run under this view: its verb takes the
-    /// whole workspace ([`Self::lock_for_verb`]). A deferred mem that
-    /// is not written stays unloaded; a target in it is checked
-    /// against its storage.
+    /// mem needs the mem), and so is every other mem that is loaded.
+    /// The mems the write refers to are among its locks
+    /// ([`referred_mems`]), so what it checks of a relation target
+    /// (that it exists, what type it has) is read from a view taken
+    /// under the target's mem's lock and stays true until the commit. A
+    /// check that reads further than the mems a call names, the cycle
+    /// guard, does not run under this view: its verb takes the whole
+    /// workspace ([`Self::lock_for_verb`]). A deferred mem that is not
+    /// written stays unloaded; a target in it is checked against its
+    /// storage, under its lock.
     pub(in crate::engine) fn level_for_write<S: AsRef<str>>(
         &mut self,
         written: &[S],
@@ -470,4 +475,33 @@ impl Engine {
         }
         Ok(guard)
     }
+}
+
+/// The mems a create or an update refers to besides the one it writes:
+/// the mems of its declared relation targets and of the wiki-links in
+/// the text the call brings. The write takes their locks with its own.
+/// A delete, a rename or a retype of a target holds the target's mem,
+/// so a reference cannot be written while one is under way, whenever
+/// the writing mem was attached; the write waits, reloads, and is
+/// computed against the target as that verb left it.
+pub(in crate::engine) fn referred_mems<'a>(
+    own: &str,
+    targets: impl IntoIterator<Item = &'a crate::entity::EntityId>,
+    texts: impl IntoIterator<Item = &'a str>,
+) -> Vec<String> {
+    let mut mems: Vec<String> = targets.into_iter().map(|t| t.mem().to_string()).collect();
+    for text in texts {
+        // Cheap gate: a text without a wiki-link names no mem.
+        if text.contains("[[") {
+            mems.extend(
+                crate::entity::parser::extract_inline_links_lenient(text, own)
+                    .iter()
+                    .map(|t| t.mem().to_string()),
+            );
+        }
+    }
+    mems.retain(|m| !m.is_empty() && m != own);
+    mems.sort();
+    mems.dedup();
+    mems
 }

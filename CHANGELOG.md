@@ -220,6 +220,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   another process may mount the same storage writable: a reference it
   adds while a delete or a retype is under way now waits for it.
 
+- **A create or an update takes the lock of every mem it refers to.**
+  A delete, a rename or a retype holds the locks of the mems that
+  existed when it started. A mem that another process created while
+  one was under way was in no lock set, and a write into it that
+  referred to the verb's entity went through at once: the delete
+  landed and left the new reference pointing at nothing its writer
+  knew of. A `create` or `update` (single or batch) now locks, with its
+  own mem, the mems of its declared relation targets and of the
+  wiki-links in the text it brings, as `relate` already locked its
+  target's mem. Such a write waits for a delete, rename or retype of
+  its target, reloads, and is told the target is gone. Writes that
+  refer to other mems therefore wait for a write in progress there.
+
 - **A delete and a retype check their referrers against every mem as it
   is now.** Both verbs guard on the edges that point at the entity, and
   such an edge can come from any mem. They reloaded their own mem only
