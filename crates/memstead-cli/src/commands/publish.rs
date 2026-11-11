@@ -225,25 +225,18 @@ fn run_with_root(
         // Exactly one writable mem routes through the engine;
         // multiple demand `--mem`; zero (an engine that boots but
         // mounts nothing writable — some legacy-shaped test trees)
-        // falls through to the folder assembly like a failed boot.
-        let engine_mem: Option<(memstead_base::Engine, String)> = match ctx
-            .cli_engine_at(&workspace_root)
-        {
-            Ok(cli_engine) => {
-                let engine = cli_engine.into_base();
-                // No writable mem is not a refusal here: publish
-                // falls back to the workspace's archive path.
-                match engine.sole_writable_mem() {
-                    Ok(mem) => Some((engine, mem)),
-                    Err(memstead_base::EngineError::NoWritableMem) => None,
-                    Err(e) => {
-                        return Err(CliError::from_engine_with_hint(e, "Pass --mem <name>.").into());
-                    }
-                }
+        // falls through to the folder assembly. A workspace the engine
+        // refuses to boot is refused here, never packaged from its folders
+        // behind the refusal.
+        let engine = ctx.cli_engine_at(&workspace_root)?.into_base();
+        // No writable mem is not a refusal here: publish falls back to the
+        // workspace's archive path.
+        let engine_mem: Option<(memstead_base::Engine, String)> = match engine.sole_writable_mem() {
+            Ok(mem) => Some((engine, mem)),
+            Err(memstead_base::EngineError::NoWritableMem) => None,
+            Err(e) => {
+                return Err(CliError::from_engine_with_hint(e, "Pass --mem <name>.").into());
             }
-            // A workspace the engine refuses to boot is refused here too,
-            // never packaged from its folders behind the refusal.
-            Err(e) => return Err(e),
         };
         let bytes = match engine_mem {
             Some((engine, mem_name)) => {
