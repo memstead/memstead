@@ -1031,3 +1031,120 @@ fn parse_client_id_splits_on_last_at() {
     assert!(parse_client_id("@1.0").is_none());
     assert!(parse_client_id("name@").is_none());
 }
+
+/// A config write replaces the file rather than rewriting it in place: a
+/// second name for the old file keeps the old bytes, which only holds when
+/// the new bytes went to a new file that was renamed over the old name. An
+/// in-place write would truncate the one inode both names share, and a
+/// crash in that window leaves the config empty.
+#[test]
+fn config_writes_replace_the_file_instead_of_truncating_it() {
+    let tmp = TempDir::new().unwrap();
+    let backend = FilesystemBackend::new(tmp.path().to_path_buf());
+    let config = tmp
+        .path()
+        .join(crate::mem::MEM_META_DIR)
+        .join("config.json");
+    let witness = tmp.path().join("witness.json");
+
+    backend
+        .write_mem_config(b"{\"v\":1}", &ctx_for_test())
+        .unwrap();
+    std::fs::hard_link(&config, &witness).unwrap();
+    backend
+        .write_mem_config(b"{\"v\":2}", &ctx_for_test())
+        .unwrap();
+    assert_eq!(std::fs::read(&config).unwrap(), b"{\"v\":2}");
+    assert_eq!(std::fs::read(&witness).unwrap(), b"{\"v\":1}");
+
+    std::fs::remove_file(&witness).unwrap();
+    std::fs::hard_link(&config, &witness).unwrap();
+    assert!(
+        backend
+            .write_mem_config_cas(Some(b"{\"v\":2}"), b"{\"v\":3}", &ctx_for_test())
+            .unwrap()
+    );
+    assert_eq!(std::fs::read(&config).unwrap(), b"{\"v\":3}");
+    assert_eq!(std::fs::read(&witness).unwrap(), b"{\"v\":2}");
+
+    let leftovers: Vec<_> = std::fs::read_dir(config.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n != "config.json")
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+/// A lock another writer holds is never taken over while it is fresh: the
+/// compare-and-set refuses with an error after its wait and writes nothing.
+#[test]
+fn config_cas_never_proceeds_past_a_fresh_lock() {
+    let tmp = TempDir::new().unwrap();
+    let backend = FilesystemBackend::new(tmp.path().to_path_buf());
+    let dir = tmp.path().join(crate::mem::MEM_META_DIR);
+    backend
+        .write_mem_config(b"{\"v\":1}", &ctx_for_test())
+        .unwrap();
+
+    let lock = dir.join("config.json.lock");
+    let holder = std::thread::spawn({
+        let lock = lock.clone();
+        move || {
+            // A live holder: it keeps its lock fresh for the whole wait.
+            std::fs::write(&lock, b"other").unwrap();
+            let start = std::time::Instant::now();
+            while start.elapsed() < CONFIG_LOCK_WAIT + std::time::Duration::from_millis(500) {
+                let f = std::fs::OpenOptions::new().write(true).open(&lock).unwrap();
+                f.set_modified(std::time::SystemTime::now()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    });
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    let result = backend.write_mem_config_cas(Some(b"{\"v\":1}"), b"{\"v\":2}", &ctx_for_test());
+    holder.join().unwrap();
+    assert!(result.is_err(), "{result:?}");
+    assert_eq!(
+        std::fs::read(dir.join("config.json")).unwrap(),
+        b"{\"v\":1}"
+    );
+    assert_eq!(
+        std::fs::read(&lock).unwrap(),
+        b"other",
+        "the holder's lock stays"
+    );
+}
+
+/// A lock left by a writer that died is broken once it is older than the
+/// stale age, and the compare-and-set then lands.
+#[test]
+fn config_cas_breaks_a_stale_lock() {
+    let tmp = TempDir::new().unwrap();
+    let backend = FilesystemBackend::new(tmp.path().to_path_buf());
+    let dir = tmp.path().join(crate::mem::MEM_META_DIR);
+    backend
+        .write_mem_config(b"{\"v\":1}", &ctx_for_test())
+        .unwrap();
+
+    let lock = dir.join("config.json.lock");
+    std::fs::write(&lock, b"dead").unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&lock)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+
+    assert!(
+        backend
+            .write_mem_config_cas(Some(b"{\"v\":1}"), b"{\"v\":2}", &ctx_for_test())
+            .unwrap()
+    );
+    assert_eq!(
+        std::fs::read(dir.join("config.json")).unwrap(),
+        b"{\"v\":2}"
+    );
+    assert!(!lock.exists());
+}

@@ -39,6 +39,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   it overwrote that file, and a refused move keeps the source's staged
   bytes, where it dropped them.
 
+- **A folder mem's config write is crash-safe and its lock is never
+  entered while held.** The config is written to a temp file and renamed
+  into place, where it was truncated and rewritten in place, so a crash
+  leaves the old config or the new one. The compare-and-set breaks a lock
+  only when it is older than two seconds (a dead writer), waits up to three
+  seconds on a fresh one and then refuses, where it deleted any lock after
+  half a second and proceeded without exclusivity; a writer removes only
+  its own lock.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both
