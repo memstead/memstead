@@ -1539,3 +1539,30 @@ fn a_failed_worktree_refresh_reports_the_commit_as_landed() {
         Some(b"fresh".to_vec())
     );
 }
+
+/// Two writers on one mem: the second built its config from the tip before
+/// the first's commit, so its compare-and-set reports a mismatch and the
+/// first writer's config survives.
+#[test]
+fn git_tree_writer_config_cas_refuses_after_a_sibling_config_commit() {
+    let tmp = TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let first = GitTreeBackend::new(gitdir.clone(), "refs/heads/test".to_string());
+    let second = GitTreeBackend::new(gitdir.clone(), "refs/heads/test".to_string());
+
+    first
+        .write_mem_config(b"{\"v\":1}", &ctx_for_test())
+        .unwrap();
+    let observed = second.read_mem_config().unwrap().unwrap();
+    assert!(
+        first
+            .write_mem_config_cas(Some(&observed), b"{\"v\":2}", &ctx_for_test())
+            .unwrap()
+    );
+    assert!(
+        !second
+            .write_mem_config_cas(Some(&observed), b"{\"v\":3}", &ctx_for_test())
+            .unwrap()
+    );
+    assert_eq!(second.read_mem_config().unwrap().unwrap(), b"{\"v\":2}");
+}

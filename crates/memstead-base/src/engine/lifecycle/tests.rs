@@ -2803,3 +2803,110 @@ fn intervention_is_reported_on_the_response_and_only_when_real() {
     assert_eq!(after.title.as_deref(), Some("theirs"));
     assert_eq!(after.description.as_deref(), Some("second"));
 }
+
+/// A schema-pin bump that races another config writer keeps that writer's
+/// field: the bump is a compare-and-set, so the sibling's write between the
+/// bump's read and its write makes it re-read and re-apply.
+#[test]
+fn schema_pin_bump_keeps_a_field_a_sibling_wrote_in_between() {
+    use crate::storage::InMemoryBackend;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// Delegates to an in-memory backend; the first config read lets a
+    /// sibling writer land a `reviewMark` right after it.
+    struct Racing {
+        inner: InMemoryBackend,
+        raced: AtomicBool,
+    }
+    impl MemBackend for Racing {
+        fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
+            self.inner.list_entities()
+        }
+        fn read_entity(&self, rel: &Path) -> Result<Option<Vec<u8>>, BackendError> {
+            self.inner.read_entity(rel)
+        }
+        fn write_entity(&self, p: &Path, b: &[u8]) -> Result<(), BackendError> {
+            self.inner.write_entity(p, b)
+        }
+        fn delete_entity(&self, p: &Path) -> Result<(), BackendError> {
+            self.inner.delete_entity(p)
+        }
+        fn move_entity(&self, f: &Path, t: &Path) -> Result<(), BackendError> {
+            self.inner.move_entity(f, t)
+        }
+        fn commit(
+            &self,
+            m: &str,
+            c: &crate::vcs::CommitContext<'_>,
+        ) -> Result<crate::storage::CommitId, BackendError> {
+            self.inner.commit(m, c)
+        }
+        fn stage_provenance(&self, r: &crate::provenance::Provenance) -> Result<(), BackendError> {
+            self.inner.stage_provenance(r)
+        }
+        fn append_provenance(&self, r: &crate::provenance::Provenance) -> Result<(), BackendError> {
+            self.inner.append_provenance(r)
+        }
+        fn read_provenance(
+            &self,
+            c: Option<&str>,
+        ) -> Result<Vec<crate::provenance::Provenance>, BackendError> {
+            self.inner.read_provenance(c)
+        }
+        fn current_head(&self) -> Result<Option<String>, BackendError> {
+            self.inner.current_head()
+        }
+        fn read_mem_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
+            let read = self.inner.read_mem_config()?;
+            if !self.raced.swap(true, Ordering::SeqCst) {
+                self.inner.write_mem_config(
+                    br#"{"schema":"default@1.0.0","reviewMark":"sibling"}"#,
+                    &test_ctx(),
+                )?;
+            }
+            Ok(read)
+        }
+        fn write_mem_config(
+            &self,
+            bytes: &[u8],
+            ctx: &crate::vcs::CommitContext<'_>,
+        ) -> Result<(), BackendError> {
+            self.inner.write_mem_config(bytes, ctx)
+        }
+        fn write_mem_config_cas(
+            &self,
+            expected: Option<&[u8]>,
+            bytes: &[u8],
+            ctx: &crate::vcs::CommitContext<'_>,
+        ) -> Result<bool, BackendError> {
+            self.inner.write_mem_config_cas(expected, bytes, ctx)
+        }
+    }
+    fn test_ctx() -> crate::vcs::CommitContext<'static> {
+        crate::vcs::CommitContext::new(
+            Some("test"),
+            crate::vcs::Actor::Cli,
+            None,
+            None,
+            crate::vcs::Role::Unspecified,
+            None,
+        )
+    }
+
+    let backend = Racing {
+        inner: InMemoryBackend::new(),
+        raced: AtomicBool::new(false),
+    };
+    backend
+        .inner
+        .write_mem_config(br#"{"schema":"default@1.0.0"}"#, &test_ctx())
+        .unwrap();
+    let target = memstead_schema::SchemaRef::new("default", semver::Version::new(1, 1, 0));
+    crate::engine::lifecycle::bump_backend_schema_pin(&backend, &target, &test_ctx()).unwrap();
+
+    let stored: serde_json::Value =
+        serde_json::from_slice(&backend.inner.read_mem_config().unwrap().unwrap()).unwrap();
+    assert_eq!(stored["schema"], "default@1.1.0");
+    assert_eq!(stored["reviewMark"], "sibling");
+}

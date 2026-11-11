@@ -376,19 +376,32 @@ pub fn bump_backend_schema_pin(
     target: &memstead_schema::SchemaRef,
     ctx: &crate::vcs::CommitContext<'_>,
 ) -> Result<Option<serde_json::Value>, EngineError> {
-    let Some(bytes) = backend
-        .read_mem_config()
-        .map_err(|e| EngineError::Mem(format!("read mem config for pin update: {e}")))?
-    else {
-        return Ok(None);
-    };
-    let mut value: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|e| EngineError::Mem(format!("parse mem config for pin update: {e}")))?;
-    value["schema"] = serde_json::Value::String(target.as_display());
-    let new_bytes = serde_json::to_vec_pretty(&value)
-        .map_err(|e| EngineError::Mem(format!("serialize mem config for pin update: {e}")))?;
-    backend
-        .write_mem_config(&new_bytes, ctx)
-        .map_err(|e| EngineError::Mem(format!("write mem config for pin update: {e}")))?;
-    Ok(Some(value))
+    // Compare-and-set against the bytes this call read, re-read and re-applied
+    // on a mismatch: a config field another writer changed in between
+    // survives, and the pin lands on top of it. Bounded like
+    // `write_mem_config_merged`.
+    for _ in 0..8 {
+        let Some(bytes) = backend
+            .read_mem_config()
+            .map_err(|e| EngineError::Mem(format!("read mem config for pin update: {e}")))?
+        else {
+            return Ok(None);
+        };
+        let mut value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|e| EngineError::Mem(format!("parse mem config for pin update: {e}")))?;
+        value["schema"] = serde_json::Value::String(target.as_display());
+        let new_bytes = serde_json::to_vec_pretty(&value)
+            .map_err(|e| EngineError::Mem(format!("serialize mem config for pin update: {e}")))?;
+        if backend
+            .write_mem_config_cas(Some(&bytes), &new_bytes, ctx)
+            .map_err(|e| EngineError::Mem(format!("write mem config for pin update: {e}")))?
+        {
+            return Ok(Some(value));
+        }
+    }
+    Err(EngineError::Mem(format!(
+        "mem config is being written concurrently: eight compare-and-set attempts to \
+         pin {} all lost the race. Retry.",
+        target.as_display()
+    )))
 }

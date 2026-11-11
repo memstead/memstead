@@ -744,6 +744,24 @@ pub fn commit_config_to_memstead_at_gitdir(
     ctx: &CommitContext<'_>,
     message: &str,
 ) -> Result<(), MemRepoWriteError> {
+    commit_config_to_memstead_at_gitdir_cas(gitdir, mem_name, None, config_bytes, ctx, message)
+        .map(|_| ())
+}
+
+/// [`commit_config_to_memstead_at_gitdir`] as a compare-and-set: with
+/// `expected` of `Some`, the write lands only when the stored config blob
+/// equals `expected` at the tip the new commit is built on, and the ref
+/// advance is pinned to that tip. `Ok(false)` means the blob differed, or
+/// another writer advanced `__MEMSTEAD` first; the caller re-reads and
+/// retries. `expected` of `None` writes unconditionally.
+pub fn commit_config_to_memstead_at_gitdir_cas(
+    gitdir: &Path,
+    mem_name: &str,
+    expected: Option<&[u8]>,
+    config_bytes: &[u8],
+    ctx: &CommitContext<'_>,
+    message: &str,
+) -> Result<bool, MemRepoWriteError> {
     let full_tree_path = match resolve_full_path_at_gitdir(gitdir, mem_name) {
         Ok(Some(p)) => p,
         Ok(None) => mem_name.to_string(),
@@ -774,6 +792,43 @@ pub fn commit_config_to_memstead_at_gitdir(
         })
         .transpose()?;
 
+    let tree_path = format!("mems/{full_tree_path}/config.json");
+    if let Some(expected) = expected {
+        let current: Option<Vec<u8>> = match existing_tip {
+            Some(tip) => {
+                let tree = repo
+                    .find_object(tip)
+                    .map_err(|e| {
+                        MemRepoWriteError::GitTree(format!("read __MEMSTEAD commit: {e}"))
+                    })?
+                    .into_commit()
+                    .tree()
+                    .map_err(|e| {
+                        MemRepoWriteError::GitTree(format!("peel __MEMSTEAD tree: {e}"))
+                    })?;
+                match tree
+                    .lookup_entry_by_path(&tree_path)
+                    .map_err(|e| MemRepoWriteError::GitTree(format!("look up {tree_path}: {e}")))?
+                {
+                    Some(entry) => Some(
+                        entry
+                            .object()
+                            .map_err(|e| {
+                                MemRepoWriteError::GitTree(format!("read {tree_path}: {e}"))
+                            })?
+                            .data
+                            .clone(),
+                    ),
+                    None => None,
+                }
+            }
+            None => None,
+        };
+        if current.as_deref() != Some(expected) {
+            return Ok(false);
+        }
+    }
+
     // Base tree: existing __MEMSTEAD tree, or the empty tree when the ref
     // does not yet exist. Either way, upsert the per-mem config blob
     // and write the resulting tree.
@@ -798,7 +853,6 @@ pub fn commit_config_to_memstead_at_gitdir(
         .write_blob(config_bytes)
         .map_err(|e| MemRepoWriteError::GitTree(format!("write config blob: {e}")))?
         .detach();
-    let tree_path = format!("mems/{full_tree_path}/config.json");
     editor
         .upsert(
             tree_path.as_str(),
@@ -846,23 +900,46 @@ pub fn commit_config_to_memstead_at_gitdir(
         .map_err(|e| MemRepoWriteError::GitTree(format!("write {tree_path} commit: {e}")))?
         .detach();
 
-    let expected = match existing_tip {
+    let previous = match existing_tip {
         Some(tip) => {
             gix::refs::transaction::PreviousValue::MustExistAndMatch(gix::refs::Target::Object(tip))
         }
         None => gix::refs::transaction::PreviousValue::MustNotExist,
     };
-    commit_refs_at_gitdir(
+    let advanced = commit_refs_at_gitdir(
         gitdir,
         &[RefSpec {
             ref_name: "refs/heads/__MEMSTEAD".to_string(),
             new_oid: new_commit_id,
-            expected,
+            expected: previous,
             log_message: format!("memstead: commit __MEMSTEAD:{tree_path}"),
         }],
-    )?;
+    );
+    match advanced {
+        Ok(()) => Ok(true),
+        // A compare-and-set that lost the ref race reports it as a
+        // mismatch, so the caller re-reads the config the winner wrote.
+        Err(_) if expected.is_some() && memstead_tip(gitdir)? != existing_tip => Ok(false),
+        Err(e) => Err(e),
+    }
+}
 
-    Ok(())
+/// The current `__MEMSTEAD` tip, read from a freshly opened repository so
+/// no cached ref state hides another writer's advance.
+fn memstead_tip(gitdir: &Path) -> Result<Option<gix::ObjectId>, MemRepoWriteError> {
+    gix::open(gitdir)
+        .map_err(|e| MemRepoWriteError::GixOpen {
+            path: gitdir.display().to_string(),
+            message: e.to_string(),
+        })?
+        .try_find_reference("refs/heads/__MEMSTEAD")
+        .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
+        .map(|r| {
+            r.into_fully_peeled_id()
+                .map(|id| id.detach())
+                .map_err(|e| MemRepoWriteError::GitTree(format!("peel __MEMSTEAD: {e}")))
+        })
+        .transpose()
 }
 
 /// Commit a batch of tree edits (upsert or remove) to arbitrary paths

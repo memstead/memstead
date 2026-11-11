@@ -48,6 +48,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   half a second and proceeded without exclusivity; a writer removes only
   its own lock.
 
+- **A schema-pin change no longer overwrites a concurrent config write.**
+  `set_mem_schema` and the below-boot pin repair write the pin as a
+  compare-and-set, re-reading and re-applying on a mismatch, where they
+  read and rewrote the whole config unguarded. The git-branch and
+  in-memory backends' config compare-and-set now honours the expected
+  bytes (git: against the blob at the tip the commit is built on, with the
+  ref advance pinned to that tip), where it wrote unconditionally and
+  reported success.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

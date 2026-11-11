@@ -983,6 +983,31 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
     }
 
+    /// The compare runs against the config blob at the `__MEMSTEAD` tip the
+    /// new commit is built on, and the ref advance is pinned to that tip,
+    /// so a sibling's config commit in between makes this call report a
+    /// mismatch instead of being overwritten.
+    fn write_mem_config_cas(
+        &self,
+        expected: Option<&[u8]>,
+        bytes: &[u8],
+        ctx: &CommitContext<'_>,
+    ) -> Result<bool, memstead_base::backend::BackendError> {
+        let leaf = self
+            .ref_name
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&self.ref_name);
+        crate::storage_memstead::commit_config_to_memstead_at_gitdir_cas(
+            &self.gitdir,
+            leaf,
+            expected,
+            bytes,
+            ctx,
+            &format!("memstead: commit __MEMSTEAD:mems/{leaf}/config.json"),
+        )
+        .map_err(|e| memstead_base::backend::BackendError::Other(e.to_string()))
+    }
+
     fn record_pipeline_edit(
         &self,
         kind: &str,

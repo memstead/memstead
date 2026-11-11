@@ -295,6 +295,24 @@ impl MemBackend for InMemoryBackend {
         state.config = Some(bytes.to_vec());
         Ok(())
     }
+
+    /// The compare and the write run under the one state lock, so they are
+    /// a single step against every other caller of this backend.
+    fn write_mem_config_cas(
+        &self,
+        expected: Option<&[u8]>,
+        bytes: &[u8],
+        _ctx: &crate::vcs::CommitContext<'_>,
+    ) -> Result<bool, BackendError> {
+        let mut state = self.lock()?;
+        if let Some(expected) = expected
+            && state.config.as_deref() != Some(expected)
+        {
+            return Ok(false);
+        }
+        state.config = Some(bytes.to_vec());
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
@@ -473,6 +491,23 @@ mod tests {
         // Matches the folder backend: no fabricated git-like head.
         let b = InMemoryBackend::new();
         assert_eq!(b.current_head().unwrap(), None);
+    }
+
+    #[test]
+    fn mem_config_cas_refuses_a_stale_expected() {
+        let b = InMemoryBackend::new();
+        let c = ctx();
+        b.write_mem_config(b"{\"v\":2}", &c).unwrap();
+        assert!(
+            !b.write_mem_config_cas(Some(b"{\"v\":1}"), b"{\"v\":3}", &c)
+                .unwrap()
+        );
+        assert_eq!(b.read_mem_config().unwrap(), Some(b"{\"v\":2}".to_vec()));
+        assert!(
+            b.write_mem_config_cas(Some(b"{\"v\":2}"), b"{\"v\":3}", &c)
+                .unwrap()
+        );
+        assert_eq!(b.read_mem_config().unwrap(), Some(b"{\"v\":3}".to_vec()));
     }
 
     #[test]

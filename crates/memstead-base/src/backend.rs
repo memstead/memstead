@@ -382,15 +382,22 @@ pub trait MemBackend: Send + Sync {
     /// which only the backend can arrange.
     ///
     /// `expected` of `None` means "write unconditionally" (a mem that has no
-    /// stored config yet). The default implementation delegates to the
-    /// note-carrying write and reports success, which is correct for backends
-    /// whose write is already atomic against concurrent writers.
+    /// stored config yet). The default compares against
+    /// [`Self::read_mem_config`] and then writes, which honours `expected`
+    /// but is one step only for a backend with a single writer; every
+    /// shipped writable backend overrides it with a compare and a write that
+    /// are indivisible.
     fn write_mem_config_cas(
         &self,
-        _expected: Option<&[u8]>,
+        expected: Option<&[u8]>,
         bytes: &[u8],
         ctx: &crate::vcs::CommitContext<'_>,
     ) -> Result<bool, BackendError> {
+        if let Some(expected) = expected
+            && self.read_mem_config()?.as_deref() != Some(expected)
+        {
+            return Ok(false);
+        }
         self.write_mem_config(bytes, ctx)?;
         Ok(true)
     }
