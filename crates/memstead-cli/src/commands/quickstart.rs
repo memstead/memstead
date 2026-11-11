@@ -885,13 +885,8 @@ fn default_schema_pin() -> anyhow::Result<memstead_schema::SchemaRef> {
 /// so the very first entity in the graph went through the same gate
 /// every later one will.
 fn seed_entity(target: &Path, mem: &str) -> anyhow::Result<String> {
-    let mut engine = BaseEngine::from_workspace_root(target).map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            crate::INTERNAL_CODE,
-            format!("boot engine at {}: {e:#}", target.display()),
-        )
-    })?;
+    let mut engine = BaseEngine::from_workspace_root(target)
+        .map_err(|e| crate::setup::boot_error_to_cli(target, e))?;
     let mut sections = indexmap::IndexMap::new();
     sections.insert(
         "definition".to_string(),

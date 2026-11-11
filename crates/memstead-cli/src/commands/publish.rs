@@ -226,6 +226,10 @@ fn run_with_root(
         // multiple demand `--mem`; zero (an engine that boots but
         // mounts nothing writable — some legacy-shaped test trees)
         // falls through to the folder assembly like a failed boot.
+        // A boot failure is kept: when the folder assembly fails too, the
+        // boot refusal (the store's own code) is the answer, not the
+        // assembly's.
+        let mut boot_failure: Option<anyhow::Error> = None;
         let engine_mem: Option<(memstead_base::Engine, String)> = match ctx
             .cli_engine_at(&workspace_root)
         {
@@ -241,7 +245,10 @@ fn run_with_root(
                     }
                 }
             }
-            Err(_) => None,
+            Err(e) => {
+                boot_failure = Some(e);
+                None
+            }
         };
         let bytes = match engine_mem {
             Some((engine, mem_name)) => {
@@ -253,12 +260,15 @@ fn run_with_root(
                     .export_mem_to_bytes(&mem_name)
                     .map_err(CliError::from_engine_op)?
             }
-            None => assemble_archive(&workspace_root).map_err(|e| {
-                CliError::new(
-                    ExitKind::Validation,
-                    "ARCHIVE_ASSEMBLY_FAILED",
-                    format!("assemble archive: {e}"),
-                )
+            None => assemble_archive(&workspace_root).map_err(|e| match boot_failure {
+                Some(boot) => boot,
+                None => CliError {
+                    kind: ExitKind::Validation,
+                    code: e.code(),
+                    details: Some(e.details()),
+                    message: format!("assemble archive: {e}"),
+                }
+                .into(),
             })?,
         };
         stage_bytes_to_tempfile(&redact_if_requested(&args, bytes)?)?
@@ -331,12 +341,11 @@ fn redact_if_requested(args: &Args, bytes: Vec<u8>) -> Result<Vec<u8>, CliError>
     if !args.redact_anchors {
         return Ok(bytes);
     }
-    memstead_base::filesystem::publish::redact_archive_anchors(&bytes).map_err(|e| {
-        CliError::new(
-            ExitKind::Validation,
-            "ARCHIVE_ASSEMBLY_FAILED",
-            format!("redact anchors: {e}"),
-        )
+    memstead_base::filesystem::publish::redact_archive_anchors(&bytes).map_err(|e| CliError {
+        kind: ExitKind::Validation,
+        code: e.code(),
+        details: Some(e.details()),
+        message: format!("redact anchors: {e}"),
     })
 }
 
@@ -376,7 +385,7 @@ fn build_domain_signature(
     let validated = validate_and_normalize_archive(&bytes).map_err(|e| {
         CliError::new(
             ExitKind::Validation,
-            "ARCHIVE_INVALID",
+            e.code(),
             format!("archive failed local validation before signing: {e}"),
         )
     })?;

@@ -96,6 +96,52 @@ pub enum AssembleError {
     Anchors(String),
 }
 
+impl AssembleError {
+    /// The wire code: a schema source or anchors refusal keeps its own,
+    /// every other stage is the assembly failing.
+    pub fn code(&self) -> &'static str {
+        match self {
+            AssembleError::Schema(e) => e.code(),
+            AssembleError::Anchors(_) => "ANCHORS_SIDECAR_UNREADABLE",
+            AssembleError::WorkspaceConfig(_)
+            | AssembleError::Config(_)
+            | AssembleError::Io(_)
+            | AssembleError::Zip(_)
+            | AssembleError::Serialise(_) => "ARCHIVE_ASSEMBLY_FAILED",
+        }
+    }
+
+    /// The recovery payload: the stage that failed and why, with the
+    /// path where the stage names one.
+    pub fn details(&self) -> serde_json::Value {
+        match self {
+            AssembleError::Schema(e) => e.details(),
+            AssembleError::WorkspaceConfig(WorkspaceConfigError::NotFound(path))
+            | AssembleError::WorkspaceConfig(WorkspaceConfigError::Io { path, .. }) => {
+                serde_json::json!({
+                    "stage": "workspace_config",
+                    "path": path,
+                    "reason": self.to_string(),
+                })
+            }
+            AssembleError::WorkspaceConfig(_) => serde_json::json!({
+                "stage": "workspace_config",
+                "reason": self.to_string(),
+            }),
+            AssembleError::Config(_) => serde_json::json!({
+                "stage": "config_projection",
+                "reason": self.to_string(),
+            }),
+            AssembleError::Io(reason) => serde_json::json!({ "stage": "io", "reason": reason }),
+            AssembleError::Zip(_) | AssembleError::Serialise(_) => serde_json::json!({
+                "stage": "write",
+                "reason": self.to_string(),
+            }),
+            AssembleError::Anchors(reason) => serde_json::json!({ "reason": reason }),
+        }
+    }
+}
+
 /// Build the archive bytes for the workspace at `workspace_root`.
 ///
 /// The caller writes the bytes to a tempfile and POSTs them to the

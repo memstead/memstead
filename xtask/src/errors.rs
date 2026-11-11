@@ -604,8 +604,6 @@ mod surface_codes {
     /// file a command reads or writes, the server process, the outcome
     /// envelope of a command.
     const SURFACE_OPERATION: &[&str] = &[
-        "ARCHIVE_ASSEMBLY_FAILED",
-        "ARCHIVE_INVALID",
         "ARCHIVE_READ_FAILED",
         "DOMAIN_KEYGEN_FAILED",
         "DOMAIN_KEY_NOT_FOUND",
