@@ -353,17 +353,6 @@ fn check_wiki_links(body: &str, current_mem: &str, path: &str) -> Result<(), Val
                 reason: "reserved `::` cross-mem syntax is not accepted".to_string(),
             });
         }
-        let target = match inner.find('|') {
-            Some(i) => &inner[..i],
-            None => inner,
-        };
-        if target.contains('#') {
-            return Err(ValidationError::InvalidWikiLink {
-                path: path.to_string(),
-                link: format!("[[{inner}]]"),
-                reason: "reserved `#` deep-link syntax is not accepted".to_string(),
-            });
-        }
 
         // Delegate the slug / mem grammar checks to the shared
         // strict resolver, under the entity's own mem. The grammar
@@ -685,17 +674,15 @@ Design notes.
         }
     }
 
+    /// The push gate reads a body wiki-link by the rule the create path
+    /// uses: a `#anchor` decorates a link to the entity, so a link create
+    /// accepted is one push accepts. The gate refused it as reserved
+    /// syntax, so an entity create had committed could not be pushed.
     #[test]
-    fn rejects_reserved_deep_link_syntax() {
+    fn accepts_an_anchored_link_as_the_create_path_does() {
         let content = format!("{MINIMAL_SPEC}\nSee [[entity#section]]");
         let entity = parse(&content);
-        let err = validate(&content, &entity).unwrap_err();
-        match err {
-            ValidationError::InvalidWikiLink { reason, .. } => {
-                assert!(reason.contains("#"), "reason={reason}");
-            }
-            other => panic!("expected InvalidWikiLink, got {other:?}"),
-        }
+        validate(&content, &entity).expect("an anchored link is a link to the entity");
     }
 
     #[test]

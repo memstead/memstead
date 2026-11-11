@@ -202,6 +202,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `RELATIONSHIP_CYCLE`, where the edge was written and the next load
   dropped it, or dropped a different, explicit edge to break the cycle.
 
+- **A body wiki-link reads by one rule at create, at push and on rename.**
+  A `#anchor` decorates a link to the entity on every path: push accepts
+  what create accepts, where it refused the anchor as reserved syntax and
+  an entity create had committed could not be pushed. A rename rewrites
+  every legal spelling of a link to the renamed entity (`../`, `.md`,
+  `#anchor`, `|label`) and keeps its decorations, where it rewrote only
+  the bare slug and the next update brought the old id back as a stub.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

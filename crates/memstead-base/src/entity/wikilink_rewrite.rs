@@ -76,9 +76,15 @@ pub(crate) fn rewrite_bare_slug(text: &str, old_slug: &str, new_slug: &str) -> (
         };
 
         out.push_str(&text[last_end..whole.start()]);
-        if target == old_slug {
+        // Compared as the decoder reads it: a leading `../`, a trailing
+        // `.md` and a `#anchor` all name the same entity, so those links
+        // are rewritten too, keeping their decorations.
+        let (pre, core, post) = split_link_decorations(target);
+        if core == old_slug {
             out.push_str("[[");
+            out.push_str(pre);
             out.push_str(new_slug);
+            out.push_str(post);
             if let Some(lbl) = label {
                 out.push('|');
                 out.push_str(lbl);
@@ -132,6 +138,9 @@ pub(crate) fn rewrite_cross_mem_slug(
         };
 
         out.push_str(&text[last_end..whole.start()]);
+        // Compared as the decoder reads it, decorations kept (see
+        // `rewrite_bare_slug`).
+        let (pre, target, post) = split_link_decorations(target);
 
         // The exact `<old_mem>--<old_slug>` spelling first: inside a
         // hierarchical mem the resolver strips that self-prefix and reads
@@ -143,11 +152,11 @@ pub(crate) fn rewrite_cross_mem_slug(
             .and_then(|rest| rest.strip_prefix("--"))
             .is_some_and(|slug| slug == old_slug);
         let rewritten_inner = if self_prefixed {
-            Some(format!("{old_mem}--{new_slug}"))
+            Some(format!("{pre}{old_mem}--{new_slug}{post}"))
         } else {
             match split_cross_mem_target(target) {
                 Some((mem, sep, slug)) if mem == old_mem && slug == old_slug => {
-                    Some(format!("{old_mem}{sep}{new_slug}"))
+                    Some(format!("{pre}{old_mem}{sep}{new_slug}{post}"))
                 }
                 _ => None,
             }
@@ -314,6 +323,24 @@ fn split_cross_mem_target(target: &str) -> Option<(&str, &'static str, &str)> {
         }
     }
     None
+}
+
+/// A link target split the way the decoder reads it: the leading `../`
+/// segments, the id the link names, and what follows it (a `.md` suffix
+/// and a `#anchor`), so a rewrite can change the id and keep the rest.
+/// Mirrors `entity::id::strip_wiki_link_decorations`, which cuts the
+/// anchor first, then the `../` prefix, then the `.md` suffix.
+fn split_link_decorations(target: &str) -> (&str, &str, &str) {
+    let anchor_at = target.find('#').unwrap_or(target.len());
+    let body = &target[..anchor_at];
+    let pre_len = body.len() - body.trim_start_matches("../").len();
+    let core_md = &body[pre_len..];
+    let core_len = core_md.strip_suffix(".md").map_or(core_md.len(), str::len);
+    (
+        &target[..pre_len],
+        &target[pre_len..pre_len + core_len],
+        &target[pre_len + core_len..],
+    )
 }
 
 #[cfg(test)]

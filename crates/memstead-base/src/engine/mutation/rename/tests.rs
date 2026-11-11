@@ -2138,3 +2138,52 @@ fn an_engine_written_folder_mem_reconciles_clean() {
     let specs = report.get("specs").expect("the folder mem is reconciled");
     assert!(specs.is_clean(), "{specs:?}");
 }
+
+/// What a body wiki-link may carry is one rule: a leading `../`, a
+/// trailing `.md`, a `#anchor` and a `|label` all decorate a link to the
+/// entity. A rename rewrites every such link, keeping its decorations, in
+/// the referrers; an anchored link is accepted at create as it is at push.
+#[test]
+fn a_rename_rewrites_every_legal_spelling_of_a_link_and_keeps_its_decorations() {
+    let tmp = TempDir::new().unwrap();
+    let (mut engine, seeded) = engine_with_seed(&tmp, "Login Service");
+    let (actor, client) = cli_actor();
+
+    let mut referrer = empty_create_args("specs", "Referrer");
+    referrer.sections.insert(
+        "purpose".to_string(),
+        "a [[login-service.md]] b [[../login-service]] c [[login-service|the service]] \
+         d [[login-service#identity]]"
+            .to_string(),
+    );
+    let referrer = engine
+        .create_entity(referrer, actor, Some(&client), None)
+        .unwrap();
+
+    engine
+        .rename_entity(
+            RenameEntityArgs {
+                id: seeded.id.clone(),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
+                new_title: "Auth Service".to_string(),
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    let body = &engine.get_entity(&referrer.id).unwrap().sections["purpose"];
+    assert!(!body.contains("login-service"), "{body}");
+    for kept in [
+        "[[auth-service.md]]",
+        "[[../auth-service]]",
+        "[[auth-service|the service]]",
+        "[[auth-service#identity]]",
+    ] {
+        assert!(body.contains(kept), "{kept} in {body}");
+    }
+    assert!(
+        engine.get_entity(&seeded.id).is_none(),
+        "the old id is not resurrected"
+    );
+}
