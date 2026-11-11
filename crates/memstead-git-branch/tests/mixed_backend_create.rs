@@ -728,3 +728,56 @@ fn a_mem_rename_carries_its_grants_into_running_engines() {
     relate(&mut renamer, "first-spec").expect("the renaming engine allows the renamed grant");
     relate(&mut long_lived, "second-spec").expect("a running engine allows the renamed grant");
 }
+
+/// A destructive mem delete whose grant scrub cannot write the workspace
+/// config reports that in the response, so the operator learns the
+/// grant survived; it was only logged.
+#[cfg(unix)]
+#[test]
+fn a_mem_delete_reports_a_grant_scrub_that_failed() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let meta = tmp.path().join(".memstead");
+    std::fs::create_dir_all(&meta).unwrap();
+    let config = meta.join("workspace.toml");
+    std::fs::write(
+        &config,
+        "format = \"memstead-git-branch-2\"\n\n\
+         [persistence_adapter]\nname = \"file-two-layer\"\n\n\
+         [cross_mem_links]\ndoomed = [\"keeper\"]\n",
+    )
+    .unwrap();
+    init_real_mem_repo(
+        tmp.path(),
+        &[("doomed", "default@1.0.0"), ("keeper", "default@1.0.0")],
+    );
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    std::fs::create_dir_all(meta.join("state")).unwrap();
+    std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o444)).unwrap();
+    std::fs::set_permissions(&meta, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+    let result = mem_management::delete_mem(
+        &mut engine,
+        mem_management::MemDeleteParams {
+            name: "doomed".to_string(),
+            delete_files: true,
+            note: None,
+            actor: Actor::Cli,
+            client: None,
+            operator_mode: true,
+            detach_incoming: false,
+        },
+    );
+    std::fs::set_permissions(&meta, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let response = result.expect("the delete itself lands");
+    assert!(
+        response
+            .warnings
+            .iter()
+            .any(|w| w.code() == "WRITE_FOLLOW_UP_FAILED"),
+        "{:?}",
+        response.warnings
+    );
+    assert!(std::fs::read_to_string(&config).unwrap().contains("doomed"));
+}

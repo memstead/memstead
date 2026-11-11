@@ -166,6 +166,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (the pin switch stands, the mem stays quarantined with that reason),
   where it reported a clean `Switched` on the CLI and over MCP.
 
+- **A mem delete reports a grant scrub that failed.** When the destructive
+  delete lands but the grants naming the mem cannot be removed from
+  `.memstead/workspace.toml`, the response carries
+  `WRITE_FOLLOW_UP_FAILED` (step `policy_scrub`), where the failure was
+  only logged and the delete read as complete.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

@@ -812,7 +812,8 @@ pub enum WarningHint {
         mem: String,
         /// The step that failed: `commit_apply` (a folder commit was cut
         /// off after its commit point and completed at once),
-        /// `worktree_sync`, `store_update`.
+        /// `worktree_sync`, `store_update`, `policy_scrub` (a mem delete
+        /// whose grant scrub could not write the workspace config).
         step: String,
         /// The failure, as the step reported it.
         detail: String,

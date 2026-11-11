@@ -811,6 +811,17 @@ pub fn delete_mem(
                      scrub failed — `.memstead/workspace.toml` may still \
                      reference the deleted mem"
                 );
+                // The caller hears it too: the grants naming the deleted
+                // mem are still in the workspace config.
+                warnings.push(crate::ops::WarningHint::WriteFollowUpFailed {
+                    mem: params.name.clone(),
+                    step: "policy_scrub".to_string(),
+                    detail: format!(
+                        "the delete landed, and the grants naming '{}' stay in \
+                         .memstead/workspace.toml: {e}",
+                        params.name
+                    ),
+                });
             }
             Ok(scrubbed) => {
                 // Lift scrubbed entries into the response envelope
