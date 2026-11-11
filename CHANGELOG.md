@@ -161,6 +161,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   unchanged, where it was refused `SECTION_CONTENT_INVALID` although the
   same block after a prose line was accepted.
 
+- **Repairing a quarantined mem's schema reports a repair that did not
+  take.** `set-schema` on a quarantined mem returns the re-attach failure
+  (the pin switch stands, the mem stays quarantined with that reason),
+  where it reported a clean `Switched` on the CLI and over MCP.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

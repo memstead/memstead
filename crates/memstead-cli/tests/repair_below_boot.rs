@@ -455,3 +455,29 @@ fn status_carries_the_quarantine_roster_in_both_forms() {
         "markdown status must render the quarantine roster; got:\n{md}"
     );
 }
+
+/// A repair whose re-attach fails reports the failure: the pin switch
+/// stands, but the mem is still quarantined, so `set-schema` exits
+/// non-zero with the reason, where it reported a clean switch.
+#[cfg(unix)]
+#[test]
+fn set_schema_reports_a_repair_whose_reattach_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let ws = quarantined_workspace(&tmp);
+    let unreadable = ws.join("sample-mem").join("locked.md");
+    std::fs::write(&unreadable, "---\ntype: spec\n---\n\n# Locked\n").unwrap();
+    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let assertion = memstead()
+        .current_dir(&ws)
+        .args(["--json", "mem", "set-schema", "sample-mem", "default@1.0.0"])
+        .assert();
+    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let out = assertion.get_output();
+    assert!(
+        !out.status.success(),
+        "a repair that leaves the mem quarantined must not report success: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}

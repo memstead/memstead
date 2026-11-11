@@ -190,11 +190,11 @@ impl Engine {
             let _ = bump_backend_schema_pin(backend.as_ref(), target, &ctx);
         }
         self.persist_state()?;
-        // Re-attempt the attach. Failure keeps the quarantine (fresh
-        // reason on the roster) but the pin switch stands — the
-        // outcome reports the switch, the roster reports any
-        // remaining cause.
-        let _ = self.reattach_quarantined_mem(mem);
+        // Re-attempt the attach. A failure keeps the quarantine with its
+        // fresh reason on the roster, and the pin switch stands; the call
+        // reports that failure, because a repair that leaves the mem out
+        // of service did not repair it.
+        self.reattach_quarantined_mem(mem)?;
         // The below-gate repair path validated nothing, so it stamps
         // nothing: the marker reports what the last validated mutation
         // stamped (read from the re-attached mount when the repair
