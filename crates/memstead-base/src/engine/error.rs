@@ -1135,6 +1135,9 @@ pub enum EngineError {
         mem: Option<String>,
         operation: String,
     },
+    /// A schema pin (`name@version`) that does not parse.
+    #[error("invalid schema pin {pin:?}: {reason}")]
+    InvalidSchemaPin { pin: String, reason: String },
     /// A chunk asked for past the end of a chunked response.
     #[error("Chunk {chunk} does not exist. Content has {total} chunk{}.", if *total == 1 { "" } else { "s" })]
     ChunkOutOfRange { chunk: usize, total: usize },
@@ -1750,6 +1753,7 @@ impl EngineError {
             EngineError::NotGitBacked { .. } => "INVALID_INPUT",
             EngineError::TemplateIdentityMismatch { .. } => "INVALID_INPUT",
             EngineError::ChunkOutOfRange { .. } => "CHUNK_OUT_OF_RANGE",
+            EngineError::InvalidSchemaPin { .. } => "INVALID_INPUT",
             EngineError::AmbiguousMem { .. } => "AMBIGUOUS_MEM",
             EngineError::UnknownTypes { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::UnknownSchema { .. } => "SCHEMA_NOT_FOUND",
@@ -2559,6 +2563,9 @@ impl EngineError {
             EngineError::NotGitBacked { mem, operation } => {
                 serde_json::json!({ "mem": mem, "operation": operation })
             }
+            EngineError::InvalidSchemaPin { pin, reason } => {
+                serde_json::json!({ "pin": pin, "reason": reason })
+            }
             EngineError::ChunkOutOfRange { chunk, total } => {
                 serde_json::json!({ "chunk": chunk, "total": total })
             }
@@ -3106,6 +3113,16 @@ impl AuthoringPackageError {
 }
 
 impl EngineError {
+    /// Parse a schema pin, refusing one that does not parse with the one
+    /// value every surface renders.
+    pub fn parse_schema_pin(pin: &str) -> Result<memstead_schema::SchemaRef, EngineError> {
+        pin.parse::<memstead_schema::SchemaRef>()
+            .map_err(|reason| EngineError::InvalidSchemaPin {
+                pin: pin.to_string(),
+                reason,
+            })
+    }
+
     /// Refuse an update template that names a title or type other than the
     /// entity's own.
     pub fn check_template_identity(

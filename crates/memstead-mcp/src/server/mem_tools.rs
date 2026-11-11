@@ -244,20 +244,9 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<crate::lifecycle::MemSetSchemaParams>,
     ) -> CallToolResult {
-        let target = match p.schema.parse::<memstead_schema::SchemaRef>() {
+        let target = match memstead_base::EngineError::parse_schema_pin(&p.schema) {
             Ok(r) => r,
-            Err(e) => {
-                let msg = format!("invalid schema ref {:?}: {e}", p.schema);
-                return tool_error_with_payload(
-                    "INVALID_INPUT",
-                    &msg,
-                    envelope(
-                        "INVALID_INPUT",
-                        msg.clone(),
-                        serde_json::json!({ "message": msg }),
-                    ),
-                );
-            }
+            Err(e) => return super::errors::engine_err(e),
         };
         let (role, identity) =
             match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
@@ -300,20 +289,9 @@ impl McpServer {
         engine.set_role(role);
         engine.set_identity(identity);
 
-        let schema_ref = match p.schema.parse::<memstead_schema::SchemaRef>() {
+        let schema_ref = match memstead_base::EngineError::parse_schema_pin(&p.schema) {
             Ok(r) => r,
-            Err(e) => {
-                let msg = format!("invalid schema ref {:?}: {e}", p.schema);
-                return tool_error_with_payload(
-                    "INVALID_INPUT",
-                    &msg,
-                    envelope(
-                        "INVALID_INPUT",
-                        msg.clone(),
-                        serde_json::json!({ "message": msg }),
-                    ),
-                );
-            }
+            Err(e) => return super::errors::engine_err(e),
         };
 
         // Resolve the inlined-schema verbosity up front — *before* the

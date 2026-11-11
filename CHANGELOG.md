@@ -239,6 +239,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `memstead_entity` and `memstead_health` and the CLI's `overview`,
   `entity` and `context`: MCP refused it with `INVALID_INPUT`, now
   retired for this case.
+  A schema pin that does not parse (`name@version` with a bad version)
+  is one engine value, `EngineError::InvalidSchemaPin` (`INVALID_INPUT`,
+  with `details.pin` and `details.reason`), on `memstead schema`,
+  `schema install`, `mem init`, `mem set-schema` and MCP's
+  `memstead_schema`, `memstead_mem_create` and `memstead_mem_set_schema`:
+  MCP's `memstead_schema` reported it as `SCHEMA_NOT_FOUND` with
+  `details.available` and the two MCP mem tools carried `details.message`
+  (retired for `pin` and `reason`); the CLI carried no details.
   `memstead publish` refuses a workspace the engine does not boot with
   the boot refusal's own code (`WORKSPACE_STORE_PARSE`, ...), where it
   reported `ARCHIVE_ASSEMBLY_FAILED` or, when the folders could be

@@ -588,9 +588,9 @@ impl McpServer {
         // schemas without first creating a mem.
         let schema_arc: Option<std::sync::Arc<memstead_schema::Schema>> =
             if effective_name.contains('@') {
-                match effective_name.parse::<memstead_schema::SchemaRef>() {
+                match memstead_base::EngineError::parse_schema_pin(&effective_name) {
                     Ok(parsed) => find_schema_unified(&engine, &parsed).cloned(),
-                    Err(_) => None,
+                    Err(e) => return super::errors::engine_err(e),
                 }
             } else {
                 find_schema_by_name(&engine, &effective_name).cloned()

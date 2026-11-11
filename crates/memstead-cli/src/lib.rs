@@ -208,6 +208,7 @@ impl CliError {
             | Backend { .. }
             | SearchUnavailable
             | ChunkOutOfRange { .. }
+            | InvalidSchemaPin { .. }
             | NoWritableMem
             | ContextNotComputable { .. } => ExitKind::Generic,
             HashMismatch { .. } => ExitKind::HashMismatch,

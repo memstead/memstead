@@ -559,10 +559,8 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         .clone()
         .unwrap_or_else(|| PathBuf::from(&mem_name));
 
-    let schema_ref: memstead_schema::SchemaRef = args
-        .schema
-        .parse()
-        .map_err(|e| invalid_input_error(format!("invalid schema ref {:?}: {e}", args.schema)))?;
+    let schema_ref = memstead_base::EngineError::parse_schema_pin(&args.schema)
+        .map_err(crate::CliError::from_engine_op)?;
     let vcs_config = if args.vcs_shared {
         Some(memstead_schema::VcsConfig {
             gitdir: "../.git".to_string(),
@@ -1553,10 +1551,8 @@ pub fn run_set_sync_state(ctx: &CliContext, args: SetSyncStateArgs) -> anyhow::R
 }
 
 pub fn run_set_schema(ctx: &CliContext, args: SetSchemaArgs) -> anyhow::Result<()> {
-    let target: memstead_schema::SchemaRef = args
-        .schema
-        .parse()
-        .map_err(|e| invalid_input_error(format!("invalid schema ref {:?}: {e}", args.schema)))?;
+    let target = memstead_base::EngineError::parse_schema_pin(&args.schema)
+        .map_err(crate::CliError::from_engine_op)?;
     let outcome = match ctx.cli_engine() {
         Ok(crate::setup::CliEngine::MemRepo(mut engine)) => engine
             .set_mem_schema(&args.name, &target)

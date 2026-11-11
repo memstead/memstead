@@ -318,14 +318,8 @@ fn workspace_installed_readme(ctx: &CliContext, schema_ref: &SchemaRef) -> Optio
 /// carrier would hide which generation the reader got.
 fn resolve_builtin_read_ref(reference: &str) -> anyhow::Result<SchemaRef> {
     if reference.contains('@') {
-        return reference.parse::<SchemaRef>().map_err(|e: String| {
-            CliError::new(
-                ExitKind::Validation,
-                "INVALID_INPUT",
-                format!("invalid schema pin {reference:?}: {e}"),
-            )
-            .into()
-        });
+        return memstead_base::EngineError::parse_schema_pin(reference)
+            .map_err(|e| CliError::from_engine_op(e).into());
     }
     let reg = memstead_schema::SchemaRegistry::builtin();
     let mut versions = reg.available_versions(reference);
@@ -1159,13 +1153,8 @@ fn resolve_source(
 fn resolve_builtin_ref(source: &str) -> anyhow::Result<SchemaRef> {
     let reg = memstead_schema::SchemaRegistry::builtin();
     if source.contains('@') {
-        let r: SchemaRef = source.parse().map_err(|e: String| {
-            CliError::new(
-                ExitKind::Validation,
-                "INVALID_INPUT",
-                format!("invalid schema pin {source:?}: {e}"),
-            )
-        })?;
+        let r: SchemaRef = memstead_base::EngineError::parse_schema_pin(source)
+            .map_err(CliError::from_engine_op)?;
         if reg.get(&r.name, &r.version).is_none() {
             return Err(CliError::from_engine_with_hint(
                 memstead_base::EngineError::unknown_builtin_schema(source),

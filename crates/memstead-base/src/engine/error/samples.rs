@@ -116,6 +116,7 @@ variant_tags!(
         NotGitBacked,
         TemplateIdentityMismatch,
         ChunkOutOfRange,
+        InvalidSchemaPin,
         NoWritableMem,
         AmbiguousMem,
         UnknownTypes,
@@ -1142,6 +1143,13 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
         (
             "MemNotReadOnly".into(),
             EngineError::MemNotReadOnly { mem: s("specs") },
+        ),
+        (
+            "InvalidSchemaPin".into(),
+            EngineError::InvalidSchemaPin {
+                pin: s("default@latest"),
+                reason: s("exact semver versions only"),
+            },
         ),
         (
             "ChunkOutOfRange".into(),
