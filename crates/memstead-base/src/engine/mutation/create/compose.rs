@@ -252,10 +252,12 @@ impl Engine {
         // A create is a transition onto every gated value it lands; no
         // record can name content that did not exist, so a self-check gate
         // refuses unless one names the result's own bytes.
+        // The result's hash is the hash of the bytes this create writes.
+        let result_hash = crate::entity::parser::compute_hash(&markdown);
         let (violated, _) = self.gate_transition_forms(
             None,
             &entity_for_render,
-            &entity_for_render.content_hash,
+            &result_hash,
             type_def.as_ref(),
             violated,
         );

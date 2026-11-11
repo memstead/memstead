@@ -353,7 +353,9 @@ impl Engine {
                 continue;
             }
             let at_result = provider(&result_entity, check_kind);
-            if at_result.confirms() {
+            // An empty hash names no bytes: a record of a placeholder
+            // (stored with an empty hash) never licenses a result.
+            if !result_hash.is_empty() && at_result.confirms() {
                 continue;
             }
             let mut state = at_result.label().to_string();

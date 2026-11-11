@@ -65,7 +65,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   record carried to the new hash. A later edit carries nothing: the
   entity reads `check_stale` and the health constraints axis reports the
   gate as a standing violation until a new check is recorded or the
-  value is left. A retype refused on a constraint or a required edge now
+  value is left. A create gates on the hash of the bytes it writes, and
+  a record with an empty hash (a check of a placeholder stub) never
+  licenses a result. A retype refused on a constraint or a required edge now
   names the violation in `details.problems` (it serialized as `null`).
   A transition write that also changes content refuses
   `CONSTRAINT_UNSATISFIED`, the violation naming the changed content in
