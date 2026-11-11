@@ -323,3 +323,79 @@ fn concurrent_publishers_union_instead_of_overwriting() {
         "{status:?}"
     );
 }
+
+/// A push keeps the remote's rows its own import refused: B publishes a
+/// row dated an hour ahead (a machine with a wrong clock), A checks and
+/// pushes. A's import refuses the row and the push names it; the
+/// remote's member still holds it beside A's rows.
+#[test]
+fn a_push_keeps_and_names_the_rows_its_import_refused() {
+    let (a, remote) = fixture();
+    let remote_gitdir = remote.path().to_path_buf();
+    let alpha = EntityId::new("specs", "alpha");
+    let beta = EntityId::new("specs", "beta");
+    {
+        let mut engine = engine_from_workspace_root(a.path()).unwrap();
+        check(&mut engine, "checker-c", &alpha);
+        engine.push("specs", "hub", false).unwrap();
+    }
+    let b = clone_workspace(a.path());
+    {
+        let mut engine_b = engine_from_workspace_root(b.path()).unwrap();
+        engine_b.pull("specs", "hub").unwrap();
+        check(&mut engine_b, "clock-ahead", &alpha);
+    }
+    // Move B's own row an hour ahead, as a wrong clock would have.
+    let ledger = b
+        .path()
+        .join(".memstead")
+        .join("state")
+        .join("checks")
+        .join("checks.jsonl");
+    let text = std::fs::read_to_string(&ledger).unwrap();
+    let ahead = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600;
+    let rewritten: String = text
+        .lines()
+        .map(|l| {
+            let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
+            if v["identity"] == "clock-ahead" {
+                v["ts"] = ahead.into();
+            }
+            format!("{v}\n")
+        })
+        .collect();
+    std::fs::write(&ledger, rewritten).unwrap();
+    {
+        let mut engine_b = engine_from_workspace_root(b.path()).unwrap();
+        engine_b.push("specs", "hub", false).unwrap();
+    }
+    assert!(
+        member_at(&remote_gitdir, CHECKS_REF)
+            .unwrap()
+            .contains("clock-ahead")
+    );
+
+    let mut engine_a = engine_from_workspace_root(a.path()).unwrap();
+    check(&mut engine_a, "checker-d", &beta);
+    let outcome = engine_a.push("specs", "hub", false).unwrap();
+    assert_eq!(outcome.checks_refused.len(), 1, "{outcome:?}");
+    assert_eq!(
+        outcome.checks_refused[0].identity.as_deref(),
+        Some("clock-ahead")
+    );
+    let member = member_at(&remote_gitdir, CHECKS_REF).unwrap();
+    assert!(
+        member.contains("clock-ahead"),
+        "the refused row stays: {member}"
+    );
+    assert!(member.contains("checker-d"), "{member}");
+    assert!(
+        !ledger_lines(a.path())
+            .iter()
+            .any(|l| l.contains("clock-ahead"))
+    );
+}
