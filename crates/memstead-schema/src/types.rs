@@ -442,16 +442,18 @@ pub enum ConstraintDef {
         #[serde(default)]
         severity: ConstraintSeverity,
     },
-    /// Form 6 — gated transition: a write that lands `field` holding
-    /// `to_value` requires every entity related via `relationships`
+    /// Form 6 — gated transition: a write that moves the entity onto
+    /// `field` holding `to_value` (it did not exist, was of a type without
+    /// this form, or held another value) requires every entity related via `relationships`
     /// edges in `direction` to carry a fresh confirming check record
     /// (derived verification state `checked_ok` — the engine's checks
     /// substrate; a stale or failed check does not confirm). Generic
     /// by construction: any schema, any enum field, any relation set —
-    /// no type semantics baked in. Evaluated at write time in the
-    /// shared declared-constraints pass (block refuses, warn warns)
-    /// and reported by the health `constraints` include as a standing
-    /// violation when a check goes stale after the transition. An
+    /// no type semantics baked in. Evaluated at write time on the
+    /// transition only (block refuses, warn warns): a write that leaves
+    /// the entity at the value is not gated, and nothing is carried. The
+    /// health `constraints` include reports it as a standing violation
+    /// when a check goes stale after the transition. An
     /// empty related set satisfies the rule (universal quantification
     /// over nothing); pair with `required_outgoing` where at least one
     /// related entity must exist. On an engine without a check ledger
@@ -486,19 +488,26 @@ pub enum ConstraintDef {
         severity: ConstraintSeverity,
     },
     /// Form 7 — gated transition on the entity's own check record: a
-    /// write that lands `field` holding `to_value` requires the entity
-    /// ITSELF to carry a fresh confirming check record of `check_kind`
+    /// write that moves the entity onto `field` holding `to_value` (it did
+    /// not exist, was of a type without this form, or held another value)
+    /// requires the entity ITSELF to carry a fresh confirming check record of `check_kind`
     /// (an engine kind, `verification` or `conformance`, or a foreign
     /// `x-<name>` kind the engine records verbatim), recorded under an
-    /// identity distinct from the entity's own author (the same
-    /// independence reading form 6 applies to related entities). The
+    /// identity that wrote none of the content it checked (every identity
+    /// on a write of the entity up to the write the record names in
+    /// `checked_write`). The record names either the bytes the write
+    /// produces, or the stored content when the write changes nothing but
+    /// `field` and the engine-stamped timestamps; only in that second case
+    /// is it carried to the new hash, so a later edit leaves the check
+    /// behind. Fields required at the gated value are written before the
+    /// check. The
     /// engine never judges what the check asserts; it requires that
     /// the act was recorded, fresh against the entity's content, by
     /// someone else. Generic by construction: any type, any enum
     /// field, any declared kind. Evaluated at write time in the shared
-    /// declared-constraints pass (block refuses, warn warns) and
-    /// reported by the health `constraints` include as a standing
-    /// violation when the check goes stale after the transition. On an
+    /// declared-constraints pass on the transition only (block refuses,
+    /// warn warns) and reported by the health `constraints` include as a
+    /// standing violation when the check goes stale after it. On an
     /// engine without a check ledger the entity derives
     /// `never_checked`, so a declared gate refuses rather than passing.
     TransitionRequiresSelfCheck {

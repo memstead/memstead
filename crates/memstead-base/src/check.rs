@@ -407,6 +407,18 @@ pub struct CheckRecord {
     /// before and the reason. Absent on every line a checker wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub carried_from: Option<CarriedFrom>,
+    /// The write whose result the check saw: the backend-native reference
+    /// of the entity's last write when the record was made (a commit sha
+    /// on a git-branch mem, the ledger line's timestamp token on a folder
+    /// mem), stamped by the engine. Independence on an entity that is not a
+    /// plan criterion compares the checker with every identity that wrote
+    /// the entity up to and including this write, in write order, so a
+    /// write in the same second before or after the check is told apart
+    /// without a clock. A carried line keeps its source's. Absent on every
+    /// line an earlier engine wrote: those are read against every write at
+    /// or before their `ts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_write: Option<String>,
 }
 
 /// How far past the engine's clock an entity's newest act may lie for a
@@ -1051,6 +1063,7 @@ impl SealedCheck {
             finding: None,
             renamed_from: self.renamed_from.clone(),
             carried_from: self.carried_from.clone(),
+            checked_write: None,
         }
     }
 }
@@ -1239,6 +1252,7 @@ mod tests {
             finding: None,
             renamed_from: None,
             carried_from: None,
+            checked_write: None,
         }
     }
 
@@ -1311,6 +1325,7 @@ mod tests {
             let carried = CheckRecord {
                 entity_hash: "h2".into(),
                 carried_from: Some(CarriedFrom::transition("h1")),
+                checked_write: None,
                 ..source.clone()
             };
             // A second record at the source's hash, same second: also
@@ -1346,6 +1361,7 @@ mod tests {
             .record(&CheckRecord {
                 entity_hash: "h2".into(),
                 carried_from: Some(CarriedFrom::transition("h1")),
+                checked_write: None,
                 ..source.clone()
             })
             .unwrap();
@@ -1359,16 +1375,19 @@ mod tests {
         let mid = CheckRecord {
             entity_hash: "h2".into(),
             carried_from: Some(CarriedFrom::transition("h1")),
+            checked_write: None,
             ..a.clone()
         };
         let last = CheckRecord {
             entity_hash: "h3".into(),
             carried_from: Some(CarriedFrom::transition("h2")),
+            checked_write: None,
             ..a.clone()
         };
         let back = CheckRecord {
             entity_hash: "h1".into(),
             carried_from: Some(CarriedFrom::transition("h2")),
+            checked_write: None,
             ..a.clone()
         };
         let read = |rows: &[&CheckRecord]| {

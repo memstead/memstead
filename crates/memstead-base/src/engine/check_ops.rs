@@ -190,6 +190,12 @@ impl Engine {
             finding,
             renamed_from: None,
             carried_from: None,
+            // The write the check saw: the entity's last write as the
+            // mem's provenance holds it now.
+            checked_write: self
+                .mem_touches(mem_name)
+                .last_write(entity_id)
+                .map(str::to_string),
         };
         ledger
             .record_local(record)
@@ -1287,6 +1293,13 @@ write_rules: []
         let id = create_plan(&mut engine, "The Bundle");
         let hash = engine.get_entity(&id).unwrap().content_hash.clone();
         let ledger = CheckLedger::for_workspace(tmp.path());
+        // Times of the act after the entity's creation, so the rows read
+        // against the writes they saw (no `checked_write`: the `ts` rule).
+        let base = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 2;
         let row = |verdict: &str, kind: Option<&str>, ts: u64| CheckRecord {
             ts,
             observed_at: None,
@@ -1303,20 +1316,21 @@ write_rules: []
             finding: None,
             renamed_from: None,
             carried_from: None,
+            checked_write: None,
         };
         // Local ok at t2, then a merged failed check made at t1 < t2.
-        ledger.record(&row("ok", None, 2_000)).unwrap();
+        ledger.record(&row("ok", None, base + 20)).unwrap();
         ledger
-            .record(&row("ok", Some("x-projection"), 2_000))
+            .record(&row("ok", Some("x-projection"), base + 20))
             .unwrap();
-        ledger.record(&row("failed", None, 1_000)).unwrap();
+        ledger.record(&row("failed", None, base + 10)).unwrap();
         ledger
-            .record(&row("failed", Some("x-projection"), 1_000))
+            .record(&row("failed", Some("x-projection"), base + 10))
             .unwrap();
 
         let (state, latest) = engine.entity_check_state("bundles", id.as_ref()).unwrap();
         assert_eq!(state, crate::check::CheckState::CheckedOk);
-        assert_eq!(latest.unwrap().ts, 2_000);
+        assert_eq!(latest.unwrap().ts, base + 20);
         let foreign = engine.latest_foreign_checks("bundles", id.as_ref());
         assert_eq!(foreign[0].verdict, "ok");
         let entity = engine.get_entity(&id).unwrap().clone();
@@ -1349,7 +1363,7 @@ write_rules: []
         ledger
             .record(&CheckRecord {
                 entity_hash: post,
-                ..row("failed", Some("x-projection"), 3_000)
+                ..row("failed", Some("x-projection"), base + 30)
             })
             .unwrap();
         let entity = engine.get_entity(&id).unwrap().clone();
@@ -1407,6 +1421,128 @@ write_rules: []
             )
             .expect("the checked side lands");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), checked);
+    }
+
+    /// Independence on an entity that is not a plan criterion counts every
+    /// identity that wrote it up to the write the check saw, on the folder
+    /// backend, with the rewrite one second after the create and in the
+    /// same second. A creates, B rewrites and checks, C sets the gated
+    /// value: refused, B's check reads `self_checked`. D, who wrote
+    /// nothing, checks and sets the value in the same second: the gate
+    /// opens and the carried line reads `confirmed_independent`. A rewrite
+    /// by D before D's check, in the same second, makes it `self_checked`.
+    /// A write without an identity before the check reads `unconfirmable`;
+    /// a line without `checked_write` is read against the writes at or
+    /// before its `ts`. The first author is A in both timings.
+    #[test]
+    fn independence_counts_every_identity_that_wrote_what_was_checked_on_folder() {
+        for pause in [true, false] {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let mut engine = self_check_gated_engine(&tmp, "x-projection");
+            engine.set_identity(Some("identity-a".to_string()));
+            let id = create_plan(&mut engine, "The Bundle");
+            if pause {
+                std::thread::sleep(std::time::Duration::from_millis(1100));
+            }
+            engine.set_identity(Some("identity-b".to_string()));
+            update(&mut engine, &id, None, Some("rewritten by b.")).unwrap();
+            check_plan(&mut engine, "identity-b", &id, "x-projection");
+            let touches = engine.mem_touches("bundles");
+            assert_eq!(
+                touches.first_author(id.as_ref()),
+                Some("identity-a"),
+                "pause {pause}"
+            );
+            let entity = engine.get_entity(&id).unwrap().clone();
+            let standing = (engine.check_standing_provider())(&entity, "x-projection");
+            assert_eq!(standing.label(), "self_checked", "pause {pause}");
+            engine.set_identity(Some("identity-c".to_string()));
+            let err =
+                set_status(&mut engine, &id, "complete").expect_err("b checked its own writing");
+            assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED");
+
+            check_plan(&mut engine, "identity-d", &id, "x-projection");
+            engine.set_identity(Some("identity-d".to_string()));
+            set_status(&mut engine, &id, "complete").expect("d wrote nothing it checked");
+            let entity = engine.get_entity(&id).unwrap().clone();
+            let standing = (engine.check_standing_provider())(&entity, "x-projection");
+            assert_eq!(standing.label(), "confirmed_independent", "pause {pause}");
+            let carried = &engine.latest_foreign_checks("bundles", id.as_ref())[0];
+            assert!(carried.carried_from.is_some());
+            assert_eq!(carried.identity.as_deref(), Some("identity-d"));
+        }
+
+        // A rewrite by D in the same second, before D's check.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "x-projection");
+        engine.set_identity(Some("identity-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+        engine.set_identity(Some("identity-d".to_string()));
+        update(&mut engine, &id, None, Some("rewritten by d.")).unwrap();
+        check_plan(&mut engine, "identity-d", &id, "x-projection");
+        let entity = engine.get_entity(&id).unwrap().clone();
+        assert_eq!(
+            (engine.check_standing_provider())(&entity, "x-projection").label(),
+            "self_checked"
+        );
+
+        // A write without an identity before the check.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "x-projection");
+        engine.set_identity(Some("identity-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+        engine.set_identity(None);
+        update(&mut engine, &id, None, Some("anonymous edit.")).unwrap();
+        check_plan(&mut engine, "identity-d", &id, "x-projection");
+        let entity = engine.get_entity(&id).unwrap().clone();
+        assert_eq!(
+            (engine.check_standing_provider())(&entity, "x-projection").label(),
+            "unconfirmable"
+        );
+
+        // A line an earlier engine wrote: no `checked_write`, read against
+        // the writes at or before its `ts`.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "x-projection");
+        engine.set_identity(Some("identity-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+        let entity = engine.get_entity(&id).unwrap().clone();
+        let touches = engine.mem_touches("bundles");
+        let legacy = |identity: &str, ts: u64| CheckRecord {
+            ts,
+            observed_at: None,
+            entity: id.as_ref().to_string(),
+            verdict: "ok".to_string(),
+            method: None,
+            entity_hash: entity.content_hash.clone(),
+            actor: "cli".to_string(),
+            client: None,
+            role: "checker".to_string(),
+            identity: Some(identity.to_string()),
+            kind: Some("x-projection".to_string()),
+            schema_ref: None,
+            finding: None,
+            renamed_from: None,
+            carried_from: None,
+            checked_write: None,
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let (r, _) = engine.independence_of(&entity, &legacy("identity-a", now + 5), &touches);
+        assert_eq!(r, crate::engine::independence::Independence::SelfChecked);
+        let (r, _) = engine.independence_of(&entity, &legacy("identity-d", now + 5), &touches);
+        assert_eq!(
+            r,
+            crate::engine::independence::Independence::ConfirmedIndependent
+        );
+        let (r, _) = engine.independence_of(&entity, &legacy("identity-d", 1), &touches);
+        assert_eq!(
+            r,
+            crate::engine::independence::Independence::Unconfirmable,
+            "no write at or before the line's ts"
+        );
     }
 
     #[test]

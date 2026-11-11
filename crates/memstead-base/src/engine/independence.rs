@@ -168,15 +168,27 @@ impl CheckStanding {
     }
 }
 
-/// One mem's mutation touches by entity: `(timestamp, identity)` per
-/// touch, from the mem's provenance record (the git-branch note trailers,
-/// or the folder ledger). Built once per mem and shared by every
-/// derivation in one pass.
+/// One recorded write of an entity: when, by whom, the backend-native
+/// reference of the write (a commit sha on a git-branch mem, the ledger
+/// line's timestamp token on a folder mem), and its place in the mem's
+/// write order (`seq`, oldest first), which orders writes inside one
+/// second without a clock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Touch {
+    pub ts: i64,
+    pub identity: Option<String>,
+    pub reference: String,
+    pub seq: usize,
+}
+
+/// One mem's mutation touches by entity, from the mem's provenance record
+/// (the git-branch note trailers, or the folder ledger). Built once per
+/// mem and shared by every derivation in one pass.
 #[derive(Debug, Default, Clone)]
 pub struct MemTouches {
-    by_entity: HashMap<String, Vec<(i64, Option<String>)>>,
-    /// Rename notes seen, as `(ts, old, new)`, for [`Self::follow_renames`].
-    renames: Vec<(i64, String, String)>,
+    by_entity: HashMap<String, Vec<Touch>>,
+    /// Rename notes seen, as `(seq, old, new)`, for [`Self::follow_renames`].
+    renames: Vec<(usize, String, String)>,
 }
 
 impl MemTouches {
@@ -185,32 +197,31 @@ impl MemTouches {
     /// [`super::history::parse_rename_pair`] splits); the touch lands
     /// under both ids and the pair is kept so [`Self::follow_renames`]
     /// can join the two halves of the story. Anything else is one id.
-    fn absorb(&mut self, entity_field: &str, ts: i64, identity: Option<String>) {
+    fn absorb(&mut self, entity_field: &str, touch: Touch) {
         match super::history::parse_rename_pair(entity_field) {
             Some((old, new)) => {
                 self.by_entity
                     .entry(old.clone())
                     .or_default()
-                    .push((ts, identity.clone()));
-                self.by_entity
-                    .entry(new.clone())
-                    .or_default()
-                    .push((ts, identity));
-                self.renames.push((ts, old, new));
+                    .push(touch.clone());
+                let seq = touch.seq;
+                self.by_entity.entry(new.clone()).or_default().push(touch);
+                self.renames.push((seq, old, new));
             }
             None => self
                 .by_entity
                 .entry(entity_field.to_string())
                 .or_default()
-                .push((ts, identity)),
+                .push(touch),
         }
     }
 
     /// Join each renamed entity's story: the touches recorded under the
     /// old id (its creation among them) become touches of the new id,
     /// oldest rename first so a chain `a → b → c` carries `a`'s story
-    /// through `b` into `c`. Without this the renamed entity's oldest
-    /// touch is the rename itself and the renamer reads as its author.
+    /// through `b` into `c`, and every story is left in write order.
+    /// Without this the renamed entity's oldest touch is the rename itself
+    /// and the renamer reads as its author.
     fn follow_renames(&mut self) {
         let mut renames = std::mem::take(&mut self.renames);
         renames.sort_by_key(|r| r.0);
@@ -223,22 +234,44 @@ impl MemTouches {
                 }
             }
         }
+        for touches in self.by_entity.values_mut() {
+            touches.sort_by_key(|t| t.seq);
+        }
         self.renames = renames;
+    }
+
+    /// The touches of `entity` in write order, oldest first.
+    pub fn story(&self, entity: &str) -> &[Touch] {
+        self.by_entity.get(entity).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// The identity of the write that created `entity`: the first touch in
+    /// write order, whatever order the backend fed them in.
+    pub fn first_author(&self, entity: &str) -> Option<&str> {
+        self.story(entity)
+            .first()
+            .and_then(|t| t.identity.as_deref())
+    }
+
+    /// The reference of `entity`'s last write, the one a check recorded
+    /// now sees.
+    pub fn last_write(&self, entity: &str) -> Option<&str> {
+        self.story(entity).last().map(|t| t.reference.as_str())
     }
 
     /// The oldest touch timestamp of `entity`, if any is recorded.
     fn written_at(&self, entity: &str) -> Option<i64> {
         self.by_entity
             .get(entity)
-            .and_then(|t| t.iter().map(|(ts, _)| *ts).min())
+            .and_then(|t| t.iter().map(|t| t.ts).min())
     }
 
     /// Identities that touched `entity` at or after `since`.
     fn identities_since(&self, entity: &str, since: i64, into: &mut BTreeSet<String>) {
         if let Some(touches) = self.by_entity.get(entity) {
-            for (ts, id) in touches {
-                if *ts >= since
-                    && let Some(id) = id
+            for t in touches {
+                if t.ts >= since
+                    && let Some(id) = &t.identity
                 {
                     into.insert(id.clone());
                 }
@@ -250,7 +283,22 @@ impl MemTouches {
     fn any_identity(&self, entity: &str) -> bool {
         self.by_entity
             .get(entity)
-            .is_some_and(|t| t.iter().any(|(_, id)| id.is_some()))
+            .is_some_and(|t| t.iter().any(|t| t.identity.is_some()))
+    }
+
+    /// The writes a check saw: every touch of `entity` up to and including
+    /// the write the record names ([`CheckRecord::checked_write`]), in
+    /// write order. A record without the field (every line an earlier
+    /// engine wrote), or one naming a write the story does not hold, is
+    /// read against every touch at or before its `ts`.
+    pub fn writes_seen_by(&self, entity: &str, check: &CheckRecord) -> Vec<&Touch> {
+        let story = self.story(entity);
+        if let Some(r) = check.checked_write.as_deref()
+            && let Some(at) = story.iter().rposition(|t| t.reference == r)
+        {
+            return story[..=at].iter().collect();
+        }
+        story.iter().filter(|t| t.ts <= check.ts as i64).collect()
     }
 }
 
@@ -284,16 +332,25 @@ impl Engine {
                         crate::ops::RENAME_SIMILARITY_DEFAULT,
                     )
                 {
-                    for n in &changes.notes {
+                    // The notes arrive newest first: the write order is
+                    // their reverse.
+                    let count = changes.notes.len();
+                    for (i, n) in changes.notes.iter().enumerate() {
+                        let touch = Touch {
+                            ts: n.timestamp,
+                            identity: n.identity.clone(),
+                            reference: n.sha.clone(),
+                            seq: count - i,
+                        };
                         if let Some(entity) = n.entity_id.as_deref() {
-                            out.absorb(entity, n.timestamp, n.identity.clone());
+                            out.absorb(entity, touch.clone());
                         }
                         // A multi-entity commit (a batch, a proposal merge)
                         // names its entities in the `Entities:` trailer and
                         // a count in its subject; the identity touches
                         // every one of them.
                         for entity in &n.entity_ids {
-                            out.absorb(entity, n.timestamp, n.identity.clone());
+                            out.absorb(entity, touch.clone());
                         }
                     }
                     out.follow_renames();
@@ -301,8 +358,10 @@ impl Engine {
             }
             crate::workspace::MountStorage::Folder { .. }
             | crate::workspace::MountStorage::InMemory => {
+                // The ledger is append-only: its line order is the write
+                // order.
                 if let Ok(records) = m.backend.read_provenance(None) {
-                    for r in records {
+                    for (seq, r) in records.into_iter().enumerate() {
                         let Some(entity) = r.entity.as_deref() else {
                             continue;
                         };
@@ -314,7 +373,14 @@ impl Engine {
                         out.by_entity
                             .entry(entity.to_string())
                             .or_default()
-                            .push((ts, r.identity.clone()));
+                            .push(Touch {
+                                ts,
+                                identity: r.identity.clone(),
+                                reference: crate::filesystem::changelog::format_rfc3339_utc(
+                                    r.timestamp,
+                                ),
+                                seq,
+                            });
                     }
                 }
             }
@@ -402,19 +468,17 @@ impl Engine {
                 (reading, Some(executors))
             }
             None => {
-                // Not a criterion: today's rule, the entity's own author.
-                // The author is the oldest touch; touches are absorbed
-                // newest-first, so among touches in one second the last
-                // absorbed is the one committed first.
-                let author = touches
-                    .by_entity
-                    .get(&entity.id.0)
-                    .and_then(|t| t.iter().rev().min_by_key(|(ts, _)| *ts))
-                    .and_then(|(_, id)| id.clone());
-                let reading = match author {
-                    Some(a) if a == checker => Independence::SelfChecked,
-                    Some(_) => Independence::ConfirmedIndependent,
-                    None => Independence::Unconfirmable,
+                // Not a criterion: every identity that wrote the entity up
+                // to the write the check saw. A writer among them is the
+                // checker checking its own content; a write without an
+                // identity leaves nothing to compare.
+                let seen = touches.writes_seen_by(&entity.id.0, check);
+                let reading = if seen.iter().any(|t| t.identity.as_deref() == Some(checker)) {
+                    Independence::SelfChecked
+                } else if seen.is_empty() || seen.iter().any(|t| t.identity.is_none()) {
+                    Independence::Unconfirmable
+                } else {
+                    Independence::ConfirmedIndependent
                 };
                 (reading, None)
             }
@@ -544,19 +608,20 @@ mod tests {
     #[test]
     fn rename_notes_join_the_story_under_the_new_id() {
         let mut t = MemTouches::default();
-        t.absorb("m--a", 10, Some("alice".into()));
-        t.absorb("m--a → m--b", 20, Some("renamer".into()));
-        t.absorb("m--b", 30, Some("bob".into()));
-        t.absorb("m--b → m--c", 40, None);
+        let touch = |ts: i64, id: Option<&str>, seq: usize| super::Touch {
+            ts,
+            identity: id.map(str::to_string),
+            reference: format!("r{seq}"),
+            seq,
+        };
+        t.absorb("m--a", touch(10, Some("alice"), 1));
+        t.absorb("m--a → m--b", touch(20, Some("renamer"), 2));
+        t.absorb("m--b", touch(30, Some("bob"), 3));
+        t.absorb("m--b → m--c", touch(40, None, 4));
         t.follow_renames();
 
         assert_eq!(t.written_at("m--c"), Some(10));
-        let author = t
-            .by_entity
-            .get("m--c")
-            .and_then(|v| v.iter().min_by_key(|(ts, _)| *ts))
-            .and_then(|(_, id)| id.clone());
-        assert_eq!(author.as_deref(), Some("alice"));
+        assert_eq!(t.first_author("m--c"), Some("alice"));
         let mut ids = std::collections::BTreeSet::new();
         t.identities_since("m--c", 0, &mut ids);
         assert_eq!(
@@ -565,7 +630,7 @@ mod tests {
         );
         // A cross-mem rewrite qualifier is not a pair and stays one key.
         let mut u = MemTouches::default();
-        u.absorb("m--x → m--y (cross-mem rewrite in peer)", 1, None);
+        u.absorb("m--x → m--y (cross-mem rewrite in peer)", touch(1, None, 5));
         u.follow_renames();
         assert!(
             u.by_entity

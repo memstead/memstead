@@ -681,7 +681,16 @@ fn merge_lands_the_six_shapes_under_two_identities_with_checks_and_the_record() 
         let entity = engine.store().get(&EntityId(id.clone())).unwrap();
         assert_eq!(record.entity_hash, entity.content_hash, "{slug}");
         let (independence, _) = engine.independence_of(entity, &record, &touches);
-        assert_eq!(independence, Independence::ConfirmedIndependent, "{slug}");
+        // Epsilon was adopted with changes: the merger wrote its landed
+        // content in the amend commit, so the merger's own check of it is
+        // a check of its own writing. Independence counts every identity
+        // that wrote the checked content, not only the creator.
+        let expected = if slug == "epsilon" {
+            Independence::SelfChecked
+        } else {
+            Independence::ConfirmedIndependent
+        };
+        assert_eq!(independence, expected, "{slug}");
     }
     for slug in ["theta", "lambda", "zeta", "iota"] {
         let id = format!("specs--{slug}");

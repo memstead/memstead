@@ -26,6 +26,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Independence counts every identity that wrote what was checked
+  (breaking).** On an entity that is not a plan criterion, a check reads
+  `self_checked` when its identity wrote the entity at any point up to
+  the write the check saw, not only when it created it; a write without
+  an identity in that range reads `unconfirmable`. A new optional ledger
+  field, `checked_write`, names that write (the commit sha on a
+  git-branch mem, the ledger line's timestamp token on a folder mem), so
+  writes in the same second before and after a check are told apart; a
+  carried line keeps its source's. Lines without it are read against
+  every write at or before their `ts`. Touches are ordered by write
+  order on every backend, so the first author is the creating write's
+  identity even when two writes share a second. A merger who adopts a
+  proposal with changes therefore reads `self_checked` on the check it
+  records for that entity.
+
 - **A gated approval no longer outlives an edit of what it approved
   (breaking).** `transition_requires_checks` and
   `transition_requires_self_check` now gate the transition only: a write

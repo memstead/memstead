@@ -552,6 +552,7 @@ mod tests {
                 finding: None,
                 renamed_from: None,
                 carried_from: None,
+                checked_write: None,
             })
             .unwrap();
         let config = memstead_schema::load_and_validate(&mem_dir).unwrap();

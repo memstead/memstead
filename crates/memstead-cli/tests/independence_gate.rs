@@ -20,6 +20,14 @@ fn memstead() -> Command {
 /// fresh, independent ok check; `criterion` and `note` (hierarchy PART_OF)
 /// are plain typed entities.
 fn seed() -> TempDir {
+    seed_with(PLAN_GATE)
+}
+
+const PLAN_GATE: &str = "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: complete\n    relationships: [VERIFIES]\n    direction: incoming\n    severity: block\n";
+
+const SELF_GATE: &str = "constraints:\n  - kind: transition_requires_self_check\n    field: status\n    to_value: complete\n    check_kind: x-approval\n    severity: block\n";
+
+fn seed_with(plan_gate: &str) -> TempDir {
     let ws = TempDir::new().unwrap();
     memstead()
         .current_dir(ws.path())
@@ -79,7 +87,7 @@ community:
         body(
             "plan",
             "\n  - key: status\n    description: s\n    field_type: string\n    default_value: draft\n    enum_values: [draft, complete]",
-            "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: complete\n    relationships: [VERIFIES]\n    direction: incoming\n    severity: block\n",
+            plan_gate,
         ),
     )
     .unwrap();
@@ -388,4 +396,128 @@ fn a_criterion_edited_after_completion_reads_stale_and_the_gate_stands_violated(
         text.contains("plans--the-plan") && text.contains("transition_requires_checks"),
         "{text}"
     );
+}
+
+fn cli(ws: &Path, args: &[&str]) -> std::process::Output {
+    memstead().current_dir(ws).args(args).output().unwrap()
+}
+
+fn edit(ws: &Path, identity: Option<&str>, args: &[&str]) {
+    let mut all = vec!["update", "plans--the-plan", "--auto-hash", "--quiet"];
+    all.extend_from_slice(args);
+    if let Some(i) = identity {
+        all.push("--identity");
+        all.push(i);
+    }
+    let out = cli(ws, &all);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+fn approve(ws: &Path, identity: &str) {
+    let out = cli(
+        ws,
+        &[
+            "check",
+            "plans--the-plan",
+            "--verdict",
+            "ok",
+            "--kind",
+            "x-approval",
+            "--role",
+            "checker",
+            "--identity",
+            identity,
+            "--quiet",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+/// The plan's self-check standing as the entity read derives it, and the
+/// first author the provenance read names.
+fn standing(ws: &Path) -> (String, String) {
+    let out = cli(
+        ws,
+        &[
+            "entity",
+            "plans--the-plan",
+            "--provenance",
+            "--json",
+            "--quiet",
+        ],
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let prov = &v["mutation_provenance"];
+    let created_by = prov["created_by"]["identity"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    let health = cli(
+        ws,
+        &["health", "--include", "constraints", "--json", "--quiet"],
+    );
+    (
+        String::from_utf8_lossy(&health.stdout).to_string(),
+        created_by,
+    )
+}
+
+/// Independence on a git-branch mem (the CLI's `init` workspace): A
+/// creates, B rewrites one second later and in the same second, B
+/// checks, C sets the gated value: refused naming `self_checked`; the
+/// first author reads A. D, who wrote nothing, checks and completes:
+/// the gate opens. Before the repair the one-second case opened the
+/// gate on B's check (the comparator was the first author only).
+#[test]
+fn independence_counts_every_writer_on_git_branch() {
+    for pause in [true, false] {
+        let ws = seed_with(SELF_GATE);
+        let root = ws.path();
+        create(root, "identity-a", "plan", "The Plan", None);
+        if pause {
+            std::thread::sleep(std::time::Duration::from_millis(1100));
+        }
+        edit(
+            root,
+            Some("identity-b"),
+            &["--section", "body=rewritten by b"],
+        );
+        approve(root, "identity-b");
+        let out = cli(
+            root,
+            &[
+                "update",
+                "plans--the-plan",
+                "--metadata",
+                "status=complete",
+                "--auto-hash",
+                "--identity",
+                "identity-c",
+                "--json",
+                "--quiet",
+            ],
+        );
+        assert!(!out.status.success(), "pause {pause}");
+        let env: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(env["code"], "CONSTRAINT_UNSATISFIED", "{env}");
+        assert!(env.to_string().contains("self_checked"), "{env}");
+        let (_, created_by) = standing(root);
+        assert_eq!(created_by, "identity-a", "pause {pause}");
+
+        approve(root, "identity-d");
+        edit(root, Some("identity-d"), &["--metadata", "status=complete"]);
+        let (health, _) = standing(root);
+        assert!(
+            !health.contains("transition_requires_self_check"),
+            "pause {pause}: {health}"
+        );
+    }
 }

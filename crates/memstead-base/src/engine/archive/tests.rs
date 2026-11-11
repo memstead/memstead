@@ -1480,6 +1480,7 @@ fn nested_mem_export_rekeys_fresh_sealed_checks_to_the_archived_bytes() {
             finding: None,
             renamed_from: None,
             carried_from: None,
+            checked_write: None,
         })
         .unwrap();
     let source_gamma_hash = engine
@@ -1695,6 +1696,7 @@ fn export_seals_latest_check_per_entity_and_kind() {
             finding: None,
             renamed_from: None,
             carried_from: None,
+            checked_write: None,
         })
         .unwrap();
 
@@ -1793,6 +1795,7 @@ fn export_without_a_qualifying_record_embeds_no_checks_member() {
             finding: None,
             renamed_from: None,
             carried_from: None,
+            checked_write: None,
         })
         .unwrap();
     let no_record = engine.export_mem_to_bytes("specs").unwrap();
@@ -2289,6 +2292,7 @@ fn archive_mount_never_reads_the_workspace_ledger() {
             finding: None,
             renamed_from: None,
             carried_from: None,
+            checked_write: None,
         })
         .unwrap();
     mounted.set_workspace_root(ws.path().to_path_buf());

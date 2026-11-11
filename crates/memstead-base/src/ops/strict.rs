@@ -533,6 +533,7 @@ mod tests {
             }),
             renamed_from: None,
             carried_from: None,
+            checked_write: None,
         }
     }
 

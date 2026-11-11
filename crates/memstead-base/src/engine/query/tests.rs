@@ -2226,6 +2226,7 @@ fn the_sealed_row_reader_carries_the_class_only_once_identities_are_declared() {
         finding: None,
         renamed_from: None,
         carried_from: None,
+        checked_write: None,
     };
 
     assert!(
@@ -2412,6 +2413,7 @@ fn a_sealed_first_party_claim_cannot_loosen_a_third_party_mem() {
         finding: None,
         renamed_from: None,
         carried_from: None,
+        checked_write: None,
     };
     assert_eq!(
         engine.check_row_prose_origin("external", "external--ext", &rec),
