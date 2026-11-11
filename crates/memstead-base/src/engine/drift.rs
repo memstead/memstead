@@ -1683,30 +1683,52 @@ impl Engine {
         else {
             return Ok(FastForward::NotOnRemote);
         };
-        let local_sha = (hook.resolve_ref)(gitdir, local_ref).map_err(EngineError::Backend)?;
-        if let Some(l) = &local_sha {
-            if *l == remote_sha {
-                return Ok(FastForward::InSync);
+        // The move is pinned to the local tip the decision was made on, so
+        // a commit that lands in between fails the move instead of being
+        // dropped from the branch. A lost race decides again on the new
+        // tip, which then usually reads as local-ahead or diverged.
+        let mut attempt = 0;
+        loop {
+            let local_sha = (hook.resolve_ref)(gitdir, local_ref).map_err(EngineError::Backend)?;
+            if let Some(l) = &local_sha {
+                if *l == remote_sha {
+                    return Ok(FastForward::InSync);
+                }
+                let fast_forward =
+                    (hook.is_ancestor)(gitdir, l, &remote_sha).map_err(EngineError::Backend)?;
+                let local_ahead = !fast_forward
+                    && (hook.is_ancestor)(gitdir, &remote_sha, l).map_err(EngineError::Backend)?;
+                if local_ahead {
+                    return Ok(FastForward::LocalAhead);
+                }
+                let replaceable_seed = !fast_forward
+                    && replace_empty_seed
+                    && (hook.is_empty_root)(gitdir, l).map_err(EngineError::Backend)?;
+                if !fast_forward && !replaceable_seed {
+                    return Ok(FastForward::Diverged);
+                }
             }
-            let fast_forward =
-                (hook.is_ancestor)(gitdir, l, &remote_sha).map_err(EngineError::Backend)?;
-            let local_ahead = !fast_forward
-                && (hook.is_ancestor)(gitdir, &remote_sha, l).map_err(EngineError::Backend)?;
-            if local_ahead {
-                return Ok(FastForward::LocalAhead);
-            }
-            let replaceable_seed = !fast_forward
-                && replace_empty_seed
-                && (hook.is_empty_root)(gitdir, l).map_err(EngineError::Backend)?;
-            if !fast_forward && !replaceable_seed {
-                return Ok(FastForward::Diverged);
+            let previous = match &local_sha {
+                Some(l) => crate::engine::RefPrevious::At(l),
+                None => crate::engine::RefPrevious::Absent,
+            };
+            match (hook.update_ref)(gitdir, local_ref, &remote_sha, previous) {
+                Ok(()) => {
+                    return Ok(FastForward::Moved {
+                        previous: local_sha.unwrap_or_default(),
+                        new: remote_sha,
+                    });
+                }
+                Err(e) => {
+                    let now =
+                        (hook.resolve_ref)(gitdir, local_ref).map_err(EngineError::Backend)?;
+                    attempt += 1;
+                    if now == local_sha || attempt == 3 {
+                        return Err(EngineError::Backend(e));
+                    }
+                }
             }
         }
-        (hook.update_ref)(gitdir, local_ref, &remote_sha).map_err(EngineError::Backend)?;
-        Ok(FastForward::Moved {
-            previous: local_sha.unwrap_or_default(),
-            new: remote_sha,
-        })
     }
 
     /// Re-read a mounted mem's config and re-resolve its schema pin

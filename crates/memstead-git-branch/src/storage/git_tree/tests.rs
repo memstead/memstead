@@ -1566,3 +1566,39 @@ fn git_tree_writer_config_cas_refuses_after_a_sibling_config_commit() {
     );
     assert_eq!(second.read_mem_config().unwrap().unwrap(), b"{\"v\":2}");
 }
+
+/// A fast-forward decided on tip A, then a sibling commit C on top of A,
+/// then the move to the remote tip B pinned at A: the move fails and C
+/// stays on the branch.
+#[test]
+fn pinned_ref_move_fails_when_a_commit_landed_after_the_decision() {
+    use memstead_base::engine::RefPrevious;
+    let ops = crate::storage::FULL_GIT_BRANCH_OPS;
+    let tmp = TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let r = "refs/heads/test";
+    let head = || (ops.resolve_ref)(&gitdir, r).unwrap().unwrap();
+
+    let writer = GitTreeBackend::new(gitdir.clone(), r.to_string());
+    writer.write_entity(Path::new("a.md"), b"a").unwrap();
+    writer.commit("A", &ctx_for_test()).unwrap();
+    let a = head();
+    writer.write_entity(Path::new("b.md"), b"b").unwrap();
+    writer.commit("B", &ctx_for_test()).unwrap();
+    let b = head();
+    (ops.update_ref)(&gitdir, r, &a, RefPrevious::Any).unwrap();
+
+    // The sibling's commit lands on A after the decision was taken.
+    let sibling = GitTreeBackend::new(gitdir.clone(), r.to_string());
+    sibling.write_entity(Path::new("c.md"), b"c").unwrap();
+    sibling.commit("C", &ctx_for_test()).unwrap();
+    let c = head();
+    assert_ne!(c, a);
+
+    assert!((ops.update_ref)(&gitdir, r, &b, RefPrevious::At(&a)).is_err());
+    assert_eq!(head(), c);
+    assert!((ops.update_ref)(&gitdir, r, &b, RefPrevious::Absent).is_err());
+    assert_eq!(head(), c);
+    (ops.update_ref)(&gitdir, r, &b, RefPrevious::At(&c)).unwrap();
+    assert_eq!(head(), b);
+}

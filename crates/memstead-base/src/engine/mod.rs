@@ -710,13 +710,31 @@ pub type GitBranchIsEmptyRootFn = fn(gitdir: &Path, sha: &str) -> Result<bool, B
 pub type GitBranchMergeBaseFn =
     fn(gitdir: &Path, a: &str, b: &str) -> Result<Option<String>, BackendError>;
 
-/// Point `ref_name` at `sha`, creating the ref when absent and
-/// moving it unconditionally when present. Engine-internal, for refs
-/// the engine derives and owns outright (the check-ledger transport
-/// ref, whose content is re-derived from the workspace ledger before
-/// every publish); never a mem's branch.
-pub type GitBranchUpdateRefFn =
-    fn(gitdir: &Path, ref_name: &str, sha: &str) -> Result<(), BackendError>;
+/// Point `ref_name` at `sha`, under the precondition `previous` names.
+/// A move that decided on an observed tip pins it with
+/// [`RefPrevious::At`] (or [`RefPrevious::Absent`] for a ref it saw
+/// missing), so a commit that lands between the decision and the move
+/// makes the move fail instead of being dropped. [`RefPrevious::Any`] is
+/// for a ref the engine derives and owns outright (the check-ledger
+/// transport ref, re-derived from the workspace ledger before every
+/// publish).
+pub type GitBranchUpdateRefFn = fn(
+    gitdir: &Path,
+    ref_name: &str,
+    sha: &str,
+    previous: RefPrevious<'_>,
+) -> Result<(), BackendError>;
+
+/// The precondition of a [`GitBranchUpdateRefFn`] move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefPrevious<'a> {
+    /// Move whatever the ref points at, or create it.
+    Any,
+    /// The ref must not exist.
+    Absent,
+    /// The ref must point at this commit.
+    At(&'a str),
+}
 
 /// `Engine::remote_add` dispatch — configures a named remote on the
 /// mem-repo gitdir (upsert: add, or set-url when it already exists).

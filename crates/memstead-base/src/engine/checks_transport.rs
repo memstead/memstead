@@ -161,7 +161,8 @@ impl Engine {
             // The vehicle: on top of the remote's tip when it has one.
             let remote_tip = self.remote_checks_tip(hook, gitdir, remote)?;
             if let Some(tip) = &remote_tip {
-                (hook.update_ref)(gitdir, &local_ref, tip).map_err(EngineError::Backend)?;
+                (hook.update_ref)(gitdir, &local_ref, tip, crate::engine::RefPrevious::Any)
+                    .map_err(EngineError::Backend)?;
             }
             let backend = self.checks_backend(gitdir, &local_ref)?;
             let mut changed = false;

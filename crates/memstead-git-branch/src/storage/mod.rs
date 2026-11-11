@@ -404,23 +404,35 @@ fn merge_base_dispatch(
     crate::ops::transport::merge_base_in_gitdir(gitdir, a, b)
 }
 
-/// Point an engine-owned ref at a commit, created or moved: the
-/// check-ledger transport ref is re-derived before every publish, so
-/// its history is a vehicle, never state to protect.
+/// Point a ref at a commit under the caller's precondition: a pinned
+/// move fails when the ref no longer points where the caller observed it.
 fn update_ref_dispatch(
     gitdir: &std::path::Path,
     ref_name: &str,
     sha: &str,
+    previous: memstead_base::engine::RefPrevious<'_>,
 ) -> Result<(), memstead_base::backend::BackendError> {
+    use gix::refs::transaction::PreviousValue;
     use memstead_base::backend::BackendError;
-    let oid = gix::ObjectId::from_hex(sha.as_bytes())
-        .map_err(|e| BackendError::Other(format!("{sha:?} is not a full object id: {e}")))?;
+    use memstead_base::engine::RefPrevious;
+    let parse = |hex: &str| {
+        gix::ObjectId::from_hex(hex.as_bytes())
+            .map_err(|e| BackendError::Other(format!("{hex:?} is not a full object id: {e}")))
+    };
+    let oid = parse(sha)?;
+    let expected = match previous {
+        RefPrevious::Any => PreviousValue::Any,
+        RefPrevious::Absent => PreviousValue::MustNotExist,
+        RefPrevious::At(old) => {
+            PreviousValue::MustExistAndMatch(gix::refs::Target::Object(parse(old)?))
+        }
+    };
     crate::mem_repo_config::commit_refs_at_gitdir(
         gitdir,
         &[crate::mem_repo_config::RefSpec {
             ref_name: ref_name.to_string(),
             new_oid: oid,
-            expected: gix::refs::transaction::PreviousValue::Any,
+            expected,
             log_message: format!("memstead: point {ref_name} at {sha}"),
         }],
     )

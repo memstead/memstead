@@ -57,6 +57,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   ref advance pinned to that tip), where it wrote unconditionally and
   reported success.
 
+- **`pull --all` never drops a commit that lands during its fast-forward.**
+  The move of the schema-and-config ref and of each mounted branch is
+  pinned to the local tip the fast-forward was decided on, where it moved
+  the ref unconditionally; a commit that lands in between makes the move
+  decide again on the new tip.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both
