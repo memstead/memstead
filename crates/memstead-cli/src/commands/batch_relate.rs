@@ -74,6 +74,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
     let mut relates: Vec<(RelateEntityArgs, Option<String>)> =
         Vec::with_capacity(entry_values.len());
+    let mut echoes: Vec<memstead_base::ops::RelateEcho> = Vec::with_capacity(entry_values.len());
     for (idx, entry_value) in entry_values.into_iter().enumerate() {
         let entry = match serde_json::from_value::<EntryPayload>(entry_value) {
             Ok(entry) => entry,
@@ -90,6 +91,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .into());
             }
         };
+        echoes.push(memstead_base::ops::RelateEcho {
+            from: entry.from.clone(),
+            to: entry.to.clone(),
+            rel_type: entry.rel_type.clone(),
+        });
         relates.push((
             RelateEntityArgs {
                 source: EntityId::canonical(&entry.from),
@@ -139,5 +145,5 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             args.dry_run,
         ));
     }
-    Err(super::batch::batch_refused_error("relate", &result).into())
+    Err(super::batch::batch_refused_error(&result, &echoes).into())
 }

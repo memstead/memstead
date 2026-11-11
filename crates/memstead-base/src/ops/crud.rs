@@ -433,3 +433,93 @@ pub struct BatchError {
     pub message: String,
     pub details: serde_json::Value,
 }
+
+/// The relation one batch-relate entry named, echoed beside the entry's
+/// outcome in a refused batch.
+#[derive(Debug, Clone, Serialize)]
+pub struct RelateEcho {
+    pub from: String,
+    pub to: String,
+    pub rel_type: String,
+}
+
+/// A batch that committed nothing because an entry failed: one envelope
+/// per entry under `details.entries`, the counts beside them.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("batch refused: {failed} of {total} operation(s) failed, nothing committed{first}")]
+pub struct BatchRefused {
+    failed: usize,
+    total: usize,
+    first: String,
+    details: serde_json::Value,
+}
+
+impl BatchRefused {
+    pub fn code(&self) -> &'static str {
+        "BATCH_REFUSED"
+    }
+
+    pub fn details(&self) -> serde_json::Value {
+        self.details.clone()
+    }
+}
+
+impl BatchResult {
+    /// The refusal of a batch that was not applied. `relations` echoes each
+    /// entry's relation for a batch relate (empty for create and update).
+    pub fn refusal(&self, relations: &[RelateEcho]) -> BatchRefused {
+        let entries: Vec<serde_json::Value> = self
+            .results
+            .iter()
+            .enumerate()
+            .map(|(i, entry)| {
+                let mut e = serde_json::json!({
+                    "index": i,
+                    "id": entry.id,
+                    "action": entry.action,
+                });
+                if let Some(r) = relations.get(i) {
+                    e["from"] = serde_json::json!(r.from);
+                    e["to"] = serde_json::json!(r.to);
+                    e["rel_type"] = serde_json::json!(r.rel_type);
+                }
+                if let Some(err) = &entry.error {
+                    e["code"] = serde_json::json!(err.code);
+                    e["message"] = serde_json::json!(err.message);
+                    e["details"] = err.details.clone();
+                }
+                e
+            })
+            .collect();
+        let mut details = serde_json::json!({
+            "applied": self.applied,
+            "entries": entries,
+            "failed": self.failed,
+            "succeeded": self.succeeded,
+            "errors_suppressed": self.errors_suppressed,
+        });
+        if !self.warnings.is_empty() {
+            details["warnings"] = serde_json::json!(self.warnings);
+        }
+        if !self.orphan_stubs_removed.is_empty() {
+            details["orphan_stubs_removed"] = serde_json::json!(self.orphan_stubs_removed);
+        }
+        let first = self
+            .results
+            .iter()
+            .find_map(|e| e.error.as_ref().map(|err| (e, err)))
+            .map(|(e, err)| {
+                format!(
+                    "; first failure [{}] on `{}`: {}",
+                    err.code, e.id, err.message
+                )
+            })
+            .unwrap_or_default();
+        BatchRefused {
+            failed: self.failed,
+            total: self.results.len(),
+            first,
+            details,
+        }
+    }
+}

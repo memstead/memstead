@@ -607,7 +607,6 @@ mod surface_codes {
         "ARCHIVE_ASSEMBLY_FAILED",
         "ARCHIVE_INVALID",
         "ARCHIVE_READ_FAILED",
-        "BATCH_REFUSED",
         "DOMAIN_KEYGEN_FAILED",
         "DOMAIN_KEY_NOT_FOUND",
         "ENGINE_LOCK_POISONED",

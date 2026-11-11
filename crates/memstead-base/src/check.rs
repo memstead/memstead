@@ -65,6 +65,29 @@ pub const FOREIGN_KIND_PREFIX: &str = "x-";
 /// The typed code for a malformed finding.
 pub const INVALID_CHECK_FINDING_CODE: &str = "INVALID_CHECK_FINDING";
 
+/// A batch of checks refused whole because entries failed validation;
+/// nothing is recorded. Each failed entry carries its index, its id and
+/// the typed errors it met.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error(
+    "batch check refused: {} of {total} entr(ies) failed validation, nothing recorded",
+    failed_entries.len()
+)]
+pub struct CheckBatchRefused {
+    pub failed_entries: Vec<serde_json::Value>,
+    pub total: usize,
+}
+
+impl CheckBatchRefused {
+    pub fn code(&self) -> &'static str {
+        "BATCH_REFUSED"
+    }
+
+    pub fn details(&self) -> serde_json::Value {
+        serde_json::json!({ "failed_entries": self.failed_entries })
+    }
+}
+
 /// A check kind from the closed vocabulary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckKind {

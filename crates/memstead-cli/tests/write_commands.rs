@@ -1135,7 +1135,7 @@ fn batch_update_json_refusal_exits_nonzero_with_envelope() {
         "details carries the BatchResult: {parsed}"
     );
     assert_eq!(
-        parsed["details"]["results"][0]["error"]["code"], "HASH_MISMATCH",
+        parsed["details"]["entries"][0]["code"], "HASH_MISMATCH",
         "per-entry failure code stays available: {parsed}",
     );
 }

@@ -161,7 +161,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             args.dry_run,
         ));
     }
-    Err(super::batch::batch_refused_error("create", &result).into())
+    Err(super::batch::batch_refused_error(&result, &[]).into())
 }
 
 /// Map a single JSON entry to the engine's [`CreateEntityArgs`],

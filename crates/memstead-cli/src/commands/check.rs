@@ -532,16 +532,16 @@ fn run_batch(ctx: &CliContext, path: &std::path::Path) -> anyhow::Result<()> {
         }
     }
     if !failures.is_empty() {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "BATCH_REFUSED",
-            format!(
-                "batch check REFUSED — {} of {} entr(ies) failed validation, nothing recorded",
-                failures.len(),
-                payload.checks.len()
-            ),
-        )
-        .with_details(serde_json::json!({ "failed_entries": failures }))
+        let e = memstead_base::check::CheckBatchRefused {
+            failed_entries: failures,
+            total: payload.checks.len(),
+        };
+        return Err(CliError {
+            kind: ExitKind::Validation,
+            code: e.code(),
+            details: Some(e.details()),
+            message: e.to_string(),
+        }
         .into());
     }
 

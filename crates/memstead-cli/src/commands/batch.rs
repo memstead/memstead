@@ -102,28 +102,21 @@ pub(crate) fn render_batch_markdown(
 /// [`BatchResult`](memstead_base::ops::BatchResult) rides on `details` —
 /// per-entry codes stay available without re-running.
 pub(crate) fn batch_refused_error(
-    command: &str,
     result: &memstead_base::ops::BatchResult,
+    relations: &[memstead_base::ops::RelateEcho],
 ) -> CliError {
-    let dominant = result.results.iter().find(|e| e.error.is_some());
-    let (code, failing_id, message) = match dominant {
-        Some(entry) => {
-            let err = entry.error.as_ref().expect("dominant entry has an error");
-            (err.code.as_str(), entry.id.to_string(), err.message.clone())
-        }
-        None => (
-            "",
-            String::new(),
-            format!("batch-{command} refused; nothing committed"),
-        ),
-    };
-    let kind = batch_refused_exit_kind(code);
-    let summary = format!(
-        "batch-{command} refused — {} item(s) failed, nothing committed; first failure [{}] on `{}`: {}",
-        result.failed, code, failing_id, message,
-    );
-    CliError::new(kind, "BATCH_REFUSED", summary)
-        .with_details(serde_json::to_value(result).unwrap_or(serde_json::Value::Null))
+    let dominant = result
+        .results
+        .iter()
+        .find_map(|e| e.error.as_ref())
+        .map_or("", |err| err.code.as_str());
+    let refused = result.refusal(relations);
+    CliError {
+        kind: batch_refused_exit_kind(dominant),
+        code: refused.code(),
+        details: Some(refused.details()),
+        message: refused.to_string(),
+    }
 }
 
 /// Map the dominant per-entry failure code to the process exit code,

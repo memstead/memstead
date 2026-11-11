@@ -209,7 +209,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `PROJECTION_VERIFY_FINDINGS` / `PROJECTION_VERIFY_INCONCLUSIVE`
   (`projection verify --fail-on-findings` / `--fail-on-inconclusive`,
   `Rollup::gate_refusal`); `REMOTE_STALE` and the verify gates read `;`
-  or `:` where they read a dash.
+  or `:` where they read a dash. A refused batch is one engine value
+  (`BatchResult::refusal`, `BATCH_REFUSED`) on MCP's list-form
+  `memstead_relate` and the CLI's `batch-create`, `batch-update` and
+  `batch-relate`: `details` carries `entries` (per entry `index`, `id`,
+  `action`, the relate entry's `from`, `to`, `rel_type`, and a failed
+  entry's `code`, `message`, `details`), `applied`, `failed`, `succeeded`
+  and `errors_suppressed`. The CLI's `details.results` (the serialized
+  batch result, each failure nested under `error`) is retired for
+  `details.entries`; MCP's entries gain `id`, and its `details` gains
+  `applied` and `succeeded`. The message reads `batch refused: <n> of <m>
+  operation(s) failed, nothing committed; first failure [<code>] on
+  `<id>`: <message>` on both. `check --from`'s refused batch is the
+  engine's `check::CheckBatchRefused` (payload unchanged).
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype

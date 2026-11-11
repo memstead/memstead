@@ -449,45 +449,22 @@ impl McpServer {
             // callers keep working; larger lists wrap under
             // BATCH_REFUSED with per-entry envelopes in
             // `details.entries`.
-            let entries: Vec<serde_json::Value> = result
-                .results
+            let echoes: Vec<memstead_base::ops::RelateEcho> = p
+                .relations
                 .iter()
-                .zip(p.relations.iter())
-                .enumerate()
-                .map(|(i, (entry, op))| {
-                    let mut e = serde_json::json!({
-                        "index": i,
-                        "from": op.from,
-                        "to": op.to,
-                        "rel_type": op.rel_type,
-                        "action": entry.action,
-                    });
-                    if let Some(err) = &entry.error {
-                        e["code"] = serde_json::json!(err.code);
-                        e["message"] = serde_json::json!(err.message);
-                        e["details"] = err.details.clone();
-                    }
-                    e
+                .map(|op| memstead_base::ops::RelateEcho {
+                    from: op.from.to_string(),
+                    to: op.to.to_string(),
+                    rel_type: op.rel_type.to_string(),
                 })
                 .collect();
+            let refused = result.refusal(&echoes);
             let (_engine, notices) = engine.finish();
             let drift = notices_as_reload_warnings(&notices);
-            let msg = format!(
-                "batch refused — {} of {} operation(s) failed, nothing committed",
-                result.failed,
-                p.relations.len(),
-            );
-            let payload = envelope(
-                "BATCH_REFUSED",
-                msg.clone(),
-                serde_json::json!({
-                    "entries": entries,
-                    "failed": result.failed,
-                    "errors_suppressed": result.errors_suppressed,
-                }),
-            );
+            let msg = refused.to_string();
+            let payload = envelope(refused.code(), msg.clone(), refused.details());
             return attach_drift_to_error(
-                tool_error_with_payload("BATCH_REFUSED", &msg, payload),
+                tool_error_with_payload(refused.code(), &msg, payload),
                 &drift,
                 notices,
             );
