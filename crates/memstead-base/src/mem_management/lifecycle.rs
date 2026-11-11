@@ -2202,10 +2202,9 @@ fn rename_mode(
 /// the identity flip has already happened (old gone, new present) the
 /// call runs in *resumption mode*: only the idempotent halves execute.
 ///
-/// **In-process caveat:** grants rewritten on disk (step 5) are not
-/// reflected into the already-loaded engine's settings — the CLI's
-/// one-shot process model makes this invisible; a long-lived embedder
-/// must re-boot after a rename.
+/// **Grants:** the rewritten grants are read back into this engine's
+/// settings at once, and another running engine adopts them with the
+/// roster change the rename makes.
 pub fn rename_mem(
     engine: &mut crate::Engine,
     params: MemRenameParams,
@@ -2460,6 +2459,8 @@ pub fn rename_mem(
     if let Some(root) = engine.workspace_root().map(|p| p.to_path_buf()) {
         crate::workspace_config_edit::rename_mem_in_cross_links(&root, &params.old, &params.new)
             .map_err(|e| crate::EngineError::Mem(format!("grants rewrite: {e}")))?;
+        // The grants just rewritten govern this engine's next write too.
+        engine.refresh_workspace_settings_if_possible();
 
         // ---- Step 8: the mem's store and its mirror (idempotent) ----
         // The binding records and the per-binding state move with the

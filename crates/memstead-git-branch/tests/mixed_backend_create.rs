@@ -669,3 +669,62 @@ fn delete_note_and_trailers_ride_the_prune_commit() {
     );
     assert!(message.contains("Identity: session-42"));
 }
+
+/// A mem rename carries its cross-mem grants into every engine on the
+/// workspace: the renaming engine, and a long-lived one that learns of the
+/// rename through its roster. Both allow the granted edge under the new
+/// name, where they kept enforcing the grant table read at boot.
+#[test]
+fn a_mem_rename_carries_its_grants_into_running_engines() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".memstead")).unwrap();
+    std::fs::write(
+        tmp.path().join(".memstead/workspace.toml"),
+        "format = \"memstead-git-branch-2\"\n\n\
+         [persistence_adapter]\nname = \"file-two-layer\"\n\n\
+         [cross_mem_links]\nreferrer = [\"target-mem\"]\n",
+    )
+    .unwrap();
+    init_real_mem_repo(
+        tmp.path(),
+        &[
+            ("target-mem", "default@1.0.0"),
+            ("referrer", "default@1.0.0"),
+        ],
+    );
+    let mut renamer = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut renamer, "target-mem", "Anchor Spec");
+    create_entity_in(&mut renamer, "referrer", "First Spec");
+    create_entity_in(&mut renamer, "referrer", "Second Spec");
+    let mut long_lived = engine_from_workspace_root(tmp.path()).expect("second engine boots");
+
+    mem_management::rename_mem(
+        &mut renamer,
+        mem_management::MemRenameParams {
+            old: "target-mem".to_string(),
+            new: "archive".to_string(),
+            operator_mode: true,
+            note: None,
+        },
+    )
+    .expect("rename lands");
+
+    let relate = |engine: &mut memstead_base::Engine, source: &str| {
+        engine.relate_entity(
+            memstead_base::RelateEntityArgs {
+                source: memstead_base::EntityId::new("referrer", source),
+                expected_hash: None,
+                rel_type: "DEPENDS_ON".to_string(),
+                target: memstead_base::EntityId::new("archive", "anchor-spec"),
+                remove: false,
+                description: None,
+                dry_run: false,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+    };
+    relate(&mut renamer, "first-spec").expect("the renaming engine allows the renamed grant");
+    relate(&mut long_lived, "second-spec").expect("a running engine allows the renamed grant");
+}

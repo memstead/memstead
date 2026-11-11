@@ -194,6 +194,7 @@ impl Engine {
             )))
         })?;
 
+        let cross_mem_links = workspace.settings.cross_mem_links.clone();
         let manifest: BTreeSet<String> = workspace
             .mounts
             .iter()
@@ -294,6 +295,13 @@ impl Engine {
             self.finish_batched_registrations();
         }
 
+        // The cross-mem grants come from the same load. They are the one
+        // policy that names mems, so they move with the roster (a rename
+        // rewrites them with the mount) and must govern the next write as
+        // the mounts do. The rest of the policy keeps its own refresh path.
+        let mut current = self.settings().clone();
+        current.cross_mem_links = cross_mem_links;
+        self.set_settings(current);
         if all_applied {
             self.roster_fingerprint = Some(now);
         }

@@ -113,6 +113,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   fails to commit, or is a rehearsal, where they stayed in the live store
   for a target the committed graph never referenced.
 
+- **A mem rename's cross-mem grants govern every running engine at once.**
+  The renaming engine reads the rewritten grants back, and another
+  long-lived engine (an MCP server) adopts them with the roster change,
+  where both kept the grant table read at boot: a granted edge to the new
+  name refused `CROSS_MEM_LINK_NOT_ALLOWED`, and the old name stayed
+  granted.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

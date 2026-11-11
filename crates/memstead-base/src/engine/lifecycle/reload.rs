@@ -726,7 +726,7 @@ impl Engine {
     /// failure surface; settings refresh failures are intentionally
     /// non-fatal so a malformed workspace.toml doesn't break content
     /// drift detection.
-    pub(super) fn refresh_workspace_settings_if_possible(&mut self) {
+    pub(crate) fn refresh_workspace_settings_if_possible(&mut self) {
         let Some(root) = self.workspace_root.clone() else {
             return;
         };
