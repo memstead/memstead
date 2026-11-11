@@ -1101,3 +1101,111 @@ fn update_entity_patch_rejects_missing_old_substring() {
         other => panic!("expected PatchOldNotFound, got {other:?}"),
     }
 }
+
+/// Two items naming one entity compose in order: the second item's hash
+/// compare runs against the first item's result. Both carrying the
+/// pre-batch hash refuses the batch with `HASH_MISMATCH` on the second
+/// item, where the second write silently replaced the first; the second
+/// carrying the first's result lands both changes.
+#[test]
+fn batch_update_naming_one_entity_twice_composes_the_items_in_order() {
+    let tmp = TempDir::new().unwrap();
+    let writer = FilesystemBackend::new(tmp.path().to_path_buf());
+    let mut engine = Engine::from_mounts(vec![(
+        folder_mount("specs", tmp.path().to_path_buf()),
+        Box::new(writer) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+    let created = engine
+        .create_entity(
+            CreateEntityArgs {
+                anchors: Vec::new(),
+                mem: "specs".to_string(),
+                title: "Seed".to_string(),
+                entity_type: "spec".to_string(),
+                sections: IndexMap::from_iter([
+                    ("identity".to_string(), "old identity".to_string()),
+                    ("purpose".to_string(), "old purpose".to_string()),
+                ]),
+                metadata: IndexMap::new(),
+                relations: Vec::new(),
+                dry_run: false,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .unwrap();
+    let item = |section: &str, body: &str, hash: &str| UpdateEntityArgs {
+        anchors: Vec::new(),
+        id: created.id.clone(),
+        expected_hash: crate::ExpectedHash::Current(hash.to_string()),
+        sections: IndexMap::from_iter([(section.to_string(), body.to_string())]),
+        append_sections: IndexMap::new(),
+        patch_sections: IndexMap::new(),
+        sections_unset: Vec::new(),
+        metadata: IndexMap::new(),
+        metadata_unset: Vec::new(),
+        declare_relations: Vec::new(),
+        dry_run: false,
+        relations_unset: Vec::new(),
+        anchors_unset: Vec::new(),
+    };
+
+    let result = engine
+        .batch_update(
+            vec![
+                (
+                    item("identity", "new identity", &created.content_hash),
+                    None,
+                ),
+                (item("purpose", "new purpose", &created.content_hash), None),
+            ],
+            Actor::Cli,
+            None,
+            false,
+        )
+        .unwrap();
+    assert!(!result.applied, "{result:?}");
+    assert_eq!(
+        result.results[1].error.as_ref().unwrap().code,
+        "HASH_MISMATCH"
+    );
+    let unchanged = engine.get_entity(&created.id).unwrap();
+    assert_eq!(unchanged.content_hash, created.content_hash);
+
+    // The first item alone, rehearsed, names the hash the second must carry.
+    let rehearsal = engine
+        .update_entity(
+            UpdateEntityArgs {
+                dry_run: true,
+                ..item("identity", "new identity", &created.content_hash)
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .unwrap();
+    let after_first = rehearsal
+        .prospective_hash
+        .clone()
+        .unwrap_or(rehearsal.content_hash.clone());
+    let result = engine
+        .batch_update(
+            vec![
+                (
+                    item("identity", "new identity", &created.content_hash),
+                    None,
+                ),
+                (item("purpose", "new purpose", &after_first), None),
+            ],
+            Actor::Cli,
+            None,
+            false,
+        )
+        .unwrap();
+    assert!(result.applied, "{result:?}");
+    let both = engine.get_entity(&created.id).unwrap();
+    assert_eq!(both.sections["identity"], "new identity");
+    assert_eq!(both.sections["purpose"], "new purpose");
+}

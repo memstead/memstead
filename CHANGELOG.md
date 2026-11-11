@@ -89,6 +89,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `current`, which no retry could match. An entity the other writer
   removed refuses as not found.
 
+- **`batch_update` items naming one entity compose in order.** Each later
+  item is checked and written against the earlier one's result, so a
+  second item carrying the pre-batch hash refuses the batch with
+  `HASH_MISMATCH`, where it replaced the first item's write while both
+  reported `updated`.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

@@ -197,8 +197,14 @@ impl Engine {
         // Report-all: a failing item never stops preparation — every
         // remaining item still validates so the refusal can name every
         // failing entry at once (the family's upgraded contract).
+        // Items naming one entity compose in order: each later item is
+        // prepared against the store as the earlier one leaves it, so its
+        // hash compare and its write start from that result. The rollback
+        // below restores the snapshot on any refusal and on a rehearsal.
+        let named: Vec<EntityId> = updates.iter().map(|(a, _)| a.id.clone()).collect();
         for (i, (args, note)) in updates.into_iter().enumerate() {
             let id = args.id.clone();
+            let named_again = named[i + 1..].contains(&id);
             if let Some(pos) = short_errors.iter().position(|(j, _)| *j == i) {
                 let (_, e) = short_errors.remove(pos);
                 items.push((id, BatchItem::Error));
@@ -217,6 +223,11 @@ impl Engine {
                     items.push((id, BatchItem::Noop));
                 }
                 Ok(PrepareOutcome::Prepared(p)) => {
+                    if named_again && let Err(e) = self.apply_prepared_to_store(&p) {
+                        items.push((id, BatchItem::Error));
+                        errors.push((i, e));
+                        continue;
+                    }
                     prepared.push(p);
                     notes.push(note);
                     items.push((id, BatchItem::Prepared));
