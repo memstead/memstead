@@ -415,6 +415,7 @@ pub fn fork_mem(
     if let ResidueProbe::Present {
         branch_ref,
         config_blob,
+        entity_count,
         ..
     } = residue_probe_for_workspace(
         engine,
@@ -426,7 +427,7 @@ pub fn fork_mem(
         return Err(FullEngineError::MemStorageResidueDetected {
             branch_ref,
             config_blob,
-            entity_count: 0,
+            entity_count,
         });
     }
 

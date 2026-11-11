@@ -78,6 +78,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   reported as added or removed, where the pair was dropped and neither
   change appeared.
 
+- **`MEM_STORAGE_RESIDUE_DETECTED` counts the entities the leftover
+  branch holds.** `mem create` and `mem fork` report that number in the
+  message and in `details.entity_count`, where both always said 0.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

@@ -1254,3 +1254,58 @@ fn memstead_mem_delete_prunes_a_config_only_leftover_in_operator_mode() {
         .success();
     assert_mem_in_mounts(&workspace, "scratch");
 }
+
+/// The residue refusal counts the entities the leftover branch still
+/// holds, the number an operator weighs before choosing a recovery.
+#[test]
+fn residue_refusal_reports_the_entities_the_branch_still_holds() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = seed_workspace(tmp.path());
+
+    memstead()
+        .current_dir(&workspace)
+        .args(["mem", "init", "scratch", "--no-gitignore"])
+        .assert()
+        .success();
+    for title in ["Alpha", "Beta"] {
+        memstead()
+            .current_dir(&workspace)
+            .args([
+                "create",
+                "--mem",
+                "scratch",
+                "--title",
+                title,
+                "--type",
+                "spec",
+                "--section",
+                "identity=A fixture entity.",
+                "--section",
+                "purpose=Counted in the residue refusal.",
+            ])
+            .assert()
+            .success();
+    }
+    memstead()
+        .current_dir(&workspace)
+        .args(["mem", "unregister", "scratch"])
+        .assert()
+        .success();
+
+    let assertion = memstead()
+        .current_dir(&workspace)
+        .args([
+            "mem",
+            "init",
+            "scratch",
+            "--no-gitignore",
+            "--hard-cleanup-first",
+        ])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8(assertion.get_output().stderr.clone()).unwrap();
+    assert!(
+        stderr.contains("2 entities preserved"),
+        "got stderr:\n{stderr}"
+    );
+}

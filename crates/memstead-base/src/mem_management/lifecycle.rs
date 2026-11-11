@@ -66,6 +66,8 @@ pub(super) enum ResidueProbe {
         branch_ref: String,
         config_blob: Option<String>,
         existing_config: Option<Box<memstead_schema::config::MemConfig>>,
+        /// Entities the leftover branch still holds.
+        entity_count: usize,
     },
 }
 
@@ -128,10 +130,15 @@ pub(super) fn residue_probe_for_workspace(
     let existing_config = serde_json::from_slice::<memstead_schema::config::MemConfig>(&bytes)
         .ok()
         .map(Box::new);
+    // The count rides the refusal: it is what the operator weighs before
+    // choosing to reattach or destroy. A branch that cannot be listed
+    // holds nothing this engine could adopt.
+    let entity_count = backend.list_entities().map(|e| e.len()).unwrap_or(0);
     ResidueProbe::Present {
         branch_ref: format!("refs/heads/{branch_full_path}"),
         config_blob: Some(format!("__MEMSTEAD:mems/{branch_full_path}/config.json")),
         existing_config,
+        entity_count,
     }
 }
 
@@ -1408,6 +1415,7 @@ pub fn create_mem(
             branch_ref,
             config_blob,
             existing_config,
+            entity_count,
         } => {
             let tombstone = existing_config
                 .as_ref()
@@ -1420,14 +1428,14 @@ pub fn create_mem(
                     return Err(FullEngineError::MemStorageResidueDetected {
                         branch_ref,
                         config_blob,
-                        entity_count: 0,
+                        entity_count,
                     });
                 }
                 Some(crate::RecoveryAction::HardCleanupFirst) => {
                     return Err(FullEngineError::MemStorageResidueDetected {
                         branch_ref,
                         config_blob,
-                        entity_count: 0,
+                        entity_count,
                     });
                 }
                 Some(crate::RecoveryAction::ForceOverwrite) => {
