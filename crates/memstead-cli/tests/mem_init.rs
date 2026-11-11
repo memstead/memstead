@@ -884,7 +884,7 @@ fn seed_workspace_with_create_allowlist(tmp: &Path) -> PathBuf {
     workspace
 }
 
-/// F6 — `memstead mem init forbidden` against an allow-create list of
+/// `memstead mem init forbidden` against an allow-create list of
 /// `[test, other]` refuses with `MEM_PATH_NOT_ALLOWED`.
 #[test]
 fn mem_init_refuses_outside_allowlist_by_default() {
@@ -958,7 +958,7 @@ fn mem_init_operator_mode_env_var_bypasses_allowlist() {
     assert_mem_in_mounts(&workspace, "forbidden");
 }
 
-/// CLI F7 regression. A
+/// Regression. A
 /// destructive `memstead mem delete` must NOT revoke the workspace's
 /// `[[mem_management.create]]` / `[[mem_management.delete]]`
 /// allowlist rules for the deleted name — they are forward-looking
@@ -1021,7 +1021,7 @@ fn mem_delete_preserves_allowlist_rules_so_recreate_succeeds() {
     );
 
     // Re-create the same name — succeeds with no fresh `allow-create`,
-    // because the create rule survived. This is the exact F7 reproduction.
+    // because the create rule survived. This is the exact reproduction.
     memstead_no_env()
         .current_dir(&workspace)
         .args(["mem", "init", "other", "--no-gitignore"])

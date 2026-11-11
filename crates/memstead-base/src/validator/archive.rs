@@ -1083,7 +1083,7 @@ mod tests {
         // The cooperative writer exposes `add_symlink`, which is the
         // only path that sets the external-attributes bit the reader
         // interprets as `is_symlink() == true`. Defense-in-depth test
-        // for R5: even if an adversary smuggles a symlink past the
+        // for the symlink rule: even if an adversary smuggles a symlink past the
         // whitelist, the structural check fires.
         let mut buf: Vec<u8> = Vec::new();
         {

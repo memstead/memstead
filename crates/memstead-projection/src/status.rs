@@ -28,7 +28,7 @@ use memstead_base::binding_run::{
 };
 use memstead_base::pipeline_store::load_pipeline_configs;
 
-/// One source facet's (or reference mem's) baseline + signal state (D11). Keyed
+/// One source facet's (or reference mem's) baseline + signal state. Keyed
 /// in [`ProjectionStatus::state`] by the facet-or-refmem name — the same key
 /// space the `sync_state` map uses (`<binding>/<facet>#synced`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -43,7 +43,7 @@ pub struct FacetState {
     pub signal: String,
 }
 
-/// The advance counts (D11): how many artifacts a frozen advance slice still
+/// The advance counts: how many artifacts a frozen advance slice still
 /// has pending versus how many have been disposed. Both zero when no advance
 /// is in flight for the binding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -74,7 +74,7 @@ pub struct FindingCounts {
     pub unanchored_mentions: usize,
 }
 
-/// One binding's status entry (D11) — the per-binding drill-down, carrying
+/// One binding's status entry — the per-binding drill-down, carrying
 /// the SAME resolution the workspace rollup aggregates (verdict, moved
 /// source, finding counts) so consumers never re-derive it client-side.
 /// The workspace-level lead stays [`Rollup`] / [`projection_rollup`].
@@ -207,8 +207,8 @@ fn resolve_binding_status(
     }
 }
 
-/// Map a resolved [`ChangeStrategy`] to its `signal` string (D11). `None`
-/// renders the literal `"none"` — E1's visible-NoSignal, never a fake token.
+/// Map a resolved [`ChangeStrategy`] to its `signal` string. `None`
+/// renders the literal `"none"` — a visible NoSignal, never a fake token.
 fn signal_of(strategy: ChangeStrategy) -> &'static str {
     match strategy {
         ChangeStrategy::None => "none",
@@ -218,7 +218,7 @@ fn signal_of(strategy: ChangeStrategy) -> &'static str {
     }
 }
 
-/// Build the `projections` array for `memstead status` (D11) from the v1
+/// Build the `projections` array for `memstead status` from the v1
 /// binding store rooted at `workspace_root`, reading baselines off `engine`'s
 /// destination-mem `sync_state` and the durable advance store.
 ///
@@ -352,10 +352,10 @@ pub fn projection_overview(engine: &Engine, workspace_root: &Path) -> Projection
 }
 
 // ---------------------------------------------------------------------------
-// Rollup — the dashboard lead (G1)
+// Rollup — the dashboard lead
 // ---------------------------------------------------------------------------
 
-/// The single dashboard verdict `memstead status` leads with (G1). One verdict
+/// The single dashboard verdict `memstead status` leads with. One verdict
 /// summarising every projection binding; the per-binding numbers
 /// ([`projection_status`]) are the drill-down.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -394,7 +394,7 @@ impl RollupVerdict {
     }
 }
 
-/// The dashboard rollup (G1): one verdict, a one-line headline, and up to three
+/// The dashboard rollup: one verdict, a one-line headline, and up to three
 /// concrete, highest-severity actions derived from the durable findings store
 /// plus freshness. The full per-binding numbers ride [`projection_status`] as
 /// the drill-down.
@@ -434,7 +434,7 @@ struct Candidate {
     text: String,
 }
 
-/// Compute the dashboard rollup (G1) for every projection binding in the
+/// Compute the dashboard rollup for every projection binding in the
 /// workspace: one verdict plus the top-three concrete actions, derived from the
 /// durable findings store and freshness (source movement vs. the `#synced`
 /// baseline). **Read-only** on every mem — it borrows `&Engine` (shared) and
@@ -548,7 +548,7 @@ fn rollup_from_scans(total: usize, scans: &[(String, Option<BindingResolution>)]
         }
         // Uncovered drives an action only under exhaustive coverage — a
         // curated binding covers a deliberate slice, so uncovered is
-        // information, not a defect (B4). (`has_action` already encodes
+        // information, not a defect. (`has_action` already encodes
         // this rule; the candidate mirrors it.)
         if uncovered > 0 && resolution.uncovered_counts {
             candidates.push(Candidate {
@@ -789,7 +789,7 @@ mod tests {
         assert!(projection_status(&engine, root).is_empty());
     }
 
-    // ---- G1: rollup verdict + top-3 actions -----------------------------
+    // ---- Rollup verdict + top-3 actions -----------------------------
 
     /// Build the same one-binding `engine/graph` workspace the status test uses,
     /// returning the engine and root. Seeds **no** `#synced` baseline and **no**
@@ -876,7 +876,7 @@ mod tests {
         .unwrap()
     }
 
-    /// G1 + E1 — a binding whose mem predates it (no anchors, never synced)
+    /// A binding whose mem predates it (no anchors, never synced)
     /// rolls up to an **onboarding** verdict, never `action-needed`: the
     /// onboarding action is surfaced and pre-binding history alone drives no
     /// red verdict (the dashboard-level refusal). The per-binding

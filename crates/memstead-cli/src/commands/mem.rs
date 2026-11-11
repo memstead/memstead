@@ -409,7 +409,7 @@ pub struct InitArgs {
     /// Optional per-instance writing guidance as a JSON object, written
     /// verbatim into the new mem's config `writeGuidance` map — e.g.
     /// `--write-guidance '{"phase_context":"early design","stack":"Rust"}'`.
-    /// Opaque to the engine (schema-strictness D8 — the keys are
+    /// Opaque to the engine (the keys are
     /// client-owned vocabulary); a wrapper that read the schema
     /// package's `mem-template.json` fills the instance keys. Omit to
     /// seed no guidance. Must be a JSON object; anything else refuses

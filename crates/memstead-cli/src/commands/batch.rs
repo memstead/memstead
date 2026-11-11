@@ -20,7 +20,7 @@ pub(crate) fn render_batch_markdown(
     // A rehearsal must never read as an applied batch: `--dry-run`
     // validates everything and writes nothing, and the human-facing
     // markdown has to say so as plainly as the JSON envelope's empty
-    // `write_id` does (cold-start 0-8-0, F5).
+    // `write_id` does.
     let header = if result.applied && dry_run {
         format!(
             "# Batch {command} rehearsed — {} item(s) valid, nothing written",

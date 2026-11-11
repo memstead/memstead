@@ -854,7 +854,7 @@ fn default_output_path(
     config: &memstead_schema::MemConfig,
 ) -> anyhow::Result<PathBuf> {
     let version = config.version.as_ref().ok_or_else(|| {
-        // F1: typed envelope replaces the pre-fix INTERNAL-collapse
+        // Typed envelope replaces the pre-fix INTERNAL-collapse
         // path (config lives at
         // `__MEMSTEAD:mems/<name>/config.json` for the mem-repo
         // backend). The recovery hint

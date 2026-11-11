@@ -107,7 +107,7 @@ fn aging_rows_render_with_their_age() {
     assert!(!plain.contains("recorded observation"), "{plain}");
 }
 
-/// B1 — the report renders every required element deterministically, with
+/// The report renders every required element deterministically, with
 /// tree fan-out on its own axis, `authored` as its own excluded bucket, and
 /// the backlog depth. Two renders of the same input are byte-identical (no
 /// LLM, no clock).
@@ -139,11 +139,11 @@ fn b1_renders_all_elements_deterministically() {
     assert!(md.contains("## Capability matrix"));
     assert!(md.contains("## Degradations"));
     assert!(md.contains("hash-adjudication-deferred"));
-    // B5 denominator provenance.
+    // Denominator provenance.
     assert!(md.contains("per-medium enumeration `S(D)` = **10**"));
 }
 
-/// B2 — a detection-less medium renders `signal: none` → "freshness
+/// A detection-less medium renders `signal: none` → "freshness
 /// unknowable", and NO green freshness verdict appears for it.
 #[test]
 fn b2_detectionless_medium_freshness_unknowable_never_green() {
@@ -184,7 +184,7 @@ fn b2_detectionless_medium_freshness_unknowable_never_green() {
     );
 }
 
-/// B1 — base retrievability is *effective*, keyed on the resolved
+/// Base retrievability is *effective*, keyed on the resolved
 /// change-detection strategy, not the medium type's static ceiling. A
 /// filesystem binding that resolves to `mtime` (no prior content, only a
 /// mod-time signal) has no retrievable base version, so its facet
@@ -228,7 +228,7 @@ fn b1_base_retrievability_follows_resolved_strategy_not_medium_ceiling() {
     assert!(strategy_retrieves_base(ChangeStrategy::Graph));
 }
 
-/// B3 — aggregates always ship at budget 0 (mode overbudget, every heavy
+/// Aggregates always ship at budget 0 (mode overbudget, every heavy
 /// list dropped to hints).
 #[test]
 fn b3_aggregates_always_ship_at_zero_budget() {
@@ -246,7 +246,7 @@ fn b3_aggregates_always_ship_at_zero_budget() {
     assert!(out.hints.iter().any(|(k, _)| k == "uncovered_artifacts"));
 }
 
-/// B3 — a large facet's per-artifact list never renders unbounded under a
+/// A large facet's per-artifact list never renders unbounded under a
 /// small budget: it is dropped to a hint with an estimated_tokens figure.
 /// The complement: `include` forces it in past the budget.
 #[test]
@@ -438,7 +438,7 @@ fn b4_authored_exclusion_rationale_is_rendered() {
     assert!(md.contains("`src/gen.rs` — generated; no entity"));
 }
 
-/// B5 — the denominator provenance is stated; a non-enumerable medium says
+/// The denominator provenance is stated; a non-enumerable medium says
 /// so rather than inventing a denominator.
 #[test]
 fn b5_denominator_provenance_stated() {
@@ -456,7 +456,7 @@ fn b5_denominator_provenance_stated() {
     assert!(md2.contains("not enumerable"));
 }
 
-/// E1 (report half) — a mem that predates its binding renders the onboarding
+/// Report half: a mem that predates its binding renders the onboarding
 /// framing: the expected-0%-anchored statement plus the concrete backfill
 /// path. REFUSAL: no failure/error framing and no red "are findings" verdict
 /// is produced solely by pre-binding history — the uncovered artifacts are
@@ -767,12 +767,12 @@ fn end_to_end_body(report: &FidelityReport, outcome: &crate::findings::VerifyOut
     // The rendered report is deterministic and carries the S(D) statement.
     assert!(md.contains("per-medium enumeration `S(D)` = **3**"));
     // This mem carries anchors, so it does NOT predate its binding — no
-    // onboarding framing (the E1 complement).
+    // onboarding framing (the adopt complement).
     assert!(!report.adopt);
     assert!(!md.contains("## Adopting — first verify"));
 }
 
-/// E1 (report half) end-to-end — a mem with **no** anchors and no `#synced`
+/// Report half, end-to-end: a mem with **no** anchors and no `#synced`
 /// baseline predates its binding: `compute_fidelity_report` sets `adopt` from
 /// the live engine, and the rendered report leads with onboarding framing
 /// with no red findings verdict. Read-only on the mem (`&Engine`).

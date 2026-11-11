@@ -84,7 +84,7 @@ fn add_create_rule_duplicate_is_idempotent_with_warning() {
     );
 }
 
-/// MCP F3 / CLI: re-adding an existing pattern with a *different*
+/// Re-adding an existing pattern with a *different*
 /// schema set must NOT silently no-op (the deceptive "file unchanged"
 /// echoing a change that did not land). It refuses with a typed error
 /// naming the stored vs requested schemas, and the file is unchanged.

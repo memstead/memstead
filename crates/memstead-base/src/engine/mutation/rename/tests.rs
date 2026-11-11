@@ -199,7 +199,7 @@ fn rename_entity_rewrites_self_references_in_body_and_relationships() {
         "purpose".to_string(),
         "see also [[old-name]] for prior context".to_string(),
     );
-    // F11: the `[[old-name]]` self-reference body link does NOT
+    // The `[[old-name]]` self-reference body link does NOT
     // synthesise a self-edge (the alias pass drops vacuous self-edges
     // and emits `SELF_LINK_IGNORED`); `scan_wikilinks_without_relation`
     // also skips self-targets, so the unbacked self-link is admitted.
@@ -263,7 +263,7 @@ fn rename_entity_rewrites_self_references_in_body_and_relationships() {
         "section body must be rewritten in-memory; got {:?}",
         in_mem.sections.get("purpose")
     );
-    // F11: no self-relation is ever synthesised — neither to the old
+    // No self-relation is ever synthesised — neither to the old
     // id nor (after the body rewrite) to the new id. The body link
     // followed the rename, but it produces no self-edge.
     let new_self_target = EntityId::new("specs", "brand-new-name");

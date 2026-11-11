@@ -782,7 +782,7 @@ Some content with [[inline-link]].
     /// next read and strict ingress rejects the canonical bytes.
     ///
     /// Regression lock for the narrative-schema `temporal_range` bug
-    /// surfaced by V3's project-mems round-trip test.
+    /// surfaced by a project-mems round-trip test.
     #[test]
     fn generate_quotes_number_shaped_string_value() {
         let schema = type_by_name(builtin_names::NARRATIVE).unwrap();

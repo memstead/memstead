@@ -34,7 +34,7 @@ fn anchor(class: AnchorProvenanceClass) -> Anchor {
 }
 
 /// The store round-trips through serde and survives a write/read cycle on
-/// disk — the durability A1 rests on.
+/// disk — the durability the store rests on.
 #[test]
 fn store_round_trips_on_disk_and_delete_is_idempotent() {
     let tmp = tempfile::tempdir().unwrap();
@@ -76,7 +76,7 @@ fn store_round_trips_on_disk_and_delete_is_idempotent() {
         .join(".gitignore");
     assert_eq!(std::fs::read_to_string(&ignore).unwrap(), "*\n");
 
-    // Fresh read from disk (a later process) sees the findings (A1).
+    // Fresh read from disk (a later process) sees the findings.
     let back = read_findings_store(root, "engine", "graph")
         .unwrap()
         .unwrap();
@@ -93,7 +93,7 @@ fn store_round_trips_on_disk_and_delete_is_idempotent() {
     delete_findings_store(root, "engine", "graph").unwrap();
 }
 
-/// A3 — a changed `hash(D)` segregates the prior batch: findings under the
+/// A changed `hash(D)` segregates the prior batch: findings under the
 /// old hash are never `current` under the new key, only `superseded`.
 #[test]
 fn changed_binding_hash_supersedes_prior_findings() {
@@ -471,7 +471,7 @@ fn merge_deferral_never_downgrades_prior_adjudication() {
     assert_eq!(merged[0].key.source_head, "head1");
 }
 
-/// A2 — hash-drift adjudication is excluded for `informed-by` (and every
+/// Hash-drift adjudication is excluded for `informed-by` (and every
 /// non-hash-bearing class): a drifted/recheck state yields NO finding.
 #[test]
 fn informed_by_anchor_never_drifts() {
@@ -492,7 +492,7 @@ fn informed_by_anchor_never_drifts() {
     }
 }
 
-/// A2 — hash-bearing classes DO produce drift/recheck findings, and every
+/// Hash-bearing classes DO produce drift/recheck findings, and every
 /// class produces an existence (`unresolvable-anchor`) finding when orphaned.
 #[test]
 fn hash_bearing_drifts_and_orphan_is_class_independent() {
@@ -546,7 +546,7 @@ fn malformed_binding_id_refuses() {
     );
 }
 
-// ---- A1/A5 end-to-end: verify writes durable findings, no entity write --
+// ---- End-to-end: verify writes durable findings, no entity write --
 
 use memstead_base::anchor::AnchorSidecar;
 use memstead_base::binding::{
@@ -564,10 +564,10 @@ use memstead_base::workspace_store::WorkspaceStoreAdapter;
 /// A full verify pass over a folder mem: it adjudicates the mem's anchors
 /// against the live source (orphaned → unresolvable-anchor; present
 /// hash-bearing whose recorded hash mismatches the observed prepared form
-/// → deterministic `drifted`; informed-by → no finding, A2) and flags an
+/// → deterministic `drifted`; informed-by → no finding) and flags an
 /// uncovered source file, then persists the findings to the durable state
-/// tier. A **fresh** read from disk (a later process) sees them (A1). The
-/// pass runs on a shared `&Engine` — structurally read-only on the mem (A5).
+/// tier. A **fresh** read from disk (a later process) sees them. The
+/// pass runs on a shared `&Engine` — structurally read-only on the mem.
 #[test]
 fn verify_persists_findings_readable_fresh() {
     let tmp = tempfile::tempdir().unwrap();
@@ -714,7 +714,7 @@ fn verify_persists_findings_readable_fresh() {
     let binding = &configs.bindings[0].config;
     let resolved = resolve_binding_run("engine/graph", binding).unwrap();
 
-    // `&engine` — shared borrow, structurally cannot mutate the mem (A5).
+    // `&engine` — shared borrow, structurally cannot mutate the mem.
     let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
     assert!(
         outcome.recorded >= 3,
@@ -730,7 +730,7 @@ fn verify_persists_findings_readable_fresh() {
         "every hash-bearing anchor already carries a recorded hash — nothing to backfill"
     );
 
-    // Fresh read from disk — a later process / sync-brief render (A1).
+    // Fresh read from disk — a later process / sync-brief render.
     let store = read_findings_store(root, "engine", "graph")
         .unwrap()
         .unwrap();
@@ -753,7 +753,7 @@ fn verify_persists_findings_readable_fresh() {
         "recorded-hash mismatch on a stable medium adjudicates drifted deterministically"
     );
     assert!(has(FindingClass::Uncovered, "src/uncovered.rs"));
-    // A2: the informed-by anchor on the present file produced no finding —
+    // The informed-by anchor on the present file produced no finding —
     // the one drifted finding above belongs to the anchored (hash-bearing)
     // anchor, and nothing queued.
     assert!(
@@ -2690,9 +2690,9 @@ fn completed_verify_records_the_verified_baseline() {
     );
 }
 
-// ---- D1: per-run adjudication cap -----------------------------------
+// ---- Per-run adjudication cap -----------------------------------
 
-/// D1 — the per-run cap queues the remainder. A rotation window covering
+/// The per-run cap queues the remainder. A rotation window covering
 /// only a subset of drift candidates adjudicates the in-window ones and
 /// QUEUES every out-of-window candidate as `queued-for-adjudication` (the
 /// tier-3 backlog). Uncapped (`window = None`) adjudicates every candidate.
@@ -2763,9 +2763,9 @@ fn adjudication_cap_queues_the_remainder() {
     );
 }
 
-// ---- D3: full_resync scheduling + non-enumerable refusal ------------
+// ---- full_resync scheduling + non-enumerable refusal ------------
 
-/// D3 — `schedule_full_resync`: disabled at cadence 0; not-due off-cadence
+/// `schedule_full_resync`: disabled at cadence 0; not-due off-cadence
 /// (with a countdown); due on-cadence for an enumerable facet (walked, no
 /// refusal).
 #[test]
@@ -2796,7 +2796,7 @@ fn full_resync_schedule_disabled_notdue_due() {
     }
 }
 
-/// D3 REFUSAL — a scheduled full walk over a NON-enumerable medium refuses
+/// REFUSAL: a scheduled full walk over a NON-enumerable medium refuses
 /// with a typed signal: it never claims coverage and is never a silent skip.
 #[test]
 fn full_resync_refuses_non_enumerable_medium() {
@@ -2829,7 +2829,7 @@ fn full_resync_refuses_non_enumerable_medium() {
     }
 }
 
-/// D3 — a scheduled full walk fires the WHOLE-source enumeration this run:
+/// A scheduled full walk fires the WHOLE-source enumeration this run:
 /// with `full_resync_every = 1` (due every run) and a sample `batch_size` of
 /// 1, all three uncovered source files are flagged, not just one — the full
 /// walk overrides the bounded rotating sample for an enumerable medium.

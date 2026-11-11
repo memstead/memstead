@@ -209,7 +209,7 @@ impl AnchorGrain {
     }
 
     /// Whether this grain can be expressed in the medium's declared anchor
-    /// namespace (the `anchor_namespace` string from the E2 capability
+    /// namespace (the `anchor_namespace` string from the capability
     /// matrix: `path` / `path+commit` / `entity` / `url`).
     ///
     /// - `span` / `file` / `tree` require a path-shaped namespace
@@ -860,7 +860,7 @@ pub enum AnchorValidationError {
         candidates: Vec<String>,
     },
     /// The grain cannot be expressed in the medium's anchor namespace
-    /// (per the E2 capability matrix), e.g. `span` on a non-path medium.
+    /// (per the capability matrix), e.g. `span` on a non-path medium.
     #[error(
         "anchor grain '{grain}' is unsupported by a '{medium_type}' medium: its \
          '{anchor_namespace}' namespace does not admit that grain"

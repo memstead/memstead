@@ -35,7 +35,7 @@
 //! the residue. Two invariants keep this honest:
 //!
 //! - the derivation reads **anchors, never a commit diff** — the inference-from-
-//!   diffs mechanism D7 rejected stays rejected; a write without `anchors[]`
+//!   diffs mechanism stays rejected; a write without `anchors[]`
 //!   marks nothing;
 //! - only the intersection with the frozen slice is ever marked — an anchored
 //!   write referencing an artifact outside the presented slice fabricates no
@@ -318,13 +318,13 @@ impl DispositionInput {
 
 impl AdvanceState {
     /// Count of accumulated dispositions — the `disposed` figure `memstead
-    /// status` reports for this binding (D11).
+    /// status` reports for this binding.
     pub fn disposed(&self) -> usize {
         self.dispositions.len()
     }
 
     /// Count of frozen-slice artifacts not yet disposed — the `pending`
-    /// remainder `memstead status` reports (D11). Same subtraction the
+    /// remainder `memstead status` reports. Same subtraction the
     /// re-presentation applies ([`subtract_disposed`]), collapsed to a count.
     pub fn pending(&self) -> usize {
         artifact_set(&self.frozen_slice)
@@ -340,7 +340,7 @@ pub struct AdvanceOutcome {
     /// The binding id advanced.
     pub binding: String,
     /// The re-presented remainder — the frozen slice with every disposed
-    /// artifact removed (disposed artifacts absent, D7). Empty when complete.
+    /// artifact removed (disposed artifacts absent). Empty when complete.
     pub remainder: Slice,
     /// Total dispositions accumulated (this call + prior, persisted).
     pub disposed: usize,
@@ -735,7 +735,7 @@ fn artifact_set(slice: &Slice) -> BTreeSet<String> {
 }
 
 /// The remainder slice: the frozen slice with every disposed id removed from
-/// each class (disposed artifacts absent, D7).
+/// each class (disposed artifacts absent).
 fn subtract_disposed(frozen: &Slice, dispositions: &BTreeMap<String, String>) -> Slice {
     let keep = |v: &[String]| -> Vec<String> {
         v.iter()
@@ -764,7 +764,7 @@ fn subtract_disposed(frozen: &Slice, dispositions: &BTreeMap<String, String>) ->
 /// `resolved.name` must be the canonical binding id `<mem>/<stem>`, as
 /// produced by [`memstead_base::binding_run::resolve_binding_run`]; `dispositions` maps each
 /// judged artifact id to an agent-supplied [`DispositionInput`] — a bare verdict
-/// or a verdict with an authored rationale (in E2 the agent supplies one for
+/// or a verdict with an authored rationale (the agent supplies one for
 /// **every** artifact — see the module docs). An `excluded` verdict with a
 /// rationale is recorded in the durable authored-exclusion ledger; a presented
 /// artifact the ledger holds is disposed `excluded` by its row when the agent
@@ -874,7 +874,7 @@ pub fn advance_baseline(
 
     // Auto-`worked`: mark every frozen-slice artifact that an anchor in
     // the destination mem now references. Reads the anchors sidecar, never a
-    // commit diff (D7's rejected mechanism stays rejected); scoped to the
+    // commit diff (the rejected diff-inference mechanism stays rejected); scoped to the
     // frozen slice (`printed`) so an anchored write outside the slice
     // fabricates no entry; skips artifacts already carrying an explicit
     // disposition (the agent's judgement wins).

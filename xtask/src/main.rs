@@ -194,7 +194,7 @@ struct EvalArgs {
     pin: Option<String>,
     /// The pinned source repository clone (divergence mode): a `karalang/kara`
     /// checkout whose history contains every commit the package's `slices.json`
-    /// references. The round digests (amendment A2) are assembled from it by `git`.
+    /// references. The round digests are assembled from it by `git`.
     #[arg(long)]
     source_repo: Option<PathBuf>,
     /// Smoke mode (divergence): drive a reduced in-memory campaign — one round, one
@@ -203,7 +203,7 @@ struct EvalArgs {
     /// (`smoke-result.json`), never the published campaign, and never resumed.
     #[arg(long)]
     smoke: bool,
-    /// Documentary fallback (divergence, amendment A1): omit the per-session
+    /// Documentary fallback (divergence): omit the per-session
     /// `--max-budget-usd` cap. Allowances become documentary targets, the ledger
     /// still publishes actual usage, and the report must state that allowances were
     /// not hard-enforced. Use when the proportional budget starves a session before
@@ -735,7 +735,7 @@ fn run_divergence_eval(args: &EvalArgs) -> Result<()> {
     let out_dir = &std::fs::canonicalize(out_dir)
         .with_context(|| format!("canonicalising campaign output dir {}", out_dir.display()))?;
 
-    // Every round's mechanical digest, assembled from the pinned source (A2).
+    // Every round's mechanical digest, assembled from the pinned source.
     let manifest = package_dir.join("slices.json");
     let mut slices = eval::divergence::extract_round_slices(source_repo, &manifest)
         .context("assembling round-slice digests from the source repo")?;
@@ -776,7 +776,7 @@ fn run_divergence_eval(args: &EvalArgs) -> Result<()> {
         arm_b_workspace,
         arm_b_mcp_config,
         sandbox_dir: sandbox_dir.clone(),
-        // Amendment A1: enforce allowances as proportional `--max-budget-usd` caps,
+        // Enforce allowances as proportional `--max-budget-usd` caps,
         // unless the documentary fallback (`--no-budget`) is selected.
         usd_per_output_token: if args.no_budget {
             None

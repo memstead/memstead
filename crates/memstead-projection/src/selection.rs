@@ -352,7 +352,7 @@ pub fn select_next_due_operation(
 
     // Eligible = every (resolvable binding, loop-declared operation) pair the
     // filter admits, minus one-shot builds that already ran. Pair keys derive
-    // from the canonical binding id (`<mem>/<stem>`, D3/D9) — the resolved
+    // from the canonical binding id (`<mem>/<stem>`) — the resolved
     // run's `name`.
     let one_shot_ran = read_one_shot_runs(&cache_root);
     let mut eligible: Vec<Pair<'_>> = Vec::new();

@@ -21,7 +21,7 @@
 //! as a single `memstead_schema(name=...)` reader; `memstead_update_community`,
 //! `memstead_batch_update`, `memstead_export`, `memstead_stats`,
 //! `memstead_status`, `memstead_relations`, `memstead_context`,
-//! `memstead_type_info` are gone (`memstead_status` never minted — D11).
+//! `memstead_type_info` are gone (`memstead_status` never minted).
 //! So is the whole `memstead_workspace_*` family (allow/revoke create,
 //! allow/revoke delete, grant/revoke cross-link): workspace policy is
 //! the operator deciding what an agent may do, and the constrained
@@ -194,7 +194,7 @@ fn mcp_does_not_expose_batch_update_or_export() {
 /// `memstead_overview.schemas[]`. They must stay gone even if someone
 /// re-adds one by copy-paste.
 ///
-/// `memstead_status` is banned here too (D11): the CLI `stats`→`status`
+/// `memstead_status` is banned here too: the CLI `stats`→`status`
 /// rename mints **no** new MCP tool — health remains the single agent
 /// dashboard (a second status tool is the response-shape sprawl the
 /// tool-surface policy exists to prevent; the asymmetry is recorded in
@@ -948,7 +948,7 @@ fn is_allowed_reference(tool_name: &str, token: &str, schema: &str) -> bool {
             .all(|part| is_allowed_reference(tool_name, part, schema));
     }
     // Dotted path — check the head only (children are struct fields we
-    // don't enumerate; tightening this is S4's job).
+    // don't enumerate; tightening this is future work).
     let head = token.split('.').next().unwrap_or(token);
     let normalised = head.trim_end_matches("[]");
 
@@ -1044,8 +1044,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "origin",
             "first-party",
             "third-party",
-            // Direction-labelled relationship entries (cold-start 0-8-0,
-            // F15): every entry carries `direction`; outgoing entries
+            // Direction-labelled relationship entries: every entry
+            // carries `direction`; outgoing entries
             // hold the endpoint under `target`, incoming (opt-in via
             // include_relations) under `from`.
             "direction",
@@ -1314,7 +1314,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Schema-payload field references. `write_rules` ships per
             // MISSING_REQUIRED_SECTION warning (section-axis); type-axis
             // guidance moved to the response's top-level `type_guidance`
-            // map (F9). `type_write_rules` is still cited for the error
+            // map. `type_write_rules` is still cited for the error
             // path (INVALID_ENUM_VALUE / REQUIRED_FIELD_UNSET). `decision`
             // is the example type the description names.
             "write_rules",
@@ -1639,7 +1639,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Friction-ledger axis (include=friction): the refusal-ledger
             // summary.
             "friction",
-            // Vital-signs axis (include=vital_signs, A6).
+            // Vital-signs axis (include=vital_signs).
             "vital_signs",
             // Due axis (include=due): the due brief as data.
             "due",
@@ -1778,8 +1778,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Per-mem
             // `write_guidance` (opaque string map) and `extra` (unknown
             // top-level config keys) now ride on the `mems` detail
-            // entries under `include_config: true`. F6 renamed the
-            // wire-facing key from camelCase `writeGuidance` to
+            // entries under `include_config: true`. The
+            // wire-facing key was renamed from camelCase `writeGuidance` to
             // snake_case `write_guidance` for parity with the rest of
             // the surface; the on-disk JSON key (`.memstead/config.json`)
             // stays `writeGuidance`.

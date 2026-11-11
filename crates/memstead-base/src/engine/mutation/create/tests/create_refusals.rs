@@ -452,7 +452,7 @@ fn create_entity_rejects_invalid_title() {
     .unwrap();
     let (actor, client) = cli_actor();
 
-    // F4: empty/whitespace-only titles now refuse with
+    // Empty/whitespace-only titles now refuse with
     // `INVALID_TITLE` / reason `empty`. The earlier hash-fallback
     // behaviour applies only to the loader path (pre-gate
     // entities); the strict mutation gate rejects so the
@@ -621,7 +621,7 @@ fn create_entity_emits_inline_wiki_link_auto_stubbed_for_new_stub_target() {
     );
 }
 
-/// CLI F11: a body wiki-link to the entity's own slug is dropped (no
+/// A body wiki-link to the entity's own slug is dropped (no
 /// vacuous self-edge) with a `SELF_LINK_IGNORED` warning, while a body
 /// link to a *different* target in the same entity still synthesises
 /// its REFERENCES edge normally — only the self-target is dropped.

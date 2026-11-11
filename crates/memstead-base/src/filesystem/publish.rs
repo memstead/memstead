@@ -334,7 +334,7 @@ mod tests {
     fn write_workspace(tmp: &TempDir, name: &str, with_version: bool) -> PathBuf {
         let root = tmp.path().join(name);
         std::fs::create_dir_all(&root).unwrap();
-        // F1: `WorkspaceConfig::new` now seeds `version = Some(0.1.0)`
+        // `WorkspaceConfig::new` now seeds `version = Some(0.1.0)`
         // by default. To simulate the pre-gate / externally-imported
         // config in the no-version test path, clear it explicitly.
         let mut cfg = WorkspaceConfig::new(name, versioned("default", "1.0.0"));

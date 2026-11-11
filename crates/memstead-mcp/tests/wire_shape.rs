@@ -1276,7 +1276,7 @@ fn full_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
     let (rename_id, _) = create_and_get_id_hash(&mut harness, "Leading And Trailing Whitespace");
     // Adjacent unrelated entities — bodies share enough lexical
     // mass with the rename target that gix's similarity scorer can
-    // mispair them over the wide window (the F16 trip).
+    // mispair them over the wide window.
     let (other_a, _) = create_and_get_id_hash(&mut harness, "Adjacent Memo Alpha");
     let (other_b, _) = create_and_get_id_hash(&mut harness, "Adjacent Memo Beta");
 
@@ -1398,7 +1398,7 @@ fn full_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
         "renamed.to_id drifted: {only_rename}",
     );
 
-    // Unrelated entities must NOT surface as `renamed` (the F16
+    // Unrelated entities must NOT surface as `renamed` (the
     // class of false-positive). Their action should be `updated`
     // (other_a was updated, other_b was untouched and so doesn't
     // appear at all).
@@ -1912,7 +1912,7 @@ pattern = \"*\"\n\
 }
 
 /// MCP parity for the CLI
-/// F7 regression. `memstead_mem_delete` (always destructive) scrubs the
+/// regression test. `memstead_mem_delete` (always destructive) scrubs the
 /// deleted mem's dangling `[cross_mem_links]` grant but PRESERVES
 /// the exact-name `[[mem_management.create]]` /
 /// `[[mem_management.delete]]` allowlist rules — they are

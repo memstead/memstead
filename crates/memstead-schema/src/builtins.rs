@@ -32,7 +32,7 @@ pub(crate) fn builtin_schemas_dir() -> &'static Dir<'static> {
 /// ships a template, `None` when it does not (`default`, `ingest`) or
 /// when `name` is not a built-in.
 ///
-/// The template is opaque to the engine (schema-strictness D8): it is
+/// The template is opaque to the engine: it is
 /// surfaced verbatim for the client to fill `<REQUIRED: …>`
 /// placeholders. Loaded from the embedded `builtins/schemas/` tree so a
 /// mem pinning a built-in resolves its template without a workspace

@@ -109,7 +109,7 @@ impl WorkspaceConfig {
     /// Build a fresh workspace config with `format` set to
     /// [`FILESYSTEM_WORKSPACE_FORMAT`] and the engine default `version`
     /// (`0.1.0`). Convenience for `memstead init`.
-    /// F1: every mem carries a populated `version` from creation
+    /// Every mem carries a populated `version` from creation
     /// onward — operators bump via `memstead mem set-version` before
     /// publishing.
     pub fn new(name: impl Into<String>, schema: SchemaRef) -> Self {
@@ -672,7 +672,7 @@ mod tests {
 
     #[test]
     fn to_published_requires_version() {
-        // F1: mem-init populates `version` with `0.1.0` by default
+        // Mem-init populates `version` with `0.1.0` by default
         // so `to_published` no longer trips on a freshly-created
         // config. Simulate the pre-gate / externally-imported config
         // by clearing `version` explicitly.

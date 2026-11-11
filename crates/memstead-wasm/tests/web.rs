@@ -149,7 +149,7 @@ fn apply_commit_then_get_entity_after() {
     );
 }
 
-/// The cold-start F11 reproducer: `Engine.fromSnapshot(bytes).health()`
+/// The wasm clock-trap reproducer: `Engine.fromSnapshot(bytes).health()`
 /// trapped (`RuntimeError: unreachable` out of `SystemTime::now`) and
 /// poisoned the instance. Pin the trap-free property: health() returns
 /// the `memstead_health`-shaped summary — staleness fields included,

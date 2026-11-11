@@ -5,7 +5,7 @@ use super::*;
 impl Engine {
     /// Engine-wide [`crate::ops::Status`] across every mount — the graph
     /// counts behind `memstead status` (renamed from `stats` with the
-    /// command, D11; fields unchanged).
+    /// command; fields unchanged).
     pub fn status(&self) -> crate::ops::Status {
         let mut types_in_use: Vec<String> = self
             .store

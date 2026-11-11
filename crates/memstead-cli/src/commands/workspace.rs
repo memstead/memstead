@@ -876,7 +876,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
     // config-derived fields absent. A mount missing from this dump is now
     // missing from the workspace configuration, and nothing else.
     for (name, config) in engine.mounts_with_optional_config() {
-        // F24: branch on mount capability. Git-branch (writable)
+        // Branch on mount capability. Git-branch (writable)
         // mounts emit the gitdir-derived snapshot token; folder and
         // archive (RO) mounts omit the token entirely. Calling
         // `gitdir_for(name)` unconditionally would trip

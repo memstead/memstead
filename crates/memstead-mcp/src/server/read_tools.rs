@@ -153,11 +153,11 @@ impl McpServer {
             None
         };
         // Origin now rides inside the shared envelope builder (the
-        // structural fix for cold-start 0-8-0 F9/F13 — every surface
+        // structural fix: every surface
         // that composes an entity read carries it, not just this one).
         // Incoming edges join the envelope's `relationships` array when
         // the caller opted into relations, mirroring the text channel's
-        // `## Relations` section (F15).
+        // `## Relations` section.
         let incoming_for_envelope = if p.include_relations.unwrap_or(false) {
             Some(engine.store().incoming(&id).to_vec())
         } else {

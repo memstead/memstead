@@ -1042,7 +1042,7 @@ fn batch_update_refuses_whole_batch_on_one_bad_entry() {
     )
     .unwrap();
 
-    // CLI F12: a refused batch exits non-zero (was exit 0), matching the
+    // A refused batch exits non-zero (was exit 0), matching the
     // exit-code table for the dominant failure — here `ENTITY_NOT_FOUND`
     // → 3, the same code single `memstead update`/`entity` use for a missing
     // id. The human breakdown still prints on stdout.
@@ -1068,7 +1068,7 @@ fn batch_update_refuses_whole_batch_on_one_bad_entry() {
         .stdout(contains("should NOT land").not());
 }
 
-/// CLI F12 (`--json`): a refused batch exits non-zero and emits exactly
+/// With `--json`, a refused batch exits non-zero and emits exactly
 /// one JSON document — the standard `{code, message, details}` error
 /// envelope. `code` is the stable `BATCH_REFUSED` token (so a script can
 /// branch on `--json | jq -r .code`), and `details` carries `applied:false`
@@ -1139,7 +1139,7 @@ fn batch_update_json_refusal_exits_nonzero_with_envelope() {
     );
 }
 
-/// CLI F12 complement: a successful `--json` batch is unchanged — exit 0,
+/// Complement: a successful `--json` batch is unchanged — exit 0,
 /// the bare `BatchResult` on stdout with `applied:true` and the commit
 /// sha (no error-envelope wrapping on the success path).
 #[test]
@@ -1195,7 +1195,7 @@ fn batch_update_json_success_unchanged_exits_zero() {
     assert!(parsed["write_id"].as_str().is_some_and(|s| !s.is_empty()));
 }
 
-/// CLI F13: a `--include-notes` read of a batch-update commit names every
+/// A `--include-notes` read of a batch-update commit names every
 /// entity the batch touched via an additive `entity_ids` array — the
 /// subject still collapses to `(N entities)` (so `subject`/`entity_id`
 /// keep their backward shape), but the note alone is now self-describing.
@@ -1530,7 +1530,7 @@ fn changes_works_on_filesystem_mem_workspace() {
 /// field in the mem's `.memstead/config.json`, the engine refuses with
 /// `MEM_CONFIG_INCOMPLETE` — locks in that the CLI surfaces that
 /// failure cleanly instead of silently producing an unstamped `.mem`.
-/// F1: `memstead init` now seeds `version = 0.1.0` so the failure path
+/// `memstead init` now seeds `version = 0.1.0` so the failure path
 /// only fires when the field is removed (simulating a pre-gate or
 /// externally-imported config). The CLI must surface this via the
 /// typed `MEM_CONFIG_INCOMPLETE` envelope.
@@ -1609,7 +1609,7 @@ fn export_mem_on_filesystem_writes_archive() {
     );
 }
 
-/// F1: `memstead mem set-version` updates the workspace config's
+/// `memstead mem set-version` updates the workspace config's
 /// `version` field on disk. The change persists across CLI
 /// invocations — a follow-up `memstead export --format mem` uses the
 /// bumped version in the default archive filename.
@@ -1618,7 +1618,7 @@ fn mem_set_version_persists_through_filesystem_backend() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
-    // Engine-default seed is `0.1.0` per F1; bump to 0.2.0.
+    // Engine-default seed is `0.1.0`; bump to 0.2.0.
     memstead()
         .current_dir(tmp.path())
         .args(["mem", "set-version", "demo", "0.2.0"])

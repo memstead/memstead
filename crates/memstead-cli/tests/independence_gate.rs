@@ -3,7 +3,7 @@
 //! session-log notes since the criterion was written — never with the
 //! criterion's author alone — and the `transition_requires_checks` gate
 //! consumes that reading, so a plan cannot complete on the executor's own
-//! checks (A5).
+//! checks.
 
 use std::fs;
 use std::path::Path;

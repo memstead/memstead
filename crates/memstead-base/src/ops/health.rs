@@ -939,7 +939,7 @@ pub fn health_open_questions_axis(
             }
         }
 
-        // The resolution readings (plan B5): for every type of this mem
+        // The resolution readings: for every type of this mem
         // that declares `resolution`, the open entities with no condition
         // written, and the open entities whose condition nobody has
         // checked under the declared kind. The ledger is read as it is;
@@ -1522,7 +1522,7 @@ pub fn collect_tag_distribution(
 /// - `RelationTargetMissing` — a `## Relationships` row naming an entity
 ///   absent from the store entirely, not even as a stub. Auto-stubbing
 ///   means this only arises from out-of-band file edits or historical
-///   cross-mem corruption (the pre-F15 mem-delete path). Repair: restore
+///   cross-mem corruption (an earlier mem-delete path). Repair: restore
 ///   the target or remove the edge.
 ///
 /// The three used to share one code, and only the first was identifiable
@@ -2977,7 +2977,7 @@ pub fn entity_health(entity: &crate::entity::Entity, schema: &TypeDefinition) ->
 ///
 /// `SystemTime::now()` is unimplemented on `wasm32-unknown-unknown` —
 /// it traps with `RuntimeError: unreachable` and poisons the wasm
-/// instance (cold-start F11) — so the wasm build reads the JS-backed
+/// instance — so the wasm build reads the JS-backed
 /// clock instead. Same value, same summary shape on every target.
 /// Today as whole days since the Unix epoch, the clock every day-threshold
 /// reading in health uses. `MEMSTEAD_TODAY=YYYY-MM-DD` pins it (the

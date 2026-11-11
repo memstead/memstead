@@ -1,13 +1,13 @@
 //! Integration tests for the `memstead projection` command tree.
 //!
-//! Leaves covered: `brief` (D9 — render a binding's run-brief, and its
-//! typed-refusal paths), `init` (D8 — non-interactive v2 scaffold), `enable`,
+//! Leaves covered: `brief` (render a binding's run-brief, and its
+//! typed-refusal paths), `init` (non-interactive v2 scaffold), `enable`,
 //! `edit`, and `advance`.
 //!
 //! `init` tests assert: a codebase/filesystem source scaffolds all three files
 //! (`mediums`/`facets`/`projections`) with `operations:[build,sync,verify]` and
 //! a round-trippable v1 binding; a `web` source scaffolds build-only with a
-//! deferral warning; the `--json` output matches D8's pinned byte-shape; and a
+//! deferral warning; the `--json` output matches the pinned byte-shape; and a
 //! re-run on an existing id refuses `PROJECTION_EXISTS` without touching disk
 //! (the three files are byte-identical after the refused second run).
 
@@ -461,7 +461,7 @@ fn init_outside_workspace_is_typed() {
 }
 
 // ---------------------------------------------------------------------------
-// projection enable (D6 — the remedy a refused mutating op cites)
+// projection enable (the remedy a refused mutating op cites)
 // ---------------------------------------------------------------------------
 
 /// Enabling `sync` on a codebase binding that lacked it adds the block (with
@@ -1059,7 +1059,7 @@ fn advance_outside_workspace_is_typed() {
 // ── brief ───────────────────────────────────────────────────────────────
 
 /// `projection brief <mem>/<stem>` renders a binding's discovery run-brief,
-/// headed by the canonical binding id (D3/D9). Scaffold a binding with
+/// headed by the canonical binding id. Scaffold a binding with
 /// `projection init`, then render it.
 #[test]
 fn brief_renders_for_scaffolded_binding() {

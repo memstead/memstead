@@ -52,8 +52,8 @@ struct RotationCursor {
 }
 
 /// Per-binding verify-scheduling state (persisted as JSON under the engine cache
-/// tier). Holds the level-trigger run clock (`verify_runs`, for `full_resync_every`,
-/// D3) and the set of named rotation cursors the verify samplers walk.
+/// tier). Holds the level-trigger run clock (`verify_runs`, for `full_resync_every`)
+/// and the set of named rotation cursors the verify samplers walk.
 ///
 /// The prior flat single-rotation shape (a bare `rotation`/`cursor`/`file_order`
 /// triple) is superseded by `rotations`; because this lives under the recomputable
@@ -402,7 +402,7 @@ mod tests {
         assert_eq!(seen.len(), 5, "the rotation covers all files");
     }
 
-    /// D2 — a named rotation over an arbitrary item set is deterministic
+    /// A named rotation over an arbitrary item set is deterministic
     /// (same persisted state → same sequence), covers the whole set over a full
     /// rotation, and reshuffles the next rotation into a different order.
     #[test]
@@ -445,7 +445,7 @@ mod tests {
         assert_eq!(order_r0, order_repro, "same seed/state → same sequence");
     }
 
-    /// D2 — two named rotations under one binding advance on independent cursors:
+    /// Two named rotations under one binding advance on independent cursors:
     /// walking one does not consume the other.
     #[test]
     fn named_rotations_are_independent() {
@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(anchors_again.batch_index, 2, "anchor cursor is independent");
     }
 
-    /// D3 — the verify-run counter ticks every call and persists across a fresh
+    /// The verify-run counter ticks every call and persists across a fresh
     /// load (the level-trigger clock survives process restarts).
     #[test]
     fn verify_run_counter_ticks_and_persists() {

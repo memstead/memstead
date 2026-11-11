@@ -679,7 +679,7 @@ fn health_never_surfaces_lifecycle_policy_fields() {
     }
 }
 
-/// F6: under `memstead_health(mem=B)`,
+/// Under `memstead_health(mem=B)`,
 /// `most_connected` degrees count only source-in-mem edges, matching
 /// the same response's `total_edges`/`edge_types`. A cross-mem edge
 /// `A→B` is excluded from B's scoped aggregate, so it must also be
@@ -2877,8 +2877,8 @@ fn test_memstead_health_default_body_via_unified_engine_path() {
 /// `memstead_health` with `include_config: true` end-to-end. The
 /// per-mem `mems` detail block surfaces `origin`, the
 /// optional `vcs` block, and the parsed
-/// `.memstead/config.json` (`write_guidance` + `extra`). F6
-/// renamed the wire-facing key from camelCase `writeGuidance`
+/// `.memstead/config.json` (`write_guidance` + `extra`). The
+/// wire-facing key was renamed from camelCase `writeGuidance`
 /// to snake_case `write_guidance` (the on-disk JSON key stays
 /// `writeGuidance` — that file format is human-authored and
 /// retains its existing shape).
@@ -4214,7 +4214,7 @@ fn anchors_create_read_and_refuse_through_mcp_surface() {
 /// `memstead_relate(remove=true)` on a relation whose source body
 /// still wiki-links the target must surface
 /// `RELATION_HAS_BODY_LINKS` through the unified server's
-/// envelope projection. Prior to F3 the variant fell through to
+/// envelope projection. Previously the variant fell through to
 /// the wildcard `INTERNAL` arm in `engine_err_unified`, hiding
 /// the typed code from agents branching on `structured_content`.
 /// The filesystem-server projection already carries the variant;
@@ -4295,7 +4295,7 @@ fn relation_has_body_links_surfaces_on_unified_server() {
     assert_eq!(payload["details"]["rel_type"], "REFERENCES");
 }
 
-/// F2 + F4: write-side title length is now capped at the same
+/// Write-side title length is now capped at the same
 /// `memstead_base::ENTITY_ID_MAX_LEN` the read-path validator
 /// enforces, so an `memstead_create` whose derived id would exceed
 /// the limit refuses with an `INVALID_TITLE` envelope carrying
@@ -4409,7 +4409,7 @@ fn create_title_length_capped_in_sync_with_read_path() {
     );
 }
 
-/// F1 (B+A): non-Latin titles round-trip end-to-end through
+/// Non-Latin titles round-trip end-to-end through
 /// `memstead_create` → store → `memstead_entity` → `memstead_relate` with
 /// an Obsidian-style `[[title]]` reference. Covers three
 /// non-Latin scripts (CJK,
@@ -4621,7 +4621,7 @@ fn non_latin_titles_round_trip_create_and_relate() {
     }
 }
 
-/// F4 / F10: the strict mutation-entry gate refuses titles whose
+/// The strict mutation-entry gate refuses titles whose
 /// alphanumeric filter would strip every character (all-emoji,
 /// all-symbol, all-punctuation). Pre-gate the create used to fall
 /// back to a `entity-<hash>` slug; the gate surfaces
@@ -4756,7 +4756,7 @@ fn all_emoji_title_refuses_with_invalid_title_envelope() {
     assert_eq!(payload["details"]["reason"], "empty");
 }
 
-/// F8: a title with embedded control
+/// A title with embedded control
 /// characters (tab, newline) is refused with `INVALID_TITLE` /
 /// `reason: control_chars` and a `proposed_slug` — not accepted then
 /// silently truncated at the newline (which split the stored `# H1`
@@ -5807,7 +5807,7 @@ fn overview_includes_schemas_mems_communities() {
     // Mems block.
     assert_eq!(parsed.mem_names(), vec!["specs".to_string()]);
     assert!(parsed.text.contains("- **Schema:** default@1.0.0"));
-    // F1: per-mem `version` surfaces under the Mems block so
+    // Per-mem `version` surfaces under the Mems block so
     // an agent reading the overview sees the publish version
     // without a separate `memstead_health include_config` round-trip.
     // The test fixture seeds `version: "0.1.0"`.
@@ -7105,7 +7105,7 @@ fn memstead_create_dry_run_preview() {
         extract_text(&result)
     );
     let json: serde_json::Value = serde_json::from_str(&extract_text(&result)).unwrap();
-    // F1 (B+A): the slug now preserves precomposed Latin
+    // The slug now preserves precomposed Latin
     // diacritics (`Große Änderung` → `große-änderung`) instead
     // of transliterating to `grosse-aenderung`.
     assert_eq!(json["id"].as_str().unwrap(), "specs--große-änderung");
@@ -9446,7 +9446,7 @@ fn memstead_mem_create_persists_mount_for_cold_boot() {
     );
 
     // Second create with the same name trips MEM_NAME_COLLISION —
-    // F3 follows from the persistence fix.
+    // this follows from the persistence fix.
     let dup = server.memstead_mem_create(Parameters(TlsMemCreateParams {
         role: None,
         identity: None,
@@ -13023,7 +13023,7 @@ mod recovery_payload {
         );
     }
 
-    /// F9 stable empty shape: `type_guidance` ships as `{}` even
+    /// Stable empty shape: `type_guidance` ships as `{}` even
     /// when no MissingRequiredSection / MissingRequiredField
     /// warnings fire, so consumers don't branch on field presence.
     #[test]

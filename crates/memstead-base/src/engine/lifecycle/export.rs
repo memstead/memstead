@@ -183,7 +183,7 @@ impl Engine {
                 "mem '{mem_name}' has no loaded MemConfig — cannot export"
             ))
         })?;
-        // F1: surface the missing-version case as a typed
+        // Surface the missing-version case as a typed
         // `MEM_CONFIG_INCOMPLETE` envelope with structured recovery
         // details, rather than letting it bubble through as the
         // backend's `INTERNAL` collapse pointing at the wrong path
@@ -312,7 +312,7 @@ impl Engine {
     /// for writes; `EngineError::InvalidInput` when the mount has no
     /// loaded `MemConfig` (folder mount with no
     /// `.memstead/config.json`; the residual missing-config path is
-    /// distinct from the missing-version path). F1.
+    /// distinct from the missing-version path).
     /// Record pipeline-edit provenance through `mem`'s backend — the
     /// bridge the pipeline-edit block (outside the engine module) uses
     /// to reach a mount's backend. A mem that isn't currently mounted

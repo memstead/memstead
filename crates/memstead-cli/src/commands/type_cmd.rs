@@ -150,7 +150,7 @@ fn resolve_schema(ctx: &CliContext, mem: Option<&str>) -> anyhow::Result<Resolve
     let all_loaded: Vec<&str> = engine.mem_names();
     let resolved_mem: &str = match mem {
         Some(name) => {
-            // F25: `--mem` resolves against every loaded
+            // `--mem` resolves against every loaded
             // mem, not just the writable subset. Schema lookup is
             // read-only; RO mounts have schemas worth introspecting.
             if !all_loaded.contains(&name) {

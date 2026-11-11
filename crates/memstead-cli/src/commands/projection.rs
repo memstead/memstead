@@ -6,14 +6,14 @@
 //! `check-path`:
 //!
 //! - `brief` renders a binding's run-brief — the Markdown prompt an agent
-//!   consumes — for a canonical binding id `<mem>/<stem>` (D3/D9), or the next
+//!   consumes — for a canonical binding id `<mem>/<stem>`, or the next
 //!   due binding under `--all` (round-robin + backoff selection).
 //! - `init` scaffolds a fresh v2 single-record binding non-interactively. A
 //!   binding file in a retired format (gen-2 or v1) quarantines with
 //!   `PROJECTION_STORE_LEGACY` and is re-authored through `init`; the engine
 //!   no longer converts the retired formats.
 //! - `enable` adds a missing `build` / `sync` / `verify` operation block to an
-//!   existing binding (D6 — the remedy a refused mutating op cites).
+//!   existing binding (the remedy a refused mutating op cites).
 //! - `edit` patches an existing binding's author-editable fields in place.
 //! - `advance` records disposition-gated sync-baseline advances.
 //! - `exclude` records authored exclusions for in-scope source artifacts.
@@ -25,7 +25,7 @@
 //! This tree is the sole binding surface: the retired `ingest` command tree
 //! folded in here (`ingest brief` → `projection brief`).
 //!
-//! Errors carry `PROJECTION_*` wire tokens (D12); the missing-workspace path is
+//! Errors carry `PROJECTION_*` wire tokens; the missing-workspace path is
 //! single-sourced through [`crate::setup::workspace_not_initialised_error`].
 
 use clap::{Args as ClapArgs, Subcommand, ValueEnum};
@@ -617,7 +617,7 @@ fn operation_state_error(err: memstead_base::binding::OperationStateError) -> Cl
     }
 }
 
-/// Map a [`RenderBriefError`] to a typed CLI error (D12). Not-found bindings /
+/// Map a [`RenderBriefError`] to a typed CLI error. Not-found bindings /
 /// facets / mediums exit `NotFound`; a malformed id is a `Validation` name
 /// error; config-load and mode-unsupported failures are generic. Codes are
 /// spelled as literals at each construction site so the generated error index
@@ -893,7 +893,7 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     let medium_type = args.medium_type.to_medium_type();
 
     // Refuse — without touching disk — when a binding of this id already exists
-    // (D8: `init` never overwrites). The binding occupies the per-mem
+    // (`init` never overwrites). The binding occupies the per-mem
     // projections tier; its presence is the id-collision signal.
     let binding_path = root
         .join(".memstead")
@@ -990,7 +990,7 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     let created = vec![format!(".memstead/projections/{mem}/{stem}.json")];
 
     if ctx.json {
-        // D8's pinned skill contract: { binding, created, operations, warnings }.
+        // The pinned skill contract: { binding, created, operations, warnings }.
         print_json(&json!({
             "binding": binding_id,
             "created": created,
@@ -1429,7 +1429,7 @@ fn map_resolve_err(binding_id: &str, err: ResolveError) -> CliError {
 }
 
 /// Map an [`AdvanceError`] to a typed CLI error. The unknown-artifact refusal
-/// is the D7 gate (Validation); a malformed id is a Validation-shaped name
+/// is a Validation error; a malformed id is a Validation-shaped name
 /// error; store / engine failures are generic. Codes are spelled as literals at
 /// each site so the generated error index picks them up.
 fn map_advance_err(binding_id: &str, err: AdvanceError) -> CliError {
@@ -1801,7 +1801,7 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     let resolved = resolve_binding_run(&binding_id, &record.config)
         .map_err(|e| map_resolve_err(&binding_id, e))?;
 
-    // The measurement pass takes a shared engine borrow (A5 — structurally
+    // The measurement pass takes a shared engine borrow (structurally
     // incapable of a mem mutation); the mutable binding exists only for the
     // completed-run baseline write below.
     let mut cli_engine = ctx.cli_engine_at(&root)?;
@@ -1966,7 +1966,7 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
         }))?;
     } else {
         // The rendered report IS the stdout content (agent-consumable brief);
-        // prepend the scheduled full-walk decision so D3's typed signal (a full
+        // prepend the scheduled full-walk decision so the scheduler's typed signal (a full
         // sweep, or a non-enumerable refusal) is never silent in human mode,
         // and append the recorded `#verified` baseline so the completed-run
         // write is visible.

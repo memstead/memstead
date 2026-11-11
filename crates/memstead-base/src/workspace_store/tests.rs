@@ -507,7 +507,7 @@ name = "file-two-layer"
 
     let on_disk =
         std::fs::read_to_string(FileWorkspaceStore::mounts_json_path(tmp.path())).unwrap();
-    // Format bumped to V2.
+    // The current format tag.
     assert!(on_disk.contains("\"memstead-mounts-3\""));
     // In-workspace path stored relative — no absolute prefix bake-in.
     assert!(

@@ -505,7 +505,7 @@ pub struct RefSpec {
 /// Run a batch of ref edits as a single `edit_references` transaction
 /// against `<workspace_root>/mem-repo/.git/`.
 ///
-/// **Atomicity scope (closes [D8] in-process registry-corruption from
+/// **Atomicity scope (closes in-process registry-corruption from
 /// concurrent writers; commit-phase IO failure remains best-effort).**
 /// gix-ref's transaction `prepare` validates every spec's precondition
 /// and acquires per-ref locks; if any spec fails the precondition the
@@ -584,8 +584,8 @@ pub fn commit_refs_at_gitdir(gitdir: &Path, specs: &[RefSpec]) -> Result<(), Mem
 /// chains onto the snapshot, then atomically advance `__SYSTEM` via
 /// [`commit_refs`] with `MustExistAndMatch(observed_system_tip)`.
 ///
-/// **Closes the in-process RMW race for the single-ref path** (D8 in
-/// the plan): if a sequential second writer observes `main = T0` but
+/// **Closes the in-process RMW race for the single-ref path**:
+/// if a sequential second writer observes `main = T0` but
 /// `main` has advanced to `T1` since the snapshot, the precondition
 /// rejects the batch with [`MemRepoWriteError::RefTransaction`] rather
 /// than silently advancing past the first writer's commit. The

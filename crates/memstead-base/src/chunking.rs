@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn apply_chunking_out_of_range_errors_even_when_no_split_needed() {
-        // F26: requesting `chunk=99` on a body that fits in one chunk
+        // Requesting `chunk=99` on a body that fits in one chunk
         // used to silently cap to chunk 1. Agents walking a large
         // surface blind need the engine to flag the overshoot.
         let md = "---\n_hash: x\n---\n\n# Small\n";
@@ -540,7 +540,7 @@ mod tests {
 
     /// `chunk_markdown` must never panic on multi-byte input regardless
     /// of where the budget boundary lands. The 2026-05-18 CLI probe
-    /// (F5) reproduced `memstead overview --token-budget 0` panicking with
+    /// reproduced `memstead overview --token-budget 0` panicking with
     /// `start byte index N is not a char boundary; it is inside '—'`
     /// against the schema description's em-dash. The fix uses
     /// `floor_char_boundary` on every byte-indexed slice — these tests

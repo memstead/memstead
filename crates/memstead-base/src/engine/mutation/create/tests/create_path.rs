@@ -991,8 +991,7 @@ fn create_overrides_user_supplied_timestamps_update_rejects_them() {
     // update the writable-metadata validator rejects the write
     // up-front with `READ_ONLY_FIELD` — the agent gets a
     // structured rejection instead of a "set" response whose
-    // value the auto-stamp pass silently discards (per the F13
-    // / F14 contract).
+    // value the auto-stamp pass silently discards.
     let tmp = TempDir::new().unwrap();
     let mem_dir = tmp.path().to_path_buf();
     let writer = FilesystemBackend::new(mem_dir.clone());
@@ -1053,7 +1052,7 @@ fn create_overrides_user_supplied_timestamps_update_rejects_them() {
         "auto_timestamp field must be engine-determined on create, not user-supplied"
     );
 
-    // F13/F14: update rejects a user-supplied value for either
+    // Update rejects a user-supplied value for either
     // init_timestamp or auto_timestamp metadata fields with
     // `READ_ONLY_FIELD`. Test both fields in turn.
     let attempt_update = |key: &str, value: &str| {

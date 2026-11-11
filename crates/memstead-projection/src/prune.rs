@@ -4,7 +4,7 @@
 //! describing it be deleted?". It **never** mutates the destination mem: it
 //! produces [`PruneProposal`]s the **sync brief** surfaces, and the deletion
 //! reaches the mem only when an agent acts on that brief through the normal MCP
-//! mutation surface (A5 holds — there is no engine path from here that deletes
+//! mutation surface (there is no engine path from here that deletes
 //! or writes a mem entity). [`prune_proposals`] takes a shared `&Engine`, so it
 //! is structurally incapable of a mem mutation.
 //!
@@ -24,7 +24,7 @@
 //! 2026-09-10; the operator's decision of 2026-08-19 had already fixed the
 //! posture.)
 //!
-//! ## Provenance guards (F3)
+//! ## Provenance guards
 //!
 //! - an `authored`-provenance entity is **never** a prune target (excluded
 //!   entirely — no proposal is produced);
@@ -42,14 +42,14 @@ use memstead_base::binding::Binding;
 
 use memstead_base::binding_run::ResolvedIngest;
 
-/// The disposition a prune proposal carries (F3).
+/// The disposition a prune proposal carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PruneDisposition {
     /// The entity's whole source basis is gone; both sides are presented and
     /// the agent decides. Never an auto-write.
     Proposed,
     /// A `derived` entity — flagged with its inputs, never proposed for
-    /// deletion (F3).
+    /// deletion.
     DerivedFlagged,
 }
 
@@ -65,7 +65,7 @@ impl PruneDisposition {
 
 /// Classify one candidate entity into a prune disposition, or `None` when it is
 /// **excluded entirely** — an `authored`-provenance entity is never a prune
-/// target (F3).
+/// target.
 ///
 /// - `authored` → `None` (never targeted);
 /// - `derived` → [`PruneDisposition::DerivedFlagged`] (flagged with inputs,
@@ -74,9 +74,9 @@ impl PruneDisposition {
 ///   presented, the agent decides).
 pub fn classify_prune_candidate(class: AnchorProvenanceClass) -> Option<PruneDisposition> {
     match class {
-        // F3 — an authored entity is never a prune target.
+        // An authored entity is never a prune target.
         AnchorProvenanceClass::Authored => None,
-        // F3 — a derived entity is flagged with its inputs, never a delete.
+        // A derived entity is flagged with its inputs, never a delete.
         AnchorProvenanceClass::Derived => Some(PruneDisposition::DerivedFlagged),
         AnchorProvenanceClass::Anchored | AnchorProvenanceClass::InformedBy => {
             Some(PruneDisposition::Proposed)
@@ -86,7 +86,7 @@ pub fn classify_prune_candidate(class: AnchorProvenanceClass) -> Option<PruneDis
 
 /// A single prune proposal — a proposed removal the sync brief surfaces. The
 /// engine never enacts it: an agent acting on the sync brief deletes (or keeps)
-/// the entity through the MCP mutation surface (A5).
+/// the entity through the MCP mutation surface.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PruneProposal {
     /// The destination-mem entity id (`mem--slug`) the proposal concerns.
@@ -97,15 +97,15 @@ pub struct PruneProposal {
     /// The entity's dominant provenance class wire string (the class the
     /// disposition was decided from).
     pub class: String,
-    /// The disposition (F3).
+    /// The disposition.
     pub disposition: PruneDisposition,
     /// For a `derived` candidate: the input artifact refs to re-examine before
-    /// any removal (F3). Empty for every other class.
+    /// any removal. Empty for every other class.
     pub derived_inputs: Vec<String>,
 }
 
 /// Gather the prune proposals for a binding — **read-only** on the destination
-/// mem (shared `&Engine`; no mutation is structurally possible, A5). Returns an
+/// mem (shared `&Engine`; no mutation is structurally possible). Returns an
 /// empty vec when the binding declares no `prune` block (prune disabled).
 ///
 /// A **candidate** is an entity whose *entire* source basis vanished — every one
@@ -186,7 +186,7 @@ pub fn prune_proposals(
         };
 
         let Some(disposition) = classify_prune_candidate(dominant) else {
-            // Authored → excluded, never a prune target (F3).
+            // Authored → excluded, never a prune target.
             continue;
         };
 
@@ -212,9 +212,9 @@ pub fn prune_proposals(
 mod tests {
     use super::*;
 
-    // ---- F3: pure classifier ------------------------------------------------
+    // ---- Pure classifier ------------------------------------------------
 
-    /// F3 — an authored entity is never a prune target: excluded (no proposal).
+    /// An authored entity is never a prune target: excluded (no proposal).
     #[test]
     fn authored_is_never_a_prune_target() {
         assert_eq!(
@@ -223,7 +223,7 @@ mod tests {
         );
     }
 
-    /// F3 — a derived entity is flagged with its inputs, never proposed.
+    /// A derived entity is flagged with its inputs, never proposed.
     #[test]
     fn derived_is_flagged_not_deleted() {
         assert_eq!(
@@ -248,7 +248,7 @@ mod tests {
         }
     }
 
-    // ---- F2/F3: end-to-end over a real engine ----------------------------
+    // ---- End-to-end over a real engine ----------------------------
 
     use crate::render::render_sync_brief_for;
     use memstead_base::anchor::{
@@ -494,7 +494,7 @@ mod tests {
             brief.contains("the call is yours"),
             "the brief leaves the decision to the agent"
         );
-        // A5: the pass never mutated the mem — the entity's anchor is still there
+        // The pass never mutated the mem — the entity's anchor is still there
         // (prune_proposals took a shared &Engine; a delete is structurally
         // impossible). Re-read the sidecar to confirm.
         let after = engine.mem_anchors_resolved("engine");
@@ -504,7 +504,7 @@ mod tests {
         );
     }
 
-    /// F3 — provenance guards: an `authored` entity is NEVER a prune target
+    /// Provenance guards: an `authored` entity is NEVER a prune target
     /// (excluded, no proposal); a `derived` entity is flagged with its inputs,
     /// never proposed for deletion; a plain `anchored` entity is proposed.
     #[test]
@@ -545,13 +545,13 @@ mod tests {
 
         let proposals = prune_proposals(&engine, &root, &binding, &resolved);
 
-        // F3 — authored is never a prune target: no proposal names it.
+        // Authored is never a prune target: no proposal names it.
         assert!(
             !proposals.iter().any(|p| p.entity == "engine--handwritten"),
             "an authored entity is never proposed for deletion"
         );
 
-        // F3 — derived is flagged with its inputs, not proposed for deletion.
+        // Derived is flagged with its inputs, not proposed for deletion.
         let derived = proposals
             .iter()
             .find(|p| p.entity == "engine--synthesised")

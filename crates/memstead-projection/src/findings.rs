@@ -11,8 +11,8 @@
 //!
 //! The store keys on the binding's **`hash(D)` alone**: a binding-declaration
 //! edit still mechanically partitions findings into a fresh keyspace (prior
-//! findings are never presented as current, only segregated as superseded —
-//! A3), but a **source-head move does not**. Each finding records the
+//! findings are never presented as current, only segregated as superseded),
+//! but a **source-head move does not**. Each finding records the
 //! `source_head` it was observed at as metadata (its [`Finding::key`]), and
 //! sync briefs present **all** open findings under the current `hash(D)`
 //! regardless of recorded head — an open finding survives source movement and
@@ -29,7 +29,7 @@
 //! (the latest-recorded batch is current, the rest superseded until the next
 //! verify rewrites the hash's batch).
 //!
-//! ## Durability & location (A1, engine-state convention)
+//! ## Durability & location (engine-state convention)
 //!
 //! The store is engine-owned state, **not a mem**. It lives at
 //! `<workspace>/.memstead/state/findings/<mem>/<name>.json` — a sibling of the
@@ -41,7 +41,7 @@
 //! backoff, and the `next_batch` rotation use — those are recomputable; findings
 //! are not.
 //!
-//! ## One writer (A4/A5)
+//! ## One writer
 //!
 //! Only the engine verify/sync/advance code paths write this store. There is no
 //! CLI/skill/temp-file side channel: the refinement scout/writer temp-findings
@@ -96,7 +96,7 @@ const FINDINGS_DIR: &str = "findings";
 ///
 /// Only the **`binding_hash` half keys the store**: a changed `hash(D)` (a
 /// binding-declaration edit) invalidates prior findings by construction —
-/// segregated as superseded, never silently mixed into the current view (A3).
+/// segregated as superseded, never silently mixed into the current view.
 /// The `source_head` half is **observation metadata**, carried on every
 /// finding so it stays self-describing about when it was observed — a moved
 /// head does NOT invalidate a finding (findings survive head movement; see
@@ -119,7 +119,7 @@ pub struct FindingKey {
 // Finding
 // ---------------------------------------------------------------------------
 
-/// The class of a verify finding (A2). A closed vocabulary: `drifted` and
+/// The class of a verify finding. A closed vocabulary: `drifted` and
 /// `queued-for-adjudication` come only from **hash-drift adjudication** (over
 /// hash-bearing anchors — never `authored` / `informed-by`, see
 /// [`adjudicate_anchor`]); `unresolvable-anchor` is an existence failure;
@@ -187,7 +187,7 @@ impl FindingClass {
     }
 }
 
-/// What a finding is about (A2): an anchor reference, or — for an uncovered
+/// What a finding is about: an anchor reference, or — for an uncovered
 /// artifact that has no anchor — the source artifact id itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -201,7 +201,7 @@ pub enum FindingTarget {
         artifact: String,
     },
     /// An uncovered source artifact — no anchor references it, so there is no
-    /// anchor to name (A2's "artifact ID for uncovered artifacts").
+    /// anchor to name.
     Artifact {
         /// The source-side artifact id.
         artifact: String,
@@ -219,13 +219,13 @@ pub enum FindingTarget {
     },
 }
 
-/// A single durable verify finding (A2). Carries its target, its class, and —
+/// A single durable verify finding. Carries its target, its class, and —
 /// self-describingly — the [`FindingKey`] it was recorded under, so a finding
 /// pulled out of the store always states which `(hash(D), source_head)` it
 /// belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Finding {
-    /// The key this finding was recorded under (A2). Redundant with its
+    /// The key this finding was recorded under. Redundant with its
     /// enclosing [`FindingsBatch::key`], carried on the finding so it stays
     /// self-describing when detached.
     pub key: FindingKey,
@@ -250,7 +250,7 @@ pub struct Finding {
 /// A new pass under the same `hash(D)` replaces the batch (after
 /// [`verify_binding`]'s merge carried forward what stays open); a pass under a
 /// different `hash(D)` lands as a separate batch — the prior one is retained,
-/// segregated, never overwritten (A3). The batch's `key.source_head` is the
+/// segregated, never overwritten. The batch's `key.source_head` is the
 /// head the batch was last **recorded** at; each finding's own key records the
 /// head *it* was observed at (a carried finding keeps its original).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -264,12 +264,12 @@ pub struct FindingsBatch {
     pub findings: Vec<Finding>,
 }
 
-/// One binding's durable findings store (A1). Persisted at
+/// One binding's durable findings store. Persisted at
 /// `.memstead/state/findings/<mem>/<name>.json`, read fresh per call. Holds
 /// findings grouped by the `hash(D)` they were recorded under so declaration
 /// invalidation is mechanical: [`Self::current`] presents the current hash's
 /// batch — regardless of source head; [`Self::superseded`] surfaces everything
-/// else, segregated (A3).
+/// else, segregated.
 ///
 /// The on-disk shape predates the hash-alone re-key and is unchanged: a store
 /// written when batches were keyed `(hash(D), source_head)` loads without loss.
@@ -303,7 +303,7 @@ impl FindingsStore {
 
     /// Record `findings` under `key.binding_hash`, replacing **every** prior
     /// batch recorded under that hash (including legacy per-head siblings) and
-    /// leaving every other hash's batch untouched (A3 segregation — a changed
+    /// leaving every other hash's batch untouched (segregation — a changed
     /// `hash(D)` never overwrites the old batch).
     pub fn record(&mut self, key: FindingKey, recorded_at: String, findings: Vec<Finding>) {
         self.batches
@@ -316,7 +316,7 @@ impl FindingsStore {
     }
 
     /// The findings recorded under `key.binding_hash` — the **only** findings
-    /// ever presented as current (A3), **regardless of `key.source_head`**: an
+    /// ever presented as current, **regardless of `key.source_head`**: an
     /// open finding recorded at a previous head stays presented after the
     /// source advances. Empty when nothing was recorded under this hash.
     pub fn current(&self, key: &FindingKey) -> &[Finding] {
@@ -328,7 +328,7 @@ impl FindingsStore {
     /// Every finding **outside** the current view of `key.binding_hash` —
     /// superseded by a `hash(D)` change (or stranded in an older legacy
     /// per-head batch of the same hash), segregated so a consumer can show
-    /// them as stale without mixing them into the current view (A3).
+    /// them as stale without mixing them into the current view.
     pub fn superseded(&self, key: &FindingKey) -> Vec<&Finding> {
         let current = self.current_batch_index(&key.binding_hash);
         self.batches
@@ -565,7 +565,7 @@ pub enum FindingsError {
     /// enumerating a missing tree yields an empty stat map whose aggregate
     /// (the hash of nothing) is indistinguishable from a genuinely empty
     /// source and would overwrite a real `#verified` baseline with fake
-    /// state. Typed and visible, mirroring the D3 non-enumerable refusal.
+    /// state. Typed and visible, mirroring the non-enumerable full-walk refusal.
     #[error("source '{source_name}' unreachable: `{path}` does not exist")]
     SourceUnreachable {
         /// The source whose pointer resolved to the missing path.
@@ -722,7 +722,7 @@ pub struct VerifyOutcome {
     pub key: FindingKey,
     /// How many findings were recorded under the current key.
     pub recorded: usize,
-    /// How many findings remain under prior (superseded) keys (A3).
+    /// How many findings remain under prior (superseded) keys.
     pub superseded: usize,
     /// The tier-3 backlog depth — findings queued for adjudication.
     pub backlog: usize,
@@ -752,7 +752,7 @@ pub struct VerifyOutcome {
 /// `#verified` writer — the counterpart of the advance path's `#synced`).
 ///
 /// Deliberately a separate step from [`verify_binding`], which keeps its
-/// shared `&Engine` borrow (A5 — measurement is structurally incapable of a
+/// shared `&Engine` borrow (measurement is structurally incapable of a
 /// mem mutation): the caller invokes this **only after** a verify pass
 /// returned `Ok`, so an aborted or failed run never advances the token. The
 /// selection loop reads the token to decide when a verify is due again; the
@@ -783,8 +783,8 @@ pub fn record_verified_baseline(
 ///
 /// Measurement bookkeeping only: the write touches the sidecar and nothing
 /// else — no entity content, no section, no `_hash`. Deliberately a separate
-/// step from [`verify_binding`] (which keeps its shared `&Engine` borrow —
-/// A5), mirroring [`record_verified_baseline`]: the caller invokes this only
+/// step from [`verify_binding`] (which keeps its shared `&Engine` borrow),
+/// mirroring [`record_verified_baseline`]: the caller invokes this only
 /// after a verify pass returned `Ok`, so an aborted or failed run never
 /// records a hash. Idempotent — the engine writer skips anchors that already
 /// carry a hash, and a pass over fully-backfilled anchors observes an empty
@@ -885,7 +885,7 @@ fn join_facet_heads(tokens: &BTreeMap<String, String>) -> String {
 
 /// The composite current source-head token: each source facet's current
 /// baseline token, joined deterministically — the value changes iff any
-/// facet's head changes (the A3 "source head moved" trigger).
+/// facet's head changes (the "source head moved" trigger).
 fn current_source_head(
     engine: &Engine,
     workspace_root: &Path,
@@ -963,7 +963,7 @@ pub fn current_findings(
 /// Adjudicate one resolved anchor into a finding, or `None` when it resolves
 /// clean.
 ///
-/// **A2 enforcement — hash-drift exclusion.** A `drifted` / `recheck` state is
+/// **Hash-drift exclusion.** A `drifted` / `recheck` state is
 /// turned into a finding **only** for a hash-bearing class (`anchored` /
 /// `derived`). An `authored` or `informed-by` anchor is excluded from hash-drift
 /// adjudication by design: it never yields a `drifted` / `queued-for-adjudication`
@@ -999,7 +999,7 @@ pub fn adjudicate_anchor(
             ),
         ),
         AnchorState::Drifted | AnchorState::Recheck => {
-            // Hash-drift adjudication — excluded for non-hash-bearing classes (A2).
+            // Hash-drift adjudication — excluded for non-hash-bearing classes.
             if !anchor.class.is_hash_bearing() {
                 return None;
             }
@@ -1035,7 +1035,7 @@ pub fn adjudicate_anchor(
 }
 
 // ---------------------------------------------------------------------------
-// Tier-3 caps + scheduling (group D)
+// Tier-3 caps + scheduling
 // ---------------------------------------------------------------------------
 
 /// One source facet's enumerability — the input the full-resync scheduler
@@ -1335,16 +1335,16 @@ fn merge_with_prior(
 /// The thin `projection verify` write path. Measures a binding's
 /// fidelity and records durable findings under the current `(hash(D),
 /// source_head)` key; **read-only on the destination mem** — the `&Engine`
-/// (shared, not `&mut`) makes a mem mutation structurally impossible (A5).
+/// (shared, not `&mut`) makes a mem mutation structurally impossible.
 ///
 /// It does two things a real verify does, enough to populate and exercise the
-/// store (A1/A2): it adjudicates the destination mem's anchors against their
-/// live source observation (via [`adjudicate_anchor`], honouring the A2
+/// store: it adjudicates the destination mem's anchors against their
+/// live source observation (via [`adjudicate_anchor`], honouring the
 /// hash-drift exclusion), and it samples in-scope source artifacts through the
-/// retained [`next_batch`] rotation (A4 — the rotation's sole surviving
+/// retained [`next_batch`] rotation (the rotation's sole surviving
 /// consumer, used only to schedule which artifacts a pass looks at) to surface
 /// uncovered ones. The full tier-1 fidelity report and the sync brief are
-/// group B/C — this path deliberately renders neither.
+/// rendered elsewhere; this path deliberately renders neither.
 pub fn verify_binding(
     engine: &Engine,
     workspace_root: &Path,
@@ -1571,7 +1571,7 @@ fn run_verify(
     let facet = source_facet_label(resolved);
     let cache_root = workspace_root.join(".memstead.cache").join("ingest");
 
-    // Tier-3 operations knobs (group D): the per-run adjudication cap, the
+    // Tier-3 operations knobs: the per-run adjudication cap, the
     // scheduled full-walk cadence, and the sample window size. All come off
     // the `verify` block, defaulting to the engine defaults (tuned on this project's own bindings) when it
     // is absent (verify has no mutating operation to gate — an absent block is
@@ -1731,7 +1731,7 @@ fn run_verify(
                 candidates.push((eid.as_ref().to_string(), anchor, state));
             }
             AnchorState::Drifted | AnchorState::Recheck => {
-                // Only hash-bearing anchors are hash-drift candidates (A2); a
+                // Only hash-bearing anchors are hash-drift candidates; a
                 // non-hash-bearing class yields no adjudication.
                 if !anchor.class.is_hash_bearing() {
                     continue;
@@ -1763,7 +1763,7 @@ fn run_verify(
     // measurement treats any configured cap as unlimited — its rotation state
     // is neither consulted nor advanced (the scheduler is bypassed, so the
     // sampled loop's window sequence is untouched by a full run). Otherwise a
-    // cap-sized rotation window selects this run's adjudicated set (D1/D2).
+    // cap-sized rotation window selects this run's adjudicated set.
     let window: Option<BTreeSet<String>> = if full || cap == 0 {
         None
     } else {
@@ -1857,7 +1857,7 @@ fn run_verify(
                     && (!entity_end_reconciled || !engine.entity_is_absent(eid))
             })
     };
-    // The durable authored-exclusion ledger (B4) gates the RECORDING, not
+    // The durable authored-exclusion ledger gates the RECORDING, not
     // only the report's decoration: an artifact mined and deliberately
     // excluded with a rationale is not an uncovered finding. Until
     // 2026-08-28 only the report body consulted the ledger, so the verdict
@@ -1931,8 +1931,8 @@ fn run_verify(
         .filter(|f| f.class == FindingClass::QueuedForAdjudication)
         .count();
 
-    // Record under the current key (prior-hash batches retained, segregated —
-    // A3), persist to the durable state tier (A1).
+    // Record under the current key (prior-hash batches retained, segregated),
+    // and persist to the durable state tier.
     let recorded = findings.len();
     store.record(key.clone(), now, findings);
     let superseded = store.superseded(&key).len();

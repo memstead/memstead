@@ -362,7 +362,7 @@ pub fn render_operative_data(
 /// `(sync_state key, medium-typed token)` pair the engine records via the
 /// `set_mem_sync_state` writer. Produced by the cursor; the brief no longer
 /// renders it as an operator command (the agent runs `projection advance`,
-/// which computes and records the token engine-side — D4/D7).
+/// which computes and records the token engine-side).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncCommand {
     /// The sync-state key, `"<binding-id>/<facet>#synced"`.
@@ -426,9 +426,9 @@ pub struct SourceCursor {
     pub dest_mem: String,
     /// The canonical binding id `<mem>/<stem>` — rendered into the
     /// `memstead projection advance <binding-id> …` line the changed-slice
-    /// preface now emits instead of a raw `mem set-sync-state` command (D4/D7).
+    /// preface now emits instead of a raw `mem set-sync-state` command.
     pub binding_id: String,
-    /// Touchpoint B: one ordered delivery sequence per primary source that
+    /// One ordered delivery sequence per primary source that
     /// declares a delivery preparation. Their unit ids also ride `union`
     /// (the advance gate accepts them); the class lists never repeat them,
     /// because a class list is alphabetical and a sequence is not.
@@ -1458,11 +1458,11 @@ fn render_exclusions(ledger: &crate::advance::ExclusionLedger) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-/// Render the prune-proposals block for the sync brief (group F) — the deletion
+/// Render the prune-proposals block for the sync brief — the deletion
 /// proposals prune surfaced, grouped by disposition.
 /// Empty string when there are no proposals.
 ///
-/// **F3 / A5, structural:** every proposal here is exactly that — a *proposal*.
+/// **Structural:** every proposal here is exactly that — a *proposal*.
 /// Nothing in this text (nor anywhere in the engine) deletes an entity; the
 /// removal reaches the mem **only** when the agent acts on this brief through the
 /// MCP mutation surface. `authored` entities never reach this block (prune
@@ -1517,7 +1517,7 @@ fn render_prune_proposals(proposals: &[PruneProposal]) -> String {
         lines.push(String::new());
     }
 
-    // Derived-flagged — flagged with inputs, never proposed for deletion (F3).
+    // Derived-flagged — flagged with inputs, never proposed for deletion.
     let derived = group(PruneDisposition::DerivedFlagged);
     if !derived.is_empty() {
         lines.push("### Derived — flagged, NOT proposed for deletion".to_string());

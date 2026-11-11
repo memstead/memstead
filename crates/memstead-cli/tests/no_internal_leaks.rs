@@ -38,7 +38,7 @@ fn assert_typed_code(envelope: &serde_json::Value, ctx: &str) {
     );
 }
 
-/// F5/F15 — `memstead update <missing-id>` returns ENTITY_NOT_FOUND.
+/// `memstead update <missing-id>` returns ENTITY_NOT_FOUND.
 #[test]
 fn update_missing_entity_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
@@ -72,7 +72,7 @@ fn update_missing_entity_returns_typed_code() {
     assert_typed_code(&env, "update missing entity");
 }
 
-/// F13: `memstead update <id>` with no hash flag returns a typed code. The
+/// `memstead update <id>` with no hash flag returns a typed code. The
 /// missing hash itself is the engine's to refuse (`EXPECTED_HASH_REQUIRED`,
 /// pinned on a real entity in `write_commands`); on an id that names
 /// nothing, the engine's existence gate answers first.
@@ -106,7 +106,7 @@ fn update_missing_hash_flag_returns_typed_code() {
     );
 }
 
-/// F21 — `memstead overview --chunk <past-end>` returns CHUNK_OUT_OF_RANGE.
+/// `memstead overview --chunk <past-end>` returns CHUNK_OUT_OF_RANGE.
 #[test]
 fn overview_chunk_past_end_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
@@ -137,7 +137,7 @@ fn overview_chunk_past_end_returns_typed_code() {
     );
 }
 
-/// F28 — `memstead init <non-empty>` returns TARGET_NOT_EMPTY.
+/// `memstead init <non-empty>` returns TARGET_NOT_EMPTY.
 #[test]
 fn init_non_empty_returns_typed_code() {
     let tmp = TempDir::new().unwrap();
@@ -167,7 +167,7 @@ fn init_non_empty_returns_typed_code() {
     );
 }
 
-/// F31 — `memstead type <unknown>` returns UNKNOWN_ENTITY_TYPE.
+/// `memstead type <unknown>` returns UNKNOWN_ENTITY_TYPE.
 #[test]
 fn type_unknown_returns_typed_code() {
     let tmp = TempDir::new().unwrap();

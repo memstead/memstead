@@ -14,7 +14,7 @@ use super::{PreparedUpdate, UpdateEntityOutcome};
 /// preserved `last_modified` from the pre-stamp `next` (which still
 /// carries the entity's on-disk value because the auto-stamp never
 /// ran on this branch), the unchanged hash, an empty `write_id`, and
-/// the applied delta — empty (F1): the request-derived keys would
+/// the applied delta — empty: the request-derived keys would
 /// claim a change that did not happen.
 pub(super) fn noop_outcome(
     next: &Entity,

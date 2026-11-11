@@ -499,7 +499,7 @@ pub enum EngineError {
     /// Refusal to delete a mem because entities in other Write-Mems
     /// still reference entities inside it. Mirrors entity-level
     /// [`Self::HasIncomingRefs`] at the mem granularity — the
-    /// edge-graph axis (F15 / CLI F8). Revoking a workspace-level grant only closes
+    /// edge-graph axis. Revoking a workspace-level grant only closes
     /// the policy axis; this check closes the actual-edge axis so a
     /// mem delete that would orphan cross-mem edges refuses with
     /// the typed envelope listing every offending `(from_id, rel_type,
@@ -1422,7 +1422,7 @@ pub enum EngineError {
     /// to `INTERNAL` with a misleading `.memstead/config.json` reference
     /// that doesn't match the mem-repo backend's blob layout.
     /// Recovery: run `memstead mem set-version <mem> <version>` to
-    /// populate the field, then retry the export. F1.
+    /// populate the field, then retry the export.
     #[error(
         "mem `{mem}` config is missing required field(s) {missing_fields:?} — \
          set via `memstead mem set-version {mem} <version>` (e.g. 0.1.0)"

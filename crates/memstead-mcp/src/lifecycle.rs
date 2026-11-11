@@ -167,7 +167,7 @@ pub struct MemSetSchemaParams {
     pub identity: Option<String>,
 }
 
-/// Parameters for `memstead_mem_set_version`. F1.
+/// Parameters for `memstead_mem_set_version`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MemSetVersionParams {

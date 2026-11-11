@@ -1171,8 +1171,8 @@ fn build_entity_envelope_source_field_reads_edge_source() {
     );
 }
 
-/// The envelope's read contract is structural (cold-start 0-8-0,
-/// F9/F13/F15): `origin` is present on every envelope, every
+/// The envelope's read contract is structural:
+/// `origin` is present on every envelope, every
 /// relationship entry declares its `direction`, and incoming edges
 /// — when the caller passes them — appear as `direction: "in"`
 /// entries carrying the other endpoint under `from`. A consumer

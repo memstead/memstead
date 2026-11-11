@@ -386,7 +386,7 @@ impl super::Engine {
         // row's source declares), marked `pinned`, so the next verify reads
         // the row against the target as it was when the claim was made. A
         // row backfilled at a later verify instead was pinned to whatever
-        // the target had become by then (Test A, M3, 2026-09-02). A target
+        // the target had become by then. A target
         // the engine cannot resolve at write (unknown id, unmounted mem, a
         // stub, a preparation without an entity form) leaves the row
         // hash-less and unverified: never a guessed hash. A supplied hash is
@@ -1961,8 +1961,8 @@ pub(super) fn validate_manual_authoring_posture(
 /// order) — `create.rs` / `update.rs` use it to surface
 /// `relations_emitted` on the response envelope.
 /// Returns the synthesised relations (in body iteration order) and a flag
-/// signalling whether a body wiki-link to the entity's own id was dropped
-/// (F11). The caller surfaces that as a `SELF_LINK_IGNORED` warning — the
+/// signalling whether a body wiki-link to the entity's own id was dropped.
+/// The caller surfaces that as a `SELF_LINK_IGNORED` warning — the
 /// pass has no warning channel of its own.
 pub(super) fn synthesise_alias_relations(
     engine: &super::Engine,
@@ -2017,7 +2017,7 @@ pub(super) fn synthesise_alias_relations(
         let ids = crate::entity::parser::extract_inline_links(body, &next.mem)
             .map_err(|errs| map_wiki_link_errors(section_key, errs))?;
         for target in ids {
-            // F11: a body wiki-link to the entity's own id is a vacuous
+            // A body wiki-link to the entity's own id is a vacuous
             // self-edge (renders as both Outgoing and Incoming, inflates
             // connectivity). Drop it — but don't refuse: the author may
             // have written their own slug. The caller surfaces
@@ -2084,7 +2084,7 @@ pub(super) struct UndeclaredCrossSchemaLink {
 }
 
 /// What [`synthesise_alias_relations`] did: the relations it emitted
-/// (in body iteration order), whether a self-link was dropped (F11),
+/// (in body iteration order), whether a self-link was dropped,
 /// and the cross-schema links it declined for lack of a declaration.
 #[derive(Default)]
 pub(super) struct AliasSynthesisOutcome {
@@ -2181,7 +2181,7 @@ pub(super) fn scan_wikilinks_without_relation(
             .map_err(|errs| map_wiki_link_errors(section_key, errs))?;
         for target in ids {
             // A self-targeting body link is intentionally unbacked: the
-            // alias pass drops its (vacuous) self-edge (F11), so it has no
+            // alias pass drops its (vacuous) self-edge, so it has no
             // backing relation by design and must not trip the
             // unbacked-link refusal here.
             if target == next.id {

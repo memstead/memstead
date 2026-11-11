@@ -210,7 +210,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
 
     // A FAILED batch (atomic refusal — nothing committed) is surfaced as
-    // the standard error envelope (CLI F12): it carries a top-level
+    // the standard error envelope: it carries a top-level
     // `code` and maps to a non-zero exit code via `ExitKind`, consistent
     // with single `update` and the documented exit-code table. A script
     // branching on `$?` (or `--json | jq -r .code`) now detects the

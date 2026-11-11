@@ -1166,8 +1166,8 @@ fn collect_equality_filter_warnings(
                 // Filterable field. A comma-bearing value on a csv-array
                 // field can never equal a single member (members are split
                 // on comma), so the filter silently matches nothing —
-                // surface the shape mismatch and the single-member form
-                // (CLI F8). The filter still applies as written.
+                // surface the shape mismatch and the single-member form.
+                // The filter still applies as written.
                 if field_def.serialization == Serialization::CsvArray && value.contains(',') {
                     warnings.push(WarningHint::FilterValueMultiMember {
                         key: key.clone(),

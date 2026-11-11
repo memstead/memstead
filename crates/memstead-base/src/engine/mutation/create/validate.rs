@@ -47,7 +47,7 @@ pub(super) struct ValidatedCreate {
 /// contributes one entry holding the type's `write_rules`. Returns an
 /// empty map when no section/field warnings fire — the stable empty
 /// shape ships on the wire so consumers don't branch on field
-/// presence (F9).
+/// presence.
 fn build_type_guidance(
     warnings: &[WarningHint],
     type_def: &TypeDefinition,

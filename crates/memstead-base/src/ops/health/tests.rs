@@ -926,7 +926,7 @@ fn dangling_link_does_not_flag_real_reference() {
     );
 }
 
-/// F12: a `## Relationships` row pointing at a fully-absent target
+/// A `## Relationships` row pointing at a fully-absent target
 /// (out-of-band file edit, mem-delete corruption) must surface.
 /// The scan covers both axes; relationship-table danglers ship
 /// `section: None` to mark the source axis.

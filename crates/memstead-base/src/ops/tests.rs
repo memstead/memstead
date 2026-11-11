@@ -137,7 +137,7 @@ fn to_envelope(w: &WarningHint) -> serde_json::Value {
 
 #[test]
 fn warning_hint_missing_required_section_envelope() {
-    // F9: type-level write_rules moved out of per-warning details
+    // Type-level write_rules moved out of per-warning details
     // to the mutation response's top-level `type_guidance` map.
     // The warning now carries only section-axis fields.
     let w = WarningHint::MissingRequiredSection {

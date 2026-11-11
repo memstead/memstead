@@ -891,7 +891,7 @@ mod tests {
 
     #[test]
     fn notice_entry_is_byte_identical_to_changes_since_envelope() {
-        // F3 parity: the notice's detailed-tier entry and the
+        // Parity: the notice's detailed-tier entry and the
         // `memstead_changes_since` event are the *same* serialized shape, so
         // an agent decodes one and decodes the other — no translation
         // between `change`/`action` or `modified`/`updated` or
@@ -919,7 +919,7 @@ mod tests {
 
     #[test]
     fn notice_renamed_carries_both_ids_and_sorts_under_to_id() {
-        // F2: a rename in the notice carries both prior and new id —
+        // A rename in the notice carries both prior and new id —
         // an agent holding the old id can follow it. Parity with
         // `memstead_changes_since` (from_id + to_id, not remove+add).
         let changes = vec![ChangeEnvelope::Renamed {
@@ -954,7 +954,7 @@ mod tests {
 
     #[test]
     fn notice_ids_tier_preserves_rename_both_ids() {
-        // F2 holds in the `ids` tier too: rich detail is dropped but a
+        // The rename rule holds in the `ids` tier too: rich detail is dropped but a
         // rename still carries both ids (identity, not detail).
         let mut changes = added_envelopes(NOTICE_DETAILED_MAX);
         changes.push(ChangeEnvelope::Renamed {

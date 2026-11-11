@@ -4,7 +4,7 @@
 //! Engine-side port of the plugin's `computeSourceCursor` (`inject.mjs`). For
 //! each of a binding's source facets it resolves the change-detection
 //! strategy, reads the durable baseline from the **destination** mem's
-//! `sync_state` (keyed `"<binding-id>/<facet-or-refmem>#synced"`, D4), computes
+//! `sync_state` (keyed `"<binding-id>/<facet-or-refmem>#synced"`), computes
 //! the changed slice against the source's current state, and unions the
 //! per-facet slices.
 //!
@@ -995,7 +995,7 @@ pub fn compute_source_cursor(
         dest_mem: dest.clone(),
         // The resolved ingest's `name` is the canonical binding id `<mem>/<stem>`
         // (via `resolve_binding_run`) — the id the `projection advance` line the
-        // brief renders (D4/D7) is keyed on.
+        // brief renders is keyed on.
         binding_id: resolved.name.clone(),
     }
 }

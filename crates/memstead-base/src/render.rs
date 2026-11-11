@@ -1060,7 +1060,7 @@ pub fn build_entity_envelope(
     );
     // `entity_type`, not `type`: one concept, one wire spelling. The wasm
     // read surface has always served the serialized Entity's `entity_type`,
-    // and this envelope said `type` for the same read — the F7-adjacent
+    // and this envelope said `type` for the same read — a
     // split the 2026-08-28 wire batch closed. The FRONTMATTER key stays
     // `type:` (on-disk storage format, not the wire), and the metadata
     // read-only triple keeps refusing it under that name.
@@ -1174,7 +1174,7 @@ pub fn build_entity_envelope(
     // appended with `direction: "in"` and the other endpoint under
     // `from`. Before the marker existed the array was silently
     // one-directional: a consumer had no signal that "what depends on
-    // this?" was unanswerable from the block (cold-start 0-8-0, F15).
+    // this?" was unanswerable from the block.
     let mut relationships: Vec<serde_json::Value> = entity
         .relationships
         .iter()

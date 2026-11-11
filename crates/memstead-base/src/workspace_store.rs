@@ -1131,8 +1131,8 @@ pub enum InstantiateError {
     /// nothing else: an earlier revision pointed at a `mem-repo` Cargo
     /// feature that does not exist on the published crates and named
     /// `instantiate_full_backend` without saying how to wire it —
-    /// a cold-start run burned its longest wall on exactly that
-    /// (protocol 0-8-0, F6). Keep this message in lockstep with the
+    /// a cold-start run burned its longest wall on exactly that.
+    /// Keep this message in lockstep with the
     /// actual `memstead-git-branch` public API.
     #[error(
         "mem {mem}: git-branch storage needs the memstead-git-branch crate \

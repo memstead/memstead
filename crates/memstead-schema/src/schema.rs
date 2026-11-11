@@ -245,7 +245,7 @@ pub(crate) fn closest_match<'a>(
 ) -> Option<String> {
     // Noise floor of `chars/2`: beyond that the input shares almost
     // nothing with the vocabulary, so a "did you mean" suggestion is
-    // noise dressed as a hint (MCP F1 — a confidently-wrong suggestion
+    // noise dressed as a hint (a confidently-wrong suggestion
     // misleads). Mirrors `nearest_str_match` in memstead-base verbatim, so
     // `closest_match`-backed codes (`UNKNOWN_SECTION`, `INVALID_REL_TYPE`)
     // gate consistently with the already-floored `INVALID_ENUM_VALUE`.
@@ -270,7 +270,7 @@ pub(crate) fn closest_match<'a>(
 mod closest_match_tests {
     use super::closest_match;
 
-    /// MCP F1: a token with no close declared candidate yields no
+    /// A token with no close declared candidate yields no
     /// suggestion (the `chars/2` noise floor rejects it) — a confidently-
     /// wrong "did you mean" is noise dressed as a hint.
     #[test]
@@ -295,7 +295,7 @@ mod closest_match_tests {
         );
     }
 
-    /// MCP F1 complement: a genuine near-typo (within `chars/2`) still
+    /// Complement: a genuine near-typo (within `chars/2`) still
     /// gets its suggestion.
     #[test]
     fn near_typo_still_suggests() {

@@ -94,8 +94,8 @@ pub struct CreateEntityOutcome {
     /// reference this top-level map via their `entity_type` field
     /// rather than each carrying the (identical, type-axis) array.
     /// Empty when no such warnings fire; stable empty shape ships
-    /// on the wire so consumers don't branch on field presence
-    /// (F9). Sorted by key for deterministic output.
+    /// on the wire so consumers don't branch on field presence.
+    /// Sorted by key for deterministic output.
     pub type_guidance: std::collections::BTreeMap<String, Vec<String>>,
     /// Number of incoming edges adopted from a pre-existing stub
     /// at this id. `None` when no stub adoption happened (no
@@ -558,7 +558,7 @@ pub struct RelateEntityOutcome {
     /// the last referrer. Wire-equivalent to
     /// [`DeleteEntityOutcome::orphan_stubs_removed`]; both surfaces
     /// share the same field name so MCP / CLI consumers can branch
-    /// uniformly (F7).
+    /// uniformly.
     pub orphan_stubs_removed: Vec<EntityId>,
 }
 

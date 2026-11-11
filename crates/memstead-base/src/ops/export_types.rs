@@ -121,7 +121,7 @@ pub struct SetMemVersionOutcome {
     /// Concurrent-drift warnings detected at the pre-write probe —
     /// e.g. `MemReloaded` when a sibling engine committed between
     /// this engine's last snapshot and the set-version write. Empty
-    /// on the happy path. F1.
+    /// on the happy path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<WarningHint>,
 }

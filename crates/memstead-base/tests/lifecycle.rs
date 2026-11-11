@@ -344,7 +344,7 @@ fn create_mem_seed_provenance_carries_the_callers_actor_and_client() {
 
 /// The optional `write_guidance` create-parameter is persisted
 /// verbatim into the new mem's config `writeGuidance` map in the
-/// seed commit (schema-strictness D8 — the engine never inspects the
+/// seed commit (the engine never inspects the
 /// keys). A populated map round-trips; the `camelCase` wire key is
 /// `writeGuidance`.
 #[test]
@@ -1403,8 +1403,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
     // Allow `a → b` cross-mem links so the relate call below
     // succeeds. The grant is revoked before the delete attempt so
     // the policy axis (Step 3, `MEM_REFERENCED_BY_POLICY`) passes
-    // while the edge-graph axis (Step 3a) fires — the exact
-    // F15 / CLI F8 scenario.
+    // while the edge-graph axis (Step 3a) fires.
     let mut cross_links: std::collections::BTreeMap<String, CrossLinkValue> = Default::default();
     cross_links.insert("a".to_string(), CrossLinkValue::List(vec!["b".to_string()]));
     engine.set_settings(WorkspaceSettings {
@@ -1482,7 +1481,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
         .expect("seed a--source with DEPENDS_ON edge");
 
     // Revoke the cross-mem grant — Step 3 now passes — leaving
-    // the edge state as the F15 scenario: policy is clean but the
+    // the edge state as above: policy is clean but the
     // edge graph still has the stale reference.
     engine.set_settings(WorkspaceSettings {
         mem_create_rules: Vec::new(),
@@ -2371,7 +2370,7 @@ fn router_only_unregister_leaves_policy_intact() {
 /// [`memstead_base::workspace_store::parse_workspace_settings`], apply
 /// the projection via `engine.set_settings`. Post-call, the engine's
 /// in-memory `settings()` view matches the on-disk state without an
-/// intervening `memstead_reload`. F6 MCP closed.
+/// intervening `memstead_reload`.
 #[test]
 fn policy_mutation_refreshes_engine_settings() {
     let tmp = TempDir::new().unwrap();

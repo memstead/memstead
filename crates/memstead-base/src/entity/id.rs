@@ -9,7 +9,6 @@ use unicode_normalization::UnicodeNormalization;
 /// filesystems. The read-path validator on the MCP surface and the
 /// write-path slug derivation share this constant so an entity that
 /// the write side accepts is always readable on the same wire.
-/// F2 + F4.
 pub const ENTITY_ID_MAX_LEN: usize = 200;
 
 /// Error cases for title→slug derivation. `title_to_slug` itself is
@@ -37,7 +36,7 @@ pub enum SlugError {
     /// in a longer-named one. `input` echoes that composed id (not the
     /// title) so it agrees with `length`: the payload measures one
     /// quantity, the id, end to end. `max` is [`ENTITY_ID_MAX_LEN`] so the
-    /// agent can shorten by the exact delta. F2 + F4.
+    /// agent can shorten by the exact delta.
     #[error(
         "entity id \"{input}\" is {length} characters (max {max}); the id is `<mem>--<slug>`, so the title budget shrinks as the mem name grows — shorten the title"
     )]
@@ -53,7 +52,7 @@ pub enum SlugError {
     /// whitespace-only, or composed exclusively of pipeline-separator
     /// characters (hyphens) so the slug pipeline would have collapsed
     /// it to a hash-fallback id. Recovery: supply a non-empty title
-    /// with at least one alphanumeric character. F4.
+    /// with at least one alphanumeric character.
     #[error("title is empty or contains no slug-meaningful characters")]
     TitleEmpty { input: String },
     /// Strict mutation-entry rejection: the title contains control
@@ -66,7 +65,7 @@ pub enum SlugError {
     /// named-offenders + `proposed_slug` recovery shape the invalid-char
     /// guard uses. `control_chars` lists each distinct offender in source
     /// order; `proposed_slug` is the slug the pipeline would produce, for
-    /// a mechanical retry with a single-line title. F8.
+    /// a mechanical retry with a single-line title.
     #[error(
         "title {input:?} contains control character(s) {control_chars:?} that would split the stored heading — \
          retry with a single-line title (proposed slug: \"{proposed_slug}\")"
@@ -106,7 +105,7 @@ pub fn build_id(mem: &str, title: &str) -> Result<EntityId, SlugError> {
 /// produces an id the read side would refuse. The cap is on the
 /// composed `<mem>--<slug>` id (which is also the filename), so the
 /// error echoes the id itself — the `reason`, the echoed `input`, and
-/// the reported `length` all describe the id, not the title. F2 + F4.
+/// the reported `length` all describe the id, not the title.
 pub fn enforce_id_length(id: &str) -> Result<(), SlugError> {
     if id.chars().count() > ENTITY_ID_MAX_LEN {
         return Err(SlugError::IdTooLong {
@@ -120,7 +119,7 @@ pub fn enforce_id_length(id: &str) -> Result<(), SlugError> {
 
 /// Convert a title string to a kebab-case slug.
 ///
-/// Pipeline (F1, option B+A):
+/// Pipeline:
 ///
 /// 1. **NFC-normalize** so combining sequences fold into precomposed
 ///    forms (`Café` written NFD becomes `Café` written NFC). One
@@ -311,7 +310,7 @@ pub fn validate_and_derive_slug(title: &str) -> Result<SlugDerivation, SlugError
 /// plenty for collision-resistance inside a single mem; the
 /// fallback only fires for titles that contain no
 /// agent-meaningful characters anyway, so the opaque form is
-/// acceptable. F1 (option A backstop).
+/// acceptable.
 fn short_hash(input: &str) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(input.as_bytes());
@@ -640,7 +639,7 @@ pub fn id_to_file_path(id: &EntityId) -> String {
 /// (`\p{Lo}` — CJK, Arabic, Hebrew, Devanagari, Thai, …), modifier
 /// letters (`\p{Lm}` — e.g. Japanese prolonged-sound mark `ー`),
 /// any Unicode numeric (`\p{N}`), and hyphen. Mem names stay
-/// ASCII — see [`validate_mem_name_grammar`]. F1 (option B+A).
+/// ASCII — see [`validate_mem_name_grammar`].
 ///
 /// Returns the original path on success, an error message on failure.
 /// Callers wrap the failure into a typed envelope (e.g.

@@ -348,8 +348,8 @@ pub fn render_sync_brief_budgeted(
                 detail: e.to_string(),
             }
         })?;
-    // Prune proposals (group F) ride the sync brief — the sole channel through
-    // which a prune removal reaches the mem (F3/A5). Read-only gather.
+    // Prune proposals ride the sync brief — the sole channel through
+    // which a prune removal reaches the mem. Read-only gather.
     let prune = prune_proposals(engine, workspace_root, binding, &resolved);
     let adopt = mem_predates_binding(engine, &resolved);
     // The exclusion ledger against the binding as declared now: in force,

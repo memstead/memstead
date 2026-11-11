@@ -24,7 +24,7 @@ pub enum WarningHint {
     /// so the agent can self-correct with a follow-up `memstead_update`.
     /// Type-level `write_rules` no longer ride per warning — they
     /// ship once at the mutation-response top level on
-    /// `type_guidance` keyed by `entity_type` (F9). Decoders look up
+    /// `type_guidance` keyed by `entity_type`. Decoders look up
     /// the guidance via `entity_type` against the top-level map.
     MissingRequiredSection {
         entity_type: String,
@@ -272,7 +272,7 @@ pub enum WarningHint {
     },
     /// A body wiki-link resolved to the entity's own id, so the
     /// alias-synthesis pass dropped the would-be self-referential edge
-    /// (F11) — a self-edge carries no navigational value and would render
+    /// since a self-edge carries no navigational value and would render
     /// as both an Outgoing and an Incoming neighbour of itself. The
     /// create/update still succeeds (the author may have written their
     /// own slug); this warns so the dropped link is observable, matching
@@ -308,7 +308,7 @@ pub enum WarningHint {
     /// warning makes the missing-mem state visible so an operator
     /// can distinguish a typo (intended `B` but typed `b`) from a
     /// deliberate forward reference that expects the mem to be
-    /// created later. (F4)
+    /// created later.
     CrossMemTargetMemUncreated {
         from_mem: String,
         to_mem: String,

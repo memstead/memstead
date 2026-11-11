@@ -8,7 +8,7 @@
 use clap::{CommandFactory, Parser};
 use memstead_cli::cli::{Cli, EXIT_CODES_HELP};
 
-/// CLI F3: `--quiet` is global like `--json` — accepted *after* the
+/// `--quiet` is global like `--json` — accepted *after* the
 /// subcommand, not only before it. Pre-fix this tripped clap's
 /// `unexpected argument '--quiet'` usage error (exit 2).
 #[test]
@@ -25,7 +25,7 @@ fn quiet_is_accepted_in_trailing_position_like_json() {
     assert!(cli.quiet);
 }
 
-/// CLI F3 doc: the exit-code table documents clap's usage-error code (2)
+/// The exit-code table documents clap's usage-error code (2)
 /// without renumbering the existing codes a programmatic caller branches
 /// on.
 #[test]
@@ -71,7 +71,7 @@ fn mem_sub_help(sub: &str) -> String {
     format!("{about}\n{long}")
 }
 
-/// CLI F4: `mem unregister --help` documents the
+/// `mem unregister --help` documents the
 /// `MEM_HAS_INCOMING_REFS` precondition and its recovery.
 #[test]
 fn mem_unregister_help_documents_incoming_refs_refusal() {
@@ -86,7 +86,7 @@ fn mem_unregister_help_documents_incoming_refs_refusal() {
     );
 }
 
-/// CLI F5: the `workspace` group describes itself as introspection *and*
+/// The `workspace` group describes itself as introspection *and*
 /// policy configuration — no longer "Read-only", which hid the
 /// policy-write subcommands from an agent scanning `--help`.
 #[test]

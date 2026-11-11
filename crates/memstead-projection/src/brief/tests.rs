@@ -760,7 +760,7 @@ fn changed_slice_caps_and_degrades_and_quotes() {
     assert!(out.contains(&format!("- …and {} more added", 3)));
     assert!(out.contains("Precise change history for one or more facets was unavailable"));
     // The brief renders the `projection advance` line (the token is no longer
-    // an operator command — the engine computes and records it, D4/D7).
+    // an operator command — the engine computes and records it).
     assert!(out.contains(
         r#"memstead projection advance d/p --dispositions '{"<artifact>": "<disposition>", ...}'"#
     ));

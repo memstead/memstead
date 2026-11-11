@@ -8,29 +8,29 @@
 //! matrix, and formats a report. Any repair instruction is the sync brief's job,
 //! never this report's.
 //!
-//! ## What the report states honestly (B1–B5)
+//! ## What the report states honestly
 //!
 //! - **Grain-classed coverage** with tree-anchor fan-out kept on its **own
 //!   axis** — a 1-entity/200-file tree anchor shows as one anchor fanning out
-//!   over 200 files, never laundered into a blended coverage percentage (B1).
+//!   over 200 files, never laundered into a blended coverage percentage.
 //! - **Anchor-resolution %** over the binding's in-scope anchors (per-binding
 //!   scoping — see the struct docs below), with `authored`
 //!   provenance **excluded** from the coverage/accuracy denominators and shown
-//!   as its own bucket (B1).
+//!   as its own bucket.
 //! - **Freshness** vs. both `sync_state` tokens (`#synced` / `#verified`). A
 //!   detection-less medium (the capability matrix marks it non-change-
 //!   detectable) renders `signal: none` → *"freshness unknowable"*; a green
-//!   freshness verdict is **structurally unreachable** for such a medium (B2).
+//!   freshness verdict is **structurally unreachable** for such a medium.
 //! - **Token-budgeted** in the house envelope shape shared with
 //!   [`memstead_base::overview`]: aggregates are hard-required and always ship; heavy
 //!   per-artifact lists greedy-fill by priority and, when they do not fit,
 //!   drop to `## Hints` with an `estimated_tokens` figure — never rendered
-//!   unbounded (B3).
+//!   unbounded.
 //! - **Coverage semantics** branch: under `curated`, the unaccounted share is
 //!   information; under `exhaustive`, unaccounted artifacts (not anchored, not
-//!   declared-excluded, no persisted disposition) are findings (B4).
+//!   declared-excluded, no persisted disposition) are findings.
 //! - **Denominator provenance** is stated: coverage is relative to the
-//!   per-medium enumeration `S(D)` (B5).
+//!   per-medium enumeration `S(D)`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -71,10 +71,10 @@ pub const ALLOWED_REPORT_INCLUDE_KEYS: &[&str] = &[
 // Structured report — the deterministic, pre-computed data the pure renderer
 // formats. Assembling it (`compute_fidelity_report`) reads the engine; the
 // renderer (`render_fidelity_report`) is a pure function over this data, so
-// every B1–B5 assertion tests against a hand-built value with no IO.
+// every report assertion tests against a hand-built value with no IO.
 // ---------------------------------------------------------------------------
 
-/// The denominator basis for coverage (B5): coverage is reported relative to
+/// The denominator basis for coverage: coverage is reported relative to
 /// the per-medium enumeration `S(D)`, or — when the medium cannot be
 /// enumerated — the report says so rather than inventing a denominator.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -106,7 +106,7 @@ pub enum DenominatorBasis {
     },
 }
 
-/// One tree-grain anchor's fan-out over `S(D)` (B1). A tree anchor is one row
+/// One tree-grain anchor's fan-out over `S(D)`. A tree anchor is one row
 /// here whatever its fan-out — the per-file count is an observation, never a
 /// per-file coverage credit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -124,12 +124,12 @@ pub const COVERAGE_UNIT: &str = "describing entities per artifact — an artifac
      when at least one entity anchors it, however many anchor rows it carries; anchor rows \
      are counted on the resolution axis, never here";
 
-/// Grain-classed coverage over `S(D)` (B1). Tree-anchor fan-out is a **separate
+/// Grain-classed coverage over `S(D)`. Tree-anchor fan-out is a **separate
 /// axis** — `direct_covered` and `tree_only_covered` are never summed into one
 /// blended percentage.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GrainCoverage {
-    /// The denominator basis (B5).
+    /// The denominator basis.
     pub denominator: DenominatorBasis,
     /// `S(D)` artifacts covered by at least one describing entity, direct or
     /// tree — the coverage unit (2026-09-02, basket line 7): an artifact
@@ -187,8 +187,8 @@ pub struct UnanchoredMention {
     pub section: String,
 }
 
-/// Anchor composition + resolution tally over the destination mem's anchors
-/// (B1). `authored` provenance is pulled into its own bucket and **excluded**
+/// Anchor composition + resolution tally over the destination mem's anchors.
+/// `authored` provenance is pulled into its own bucket and **excluded**
 /// from the resolution (coverage/accuracy) tally.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct AnchorComposition {
@@ -285,8 +285,8 @@ pub struct AgingAnchor {
     pub unobserved_for_days: u64,
 }
 
-/// One facet's capability-matrix row + resolved change signal (B1 capability
-/// block; B2 change-detectability; B5 enumeration provenance).
+/// One facet's capability-matrix row + resolved change signal (capability
+/// block, change-detectability, enumeration provenance).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FacetCapability {
     /// The source facet.
@@ -332,7 +332,7 @@ impl FacetCapability {
     }
 }
 
-/// One facet's freshness state vs. both `sync_state` tokens (B1/B2).
+/// One facet's freshness state vs. both `sync_state` tokens.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FacetFreshness {
     /// The source facet.
@@ -346,7 +346,7 @@ pub struct FacetFreshness {
     /// Whether the medium is change-detectable at all: the capability matrix
     /// marks a change signal **and** a strategy resolved (signal ≠ `none`).
     /// When `false`, freshness is **unknowable** and the renderer is
-    /// structurally incapable of printing a green verdict for this facet (B2).
+    /// structurally incapable of printing a green verdict for this facet.
     pub change_detectable: bool,
 }
 
@@ -364,7 +364,7 @@ pub struct FidelityReport {
     /// as defects: no failure/error framing and no red verdict is produced
     /// **solely** by pre-binding history.
     pub adopt: bool,
-    /// The binding's EFFECTIVE coverage (B4) — declared when the author
+    /// The binding's EFFECTIVE coverage — declared when the author
     /// wrote the field, otherwise resolved per medium
     /// ([`memstead_base::binding::effective_coverage_semantics`]).
     pub coverage_semantics: CoverageSemantics,
@@ -379,30 +379,30 @@ pub struct FidelityReport {
     /// omits whatever the old-dialect patterns would have selected, which is
     /// precisely the case a reader cannot see from the numbers.
     pub legacy_dialect_patterns: Vec<String>,
-    /// Per-facet capability rows (B1 capability block).
+    /// Per-facet capability rows (capability block).
     pub capabilities: Vec<FacetCapability>,
-    /// Per-facet freshness (B1/B2).
+    /// Per-facet freshness.
     pub freshness: Vec<FacetFreshness>,
     /// Binding-level: has any change-detectable source moved past its `#synced`
     /// baseline this pass? `None` when no source is change-detectable (nothing
     /// to compare) — never a fabricated `false`.
     pub source_moved_past_synced: Option<bool>,
-    /// Grain-classed coverage over `S(D)` (B1/B5).
+    /// Grain-classed coverage over `S(D)`.
     pub coverage: GrainCoverage,
-    /// Anchor composition + resolution (B1).
+    /// Anchor composition + resolution.
     pub anchors: AnchorComposition,
     /// Findings tally by class over the current key.
     pub findings_by_class: BTreeMap<String, usize>,
-    /// Tier-3 backlog depth — findings queued for adjudication (B1).
+    /// Tier-3 backlog depth — findings queued for adjudication.
     pub backlog: usize,
     /// Findings recorded under a **prior** `hash(D)`,
     /// segregated as superseded (the heavy detail list is the count's backing).
     pub superseded: Vec<String>,
     /// Persisted dispositions that exclude an otherwise-uncovered artifact from
-    /// the exhaustive findings set (B4) — the count (`= disposed_excluded_rationales.len()`).
+    /// the exhaustive findings set — the count (`= disposed_excluded_rationales.len()`).
     pub disposed_excluded: usize,
-    /// The durable authored-exclusion ledger consulted under exhaustive coverage
-    /// (B4): `(artifact, rationale)` for each uncovered artifact a persisted
+    /// The durable authored-exclusion ledger consulted under exhaustive coverage:
+    /// `(artifact, rationale)` for each uncovered artifact a persisted
     /// disposition marks deliberately excluded. Removed from the findings /
     /// backfill denominator and rendered with its reasoning so the editorial
     /// decision stays visible.
@@ -412,7 +412,7 @@ pub struct FidelityReport {
     /// declaration marks deliberately so. Named, so the reader sees why the
     /// entity is not owed, never merely subtracted.
     pub excluded_entity_rationales: Vec<(String, String)>,
-    /// Degradation flags (B1) — typed, human/agent-readable strings.
+    /// Degradation flags — typed, human/agent-readable strings.
     pub degradations: Vec<String>,
     /// The binding's intent checked against the destination schema's
     /// relationship vocabulary ([`memstead_base::binding_intent`]): one entry per all-caps
@@ -883,7 +883,7 @@ fn ratio(num: usize, den: usize) -> String {
 }
 
 /// Render the hard-required (always-ships) aggregate markdown for a report.
-/// This is the content B3's "aggregated counts always ship" rests on — it is
+/// This is the content the "aggregated counts always ship" rule rests on — it is
 /// concatenated whatever the budget.
 fn render_hard_required(report: &FidelityReport) -> String {
     let mut md = String::new();
@@ -951,7 +951,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         ));
     }
 
-    // --- Denominator provenance (B5) ---
+    // --- Denominator provenance ---
     md.push_str("## Denominator provenance\n\n");
     match &report.coverage.denominator {
         DenominatorBasis::Enumerated { count } => md.push_str(&format!(
@@ -970,7 +970,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         )),
     }
 
-    // --- Capability matrix (B1) ---
+    // --- Capability matrix ---
     md.push_str("## Capability matrix\n\n");
     if report.capabilities.is_empty() {
         md.push_str("_(no primary sources resolved)_\n\n");
@@ -988,7 +988,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         }
     }
 
-    // --- Freshness (B1/B2) ---
+    // --- Freshness ---
     md.push_str("## Freshness\n\n");
     if report.freshness.is_empty() {
         md.push_str("_(no source facets)_\n\n");
@@ -997,7 +997,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
             md.push_str(&format!("### `{}`\n\n", f.facet));
             md.push_str(&format!("- signal: `{}`\n", f.signal));
             if !f.change_detectable {
-                // B2 REFUSAL: a non-change-detectable medium NEVER prints a
+                // REFUSAL: a non-change-detectable medium NEVER prints a
                 // green freshness verdict — only "unknowable". This branch is
                 // the only place `signal: none` freshness is rendered.
                 md.push_str(
@@ -1029,7 +1029,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         }
     }
 
-    // --- Coverage (B1, B4) ---
+    // --- Coverage ---
     md.push_str("## Coverage (grain-classed)\n\n");
     // A partial enumeration reports counts and no percentage: `ratio` renders
     // `n/a` for a zero denominator, which is exactly the honest shape here —
@@ -1043,7 +1043,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         ratio(report.coverage.direct_covered, den)
     ));
     // Tree fan-out is a DISTINCT axis — reported separately, never blended into
-    // the direct-covered percentage (B1).
+    // the direct-covered percentage.
     let tree_files: usize = report.coverage.tree_anchors.iter().map(|t| t.fanout).sum();
     md.push_str(&format!(
         "- tree-anchor fan-out (separate axis): {} tree anchor(s) fanning out over {} file(s); \
@@ -1130,7 +1130,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         ));
     }
 
-    // Coverage-semantics framing (B4). REFUSAL: under adopt, the exhaustive
+    // Coverage-semantics framing. REFUSAL: under adopt, the exhaustive
     // branch must NOT frame the uncovered artifacts as defect findings — they are
     // the expected backfill worklist of a mem that predates its binding, never a
     // red verdict caused solely by pre-binding history.
@@ -1167,7 +1167,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         }
     }
 
-    // Authored exclusion ledger (B4) — surface the reasoning behind each
+    // Authored exclusion ledger — surface the reasoning behind each
     // deliberately-excluded artifact so an editorial decision stays visible and
     // auditable, not just subtracted from a denominator.
     if !report.disposed_excluded_rationales.is_empty() {
@@ -1196,7 +1196,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         md.push('\n');
     }
 
-    // --- Anchors (B1) ---
+    // --- Anchors ---
     md.push_str("## Anchors\n\n");
     md.push_str(&format!(
         "- by class: {}\n",
@@ -1339,7 +1339,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
     }
     md.push('\n');
 
-    // --- Findings + backlog (B1) ---
+    // --- Findings + backlog ---
     md.push_str("## Findings\n\n");
     md.push_str(&format!(
         "- by class: {}\n",
@@ -1354,7 +1354,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         report.superseded.len()
     ));
 
-    // --- Degradations (B1) ---
+    // --- Degradations ---
     md.push_str("## Degradations\n\n");
     if report.degradations.is_empty() {
         md.push_str("_(none)_\n\n");
@@ -1467,7 +1467,7 @@ fn already_out_clause(disposed_excluded: usize) -> &'static str {
 }
 
 /// Render the tier-1 fidelity report into markdown, token-budgeted in the house
-/// envelope shape (B3). Aggregated counts (the hard-required block) always ship;
+/// envelope shape. Aggregated counts (the hard-required block) always ship;
 /// heavy per-artifact lists greedy-fill by priority and drop to `## Hints` when
 /// they do not fit — `include`-listed keys force their section in past the
 /// budget, exactly as the overview envelope does.
@@ -1573,7 +1573,7 @@ pub fn render_fidelity_report(
 // Assembly — reads the engine, findings store, advance store, capability matrix
 // ---------------------------------------------------------------------------
 
-/// Assemble the tier-1 [`FidelityReport`] for a binding (B1–B5). Read-only on
+/// Assemble the tier-1 [`FidelityReport`] for a binding. Read-only on
 /// the destination mem — it borrows `&Engine` (shared), reads the durable
 /// findings store under `key`, the advance store, and the live anchor /
 /// enumeration / freshness state. It performs no mutation and no LLM call.
@@ -2026,7 +2026,7 @@ pub fn compute_fidelity_report(
         }
     }
 
-    // --- Degradation flags (B1) ---
+    // --- Degradation flags ---
     let mut degradations: Vec<String> = Vec::new();
     for c in &capabilities {
         if !c.change_signal || c.signal == "none" {
@@ -2117,7 +2117,7 @@ pub fn compute_fidelity_report(
 }
 
 /// Whether a resolved change-detection strategy can retrieve a prior base
-/// version of an artifact (B1). Only git-backed strategies (`git`, `graph`)
+/// version of an artifact. Only git-backed strategies (`git`, `graph`)
 /// hold prior content; `mtime` reports *that* an artifact changed but not its
 /// previous bytes, and `none` detects nothing. The report states this as a
 /// fact about the source; nothing in the engine acts on it (prune proposes
@@ -2127,7 +2127,7 @@ fn strategy_retrieves_base(strategy: ChangeStrategy) -> bool {
 }
 
 /// The `signal` wire string for a [`ChangeStrategy`] — `none` for detection-less
-/// (never a fabricated token, B2).
+/// (never a fabricated token).
 fn signal_wire(strategy: ChangeStrategy) -> &'static str {
     match strategy {
         ChangeStrategy::None => "none",

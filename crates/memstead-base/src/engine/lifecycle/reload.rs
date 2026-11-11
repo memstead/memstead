@@ -509,7 +509,7 @@ impl Engine {
             self.load_errors.extend(load_result.errors);
         }
 
-        // Refresh the mem's config from the backend too (D13). `sync_state`
+        // Refresh the mem's config from the backend too. `sync_state`
         // (the projection baselines) and the schema pin / write guidance are
         // mem-scoped state that rides the mem branch, so an out-of-band write
         // — a sibling `projection advance` / `mem set-sync-state` — must become

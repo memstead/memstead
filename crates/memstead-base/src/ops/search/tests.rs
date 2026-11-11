@@ -438,7 +438,7 @@ fn search_unknown_filter_key_warns_and_keeps_hits() {
     );
 }
 
-/// F7: a search scoped to entity_type=T with an unknown filter
+/// A search scoped to entity_type=T with an unknown filter
 /// key must name `T` in the warning, not the schema's default
 /// type. Pre-fix the warning generator used the resolved
 /// `filter_schema.name` (the default type when `T` doesn't
@@ -470,7 +470,7 @@ fn search_unknown_filter_key_names_scoped_entity_type() {
     );
 }
 
-/// F7: when the caller did NOT scope the search to any
+/// When the caller did NOT scope the search to any
 /// entity_type, the warning must omit the "for type 'X'" clause
 /// rather than name the schema's default type — the user didn't
 /// ask about any specific type, so naming one in the warning is
@@ -499,7 +499,7 @@ fn search_unknown_filter_key_omits_type_when_no_scope() {
     );
 }
 
-/// F7 (range sibling): the range-filter warning has the same
+/// Range sibling: the range-filter warning has the same
 /// scoped-type contract as its equality cousin.
 #[test]
 fn search_unknown_range_filter_names_scoped_entity_type() {
@@ -610,7 +610,7 @@ fn search_workspace_wide_unknown_filter_passes_through() {
 
 #[test]
 fn search_non_filterable_field_ignored_returns_unfiltered() {
-    // MCP F2: a filter on a field declared but marked
+    // A filter on a field declared but marked
     // `Filterable::None` (here, the
     // universal `type` base field) is truly ignored — the result
     // set equals the same search without the filter, NOT an empty
@@ -730,7 +730,7 @@ fn search_unscoped_filterable_field_narrows_with_distinct_code() {
     );
 }
 
-/// MCP F3: an UNSCOPED filter on a field that is declared only as
+/// An UNSCOPED filter on a field that is declared only as
 /// **non-filterable** (`source_quality`
 /// on `assertion`, `Filterable::None`) is ignored, not type-narrowed —
 /// the result equals the same search without the filter (the spec
@@ -781,7 +781,7 @@ fn search_unscoped_non_filterable_field_ignored_not_narrowed() {
     }
 }
 
-/// MCP F4 (range): an UNSCOPED range filter on a field no type
+/// Range: an UNSCOPED range filter on a field no type
 /// declares as range-filterable does
 /// not drop the types that lack the field. `level` is `Filterable::
 /// Equality` on `spec`; a `min_level` range filter is ignored, so a
@@ -2557,7 +2557,7 @@ fn range_filter_on_created_date_works() {
 }
 
 /// Build a one-type schema whose `tags` field is a csv-array,
-/// equality-filterable metadata field — the shape CLI F8 is about.
+/// equality-filterable metadata field — the shape the multi-member warning is about.
 fn csv_tag_schema() -> std::sync::Arc<Schema> {
     let manifest = "name: tagtest\nversion: 0.1.0\ndescription: t\nwhen_to_use: t\n\
 types:\n  - thing\nrelationships:\n  mode: open\n  definitions:\n    \
@@ -2603,7 +2603,7 @@ fn codes_for(filters: &[(&str, &str)]) -> Vec<&'static str> {
     warnings.iter().map(|w| w.code()).collect()
 }
 
-/// CLI F8 positive: a comma-bearing value on a csv-array field warns
+/// Positive: a comma-bearing value on a csv-array field warns
 /// `FILTER_VALUE_MULTI_MEMBER` — the silent zero gets a recoverable
 /// signal naming the single-member form.
 #[test]
@@ -2615,7 +2615,7 @@ fn csv_filter_comma_value_warns_multi_member() {
     );
 }
 
-/// CLI F8 complement: a single-member value is the supported shape —
+/// Complement: a single-member value is the supported shape —
 /// no multi-member warning.
 #[test]
 fn csv_filter_single_member_does_not_warn() {
@@ -2626,7 +2626,7 @@ fn csv_filter_single_member_does_not_warn() {
     );
 }
 
-/// CLI F8 complement: a genuinely-unknown key still warns
+/// Complement: a genuinely-unknown key still warns
 /// `UNKNOWN_FILTER_KEY` (the new advisory is additive, not a
 /// replacement).
 #[test]

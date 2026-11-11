@@ -1146,7 +1146,7 @@ fn mem_repo_only_subcommand_still_refuses_after_disclosure() {
     );
 }
 
-/// F5: an agent session that has just run onboarding cannot restart
+/// An agent session that has just run onboarding cannot restart
 /// itself, so the receipt names a check that works from inside that
 /// session — and still names the restart for what the restart does.
 #[test]
@@ -1429,7 +1429,7 @@ fn the_receipts_printed_commands_run_verbatim_from_the_callers_cwd() {
     }
 }
 
-/// F8: `--relation` is no longer refused on a filesystem-mem
+/// `--relation` is no longer refused on a filesystem-mem
 /// workspace — the MCP surface has always performed this operation on
 /// this shape, and the CLI-local guard made the limit look like the
 /// engine's. The edge is readable afterwards.

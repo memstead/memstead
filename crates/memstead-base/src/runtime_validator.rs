@@ -741,7 +741,7 @@ pub fn validate_updatable_section(
 /// layer surfaces as `MISSING_REQUIRED_SECTION` warnings. Type-level
 /// `write_rules` no longer ride per warning — they ship once at the
 /// mutation-response top level on `type_guidance` keyed by
-/// `entity_type` (F9).
+/// `entity_type`.
 #[derive(Debug, Clone)]
 pub struct MissingRequiredSection {
     pub entity_type: String,

@@ -137,7 +137,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
 
     // Refused batch: standard error envelope with the full result on
-    // `details` — same contract as `batch-update` (CLI F12).
+    // `details` — same contract as `batch-update`.
     if !ctx.json {
         print_markdown(&super::batch::render_batch_markdown(
             "relate",

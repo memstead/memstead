@@ -316,7 +316,7 @@ fn export_mem_fails_without_version() {
         .stderr(contains("version"));
 }
 
-/// F1: `memstead mem set-version` against a mem-repo workspace bumps
+/// `memstead mem set-version` against a mem-repo workspace bumps
 /// the version on the `__MEMSTEAD:mems/<name>/config.json` blob (via
 /// the backend's `write_mem_config` trait method). Backend-symmetric
 /// counterpart to `memstead-cli/tests/write_commands.rs::mem_set_version_persists_through_filesystem_backend`,

@@ -183,7 +183,7 @@ pub struct CreateResult {
     /// MISSING_REQUIRED_SECTION / MISSING_REQUIRED_FIELD warnings on
     /// `warnings[]` reference this top-level map via their
     /// `entity_type` field rather than each carrying the (identical,
-    /// type-axis) array (F9). Stable empty shape (`{}`) ships when no
+    /// type-axis) array. Stable empty shape (`{}`) ships when no
     /// such warnings fire — consumers don't branch on field presence.
     #[serde(default)]
     pub type_guidance: std::collections::BTreeMap<String, Vec<String>>,

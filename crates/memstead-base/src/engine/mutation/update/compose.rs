@@ -541,7 +541,7 @@ impl Engine {
                 stubs: auto_stubbed,
             });
         }
-        // F11: surface a dropped self-referential body link (the alias
+        // Surface a dropped self-referential body link (the alias
         // pass omitted the vacuous self-edge).
         if self_link_ignored {
             warnings.push(WarningHint::SelfLinkIgnored { id: id.clone() });
@@ -612,7 +612,7 @@ impl Engine {
                 set: modified_metadata_set,
                 unset: modified_metadata_unset,
             },
-            // F5: `InlineWikiLinkAutoStubbed` rides on the outcome so the
+            // `InlineWikiLinkAutoStubbed` rides on the outcome so the
             // update path matches create's contract.
             warnings,
             relations_declared,

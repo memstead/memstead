@@ -990,7 +990,7 @@ pub struct MemCreateParams {
     /// Optional opaque per-instance writing guidance, persisted
     /// verbatim into the new mem's config (`writeGuidance`) in the
     /// seed commit. The engine never inspects the map's contents
-    /// (schema-strictness D8 — `writeGuidance` is client-owned
+    /// (`writeGuidance` is client-owned
     /// vocabulary); a client that read a schema package's
     /// `mem-template.json` fills the instance keys and passes them
     /// here. Empty map (the default) seeds no guidance, identical to
@@ -1559,7 +1559,7 @@ pub fn create_mem(
         }
     };
     // ---- Step 3: build MemConfig bytes ----
-    // F1: every mem carries a populated `version` from creation
+    // Every mem carries a populated `version` from creation
     // onward — `0.1.0` is the engine default; operators bump via
     // `memstead mem set-version` before publishing. Without this seed,
     // the export path hits the residual `MEM_CONFIG_INCOMPLETE` /

@@ -303,7 +303,7 @@ fn zero_observed_anchors_blocks_green() {
     assert_eq!(r.rollup().verdict, RollupVerdict::Inconclusive);
 }
 
-/// E1: a mem that predates its binding is expected to be 0% anchored, so
+/// A mem that predates its binding is expected to be 0% anchored, so
 /// uncovered findings there are the backfill worklist. No red verdict may
 /// be produced SOLELY by pre-binding history — but it is not clean either.
 #[test]
@@ -323,7 +323,7 @@ fn adopt_with_only_uncovered_is_never_red() {
         roll.because
     );
 
-    // Real drift on an adopting mem is still drift — the E1 framing
+    // Real drift on an adopting mem is still drift — the adopt framing
     // covers pre-binding history, not everything that follows it.
     r.findings_by_class.insert("drifted".to_string(), 1);
     assert_eq!(r.rollup().verdict, RollupVerdict::Drifted);

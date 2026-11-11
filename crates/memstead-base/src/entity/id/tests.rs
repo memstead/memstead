@@ -47,9 +47,9 @@ fn title_to_slug_basic() {
     assert_eq!(title_to_slug("My  Entity  Name").unwrap(), "my-entity-name");
 }
 
-/// F1 (B+A) behaviour change: precomposed Latin diacritics are
+/// Behaviour change: precomposed Latin diacritics are
 /// preserved in the slug rather than transliterated to ASCII.
-/// `Große Änderung` was `grosse-aenderung` pre-F1; it is now
+/// `Große Änderung` used to be `grosse-aenderung`; it is now
 /// `große-änderung`. Same applies to `naïve`, `Café résumé`,
 /// `Łódź`, etc. — slug matches title in every script the
 /// Unicode `is_alphanumeric` predicate accepts.
@@ -79,7 +79,7 @@ fn title_to_slug_polish() {
     assert_eq!(title_to_slug("Łódź").unwrap(), "łódź");
 }
 
-/// F1 (B+A): CJK titles round-trip cleanly. No transliteration,
+/// CJK titles round-trip cleanly. No transliteration,
 /// no hash — the slug equals the title.
 #[test]
 fn title_to_slug_cjk() {
@@ -93,7 +93,7 @@ fn title_to_slug_cjk() {
     assert_eq!(title_to_slug("Project 日本 v2").unwrap(), "project-日本-v2");
 }
 
-/// F1 (B+A): cased non-Latin scripts (Cyrillic, Greek, Armenian)
+/// Cased non-Latin scripts (Cyrillic, Greek, Armenian)
 /// case-fold to lowercase the same way Latin does.
 #[test]
 fn title_to_slug_cyrillic() {
@@ -102,7 +102,7 @@ fn title_to_slug_cyrillic() {
     assert_eq!(title_to_slug("ПРОЕКТ ПЛАН").unwrap(), "проект-план");
 }
 
-/// F1 (B+A): Right-to-left scripts. Hebrew and Arabic letters
+/// Right-to-left scripts. Hebrew and Arabic letters
 /// are `\p{Lo}` (case-less); they pass through unchanged.
 /// Hebrew niqqud and Arabic harakat are `\p{Mn}` (nonspacing
 /// marks) carrying the Unicode `Other_Alphabetic` property, so
@@ -122,7 +122,7 @@ fn title_to_slug_rtl() {
     assert_eq!(title_to_slug("שלום עולם").unwrap(), "שלום-עולם");
 }
 
-/// F1 (option A backstop): titles whose pipeline yields an
+/// Backstop: titles whose pipeline yields an
 /// empty slug fall through to a deterministic short-hash id
 /// rather than failing. Covers all-emoji, all-symbol,
 /// all-punctuation, and empty/whitespace inputs.
@@ -149,7 +149,7 @@ fn title_to_slug_residual_falls_back_to_hash() {
 /// NFC normalization is load-bearing for cross-platform safety:
 /// a `Café` written NFD (`Cafe` + combining-acute U+0301) and
 /// one written NFC (single codepoint U+00E9) must produce the
-/// same slug. Pre-F1 the pipeline NFD-decomposed and stripped
+/// same slug. Formerly the pipeline NFD-decomposed and stripped
 /// combining marks, yielding `cafe` for both — that path is
 /// gone, so the NFC normalization step is what holds the
 /// invariant now.
@@ -165,7 +165,7 @@ fn title_to_slug_nfc_normalization() {
     );
 }
 
-/// F4: the strict mutation-entry gate rejects empty titles with
+/// The strict mutation-entry gate rejects empty titles with
 /// `TitleEmpty` so the wire envelope can carry `reason: "empty"`
 /// rather than silently producing a hash-fallback slug.
 #[test]
@@ -183,7 +183,7 @@ fn validate_and_derive_slug_rejects_empty() {
     }
 }
 
-/// F10 + F19: any character the permissive pipeline would drop
+/// Any character the permissive pipeline would drop
 /// (emoji, punctuation, math/currency symbols, path separators)
 /// is admitted — the title is display text — with the dropped
 /// characters reported and the slug derived exactly as the
@@ -315,7 +315,7 @@ fn slug_error_reason_discriminator() {
     assert_eq!(e.reason(), "control_chars");
 }
 
-/// F2 + F4: a title that derives a slug whose full
+/// A title that derives a slug whose full
 /// `mem--slug` id sits at the 200-char ceiling is accepted;
 /// one byte over is rejected with a recovery-friendly error.
 /// `build_id` is the canonical write-side entry, so both
@@ -350,7 +350,7 @@ fn build_id_basic() {
     );
 }
 
-/// F1 (B+A): non-Latin titles round-trip through `build_id`.
+/// Non-Latin titles round-trip through `build_id`.
 #[test]
 fn build_id_non_latin() {
     assert_eq!(
