@@ -1030,3 +1030,30 @@ fn section_content_refuses_the_trim_fork_for_h1_too() {
         .expect_err("h1 exposed by the trim must be refused");
     assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
 }
+
+/// A heading the parser keys onto a declared section forks the entity
+/// whatever its spelling: case, inner spaces against underscores, and
+/// trailing blanks all derive the same key, so each is refused like the
+/// declared heading itself. The catch-all's own heading is among them.
+#[test]
+fn the_catch_all_exemption_refuses_every_spelling_of_a_declared_heading() {
+    let declared = ["Body", "Field Notes"];
+    let ctx = CatchAllContext {
+        key: "field_notes",
+        entity_type: "doc",
+        declared_headings: &declared,
+    };
+    for heading in [
+        "## body",
+        "## Body ",
+        "## BODY",
+        "## field notes",
+        "## Field_Notes",
+    ] {
+        let value = format!("{heading}\n\nthis text would be dropped on reparse\n");
+        let err =
+            validate_section_content([("field_notes", value.as_str())].into_iter(), Some(ctx))
+                .expect_err(heading);
+        assert_eq!(err.code(), "SECTION_CONTENT_INVALID", "{heading}");
+    }
+}

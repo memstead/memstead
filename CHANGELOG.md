@@ -95,6 +95,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `HASH_MISMATCH`, where it replaced the first item's write while both
   reported `updated`.
 
+- **The catch-all section refuses every spelling of a declared heading.**
+  A heading inside the catch-all that derives to a declared section's key
+  (`## identity`, `## Identity `, the catch-all's own heading in another
+  case) refuses `SECTION_CONTENT_INVALID`, as the exact heading already
+  did, where it was accepted and its text dropped on the next parse.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

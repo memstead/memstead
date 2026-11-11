@@ -890,10 +890,18 @@ pub fn validate_section_content<'a>(
             // the round trip verbatim; one with NO body is skipped by the
             // catch-all builder and silently dropped by the write, so it
             // refuses instead. The exemption and the refusal are the same rule
-            // read from its two sides.
+            // read from its two sides. "Declared" is decided by the key the
+            // parser derives from the heading (case, spaces and trailing
+            // blanks folded), never by the heading text, because the parser
+            // keeps the first body per key and drops the rest.
             if is_h2
                 && catch_all.is_some_and(|c| {
-                    c.key == key && !c.declared_headings.contains(&&masked_line[3..])
+                    let derived = memstead_schema::derive_section_key(masked_line[3..].trim());
+                    c.key == key
+                        && !c
+                            .declared_headings
+                            .iter()
+                            .any(|h| memstead_schema::derive_section_key(h) == derived)
                 })
             {
                 if heading_body_is_empty(stored, line) {
