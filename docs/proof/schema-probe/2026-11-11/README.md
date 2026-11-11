@@ -18,10 +18,12 @@ still declared and is no longer read.
 | Laboratory QM | 2: a procedure is reviewed again every 24 months, counted from the last recorded review | `procedure` | `date_field: last_reviewed` | `check_kind: x-review` | carried |
 | Inspection body | 2: an approval lapses 24 months after the inspection, the date coming from the recorded inspection | `item` | `date_field: last_modified` | `check_kind: x-inspection` | carried |
 
-A rule counts as carried because the run shows both cases: before any check
-of its kind the entity is listed due now with the standing `never_checked`
-and no date, and each recorded check by another identity moves the date to
-the check's act plus the declared offset. The hand-typed field (set to
+A rule counts as carried because each recorded check by another identity
+moves the date to the check's act plus the declared offset. For stock rules 1
+and 9 the run also shows the entity before any check: listed due now with the
+standing `never_checked` and no date. The procedure and the item are not open
+before their first check (they become effective or approved on it), so their
+lines start with the dated case. The hand-typed field (set to
 2020-01-01 where the type requires it) plays no part.
 
 ## The run
