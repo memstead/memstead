@@ -116,6 +116,11 @@ impl Engine {
     /// directly — keeps the engine surface backend-neutral.
     ///
     /// Counterpart to [`Self::mem_names`] which lists every mount.
+    /// The index of `mem`'s attached mount, for the crate's own writers.
+    pub(crate) fn mounts_index_of(&self, mem: &str) -> Option<usize> {
+        self.mounts.iter().position(|m| m.mount.mem == mem)
+    }
+
     pub fn mount(&self, mem: &str) -> Option<&crate::workspace::Mount> {
         self.mounts
             .iter()

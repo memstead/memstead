@@ -188,6 +188,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   writes refuse until a reload succeeds, where the pre-pull view read as
   current and its writes landed on the pulled tip.
 
+- **A mem rename resumes only itself.** A rename stamps its old name on
+  the mem it moves (`renamingFrom` in the mem config) and clears it when
+  it finishes; re-issuing a cut-off rename resumes only a mem carrying
+  that marker. A rename from a name no mount holds onto a live mem's name
+  refuses as an unknown mem, where it ran as a resumption and rewrote the
+  absent name's links and grants onto the live mem.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

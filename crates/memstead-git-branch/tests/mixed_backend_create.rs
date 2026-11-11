@@ -926,3 +926,94 @@ fn a_branch_reset_serves_the_tree_it_reset_to() {
     assert_eq!(served.sections["purpose"], before.sections["purpose"]);
     assert_eq!(served.content_hash, before.content_hash);
 }
+
+/// A rename from a name no mount holds onto a live mem's name is no
+/// resumption: it refuses as an unknown mem and rewrites nothing, where
+/// it retargeted links and grants of the absent name onto the live mem.
+#[test]
+fn a_rename_onto_an_unrelated_live_mem_is_not_resumed() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".memstead")).unwrap();
+    std::fs::write(
+        tmp.path().join(".memstead/workspace.toml"),
+        "format = \"memstead-git-branch-2\"\n\n\
+         [persistence_adapter]\nname = \"file-two-layer\"\n\n\
+         [cross_mem_links]\nspecs = [\"notes\"]\n",
+    )
+    .unwrap();
+    init_real_mem_repo(
+        tmp.path(),
+        &[("specs", "default@1.0.0"), ("notes", "default@1.0.0")],
+    );
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "specs", "Topic");
+    let config_before =
+        std::fs::read_to_string(tmp.path().join(".memstead/workspace.toml")).unwrap();
+
+    let err = mem_management::rename_mem(
+        &mut engine,
+        mem_management::MemRenameParams {
+            old: "planned".to_string(),
+            new: "specs".to_string(),
+            operator_mode: true,
+            note: None,
+        },
+    )
+    .expect_err("no mem is being renamed from 'planned'");
+    assert!(
+        err.code().contains("NOT_FOUND") || err.code().contains("UNKNOWN"),
+        "{}",
+        err.code()
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(".memstead/workspace.toml")).unwrap(),
+        config_before,
+        "the grants are untouched"
+    );
+}
+
+/// A rename cut off after its storage moved, before it finished, leaves its
+/// marker on the mem; re-issuing the rename resumes it and clears the
+/// marker.
+#[test]
+fn a_rename_cut_off_after_the_flip_resumes_and_clears_its_marker() {
+    use memstead_base::backend::MemBackend;
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    let params = || mem_management::MemRenameParams {
+        old: "specs".to_string(),
+        new: "archive".to_string(),
+        operator_mode: true,
+        note: None,
+    };
+    mem_management::rename_mem(&mut engine, params()).expect("the rename lands");
+    let mount = engine.mount("archive").cloned().unwrap();
+    let backend = memstead_git_branch::storage::instantiate_full_backend(&mount).unwrap();
+    let read_marker = |b: &dyn MemBackend| -> Option<String> {
+        let bytes = b.read_mem_config().unwrap().unwrap();
+        let cfg: memstead_schema::config::MemConfig = serde_json::from_slice(&bytes).unwrap();
+        cfg.renaming_from
+    };
+    assert_eq!(
+        read_marker(backend.as_ref()),
+        None,
+        "a finished rename clears its marker"
+    );
+
+    // The state a run cut off before its last step leaves behind.
+    let bytes = backend.read_mem_config().unwrap().unwrap();
+    let mut cfg: memstead_schema::config::MemConfig = serde_json::from_slice(&bytes).unwrap();
+    cfg.renaming_from = Some("specs".to_string());
+    backend
+        .write_mem_config(
+            &serde_json::to_vec_pretty(&cfg).unwrap(),
+            &memstead_base::vcs::CommitContext::internal(),
+        )
+        .unwrap();
+    drop(engine);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("reboot");
+    let resumed = mem_management::rename_mem(&mut engine, params()).expect("the rename resumes");
+    assert!(resumed.resumed);
+    assert_eq!(read_marker(backend.as_ref()), None);
+}

@@ -561,6 +561,15 @@ pub struct MemConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unregistered_at: Option<String>,
 
+    /// Set by a mem rename while it runs: the name the mem is being
+    /// renamed from. A rename that was cut off after its storage moved is
+    /// resumed only on a mem that carries its own old name here, so a
+    /// rename onto an unrelated live mem is never mistaken for one. The
+    /// rename clears it when it completes. Workspace-local lifecycle
+    /// state, like the tombstone above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renaming_from: Option<String>,
+
     /// Per-source "last successfully synced source state", written by
     /// the ingest layer and surfaced verbatim on the workspace dump.
     /// The engine never parses, validates, or interprets a value:

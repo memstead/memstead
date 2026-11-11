@@ -456,6 +456,7 @@ pub fn fork_mem(
     config.sync_state.clear();
     config.review_mark = None;
     config.unregistered_at = None;
+    config.renaming_from = None;
 
     // ---- Step 8: the writes, each rolled back on the next one's failure ----
     let branch_ref = format!("refs/heads/{}", params.name);

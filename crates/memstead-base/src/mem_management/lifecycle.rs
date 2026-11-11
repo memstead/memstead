@@ -1618,6 +1618,7 @@ pub fn create_mem(
         community: None,
         vcs: params.vcs.clone(),
         unregistered_at: None,
+        renaming_from: None,
         sync_state: Default::default(),
         extra: Default::default(),
     };
@@ -2172,11 +2173,24 @@ fn rename_mode(
             false
         }
         (None, true) => {
-            // The identity flip already happened — resumption mode.
-            // The new mount must be writable (a rename never produces
-            // a read-only mount, so anything else is a name clash
-            // with an installed read mem, not a resumable rename).
-            if !engine.mem_router().is_writable(&params.new) {
+            // The identity flip already happened — resumption mode, but
+            // only for the mem this rename flipped: it is writable (a
+            // rename never produces a read-only mount) and carries this
+            // rename's old name as its resumption marker. Any other mem
+            // under the new name is unrelated, and the old name is
+            // simply unknown.
+            let flipped_by_this_rename = engine.mem_router().is_writable(&params.new)
+                && engine.mount(&params.new).is_some_and(|m| {
+                    (engine.backend_factory())(m)
+                        .ok()
+                        .and_then(|b| b.read_mem_config().ok().flatten())
+                        .and_then(|bytes| {
+                            serde_json::from_slice::<memstead_schema::config::MemConfig>(&bytes)
+                                .ok()
+                        })
+                        .is_some_and(|c| c.renaming_from.as_deref() == Some(params.old.as_str()))
+                });
+            if !flipped_by_this_rename {
                 return Err(engine.unknown_mem(&params.old.clone()).into());
             }
             true
@@ -2417,7 +2431,12 @@ pub fn rename_mem(
                     })
                     .collect();
                 cfg.sync_state = rewritten;
-                if changed {
+                // The marker that lets a cut-off rename be resumed, and
+                // nothing else: it names this rename's old name on the
+                // mem itself, so it travels with the storage flip.
+                cfg.renaming_from = Some(params.old.clone());
+                let _ = changed;
+                {
                     let mut out = serde_json::to_vec_pretty(&cfg).map_err(|e| {
                         crate::EngineError::Mem(format!("serialise mem config: {e}"))
                     })?;
@@ -2511,6 +2530,21 @@ pub fn rename_mem(
             "relocate",
         )
         .map_err(|e| crate::EngineError::Mem(format!("mirror relocated records: {e}")))?;
+    }
+
+    // ---- Step 9: the rename is complete; its resumption marker goes ----
+    if let Some(idx) = engine.mounts_index_of(&params.new) {
+        engine
+            .write_mem_config_merged(
+                idx,
+                &params.new,
+                "rename_mem",
+                params.note.as_deref(),
+                &|c| {
+                    c.renaming_from = None;
+                },
+            )
+            .map_err(|e| crate::EngineError::Mem(format!("clear the rename marker: {e}")))?;
     }
 
     let note_warning = engine.note_missing_warning("rename_mem", params.note.as_deref());
