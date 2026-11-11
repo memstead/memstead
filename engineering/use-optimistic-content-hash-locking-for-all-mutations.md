@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:08Z
-last_modified: 2026-11-10T19:30:43Z
+last_modified: 2026-11-11T11:35:07Z
 status: accepted
 decided_on: 2026-06-08
 deciders: memstead-core
@@ -13,6 +13,7 @@ tags: concurrency, locking, mutation-path, optimistic, engine
 
 ## Decision
 We chose optimistic concurrency control as the universal mutation-locking mechanism: every write that can move content passes an `expected_hash` token (the content hash the caller last read), and the engine refuses the write with `HASH_MISMATCH` when the on-disk content has advanced past that token. There is no pessimistic lock and no last-write-wins fallback — the same token threads uniformly through create, update, delete, rename, and relate. At the git-branch backend the check is enforced as a commit-tip compare-and-swap, mapped onto the same `HASH_MISMATCH` envelope so an agent sees one code regardless of whether the conflict was detected at the entity-hash or the commit level.
+2026-11-11 amendment: relate is outside the requirement, as the Notes record; the token threads through create, update, delete, rename and retype.
 
 ## Context
 The engine is built for concurrent access: a long-lived MCP engine instance can share one git-branch mem-repo with out-of-band CLI siblings, and a single agent reads an entity, reasons over it, then writes back in a later turn. Between read and write the underlying content may have advanced. A locking discipline was needed that (a) never silently overwrites a change the agent did not see, (b) does not require a stateful server-side lock that a crashed or slow agent could hold indefinitely, and (c) presents a single uniform contract to agents across every mutation path. This pairs with [[engine--reload-before-operation-coherence]]: the pre-operation reload surfaces sibling drift, and optimistic locking catches any stale-parent write that slips past it.
@@ -22,6 +23,7 @@ The engine is built for concurrent access: a long-lived MCP engine instance can 
 - No server-side lock state: nothing to leak, time out, or deadlock; a crashed agent holds nothing.
 - The same `expected_hash` contract covers every mutation that can move content, so agents learn one concurrency model rather than per-operation rules. The single exception is an anchors-only update, and it is not a second model: the token is waived exactly where it could compare nothing.
 - Cost: agents must thread the hash through every content-changing mutation (read-before-write is mandatory there) and handle the retry loop on conflict. An anchors-only update pays neither, which is the point of the exemption: the read bought no protection on a write that cannot move the hash; the engine provides `dry_run` as the designated stale-hash recovery path (returns the current `_hash` plus a `prospective_hash`).
+- 2026-11-11 amendment: the engine does hold a write lock per mem for the duration of one write (an operating-system lock, released when its process dies), and a write that reads the workspace holds every mem's; no lock outlives a call, so the point stands that a caller holds nothing between its read and its write.
 
 ## Relationships
 - **REFERENCES**: [[engine:reload-before-operation-coherence]]
