@@ -94,12 +94,15 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         .or_else(|| std::env::var_os("MEMSTEAD_WORKSPACE").map(std::path::PathBuf::from));
     if let Some(root) = override_path {
         if !memstead_base::is_workspace_root(&root) {
-            return Err(setup::workspace_not_initialised_error(&format!(
-                "workspace override `{}` (from --workspace or MEMSTEAD_WORKSPACE) does not \
+            return Err(setup::workspace_not_initialised_error_at(
+                &root,
+                &format!(
+                    "workspace override `{}` (from --workspace or MEMSTEAD_WORKSPACE) does not \
                  carry `.memstead/workspace.toml` — refusing rather than falling back to \
                  the directory walk",
-                root.display()
-            ))
+                    root.display()
+                ),
+            )
             .into());
         }
         std::env::set_current_dir(&root).map_err(|e| {

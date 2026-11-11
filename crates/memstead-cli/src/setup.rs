@@ -30,8 +30,16 @@ use crate::output::ExitKind;
 /// The missing-workspace refusal: the engine's boot value for "no
 /// workspace here" (code and payload, with the bootstrap command under
 /// `details.hint.recovery_command`), with this command's own message.
+/// `details.path` is the directory the walk started from: the current one,
+/// which an accepted `--workspace` override has already entered.
 pub fn workspace_not_initialised_error(message: &str) -> CliError {
-    let e = memstead_base::BootError::NotInitialised(std::env::current_dir().unwrap_or_default());
+    workspace_not_initialised_error_at(&std::env::current_dir().unwrap_or_default(), message)
+}
+
+/// The missing-workspace refusal for a named path that is not a workspace
+/// (a `--workspace` override the process could not enter).
+pub fn workspace_not_initialised_error_at(path: &Path, message: &str) -> CliError {
+    let e = memstead_base::BootError::NotInitialised(path.to_path_buf());
     CliError {
         kind: ExitKind::Generic,
         code: e.code(),
