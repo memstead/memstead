@@ -228,6 +228,7 @@ pub fn push_in_gitdir(
         new_sha: local_sha,
         forced: force,
         checks_published: None,
+        checks_refused: Vec::new(),
     })
 }
 

@@ -101,6 +101,11 @@ pub struct PushOutcome {
     /// held the same rows.
     #[serde(default)]
     pub checks_published: Option<String>,
+    /// Rows of the remote's transport ref this ledger refused on the
+    /// push's import (a time of the act beyond the clock skew ahead of
+    /// this engine's clock), each named; they stay on the remote.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks_refused: Vec<crate::check::RefusedCheckRow>,
 }
 
 /// Outcome of `Engine::push_all`: every mounted git-branch mem's
@@ -121,6 +126,10 @@ pub struct PushAllOutcome {
     pub in_sync: Vec<String>,
     /// Refs the run could not move, each with its typed code.
     pub refused: Vec<RefusedRef>,
+    /// Check-ledger rows the run's import refused, each named; they stay
+    /// on the remote.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks_refused: Vec<crate::check::RefusedCheckRow>,
 }
 
 /// One ref `Engine::push_all` moved on the remote.

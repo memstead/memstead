@@ -529,20 +529,6 @@ impl Engine {
             self.discard_all_pending();
             return Err(e);
         }
-        // An adopted update that passed a self-check transition on the
-        // stored content's record carries that record to the landed bytes,
-        // as the single and batch update paths do, before anything lands.
-        for a in &adopted {
-            for l in &a.landings {
-                if let Landing::Update(p) = l
-                    && let Err(e) = self.carry_prepared_self_checks(p)
-                {
-                    self.store = store_snapshot;
-                    self.discard_all_pending();
-                    return Err(e);
-                }
-            }
-        }
 
         // ---- The store as it will be, so a deletion's referrers are judged
         //      against the adopted bodies, not the pre-merge ones ----
@@ -625,6 +611,67 @@ impl Engine {
                 return Err(e);
             }
         };
+        // A merge is one write of each adopted entity: an amend that lands
+        // beside an adopted status change is judged against the entity as
+        // it stood before the merge, so the merge cannot reach a gated
+        // value on text no record names (the landing entered the value, the
+        // amend then changes the content).
+        for p in &amends {
+            let next = match parse_markdown(&p.markdown, &p.file_path, p.type_def.as_ref(), &p.mem)
+            {
+                Ok(parsed) => parsed.entity,
+                Err(e) => {
+                    self.store = store_snapshot;
+                    self.discard_all_pending();
+                    return Err(EngineError::ParseAfterWrite(e.to_string()));
+                }
+            };
+            let before = store_snapshot.get(&p.id).cloned();
+            let before_def = before.as_ref().and_then(|b| {
+                self.schemas
+                    .get(&p.mem)
+                    .and_then(|schema| schema.get_type(&b.entity_type))
+            });
+            let pre = match (&before, &before_def) {
+                (Some(b), Some(d)) => Some((b, d.as_ref())),
+                _ => None,
+            };
+            let (violated, _) = self.gate_transition_forms(
+                pre,
+                &next,
+                &crate::entity::parser::compute_hash(&p.markdown),
+                p.type_def.as_ref(),
+                Vec::new(),
+            );
+            let blocked: Vec<_> = violated
+                .into_iter()
+                .filter(|v| v.severity() == memstead_schema::ConstraintSeverity::Block)
+                .collect();
+            if !blocked.is_empty() {
+                self.store = store_snapshot;
+                self.discard_all_pending();
+                return Err(EngineError::ConstraintUnsatisfied {
+                    entity_type: next.entity_type.clone(),
+                    entity_id: p.id.to_string(),
+                    violations: blocked,
+                });
+            }
+        }
+        // An adopted update that passed a self-check transition on the
+        // stored content's record carries that record to the landed bytes,
+        // as the single and batch update paths do: after every gate of the
+        // merge passed, before anything lands.
+        for a in &adopted {
+            for l in &a.landings {
+                if let Landing::Update(p) = l
+                    && let Err(e) = self.carry_prepared_self_checks(p)
+                {
+                    self.store = store_snapshot;
+                    self.discard_all_pending();
+                    return Err(e);
+                }
+            }
+        }
         for p in &amends {
             if let Err(e) = self.carry_prepared_self_checks(p) {
                 self.store = store_snapshot;

@@ -167,3 +167,144 @@ fn proposal_merge_of_a_status_flip_carries_the_licensing_record() {
         "the merged status flip stands violated (record not carried): {violations}"
     );
 }
+
+/// A merge that adopts the status flip and amends the body in the same
+/// call reaches the gated value on text no record names: it refuses, and
+/// the entity and the ledger stay as they were.
+#[test]
+fn proposal_merge_adopting_with_changes_does_not_land_a_gated_value_on_unchecked_text() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let ws = tmp.path();
+    run(ws, &["mem-repo", "init"]);
+    run(
+        ws,
+        &[
+            "workspace",
+            "allow-create",
+            "plans",
+            "--schema",
+            "default@1.3.0",
+        ],
+    );
+    run(ws, &["mem", "init", "plans", "--schema", "default@1.3.0"]);
+    package(ws, "0.1.0", true);
+    package(ws, "0.2.0", false);
+    run(ws, &["mem", "set-schema", "plans", "gated@0.1.0"]);
+    run(
+        ws,
+        &[
+            "workspace",
+            "allow-create",
+            "fork*",
+            "--schema",
+            "gated@0.1.0",
+        ],
+    );
+    run(
+        ws,
+        &[
+            "create",
+            "--identity",
+            "author-a",
+            "--type",
+            "plan",
+            "--title",
+            "Beta",
+            "--section",
+            "body=original",
+            "--metadata",
+            "status=draft",
+        ],
+    );
+    run(
+        ws,
+        &[
+            "check",
+            "plans--beta",
+            "--verdict",
+            "ok",
+            "--method",
+            "t",
+            "--identity",
+            "checker-c",
+            "--role",
+            "checker",
+            "--kind",
+            "x-approval",
+        ],
+    );
+    run(
+        ws,
+        &["mem", "fork", "plans", "forkb", "--identity", "author-b"],
+    );
+    // The fork drops the gate so the proposer can flip the status there.
+    run(ws, &["mem", "set-schema", "forkb", "gated@0.2.0"]);
+    run(
+        ws,
+        &[
+            "update",
+            "forkb--beta",
+            "--metadata",
+            "status=complete",
+            "--auto-hash",
+            "--identity",
+            "author-b",
+        ],
+    );
+    let disp = ws.join("disp.json");
+    run(
+        ws,
+        &[
+            "proposal",
+            "brief",
+            "forkb",
+            "--out",
+            disp.to_str().unwrap(),
+        ],
+    );
+    let mut d: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&disp).unwrap()).unwrap();
+    d["dispositions"]["beta"]["disposition"] = "adopt_with_changes".into();
+    d["dispositions"]["beta"]["reason"] = "the owner rewords the body".into();
+    d["dispositions"]["beta"]["body"] = serde_json::json!({
+        "sections": {"body": "amended by the owner, never checked"},
+        "metadata": {"status": "complete"}
+    });
+    fs::write(&disp, d.to_string()).unwrap();
+    let ledger_before = run(ws, &["checks", "--mem", "plans", "--json"]).stdout;
+    let entity_before = run(ws, &["entity", "plans--beta", "--json"]).stdout;
+    let out = Command::cargo_bin("memstead")
+        .unwrap()
+        .current_dir(ws)
+        .args([
+            "proposal",
+            "merge",
+            "forkb",
+            "--dispositions",
+            disp.to_str().unwrap(),
+            "--identity",
+            "owner-o",
+            "--json",
+            "--quiet",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("transition_requires_self_check"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert_eq!(
+        run(ws, &["checks", "--mem", "plans", "--json"]).stdout,
+        ledger_before
+    );
+    assert_eq!(
+        run(ws, &["entity", "plans--beta", "--json"]).stdout,
+        entity_before
+    );
+}

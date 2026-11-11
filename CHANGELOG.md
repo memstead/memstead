@@ -84,7 +84,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `pull` and `pull --all` refuse an imported row whose time of the act
   lies more than five minutes ahead of the receiving clock, as a local
   `observed_at` that far ahead refuses, and name each such row in
-  `checks_refused`. `memstead check list` lists rows in that order.
+  `checks_refused`. A push names the rows its import
+  refused the same way and leaves them on the remote: a mem's published
+  rows are the union of the remote's and the local ledger's. `memstead check list` lists rows in that order.
 
 - **A boolean metadata field refuses a value that is neither true nor
   false.** `create`, `update` and `retype` read `true` / `false` in any

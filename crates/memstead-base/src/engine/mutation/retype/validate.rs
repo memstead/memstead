@@ -315,14 +315,25 @@ impl Engine {
                 Some(&check_provider),
             );
             // The write changes the type, so a self-check gate the result
-            // enters passes only on a record naming the result's own hash
-            // (`next` carries the stored hash here; the retyped bytes are
-            // never checked before they exist): it refuses.
+            // enters passes only on a record naming the result's own hash:
+            // the bytes the compose step writes, stamped and rendered the
+            // same way (content can return to checked bytes, as a carry
+            // chain can).
             let source_def = resolved.schema.get_type(&resolved.entity.entity_type);
+            let mut stamped = next.clone();
+            crate::engine::mutation::auto_stamp_timestamps(
+                &mut stamped,
+                target_def.as_ref(),
+                &self.now_iso(),
+            );
+            let result_hash =
+                crate::engine::mutation::render_for_write(&stamped, target_def.as_ref())
+                    .map(|md| crate::entity::parser::compute_hash(&md))
+                    .unwrap_or_default();
             let (violated, _) = self.gate_transition_forms(
                 source_def.as_deref().map(|d| (&resolved.entity, d)),
                 next,
-                "",
+                &result_hash,
                 target_def.as_ref(),
                 violated,
             );

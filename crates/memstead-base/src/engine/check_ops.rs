@@ -549,7 +549,13 @@ pub(crate) fn content_changed_beside(
     keys.sort();
     keys.dedup();
     for k in keys {
-        let norm = |s: Option<&String>| s.map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
+        // Compared as the bytes are hashed: only the trailing newlines
+        // the renderer drops are ignored; leading or other edge whitespace
+        // is content (four leading spaces make a code block).
+        let norm = |s: Option<&String>| {
+            s.map(|b| b.trim_end_matches(['\n', '\r']).to_string())
+                .filter(|b| !b.is_empty())
+        };
         if norm(before.sections.get(k)) != norm(next.sections.get(k)) {
             changed.push(format!("section:{k}"));
         }
@@ -1763,6 +1769,64 @@ write_rules: []
             .expect_err("a retype onto the gate changes the type");
         assert!(err.to_string().contains("block-tier constraint"), "{err}");
         assert_eq!(engine.get_entity(&memo).unwrap().content_hash, stored);
+    }
+
+    /// A rename that rewrites a link inside another entry writes that
+    /// entry: the renamer's own check of it reads `self_checked`.
+    #[test]
+    fn a_rename_counts_its_identity_on_every_referrer_it_rewrites_on_folder() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "x-projection");
+        engine.set_identity(Some("identity-a".to_string()));
+        let target = create_plan(&mut engine, "The Target");
+        let (actor, client) = crate::engine::test_helpers::cli_actor();
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("body".to_string(), format!("see [[{}]].", target.0));
+        let referrer = engine
+            .create_entity(
+                crate::engine::CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "bundles".to_string(),
+                    title: "The Referrer".to_string(),
+                    entity_type: "plan".to_string(),
+                    sections,
+                    metadata: indexmap::IndexMap::new(),
+                    relations: vec![crate::ops::RelateArg {
+                        target: target.clone(),
+                        rel_type: "PART_OF".to_string(),
+                        description: None,
+                    }],
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap()
+            .id;
+        let before = engine.get_entity(&referrer).unwrap().content_hash.clone();
+        engine.set_identity(Some("identity-c".to_string()));
+        let current = engine.get_entity(&target).unwrap().content_hash.clone();
+        engine
+            .rename_entity(
+                crate::engine::RenameEntityArgs {
+                    id: target.clone(),
+                    expected_hash: crate::ExpectedHash::Current(current),
+                    new_title: "The Moved".to_string(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let after = engine.get_entity(&referrer).unwrap().content_hash.clone();
+        assert_ne!(before, after, "the rename rewrote the referrer");
+        check_plan(&mut engine, "identity-c", &referrer, "x-projection");
+        let entity = engine.get_entity(&referrer).unwrap().clone();
+        let standing = (engine.check_standing_provider())(&entity, "x-projection");
+        assert_eq!(standing.label(), "self_checked");
+        let touches = engine.mem_touches("bundles");
+        assert_eq!(touches.first_author(referrer.as_ref()), Some("identity-a"));
     }
 
     #[test]

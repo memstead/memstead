@@ -61,6 +61,35 @@ impl Engine {
             .provenance_record(ProvenanceKind::Rename, &new_id, actor, client, note)
             .with_logical_operation_id(logical_op_id.clone())
             .with_renamed_from(id.to_string());
+        // Every entry whose links the rename rewrites is written by this
+        // identity too: one record per rewritten entry beside the rename's
+        // own (the folder ledger's lines), and the same ids in the commit's
+        // `Entities:` trailer (the git-branch notes). Independence counts
+        // every identity that wrote an entry, so a renamer cannot confirm
+        // the entries its rename rewrote.
+        let records_of = |rewrites: &[super::ReferrerRewrite]| {
+            let mut records = vec![record.clone()];
+            for r in rewrites {
+                records.push(
+                    self.provenance_record(ProvenanceKind::Update, &r.id, actor, client, note)
+                        .with_logical_operation_id(logical_op_id.clone()),
+                );
+            }
+            records
+        };
+        let source_records = records_of(same_mem);
+        let peer_records: std::collections::BTreeMap<String, Vec<_>> = peer_plans
+            .values()
+            .map(|plan| (plan.mem.clone(), records_of(&plan.rewrites)))
+            .collect();
+        let rewrite_ids = |rewrites: &[super::ReferrerRewrite]| {
+            (!rewrites.is_empty()).then(|| {
+                rewrites
+                    .iter()
+                    .map(|r| r.id.to_string())
+                    .collect::<Vec<_>>()
+            })
+        };
 
         // Every peer's head, taken before the first write and pinned
         // through `commit_with_expected_parent`. Each peer is locked
@@ -98,6 +127,7 @@ impl Engine {
                     note.map(String::from),
                 );
                 peer_ctx.logical_operation_id = Some(logical_op_id.as_str());
+                peer_ctx.entity_ids = rewrite_ids(&plan.rewrites);
                 let expected = peer_snapshots.get(&plan.mem).cloned().unwrap_or(None);
                 self.commit_or_complete(
                     plan.mount_idx,
@@ -105,7 +135,7 @@ impl Engine {
                         plan.mount_idx,
                         &peer_commit_subject,
                         &peer_ctx,
-                        std::slice::from_ref(&record),
+                        &peer_records[&plan.mem],
                         expected.as_deref(),
                     ),
                 )
@@ -144,14 +174,10 @@ impl Engine {
                     note.map(String::from),
                 );
                 ctx.logical_operation_id = Some(logical_op_id.as_str());
+                ctx.entity_ids = rewrite_ids(same_mem);
                 self.commit_or_complete(
                     mount_idx,
-                    self.commit_staged(
-                        mount_idx,
-                        &commit_subject,
-                        &ctx,
-                        std::slice::from_ref(&record),
-                    ),
+                    self.commit_staged(mount_idx, &commit_subject, &ctx, &source_records),
                 )
             });
         let landed = match landed {

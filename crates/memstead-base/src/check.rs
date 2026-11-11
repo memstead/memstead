@@ -567,9 +567,9 @@ fn checks_dir(workspace_root: &Path) -> PathBuf {
         .join("checks")
 }
 
-/// The ledger file path for a workspace. Crate-private with the raw read:
-/// a reader outside this module gets rows only in standing order.
-pub(crate) fn check_ledger_path(workspace_root: &Path) -> PathBuf {
+/// The ledger file path for a workspace. Private to this module with the
+/// raw read: every reader elsewhere gets rows only in standing order.
+fn check_ledger_path(workspace_root: &Path) -> PathBuf {
     checks_dir(workspace_root).join("checks.jsonl")
 }
 

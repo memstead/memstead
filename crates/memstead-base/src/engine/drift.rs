@@ -976,7 +976,7 @@ impl Engine {
         // the transport ref and pushed beside it (engine::checks_transport).
         // The branch is on the remote by now, so a failure here names
         // that, and a rerun publishes the rows alone.
-        outcome.checks_published = self
+        let (published, refused) = self
             .publish_checks(&hook, &gitdir, remote, &[mem])
             .map_err(|e| {
                 EngineError::Mem(format!(
@@ -985,6 +985,8 @@ impl Engine {
                     e.prose_render()
                 ))
             })?;
+        outcome.checks_published = published;
+        outcome.checks_refused = refused;
         Ok(outcome)
     }
 
@@ -1319,13 +1321,17 @@ impl Engine {
             let checks_ref = crate::workspace::branch_full_ref(crate::MEMSTEAD_CHECKS_REF_BRANCH);
             let previous_sha = remote_refs.get(&checks_ref).cloned().unwrap_or_default();
             match self.publish_checks(&hook, gitdir, remote, &mem_refs) {
-                Ok(Some(new_sha)) => outcome.pushed.push(PushedRef {
-                    ref_name: checks_ref,
-                    mem: None,
-                    previous_sha,
-                    new_sha,
-                }),
-                Ok(None) => {
+                Ok((Some(new_sha), refused)) => {
+                    outcome.checks_refused.extend(refused);
+                    outcome.pushed.push(PushedRef {
+                        ref_name: checks_ref,
+                        mem: None,
+                        previous_sha,
+                        new_sha,
+                    })
+                }
+                Ok((None, refused)) => {
+                    outcome.checks_refused.extend(refused);
                     if !previous_sha.is_empty() {
                         outcome.in_sync.push(checks_ref);
                     }

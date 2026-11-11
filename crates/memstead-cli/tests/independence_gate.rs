@@ -670,3 +670,109 @@ fn edit_note(ws: &Path, args: &[&str]) {
         String::from_utf8_lossy(&out.stdout)
     );
 }
+
+/// On a git-branch mem: a rename that rewrites a link inside an entry
+/// counts the renamer as a writer of that entry, so the renamer's own
+/// check of it does not open the self-check gate.
+#[test]
+fn a_rename_counts_its_identity_on_the_referrers_it_rewrites_on_git_branch() {
+    let ws = seed_on(SELF_GATE, true);
+    let root = ws.path();
+    create(root, "identity-a", "plan", "The Target", None);
+    let out = cli(
+        root,
+        &[
+            "create",
+            "--type",
+            "plan",
+            "--title",
+            "The Plan",
+            "--section",
+            "body=see [[plans--the-target]].",
+            "--relation",
+            "PART_OF:plans--the-target",
+            "--identity",
+            "identity-a",
+            "--quiet",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let out = cli(
+        root,
+        &[
+            "rename",
+            "plans--the-target",
+            "The Moved",
+            "--auto-hash",
+            "--identity",
+            "identity-c",
+            "--quiet",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    approve(root, "identity-c");
+    let out = cli(
+        root,
+        &[
+            "update",
+            "plans--the-plan",
+            "--metadata",
+            "status=complete",
+            "--auto-hash",
+            "--identity",
+            "identity-e",
+            "--json",
+            "--quiet",
+        ],
+    );
+    assert!(!out.status.success(), "the renamer wrote what it checked");
+    let env: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(env.to_string().contains("self_checked"), "{env}");
+}
+
+/// A self-check transition write that changes a section only at its edge
+/// (leading spaces turn a paragraph into a code block) changes content:
+/// it refuses, the ledger unchanged, on both backends.
+#[test]
+fn an_edge_whitespace_change_beside_the_transition_refuses() {
+    for git_branch in [false, true] {
+        let ws = seed_on(SELF_GATE, git_branch);
+        let root = ws.path();
+        create(root, "identity-a", "plan", "The Plan", None);
+        approve(root, "identity-c");
+        let ledger = root.join(".memstead/state/checks/checks.jsonl");
+        let before = fs::read_to_string(&ledger).unwrap();
+        let out = cli(
+            root,
+            &[
+                "update",
+                "plans--the-plan",
+                "--metadata",
+                "status=complete",
+                "--section",
+                "body=    x",
+                "--auto-hash",
+                "--identity",
+                "identity-b",
+                "--json",
+                "--quiet",
+            ],
+        );
+        assert!(
+            !out.status.success(),
+            "git-branch {git_branch}: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        let env: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(env["code"], "CONSTRAINT_UNSATISFIED", "{env}");
+        assert_eq!(fs::read_to_string(&ledger).unwrap(), before);
+    }
+}

@@ -147,25 +147,28 @@ impl Engine {
     /// it to `remote`. Imports the remote's rows first, so nothing
     /// another machine published is ever dropped, then writes each
     /// mem's rows on top of the remote's tip and pushes fast-forward;
-    /// a race is retried once. Returns the ref's sha when the push
-    /// moved it, `None` when the remote already held the same rows (or
-    /// the workspace has no ledger).
+    /// a race is retried once. The remote's rows stay on it even when
+    /// this ledger refused them on import (a row dated ahead of this
+    /// clock): each mem's published member is the union of the remote's
+    /// rows and this ledger's. Returns the ref's sha when the push moved
+    /// it (`None` when the remote already held the same rows, or the
+    /// workspace has no ledger), and the rows the import refused, named.
     pub(crate) fn publish_checks(
         &self,
         hook: &GitBranchOps,
         gitdir: &Path,
         remote: &str,
         mems: &[&str],
-    ) -> Result<Option<String>, EngineError> {
+    ) -> Result<(Option<String>, Vec<crate::check::RefusedCheckRow>), EngineError> {
         let Some(root) = self.workspace_root() else {
-            return Ok(None);
+            return Ok((None, Vec::new()));
         };
         let ledger = CheckLedger::for_workspace(root);
         let local_ref = branch_full_ref(crate::MEMSTEAD_CHECKS_REF_BRANCH);
         let mut last_err: Option<EngineError> = None;
         for _attempt in 0..2 {
             let imported = self.import_checks(hook, gitdir, remote, mems)?;
-            let _ = imported;
+            let refused = imported.refused;
             // The vehicle: on top of the remote's tip when it has one.
             let remote_tip = self.remote_checks_tip(hook, gitdir, remote)?;
             if let Some(tip) = &remote_tip {
@@ -176,8 +179,20 @@ impl Engine {
             let mut changed = false;
             for mem in mems {
                 let path = crate::checks_ref_member_path(mem);
-                let bytes = ledger.transport_lines_for_mem(mem);
                 let current = backend.read_entity(Path::new(&path))?;
+                // The union: the remote's rows (a refused one included)
+                // beside this ledger's, in the transport form.
+                let mut rows = ledger.rows_for_mem(mem);
+                if let Some(remote_bytes) = &current {
+                    rows.extend(
+                        String::from_utf8_lossy(remote_bytes)
+                            .lines()
+                            .filter_map(|l| {
+                                serde_json::from_str::<crate::check::CheckRecord>(l).ok()
+                            }),
+                    );
+                }
+                let bytes = CheckLedger::transport_lines(&rows);
                 if bytes.is_empty() && current.is_none() {
                     continue;
                 }
@@ -189,7 +204,7 @@ impl Engine {
             }
             let local_tip = (hook.resolve_ref)(gitdir, &local_ref).map_err(EngineError::Backend)?;
             if !changed && (local_tip.is_none() || local_tip == remote_tip) {
-                return Ok(None);
+                return Ok((None, refused));
             }
             if changed {
                 let ctx = crate::vcs::CommitContext::new(
@@ -210,7 +225,7 @@ impl Engine {
                 crate::MEMSTEAD_CHECKS_REF_BRANCH,
                 false,
             ) {
-                Ok(outcome) => return Ok(Some(outcome.new_sha)),
+                Ok(outcome) => return Ok((Some(outcome.new_sha), refused)),
                 Err(BackendError::Other(msg)) if msg.starts_with("NON_FAST_FORWARD:") => {
                     // Another publisher landed first: import what it
                     // wrote and write ours on top of it.
