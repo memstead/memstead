@@ -32,6 +32,17 @@ fn main() -> ExitCode {
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
+            // An engine error that reached here by a bare `?` renders as the
+            // engine's value, never as INTERNAL: the same mapping every
+            // command applies by hand.
+            let e = match e.downcast::<memstead_base::EngineError>() {
+                Ok(x) => anyhow::Error::from(CliError::from_engine_op(x)),
+                Err(e) => e,
+            };
+            let e = match e.downcast::<memstead_base::FullEngineError>() {
+                Ok(x) => anyhow::Error::from(CliError::from_full_engine_op(x)),
+                Err(e) => e,
+            };
             let cli_err = e.downcast_ref::<CliError>();
             let kind = cli_err.map(|c| c.kind).unwrap_or(ExitKind::Generic);
             let code = cli_err.map(|c| c.effective_code()).unwrap_or("INTERNAL");

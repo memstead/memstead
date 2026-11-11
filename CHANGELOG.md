@@ -222,6 +222,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   operation(s) failed, nothing committed; first failure [<code>] on
   `<id>`: <message>` on both. `check --from`'s refused batch is the
   engine's `check::CheckBatchRefused` (payload unchanged).
+  An engine error that reaches the CLI's exit without a command's own
+  mapping renders as the engine's code and payload, where it rendered
+  `INTERNAL`.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype
