@@ -244,6 +244,25 @@ fn allowlist_remedy(policy_table: &str) -> &'static str {
 }
 
 impl FullEngineError {
+    /// Refuse a name a folder mem cannot take: the structural refusals
+    /// every mem name meets, then the folder slug shape (lowercase letters,
+    /// digits and hyphens), as `invalid_char`.
+    pub fn check_folder_mem_name(name: &str) -> Result<(), FullEngineError> {
+        let refuse = |reason: &'static str| FullEngineError::InvalidMemName {
+            name: name.to_string(),
+            reason,
+        };
+        if let Some(reason) = crate::mem_management::lifecycle::classify_invalid_mem_name(name) {
+            return Err(refuse(reason));
+        }
+        if crate::filesystem::config::validate_mem_name(name).is_err() {
+            return Err(refuse("invalid_char"));
+        }
+        Ok(())
+    }
+}
+
+impl FullEngineError {
     /// Render rich, fully-inlined recovery prose for the agent-visible
     /// text channel. Closes the asymmetry where structured `details.X`
     /// fields stayed off the agent's text channel. Each lifecycle

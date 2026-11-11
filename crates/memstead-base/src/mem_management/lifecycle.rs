@@ -1060,7 +1060,7 @@ pub struct MemCreateResponse {
 ///   than a regex no-match.
 /// - `invalid_char` — fallback for anything else the grammar rejects
 ///   (non-printable, non-ASCII letters, reserved characters).
-pub(super) fn classify_invalid_mem_name(name: &str) -> Option<&'static str> {
+pub(crate) fn classify_invalid_mem_name(name: &str) -> Option<&'static str> {
     if name.is_empty() {
         return Some("empty");
     }

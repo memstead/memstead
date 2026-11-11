@@ -117,6 +117,7 @@ variant_tags!(
         TemplateIdentityMismatch,
         ChunkOutOfRange,
         InvalidSchemaPin,
+        UnsupportedWorkspaceShape,
         NoWritableMem,
         AmbiguousMem,
         UnknownTypes,
@@ -1145,10 +1146,15 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
             EngineError::MemNotReadOnly { mem: s("specs") },
         ),
         (
+            "UnsupportedWorkspaceShape".into(),
+            EngineError::UnsupportedWorkspaceShape { path: s("/ws") },
+        ),
+        (
             "InvalidSchemaPin".into(),
             EngineError::InvalidSchemaPin {
                 pin: s("default@latest"),
                 reason: s("exact semver versions only"),
+                available: v(&["default"]),
             },
         ),
         (

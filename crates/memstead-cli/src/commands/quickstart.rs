@@ -720,15 +720,15 @@ fn resolve_mem_name(
         None => format!("memstead quickstart --name {name}"),
     };
     if let Some(name) = flag {
-        validate_mem_name(name).map_err(|e| {
-            CliError::new(
-                ExitKind::Validation,
-                "INVALID_INPUT",
-                format!(
-                    "invalid --name: {e}. Retry with a slug, e.g.: {}",
-                    retry(&derive_mem_name(name).unwrap_or_else(|| "my-graph".to_string())),
-                ),
-            )
+        memstead_base::FullEngineError::check_folder_mem_name(name).map_err(|e| {
+            let rule = validate_mem_name(name).err().unwrap_or_default();
+            let mut c = CliError::from_full_engine_op(e);
+            c.message = format!(
+                "{}. {rule}. Retry with a slug, e.g.: {}",
+                c.message,
+                retry(&derive_mem_name(name).unwrap_or_else(|| "my-graph".to_string())),
+            );
+            c
         })?;
         return Ok(name.to_string());
     }
@@ -744,12 +744,11 @@ fn resolve_mem_name(
             "Could not derive a mem name from `{basename}`. Mem name (lowercase letters, digits, hyphens): ",
         ))?;
         let answer = answer.trim();
-        validate_mem_name(answer).map_err(|e| {
-            CliError::new(
-                ExitKind::Validation,
-                "INVALID_INPUT",
-                format!("invalid mem name: {e}. Retry with: {}", retry("my-graph")),
-            )
+        memstead_base::FullEngineError::check_folder_mem_name(answer).map_err(|e| {
+            let rule = validate_mem_name(answer).err().unwrap_or_default();
+            let mut c = CliError::from_full_engine_op(e);
+            c.message = format!("{}. {rule}. Retry with: {}", c.message, retry("my-graph"));
+            c
         })?;
         return Ok(answer.to_string());
     }

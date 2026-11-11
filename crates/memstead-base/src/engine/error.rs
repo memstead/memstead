@@ -1135,9 +1135,20 @@ pub enum EngineError {
         mem: Option<String>,
         operation: String,
     },
+    /// A command that needs a mem-repo workspace, run on a filesystem-mem
+    /// one.
+    #[error(
+        "the workspace at {path} is filesystem-shaped; this command needs a mem-repo workspace"
+    )]
+    UnsupportedWorkspaceShape { path: String },
     /// A schema pin (`name@version`) that does not parse.
     #[error("invalid schema pin {pin:?}: {reason}")]
-    InvalidSchemaPin { pin: String, reason: String },
+    InvalidSchemaPin {
+        pin: String,
+        reason: String,
+        /// The schema names the asking surface could resolve.
+        available: Vec<String>,
+    },
     /// A chunk asked for past the end of a chunked response.
     #[error("Chunk {chunk} does not exist. Content has {total} chunk{}.", if *total == 1 { "" } else { "s" })]
     ChunkOutOfRange { chunk: usize, total: usize },
@@ -1754,6 +1765,7 @@ impl EngineError {
             EngineError::TemplateIdentityMismatch { .. } => "INVALID_INPUT",
             EngineError::ChunkOutOfRange { .. } => "CHUNK_OUT_OF_RANGE",
             EngineError::InvalidSchemaPin { .. } => "INVALID_INPUT",
+            EngineError::UnsupportedWorkspaceShape { .. } => "UNSUPPORTED_WORKSPACE_SHAPE",
             EngineError::AmbiguousMem { .. } => "AMBIGUOUS_MEM",
             EngineError::UnknownTypes { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::UnknownSchema { .. } => "SCHEMA_NOT_FOUND",
@@ -2563,9 +2575,12 @@ impl EngineError {
             EngineError::NotGitBacked { mem, operation } => {
                 serde_json::json!({ "mem": mem, "operation": operation })
             }
-            EngineError::InvalidSchemaPin { pin, reason } => {
-                serde_json::json!({ "pin": pin, "reason": reason })
-            }
+            EngineError::UnsupportedWorkspaceShape { path } => serde_json::json!({ "path": path }),
+            EngineError::InvalidSchemaPin {
+                pin,
+                reason,
+                available,
+            } => serde_json::json!({ "pin": pin, "reason": reason, "available": available }),
             EngineError::ChunkOutOfRange { chunk, total } => {
                 serde_json::json!({ "chunk": chunk, "total": total })
             }
@@ -3115,11 +3130,25 @@ impl AuthoringPackageError {
 impl EngineError {
     /// Parse a schema pin, refusing one that does not parse with the one
     /// value every surface renders.
+    /// The names in the refusal are the built-in catalogue's; an engine
+    /// that knows more schemas parses through [`crate::Engine::parse_schema_pin`].
     pub fn parse_schema_pin(pin: &str) -> Result<memstead_schema::SchemaRef, EngineError> {
+        let available = match EngineError::unknown_builtin_schema(pin) {
+            EngineError::UnknownSchema { available, .. } => available,
+            _ => Vec::new(),
+        };
+        Self::parse_schema_pin_against(pin, available)
+    }
+
+    fn parse_schema_pin_against(
+        pin: &str,
+        available: Vec<String>,
+    ) -> Result<memstead_schema::SchemaRef, EngineError> {
         pin.parse::<memstead_schema::SchemaRef>()
             .map_err(|reason| EngineError::InvalidSchemaPin {
                 pin: pin.to_string(),
                 reason,
+                available,
             })
     }
 
@@ -3379,6 +3408,17 @@ impl EngineError {
 impl super::Engine {
     /// `SCHEMA_NOT_FOUND` for a schema asked for by name, with every name
     /// the engine can serve (mounted, workspace-installed, built-in).
+    /// Parse a schema pin, refusing one that does not parse with the
+    /// schema names this engine resolves (mounted, workspace-installed,
+    /// built-in) in the refusal.
+    pub fn parse_schema_pin(&self, pin: &str) -> Result<memstead_schema::SchemaRef, EngineError> {
+        let available = match self.unknown_schema(pin) {
+            EngineError::UnknownSchema { available, .. } => available,
+            _ => Vec::new(),
+        };
+        EngineError::parse_schema_pin_against(pin, available)
+    }
+
     pub fn unknown_schema(&self, name: &str) -> EngineError {
         let mut available: Vec<String> = self
             .schemas()

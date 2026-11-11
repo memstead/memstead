@@ -532,11 +532,11 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // (`.memstead/workspace.toml`). The presence of this file is the
     // engine's own boot precondition — `memstead-mcp` walks for it too.
     let workspace_root = find_workspace_root(&cwd).ok_or_else(|| {
-        validation_error(format!(
+        anyhow::Error::from(crate::setup::workspace_not_initialised_error(&format!(
             "no workspace found above {}. Run `memstead mem-repo init` first or \
              change directory into an existing workspace.",
             cwd.display(),
-        ))
+        )))
     })?;
 
     // Hierarchical paths are first-class mem identifiers. The CLI forwards
@@ -608,15 +608,10 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             // `UNSUPPORTED_WORKSPACE_SHAPE` (the code the cold-start
             // disclosure teaches by name). The message text is
             // unchanged; only the typed code routes differently.
-            return Err(CliError {
-                kind: ExitKind::Generic,
-                code: "UNSUPPORTED_WORKSPACE_SHAPE",
-                message: format!(
-                    "`memstead mem init` requires a mem-repo workspace; the workspace at {} is filesystem-shaped. Use `memstead mem-repo init` first to migrate.",
-                    workspace_root.display(),
-                ),
-                details: None,
-            }
+            return Err(crate::setup::unsupported_shape_error(
+                &workspace_root,
+                "use `memstead mem-repo init` first to migrate",
+            )
             .into());
         }
     };
@@ -748,20 +743,21 @@ pub fn run_rename(ctx: &CliContext, args: RenameArgs) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()
         .map_err(|e| generic_error(format!("determine current directory: {e}")))?;
     let workspace_root = find_workspace_root(&cwd).ok_or_else(|| {
-        validation_error(format!(
+        anyhow::Error::from(crate::setup::workspace_not_initialised_error(&format!(
             "no workspace found above {}. `memstead mem rename` must run \
              inside a configured workspace.",
             cwd.display(),
-        ))
+        )))
     })?;
 
     let mut engine = match ctx.cli_engine()? {
         CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(_) => {
-            return Err(validation_error(format!(
-                "`memstead mem rename` requires a mem-repo workspace; the workspace at {} is filesystem-shaped.",
-                workspace_root.display(),
-            )));
+            return Err(crate::setup::unsupported_shape_error(
+                &workspace_root,
+                "`memstead mem rename` runs on mem-repo workspaces",
+            )
+            .into());
         }
     };
     let params = mem_management::MemRenameParams {
@@ -867,11 +863,11 @@ fn run_delete_inner(
     let cwd = std::env::current_dir()
         .map_err(|e| generic_error(format!("determine current directory: {e}")))?;
     let workspace_root = find_workspace_root(&cwd).ok_or_else(|| {
-        validation_error(format!(
+        anyhow::Error::from(crate::setup::workspace_not_initialised_error(&format!(
             "no workspace found above {}. `memstead mem {verb}` must run \
              inside a configured workspace.",
             cwd.display(),
-        ))
+        )))
     })?;
 
     let params = MemDeleteParams {
@@ -888,10 +884,11 @@ fn run_delete_inner(
     let mut engine = match ctx.cli_engine()? {
         CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(_) => {
-            return Err(validation_error(format!(
-                "`memstead mem {verb}` requires a mem-repo workspace; the workspace at {} is filesystem-shaped.",
-                workspace_root.display(),
-            )));
+            return Err(crate::setup::unsupported_shape_error(
+                &workspace_root,
+                &format!("`memstead mem {verb}` runs on mem-repo workspaces"),
+            )
+            .into());
         }
     };
     let response =
@@ -965,11 +962,13 @@ pub fn run_fork(ctx: &CliContext, args: ForkArgs) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()
         .map_err(|e| generic_error(format!("determine current directory: {e}")))?;
     if find_workspace_root(&cwd).is_none() {
-        return Err(validation_error(format!(
-            "no workspace found above {}. Run `memstead mem-repo init` first or \
+        return Err(anyhow::Error::from(
+            crate::setup::workspace_not_initialised_error(&format!(
+                "no workspace found above {}. Run `memstead mem-repo init` first or \
              change directory into an existing workspace.",
-            cwd.display(),
-        )));
+                cwd.display(),
+            )),
+        ));
     }
     // `<source>[@<sha>]`: the `@` splits the source name from the commit.
     let (source, sha) = match args.source.split_once('@') {
@@ -1641,16 +1640,6 @@ fn run_set_schema_below_boot(
 
 fn generic_error(msg: String) -> anyhow::Error {
     CliError::from_engine_op(memstead_base::EngineError::Mem(msg)).into()
-}
-
-fn validation_error(msg: String) -> anyhow::Error {
-    CliError {
-        code: "VALIDATION_FAILED",
-        kind: ExitKind::Validation,
-        message: msg,
-        details: None,
-    }
-    .into()
 }
 
 fn invalid_input_error(msg: String) -> anyhow::Error {

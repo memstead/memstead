@@ -1186,6 +1186,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "_mem_schema",
         ],
         "memstead_schema" => &[
+            // The unknown-name refusal the description names.
+            "SCHEMA_NOT_FOUND",
             // Response-shape fields shipped by build_schema_payload.
             // Full and lite ship the heavy arrays under distinct keys;
             // the description names all four so consumers decode by key

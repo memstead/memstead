@@ -208,7 +208,7 @@ impl CliError {
             | Backend { .. }
             | SearchUnavailable
             | ChunkOutOfRange { .. }
-            | InvalidSchemaPin { .. }
+            | UnsupportedWorkspaceShape { .. }
             | NoWritableMem
             | ContextNotComputable { .. } => ExitKind::Generic,
             HashMismatch { .. } => ExitKind::HashMismatch,
@@ -287,6 +287,7 @@ impl CliError {
             | MemNotReadOnly { .. }
             | NotGitBacked { .. }
             | TemplateIdentityMismatch { .. }
+            | InvalidSchemaPin { .. }
             | EntityIdTooLong { .. }
             | RenameSimilarityOutOfRange { .. }
             | MarkdownExportUnsupportedBackend { .. }

@@ -70,7 +70,7 @@ if (clearMode) {
     process.stdout.write(`[${LABEL} | clear] ${target} — deleted.\n`);
   } else if (/unknown (writable )?mem/i.test(r.stderr || '')) {
     process.stdout.write(`[${LABEL} | clear] ${target} — already absent.\n`);
-  } else if (/requires a mem-repo workspace/i.test(r.stderr || '')) {
+  } else if (/UNSUPPORTED_WORKSPACE_SHAPE/.test(r.stderr || '')) {
     // The engine's own wording names a workspace shape the first-session
     // reader has never chosen and cannot act on. A filesystem-mem workspace
     // holds exactly one mem, so it has no paired process mem to clear and

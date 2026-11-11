@@ -18,6 +18,8 @@ pub enum WorkspaceCreateError {
     AlreadyExistsAbove { target: PathBuf, found_at: PathBuf },
     #[error("{} is already a Memstead workspace", path.display())]
     AlreadyInitialised { path: PathBuf },
+    #[error("{} already exists; a mem-repo is never created over one", path.display())]
+    MemRepoExists { path: PathBuf },
     #[error(
         "{} is a `.memstead/` directory that is not a workspace (no workspace.toml)",
         store.display()
@@ -48,6 +50,7 @@ impl WorkspaceCreateError {
             WorkspaceCreateError::AlreadyInitialised { .. } => "WORKSPACE_ALREADY_INITIALISED",
             WorkspaceCreateError::ForeignMemsteadDir { .. } => "FOREIGN_MEMSTEAD_DIR",
             WorkspaceCreateError::SchemaPackageExists { .. } => "SCHEMA_PACKAGE_EXISTS",
+            WorkspaceCreateError::MemRepoExists { .. } => "MEM_DB_ALREADY_EXISTS",
             WorkspaceCreateError::TargetNotEmpty { .. } => "TARGET_NOT_EMPTY",
         }
     }
@@ -59,7 +62,8 @@ impl WorkspaceCreateError {
                 "hint": NESTED_WORKSPACE_HINT,
             }),
             WorkspaceCreateError::AlreadyInitialised { path }
-            | WorkspaceCreateError::SchemaPackageExists { path } => {
+            | WorkspaceCreateError::SchemaPackageExists { path }
+            | WorkspaceCreateError::MemRepoExists { path } => {
                 serde_json::json!({ "path": path.display().to_string() })
             }
             WorkspaceCreateError::ForeignMemsteadDir { store } => {

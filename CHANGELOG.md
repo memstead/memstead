@@ -245,8 +245,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `schema install`, `mem init`, `mem set-schema` and MCP's
   `memstead_schema`, `memstead_mem_create` and `memstead_mem_set_schema`:
   MCP's `memstead_schema` reported it as `SCHEMA_NOT_FOUND` with
-  `details.available` and the two MCP mem tools carried `details.message`
-  (retired for `pin` and `reason`); the CLI carried no details.
+  `details.name` (now `details.pin`) and `details.available` (kept, the
+  schema names the engine resolves), and the two MCP mem tools carried
+  `details.message` (retired for `pin` and `reason`); the CLI carried no
+  details and now carries `available` from the built-in catalogue. The
+  CLI's exit for it stays `5`, the validation exit.
+  `memstead init --schema` refuses a malformed pin the same way; `init
+  --name` and `quickstart --name` refuse a name a folder mem cannot take
+  with the engine's `INVALID_MEM_NAME` (`details.name`, `details.reason`;
+  the slug rule follows in the message), where they refused
+  `INVALID_INPUT`, the code `mem init` and MCP's `memstead_mem_create`
+  already served. `VALIDATION_FAILED` retires: `memstead mem` commands
+  outside a workspace refuse `WORKSPACE_NOT_INITIALISED` (with the
+  engine's payload), and on a filesystem-mem workspace the mem-repo-only
+  commands (`mem init`, `mem rename`, `mem delete`, the other `mem`
+  verbs, and every command `UNSUPPORTED_WORKSPACE_SHAPE` already covered)
+  refuse `UNSUPPORTED_WORKSPACE_SHAPE`, now an engine value carrying
+  `details.path`. `mem-repo init` over an existing mem-repo refuses
+  `MEM_DB_ALREADY_EXISTS` with `details.path`; a broken built-in schema
+  catalogue under `init` is the engine's `SCHEMA_RESOLVER_INIT_FAILED`.
+  The plugin's `/ingest --clear` recognises a filesystem-mem workspace by
+  the code `UNSUPPORTED_WORKSPACE_SHAPE` instead of the message wording.
   `memstead publish` refuses a workspace the engine does not boot with
   the boot refusal's own code (`WORKSPACE_STORE_PARSE`, ...), where it
   reported `ARCHIVE_ASSEMBLY_FAILED` or, when the folders could be

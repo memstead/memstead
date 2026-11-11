@@ -306,16 +306,12 @@ pub(crate) fn run_init(
 
     let mem_repo_root = workspace.join("mem-repo");
     if mem_repo_root.exists() {
-        return Err(CliError {
-            code: "MEM_DB_ALREADY_EXISTS",
-            kind: ExitKind::Validation,
-            message: format!(
-                "{} already exists — refusing to overwrite. Delete or move \
-                 the existing mem-repo before re-running `mem-repo init`.",
-                mem_repo_root.display()
-            ),
-            details: None,
-        }
+        return Err(CliError::from_workspace_create(
+            memstead_base::workspace_create::WorkspaceCreateError::MemRepoExists {
+                path: mem_repo_root.clone(),
+            },
+            "Delete or move the existing mem-repo before re-running `mem-repo init`.",
+        )
         .into());
     }
 

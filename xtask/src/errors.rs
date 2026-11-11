@@ -154,12 +154,15 @@ fn scan_cli_codes(
         Regex::new(r#"pub const [A-Z_]+_CODE:\s*&str\s*=\s*"([A-Z][A-Z0-9_]+)""#).unwrap();
     let with_code_re = Regex::new(r#"\.with_code\(\s*"([A-Z][A-Z0-9_]+)"\s*\)"#).unwrap();
     let new_re = Regex::new(r#"CliError::new\([^)"]*?"([A-Z][A-Z0-9_]+)""#).unwrap();
+    // A `CliError { code: "...", .. }` struct literal: an unquoted `code:`
+    // field (a `json!` key is quoted and never matches).
+    let literal_re = Regex::new(r#"\bcode:\s*"([A-Z][A-Z0-9_]+)""#).unwrap();
     for crate_dir in ["crates/memstead-cli/src"] {
         let root = workspace_root.join(crate_dir);
         for path in rust_sources(&root)? {
             let rel = pathdiff(workspace_root, &path);
             let text = std::fs::read_to_string(&path)?;
-            for re in [&const_re, &with_code_re, &new_re] {
+            for re in [&const_re, &with_code_re, &new_re, &literal_re] {
                 for cap in re.captures_iter(&text) {
                     let m = cap.get(1).unwrap();
                     push(
@@ -610,8 +613,10 @@ mod surface_codes {
         "INTERNAL",
         "INTERNAL_IO_ERROR",
         "LOGIN_FAILED",
+        "MEM_REPO_INIT_FAILED",
         "NETWORK_ERROR",
         "NOT_AUTHENTICATED",
+        "OUTER_GITIGNORE_HOME_REFUSED",
         "REGISTRY_AUTH_CONFIG_UNAVAILABLE",
         "REGISTRY_ERROR",
         "REGISTRY_MALFORMED_RESPONSE",
@@ -647,12 +652,13 @@ mod surface_codes {
         ("crates/memstead-cli/src/commands/due.rs", 3),
         ("crates/memstead-cli/src/commands/export.rs", 6),
         ("crates/memstead-cli/src/commands/install.rs", 1),
-        ("crates/memstead-cli/src/commands/mem.rs", 1),
+        ("crates/memstead-cli/src/commands/mem.rs", 2),
+        ("crates/memstead-cli/src/commands/mem_repo.rs", 1),
         ("crates/memstead-cli/src/commands/mod.rs", 2),
         ("crates/memstead-cli/src/commands/projection.rs", 1),
         ("crates/memstead-cli/src/commands/proposal.rs", 2),
         ("crates/memstead-cli/src/commands/publish.rs", 3),
-        ("crates/memstead-cli/src/commands/quickstart.rs", 9),
+        ("crates/memstead-cli/src/commands/quickstart.rs", 7),
         ("crates/memstead-cli/src/commands/relate.rs", 2),
         ("crates/memstead-cli/src/commands/retype.rs", 2),
         ("crates/memstead-cli/src/commands/schema.rs", 3),

@@ -128,6 +128,17 @@ fn memstead_word() -> String {
 /// this binary — the refusal is read by someone who is about to type
 /// what it says.
 ///
+/// The mem-repo-only refusal: the engine's value, this command's advice
+/// after it.
+pub fn unsupported_shape_error(root: &Path, advice: &str) -> CliError {
+    let mut c = CliError::from_engine_op(memstead_base::EngineError::UnsupportedWorkspaceShape {
+        path: root.display().to_string(),
+    });
+    c.kind = ExitKind::Generic;
+    c.message = format!("{}: {advice}", c.message);
+    c
+}
+
 fn unsupported_workspace_shape_message() -> String {
     let m = memstead_word();
     format!(
@@ -502,13 +513,9 @@ impl CliContext {
         // tag here so callers print an actionable message instead of
         // booting into a foldery engine and erroring later.
         if !memstead_base::is_mem_repo_shaped(&root) {
-            return Err(CliError {
-                kind: ExitKind::Generic,
-                code: "UNSUPPORTED_WORKSPACE_SHAPE",
-                message: unsupported_workspace_shape_message(),
-                details: None,
-            }
-            .into());
+            return Err(
+                unsupported_shape_error(&root, &unsupported_workspace_shape_message()).into(),
+            );
         }
 
         let mut engine =
@@ -629,13 +636,7 @@ pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
     };
 
     if !memstead_base::is_mem_repo_shaped(&root) {
-        return Err(CliError {
-            code: "UNSUPPORTED_WORKSPACE_SHAPE",
-            kind: ExitKind::Generic,
-            message: unsupported_workspace_shape_message(),
-            details: None,
-        }
-        .into());
+        return Err(unsupported_shape_error(&root, &unsupported_workspace_shape_message()).into());
     }
 
     let mut engine = engine_from_workspace_root(&root).map_err(|e| boot_error_to_cli(&root, e))?;

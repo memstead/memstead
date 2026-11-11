@@ -64,20 +64,18 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    let schema_pin: SchemaRef = args.schema.parse().map_err(|e: String| CliError {
-        code: "INVALID_INPUT",
-        message: format!("invalid --schema {value:?}: {e}", value = args.schema),
-        kind: ExitKind::Validation,
-        details: None,
-    })?;
+    let schema_pin: SchemaRef = memstead_base::EngineError::parse_schema_pin(&args.schema)
+        .map_err(CliError::from_engine_op)?;
 
     // The mem name is path-derived and no longer round-trips through
     // `config.json`, so validate the slug shape here at the boundary.
-    validate_mem_name(&args.name).map_err(|e| CliError {
-        code: "INVALID_INPUT",
-        message: format!("invalid --name: {e}"),
-        kind: ExitKind::Validation,
-        details: None,
+    memstead_base::FullEngineError::check_folder_mem_name(&args.name).map_err(|e| {
+        let rule = validate_mem_name(&args.name).err().unwrap_or_default();
+        let mut c = CliError::from_full_engine_op(e);
+        if !rule.is_empty() {
+            c.message = format!("{}. {rule}", c.message);
+        }
+        c
     })?;
 
     // A pin that resolves to no built-in schema is loudly flagged, not
@@ -90,11 +88,10 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // into that state. (`memstead mem init` / MCP `memstead_mem_create`
     // refuse instead — there the workspace already exists, so
     // install-before-pin is always possible.)
-    let builtin = memstead_schema::builtins::load_builtin_schemas().map_err(|e| CliError {
-        code: "SCHEMA_RESOLVER_INIT_FAILED",
-        message: format!("load built-in schema catalogue: {e}"),
-        kind: ExitKind::Generic,
-        details: None,
+    let builtin = memstead_schema::builtins::load_builtin_schemas().map_err(|e| {
+        CliError::from_engine_op(memstead_base::EngineError::SchemaResolverInit(
+            e.to_string(),
+        ))
     })?;
     let pin_unresolved =
         memstead_base::engine::resolve_builtin_schema_pin_pub(&schema_pin, &builtin).is_none();
@@ -385,7 +382,7 @@ mod tests {
         // Range syntax is rejected upstream by SchemaRef's FromStr.
         let err = run_init(tmp.path(), "demo", "default@^1.0.0").unwrap_err();
         assert!(
-            err.to_string().contains("invalid --schema"),
+            err.to_string().contains("invalid schema pin"),
             "expected schema rejection, got: {err}"
         );
     }
@@ -398,7 +395,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let err = run_init(tmp.path(), "Demo Bad", "default@1.0.0").unwrap_err();
         assert!(
-            err.to_string().contains("invalid --name"),
+            err.to_string().contains("invalid_char") || err.to_string().contains("mem name"),
             "expected --name rejection, got: {err}"
         );
     }
@@ -456,7 +453,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let err = run_init(tmp.path(), "demo", "default").unwrap_err();
         assert!(
-            err.to_string().contains("invalid --schema"),
+            err.to_string().contains("invalid schema pin"),
             "expected bare-name pin rejection, got: {err}"
         );
     }
