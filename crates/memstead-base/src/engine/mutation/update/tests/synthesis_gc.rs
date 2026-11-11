@@ -1196,4 +1196,129 @@ community:
             "refused create must not leave any entity behind, got: {listed:?}"
         );
     }
+
+    fn create_doc(
+        engine: &mut Engine,
+        title: &str,
+        body: &str,
+    ) -> Result<crate::engine::CreateEntityOutcome, EngineError> {
+        let (actor, client) = cli_actor();
+        engine.create_entity(
+            CreateEntityArgs {
+                anchors: Vec::new(),
+                mem: "v".to_string(),
+                title: title.to_string(),
+                entity_type: "doc".to_string(),
+                sections: IndexMap::from_iter([("body".to_string(), body.to_string())]),
+                metadata: IndexMap::new(),
+                relations: Vec::new(),
+                dry_run: false,
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+    }
+
+    fn pointer_manifest(pointer_extra: &str) -> String {
+        format!(
+            r#"name: gated
+version: 0.1.0
+description: alias pointer under the declared-edge gates
+when_to_use: tests
+types:
+  - doc
+relationships:
+  mode: strict
+  definitions:
+    - name: CITES
+      description: Citation, auto-emitted from body wiki-links
+      default_weight: 0.5
+{pointer_extra}
+    - name: _default
+      description: Fallback
+      default_weight: 1.0
+alias_target_rel_type: CITES
+community:
+  resolution: 1.0
+  seed: 42
+"#
+        )
+    }
+
+    /// A body wiki-link whose pointer edge the schema's shape forbids
+    /// refuses the write, as a declared edge of that shape does, where the
+    /// synthesised edge landed and the next load dropped it.
+    #[test]
+    fn a_wiki_link_whose_pointer_edge_breaks_the_shape_is_refused() {
+        let manifest = pointer_manifest("      source_types: [note]")
+            .replace("types:\n  - doc\n", "types:\n  - doc\n  - note\n");
+        let tmp = TempDir::new().unwrap();
+        let schemas_dir = tmp.path().join("schemas");
+        write_schema_files(
+            &schemas_dir,
+            "gated",
+            &manifest,
+            &[
+                ("doc", &make_type_yaml("doc")),
+                ("note", &make_type_yaml("note")),
+            ],
+        );
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemBackend::new(mem_dir.clone());
+        let mount = folder_mount_with_pin(
+            "v",
+            mem_dir,
+            SchemaRef::new("gated", semver::Version::new(0, 1, 0)),
+        );
+        let mut engine = Engine::from_mounts_with_schemas_dir(
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
+            Some(&schemas_dir),
+        )
+        .expect("engine with custom schema constructs");
+        create_doc(&mut engine, "Target", "target body").unwrap();
+        let err = create_doc(&mut engine, "Source", "see [[target]]")
+            .expect_err("a doc is no source the pointer admits");
+        assert_eq!(err.code(), "INVALID_REL_SHAPE", "{err:?}");
+    }
+
+    /// A body wiki-link that would close a cycle on an acyclic pointer
+    /// refuses the write, as a declared edge does, where the synthesised
+    /// edge landed and the next load dropped a different, explicit edge.
+    #[test]
+    fn a_wiki_link_closing_a_pointer_cycle_is_refused() {
+        let manifest = pointer_manifest("      acyclic: true");
+        let (mut engine, _tmp) =
+            engine_with_schema(&manifest, "doc", "gated", semver::Version::new(0, 1, 0));
+        let a = create_doc(&mut engine, "Alpha", "first").unwrap();
+        create_doc(&mut engine, "Beta", "cites [[alpha]]").unwrap();
+        let (actor, client) = cli_actor();
+        let err = engine
+            .update_entity(
+                UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                    id: a.id.clone(),
+                    expected_hash: crate::ExpectedHash::Current(a.content_hash.clone()),
+                    sections: IndexMap::from_iter([(
+                        "body".to_string(),
+                        "now cites [[beta]]".to_string(),
+                    )]),
+                    append_sections: IndexMap::new(),
+                    patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
+                    metadata: IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    dry_run: false,
+                    declare_relations: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("alpha cites beta cites alpha");
+        assert_eq!(err.code(), "RELATIONSHIP_CYCLE", "{err:?}");
+    }
 }

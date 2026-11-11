@@ -2098,6 +2098,40 @@ pub(super) fn synthesise_alias_relations(
                 }
                 continue;
             }
+            // The pointer edge is an edge like any other: it passes the
+            // gates a declared edge passes, the shape and the cycle law,
+            // so a wiki-link the graph would not keep refuses here rather
+            // than landing and being dropped by the next load.
+            let target_type = match engine
+                .store
+                .get(&target)
+                .map(|e| e.entity_type.clone())
+                .filter(|t| !t.is_empty())
+            {
+                Some(t) => Some(t),
+                None => peek_deferred_target_type(engine, &target)?,
+            };
+            // An open-mode vocabulary note is already the pointer's own:
+            // the pointer is declared, so only a shape miss can refuse.
+            let _ = route_edge_validation(
+                engine,
+                &pointer,
+                next.entity_type.as_str(),
+                target_type.as_deref(),
+                &next.mem,
+                target.mem(),
+                &next.id,
+                &target,
+                /* check_shape = */ true,
+            )?;
+            validate_edge_acyclicity(
+                &engine.store,
+                schema.as_ref(),
+                &next.id,
+                next.entity_type.as_str(),
+                &target,
+                &pointer,
+            )?;
             let rel = crate::entity::Relationship::new(pointer.clone(), target.clone());
             next.relationships.push(rel.clone());
             already_synthesised.insert(target);

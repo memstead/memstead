@@ -195,6 +195,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   refuses as an unknown mem, where it ran as a resumption and rewrote the
   absent name's links and grants onto the live mem.
 
+- **A body wiki-link's synthesised edge passes the gates a declared edge
+  passes.** On a schema whose `alias_target_rel_type` carries a shape or
+  sits under an acyclicity law, a wiki-link whose edge breaks the shape
+  refuses `INVALID_REL_SHAPE` and one that would close a cycle refuses
+  `RELATIONSHIP_CYCLE`, where the edge was written and the next load
+  dropped it, or dropped a different, explicit edge to break the cycle.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both
