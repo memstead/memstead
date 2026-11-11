@@ -210,11 +210,33 @@ impl CheckFinding {
     /// Parse and validate a finding from JSON (the CLI's `--finding` and
     /// batch entries, the MCP param). An unknown key, a missing required
     /// key, or an empty value is one typed refusal naming the shape.
-    pub fn from_json(value: serde_json::Value) -> Result<Self, String> {
-        let finding: CheckFinding = serde_json::from_value(value)
-            .map_err(|e| format!("finding does not match the shape {} ({e})", Self::SHAPE))?;
-        finding.validate()?;
+    pub fn from_json(value: serde_json::Value) -> Result<Self, InvalidCheckFinding> {
+        let finding: CheckFinding =
+            serde_json::from_value(value).map_err(|e| InvalidCheckFinding {
+                reason: format!("finding does not match the shape {} ({e})", Self::SHAPE),
+            })?;
+        finding
+            .validate()
+            .map_err(|reason| InvalidCheckFinding { reason })?;
         Ok(finding)
+    }
+}
+
+/// A check finding that does not match its shape: one refusal, the same
+/// on every surface, naming the shape it must match.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{reason}")]
+pub struct InvalidCheckFinding {
+    pub reason: String,
+}
+
+impl InvalidCheckFinding {
+    pub fn code(&self) -> &'static str {
+        INVALID_CHECK_FINDING_CODE
+    }
+
+    pub fn details(&self) -> serde_json::Value {
+        serde_json::json!({ "shape": CheckFinding::SHAPE })
     }
 }
 
@@ -1503,7 +1525,9 @@ mod tests {
             serde_json::json!({ "code": "x", "message": "m", "severity": "high" }),
             serde_json::json!({ "code": "x", "message": "m", "section": "" }),
         ] {
-            let err = CheckFinding::from_json(bad.clone()).unwrap_err();
+            let err = CheckFinding::from_json(bad.clone())
+                .unwrap_err()
+                .to_string();
             assert!(err.contains("shape"), "{bad}: {err}");
         }
     }

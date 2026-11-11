@@ -730,15 +730,12 @@ impl McpServer {
                 serde_json::to_value(f).unwrap_or(serde_json::Value::Null),
             ) {
                 Ok(f) => Some(f),
-                Err(reason) => {
+                Err(e) => {
+                    let message = e.to_string();
                     return tool_error_with_payload(
-                        memstead_base::check::INVALID_CHECK_FINDING_CODE,
-                        &reason,
-                        envelope(
-                            memstead_base::check::INVALID_CHECK_FINDING_CODE,
-                            reason.clone(),
-                            serde_json::json!({ "shape": memstead_base::check::CheckFinding::SHAPE }),
-                        ),
+                        e.code(),
+                        &message,
+                        envelope(e.code(), message.clone(), e.details()),
                     );
                 }
             },

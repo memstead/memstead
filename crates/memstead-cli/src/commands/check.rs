@@ -298,13 +298,11 @@ fn parse_kind(kind: Option<&str>) -> Result<RecordKind, CliError> {
 fn parse_finding(raw: Option<serde_json::Value>) -> Result<Option<CheckFinding>, CliError> {
     match raw {
         None => Ok(None),
-        Some(v) => CheckFinding::from_json(v).map(Some).map_err(|reason| {
-            CliError::new(
-                ExitKind::Validation,
-                memstead_base::check::INVALID_CHECK_FINDING_CODE,
-                reason,
-            )
-            .with_details(serde_json::json!({ "shape": CheckFinding::SHAPE }))
+        Some(v) => CheckFinding::from_json(v).map(Some).map_err(|e| CliError {
+            kind: ExitKind::Validation,
+            code: e.code(),
+            details: Some(e.details()),
+            message: e.to_string(),
         }),
     }
 }
