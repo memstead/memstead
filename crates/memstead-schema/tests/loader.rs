@@ -3572,6 +3572,42 @@ fn due_type(due_block: &str) -> String {
     )
 }
 
+/// The due date comes from exactly one of `date_field` and `check_kind`:
+/// both, or neither, refuse naming the two keys; a malformed kind refuses
+/// with the kind grammar; a well-formed kind loads.
+#[test]
+fn due_axis_takes_exactly_one_of_date_field_and_check_kind() {
+    let refuses = |block: &str| -> String {
+        load(&minimal_manifest(), &[("sample", &due_type(block))])
+            .expect_err("must refuse")
+            .to_string()
+    };
+    let both = refuses(
+        "due:\n  date_field: faellig_am\n  check_kind: x-review\n  status_field: status\n  open_values: [offen]\n",
+    );
+    let neither = refuses("due:\n  status_field: status\n  open_values: [offen]\n");
+    for err in [&both, &neither] {
+        assert!(
+            err.contains("`date_field`") && err.contains("`check_kind`"),
+            "names the two keys: {err}"
+        );
+    }
+    let malformed =
+        refuses("due:\n  check_kind: X_Review\n  status_field: status\n  open_values: [offen]\n");
+    assert!(
+        malformed.contains("x-<name>"),
+        "names the kind grammar: {malformed}"
+    );
+
+    let ok = due_type(
+        "due:\n  check_kind: x-review\n  offset_days: 730\n  status_field: status\n  open_values: [offen]\n",
+    );
+    let schema = load(&minimal_manifest(), &[("sample", &ok)]).expect("a check-dated due loads");
+    let due = schema.get_type("sample").unwrap().due.clone().unwrap();
+    assert_eq!(due.check_kind.as_deref(), Some("x-review"));
+    assert_eq!(due.date_field, None);
+}
+
 /// A well-formed declaration loads; a schema without `due:` loads and
 /// carries no axis — behaves exactly as today.
 #[test]
@@ -3582,7 +3618,7 @@ fn due_axis_well_formed_loads_and_absence_is_inert() {
     let schema = load(&minimal_manifest(), &[("sample", &ok)]).expect("well-formed due loads");
     let td = schema.get_type("sample").unwrap();
     let due = td.due.as_ref().unwrap();
-    assert_eq!(due.date_field, "faellig_am");
+    assert_eq!(due.date_field.as_deref(), Some("faellig_am"));
     assert_eq!(due.lead_section.as_deref(), Some("vorlauf"));
 
     let none = due_type("");

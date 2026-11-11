@@ -1,0 +1,70 @@
+name: item
+description: An object under inspection, approved for a limited time.
+when_to_use: One entity per inspected object.
+sections:
+  - key: technical_description
+    heading: Technical Description
+    required: true
+    search_weight: 10.0
+  - key: remarks
+    heading: Remarks
+    search_weight: 1.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    required: true
+    description: Approval state.
+    field_type: string
+    default_value: draft
+    enum_values: [draft, approved, defects_found]
+    filterable: equality
+  - key: class
+    required: true
+    description: Object class.
+    field_type: string
+    enum_values: [a, b]
+    filterable: equality
+title_weight: 100.0
+text_fields: [technical_description, remarks]
+hierarchy_relationship: PART_OF
+updatable_fields: [title, technical_description, remarks, status, class, tags]
+health_required_fields: [technical_description]
+staleness_threshold_days: 3650
+due:
+  check_kind: x-inspection
+  offset_days: 730
+  status_field: status
+  open_values: [approved]
+constraints:
+  - kind: transition_requires_self_check
+    field: status
+    to_value: approved
+    check_kind: x-inspection
+  - kind: transition_requires_checks
+    field: status
+    to_value: approved
+    relationships: [NEEDS_CHECK]
+    direction: out
+  - kind: transition_requires_checks
+    field: status
+    to_value: approved
+    relationships: [MAJOR_DEFECT_OF]
+    direction: in
+required_outgoing:
+  - relationships: [NEEDS_CHECK]
+    cardinality: at_least_one
+    severity: block
+    when_field: class
+    when_value: b
+  - relationships: [INSPECTED_AGAINST]
+    cardinality: at_least_one
+    severity: block
+    when_field: status
+    when_value: approved
+  - relationships: [RESTS_ON]
+    cardinality: at_least_one
+    severity: block
+    when_field: status
+    when_value: approved
+write_rules:
+  - "Keep entries factual."

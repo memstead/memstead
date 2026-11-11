@@ -1,0 +1,38 @@
+name: party
+description: Any party (authority, owner, supplier).
+when_to_use: One entity per party.
+sections:
+  - key: notes
+    heading: Notes
+    catch_all: true
+    search_weight: 1.0
+  - key: contact
+    heading: Contact
+    required: true
+    search_weight: 10.0
+metadata_fields:
+  - key: standing
+    required: true
+    description: Whether the party is current.
+    field_type: string
+    default_value: current
+    enum_values: [current, former]
+    filterable: equality
+  - key: contact_confirmed_on
+    required: true
+    description: Date the contact details were last confirmed.
+    field_type: date
+    filterable: range
+due:
+  check_kind: x-confirmation
+  offset_days: 365
+  status_field: standing
+  open_values: [current]
+text_fields: [notes, contact]
+updatable_fields: [title, notes, contact, standing, contact_confirmed_on, tags]
+health_required_fields: [contact]
+title_weight: 100.0
+hierarchy_relationship: PART_OF
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep it factual."

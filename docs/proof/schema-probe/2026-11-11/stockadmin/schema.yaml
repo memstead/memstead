@@ -1,0 +1,69 @@
+name: stockadmin
+version: 0.1.0
+description: |
+  Administration of a managed stock of technical installations: installations,
+  their recurring duties, completions, contractors, cases with authorities,
+  projects and permits, fixed calendar deadlines, and parties.
+when_to_use: |
+  Use for a holding of installations with recurring duties and authority cases.
+types:
+  - installation
+  - duty
+  - completion
+  - contractor
+  - case
+  - project
+  - permit
+  - deadline
+  - party
+relationships:
+  mode: strict
+  definitions:
+    - name: HAS_DUTY
+      description: An installation carries this duty.
+      default_weight: 2.0
+      source_types: [installation]
+      target_types: [duty]
+    - name: HAS_GAS_SAFETY_DUTY
+      description: A gas installation carries its gas-safety duty.
+      default_weight: 2.0
+      source_types: [installation]
+      target_types: [duty]
+    - name: PERFORMED_BY
+      description: The duty is performed by this contractor.
+      default_weight: 2.0
+      source_types: [duty]
+      target_types: [contractor]
+    - name: COMPLETES
+      description: A completion records an occurrence of this duty.
+      default_weight: 2.0
+      source_types: [completion]
+      target_types: [duty]
+    - name: BLOCKED_BY
+      description: The duty cannot be performed while this case is open.
+      default_weight: 1.5
+      source_types: [duty]
+      target_types: [case]
+    - name: NEEDS_PERMIT
+      description: The project needs this permit.
+      default_weight: 2.0
+      source_types: [project]
+      target_types: [permit]
+    - name: WITH_PARTY
+      description: Counterparty of a case or contractor.
+      default_weight: 1.0
+      target_types: [party]
+    - name: PART_OF
+      description: Hierarchical containment.
+      default_weight: 3.0
+      acyclic: true
+    - name: REFERENCES
+      description: Soft reference. Auto-emitted from body wiki-links.
+      default_weight: 0.5
+    - name: _default
+      description: Fallback weight.
+      default_weight: 1.0
+alias_target_rel_type: REFERENCES
+community:
+  resolution: 1.0
+  seed: 42

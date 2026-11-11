@@ -1,0 +1,33 @@
+name: permit
+description: A permit a project needs.
+when_to_use: One entity per permit.
+sections:
+  - key: notes
+    heading: Notes
+    catch_all: true
+    search_weight: 1.0
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 10.0
+metadata_fields:
+  - key: status
+    required: true
+    description: Permit lifecycle.
+    field_type: string
+    default_value: applied
+    enum_values: [applied, granted, refused]
+    filterable: equality
+constraints:
+  - kind: transition_requires_self_check
+    field: status
+    to_value: granted
+    check_kind: verification
+text_fields: [notes, summary]
+updatable_fields: [title, notes, summary, status, tags]
+health_required_fields: [summary]
+title_weight: 100.0
+hierarchy_relationship: PART_OF
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep it factual."

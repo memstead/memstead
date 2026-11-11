@@ -623,13 +623,34 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        let now = due
+            .get("due_now")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         lines.push(format!(
-            "## Due ({} overdue, {} due soon; today {}, through {})",
+            "## Due ({} overdue, {} due soon{}; today {}, through {})",
             overdue.len(),
             soon.len(),
+            if now.is_empty() {
+                String::new()
+            } else {
+                format!(", {} due now", now.len())
+            },
             s(&Value::Object(due.clone()), "today"),
             s(&Value::Object(due.clone()), "through"),
         ));
+        for r in &now {
+            lines.push(format!(
+                "- `{}` — {} — **due now**: no confirming `{}` check ({}) (status: {}, mem: {})",
+                s(r, "id"),
+                s(r, "title"),
+                s(r, "check_kind"),
+                s(r, "standing"),
+                s(r, "status"),
+                s(r, "mem"),
+            ));
+        }
         for r in &overdue {
             lines.push(format!(
                 "- `{}` — {} — **{}** OVERDUE ({} days past) (status: {}, mem: {})",

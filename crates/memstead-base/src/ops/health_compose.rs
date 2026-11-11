@@ -667,10 +667,13 @@ pub fn compose_health(
         // empty brief with `mems: []`.
         let today = match args.today {
             Some(t) => t.to_string(),
-            None => {
-                let now = engine.now_iso();
-                now.get(..10).unwrap_or(&now).to_string()
-            }
+            None => match crate::ops::health::pinned_today() {
+                Some(pinned) => pinned,
+                None => {
+                    let now = engine.now_iso();
+                    now.get(..10).unwrap_or(&now).to_string()
+                }
+            },
         };
         let brief = engine
             .due_brief(&today, &crate::engine::due::DueWindow::Days(90), vf)
@@ -948,14 +951,32 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
         };
         let overdue = rows("overdue");
         let soon = rows("due_soon");
+        let now = rows("due_now");
         let _ = writeln!(
             s,
-            "\n## Due ({} overdue, {} due soon; today {}, through {})",
+            "\n## Due ({} overdue, {} due soon{}; today {}, through {})",
             overdue.len(),
             soon.len(),
+            if now.is_empty() {
+                String::new()
+            } else {
+                format!(", {} due now", now.len())
+            },
             due.get("today").and_then(|x| x.as_str()).unwrap_or("?"),
             due.get("through").and_then(|x| x.as_str()).unwrap_or("?"),
         );
+        for r in now {
+            let _ = writeln!(
+                s,
+                "- `{}` — {} — **due now**: no confirming `{}` check ({}) (status: {}, mem: {})",
+                r["id"].as_str().unwrap_or(""),
+                r["title"].as_str().unwrap_or(""),
+                r["check_kind"].as_str().unwrap_or(""),
+                r["standing"].as_str().unwrap_or(""),
+                r["status"].as_str().unwrap_or(""),
+                r["mem"].as_str().unwrap_or(""),
+            );
+        }
         for r in overdue {
             let _ = writeln!(
                 s,

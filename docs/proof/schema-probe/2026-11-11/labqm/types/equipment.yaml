@@ -1,0 +1,61 @@
+name: equipment
+description: |
+  A piece of laboratory equipment with its declared tolerance.
+when_to_use: |
+  One entity per physical instrument.
+sections:
+  - key: notes
+    heading: Notes
+    search_weight: 1.0
+    catch_all: true
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 10.0
+metadata_fields:
+  - key: inventory_number
+    required: true
+    description: Inventory number.
+    field_type: string
+    filterable: equality
+  - key: status
+    required: true
+    description: Use state.
+    field_type: string
+    default_value: out_of_service
+    enum_values: [out_of_service, in_use, out_of_tolerance]
+    filterable: equality
+  - key: tolerance_min
+    description: Lower tolerance bound.
+    field_type: number
+  - key: tolerance_max
+    description: Upper tolerance bound.
+    field_type: number
+constraints:
+  - kind: unique
+    fields: [inventory_number]
+  - kind: transition_requires_checks
+    field: status
+    to_value: in_use
+    relationships: [CALIBRATED_BY]
+    direction: out
+    min_related: 1
+  - kind: status_propagation
+    field: status
+    value: out_of_tolerance
+    relationships: [PRODUCED_WITH]
+    direction: in
+required_outgoing:
+  - relationships: [CALIBRATED_BY]
+    cardinality: at_least_one
+    severity: block
+    when_field: status
+    when_value: in_use
+title_weight: 100.0
+text_fields: [summary]
+hierarchy_relationship: PART_OF
+updatable_fields: [title, summary, inventory_number, status, tolerance_min, tolerance_max, tags]
+health_required_fields: [summary]
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep entries factual."

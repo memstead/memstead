@@ -2377,26 +2377,59 @@ fn validate_due(
         // The engine stamps `created_date` and `last_modified` on every
         // entity whether or not the type declares them, so a due axis may
         // read them without a declaration.
-        let engine_stamped = matches!(due.date_field.as_str(), "created_date" | "last_modified");
-        match td.metadata_fields.iter().find(|f| f.key == due.date_field) {
-            None if engine_stamped => {}
-            None => errors.push(SchemaLoadError::InvalidDueAxis {
+        match (&due.date_field, &due.check_kind) {
+            (Some(_), Some(_)) | (None, None) => errors.push(SchemaLoadError::InvalidDueAxis {
                 type_name: td.name.clone(),
-                offender: due.date_field.clone(),
-                reason: "`date_field` names no metadata field of this type (and is not an \
-                         engine-stamped timestamp: created_date, last_modified)"
+                offender: if due.date_field.is_some() {
+                    "date_field, check_kind".to_string()
+                } else {
+                    "(neither date_field nor check_kind)".to_string()
+                },
+                reason: "declare exactly one of `date_field` (a date field the due date is read \
+                         from) and `check_kind` (the check kind whose newest confirming record \
+                         dates it)"
                     .to_string(),
             }),
-            Some(f) if f.field_type != crate::types::FieldType::Date => {
-                errors.push(SchemaLoadError::InvalidDueAxis {
-                    type_name: td.name.clone(),
-                    offender: due.date_field.clone(),
-                    reason: "`date_field` must name a date-typed metadata field or an \
-                             engine-stamped timestamp (created_date, last_modified)"
-                        .to_string(),
-                })
+            (None, Some(kind)) => {
+                if !crate::types::check_kind_wire_is_well_formed(kind) {
+                    errors.push(SchemaLoadError::InvalidDueAxis {
+                        type_name: td.name.clone(),
+                        offender: kind.clone(),
+                        reason: format!(
+                            "`check_kind` is neither an engine check kind [{}] nor a foreign \
+                             `x-<name>` kind (lowercase letters, digits, hyphens)",
+                            crate::types::ENGINE_CHECK_KINDS.join(", ")
+                        ),
+                    });
+                }
             }
-            Some(_) => {}
+            (Some(date_field), None) => {
+                // The engine stamps `created_date` and `last_modified` on
+                // every entity whether or not the type declares them, so
+                // a due axis may read them without a declaration.
+                let engine_stamped =
+                    matches!(date_field.as_str(), "created_date" | "last_modified");
+                match td.metadata_fields.iter().find(|f| &f.key == date_field) {
+                    None if engine_stamped => {}
+                    None => errors.push(SchemaLoadError::InvalidDueAxis {
+                        type_name: td.name.clone(),
+                        offender: date_field.clone(),
+                        reason: "`date_field` names no metadata field of this type (and is not \
+                                 an engine-stamped timestamp: created_date, last_modified)"
+                            .to_string(),
+                    }),
+                    Some(f) if f.field_type != crate::types::FieldType::Date => {
+                        errors.push(SchemaLoadError::InvalidDueAxis {
+                            type_name: td.name.clone(),
+                            offender: date_field.clone(),
+                            reason: "`date_field` must name a date-typed metadata field or an \
+                                     engine-stamped timestamp (created_date, last_modified)"
+                                .to_string(),
+                        })
+                    }
+                    Some(_) => {}
+                }
+            }
         }
         if let Some(gate) = &due.unless_open_via {
             if gate.relationships.is_empty() {

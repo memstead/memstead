@@ -1,0 +1,60 @@
+name: labqm
+version: 0.1.0
+
+description: |
+  Quality management in a testing laboratory: procedures, equipment,
+  calibrations, trainings, deviations and test results.
+
+when_to_use: |
+  Use for a laboratory quality system holding procedures, equipment and
+  its calibrations, staff trainings, deviations and test results.
+
+types:
+  - procedure
+  - critical_procedure
+  - equipment
+  - calibration
+  - training
+  - deviation
+  - test_result
+
+relationships:
+  mode: strict
+  definitions:
+    - name: CALIBRATED_BY
+      description: Equipment to a calibration performed on it.
+      default_weight: 2.0
+      source_types: [equipment]
+      target_types: [calibration]
+    - name: PRODUCED_WITH
+      description: A test result to the equipment that produced it.
+      default_weight: 2.0
+      source_types: [test_result]
+      target_types: [equipment]
+    - name: TRAINED_ON
+      description: A training to the procedure it covered; the training derives from the procedure as trained.
+      default_weight: 2.0
+      derivation: true
+      source_types: [training]
+      target_types: [procedure, critical_procedure]
+    - name: CONCERNS
+      description: A deviation to what it concerns.
+      default_weight: 1.0
+      source_types: [deviation]
+    - name: PART_OF
+      description: Hierarchical containment.
+      default_weight: 3.0
+      acyclic: true
+    - name: REFERENCES
+      description: Soft reference. Auto-emitted from body wiki-links.
+      default_weight: 0.5
+      manual_authoring: forbidden
+    - name: _default
+      description: Fallback weight.
+      default_weight: 1.0
+
+alias_target_rel_type: REFERENCES
+
+community:
+  resolution: 1.0
+  seed: 42

@@ -1,0 +1,31 @@
+name: training
+description: |
+  A person's training on a procedure in the version trained.
+when_to_use: |
+  One entity per person and procedure training.
+sections:
+  - key: notes
+    heading: Notes
+    search_weight: 1.0
+    catch_all: true
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 10.0
+metadata_fields:
+  - key: trainee
+    required: true
+    description: The person trained.
+    field_type: string
+required_outgoing:
+  - relationships: [TRAINED_ON]
+    cardinality: at_least_one
+    severity: block
+title_weight: 100.0
+text_fields: [summary]
+hierarchy_relationship: PART_OF
+updatable_fields: [title, summary, trainee, tags]
+health_required_fields: [summary]
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep entries factual."

@@ -1,0 +1,34 @@
+name: contractor
+description: A contractor that performs duties.
+when_to_use: One entity per contractor.
+sections:
+  - key: notes
+    heading: Notes
+    catch_all: true
+    search_weight: 1.0
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 10.0
+metadata_fields:
+  - key: status
+    required: true
+    description: Contract standing.
+    field_type: string
+    default_value: active
+    enum_values: [active, terminated]
+    filterable: equality
+constraints:
+  - kind: status_propagation
+    field: status
+    value: terminated
+    relationships: [PERFORMED_BY]
+    direction: in
+text_fields: [notes, summary]
+updatable_fields: [title, notes, summary, status, tags]
+health_required_fields: [summary]
+title_weight: 100.0
+hierarchy_relationship: PART_OF
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep it factual."

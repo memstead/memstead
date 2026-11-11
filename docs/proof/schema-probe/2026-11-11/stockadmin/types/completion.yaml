@@ -1,0 +1,50 @@
+name: completion
+description: One recorded completion of a duty, with its service report.
+when_to_use: One entity per completed occurrence.
+sections:
+  - key: notes
+    heading: Notes
+    catch_all: true
+    search_weight: 1.0
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 10.0
+  - key: service_report
+    heading: Service Report
+    search_weight: 5.0
+metadata_fields:
+  - key: status
+    required: true
+    description: Recorded or confirmed.
+    field_type: string
+    default_value: recorded
+    enum_values: [recorded, confirmed]
+    filterable: equality
+  - key: completed_on
+    required: true
+    description: Date the work was completed.
+    field_type: date
+    filterable: range
+constraints:
+  - kind: requires_when
+    field: service_report
+    when_field: status
+    when_value: confirmed
+    severity: block
+  - kind: transition_requires_self_check
+    field: status
+    to_value: confirmed
+    check_kind: x-service-report
+required_outgoing:
+  - relationships: [COMPLETES]
+    cardinality: at_least_one
+    severity: block
+text_fields: [notes, summary, service_report]
+updatable_fields: [title, notes, summary, service_report, status, completed_on, tags]
+health_required_fields: [summary]
+title_weight: 100.0
+hierarchy_relationship: PART_OF
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep it factual."

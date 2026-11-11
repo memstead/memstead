@@ -27,7 +27,7 @@ fn engine_stamped_date_field_offset_and_gate_load() {
     )
     .unwrap();
     let due = schema.types["bundle"].due.as_ref().unwrap();
-    assert_eq!(due.date_field, "last_modified");
+    assert_eq!(due.date_field.as_deref(), Some("last_modified"));
     assert_eq!(due.offset_days, 14);
     let gate = due.unless_open_via.as_ref().unwrap();
     assert_eq!(gate.relationships, vec!["PART_OF".to_string()]);

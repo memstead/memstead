@@ -790,6 +790,16 @@ staleness_threshold_days: 180
 #                        a direction as out/in
 #   signals            — edge_load counts with notice/warn thresholds,
 #                        served with contributors on every read
+#   due                — when an entity falls due, read by `memstead due`
+#                        and never enforced: from a date field
+#                        (`date_field`), or from the newest confirming
+#                        check of a kind (`check_kind`), for example a
+#                        review every two years:
+#                          due:
+#                            check_kind: x-review
+#                            offset_days: 730
+#                            status_field: status
+#                            open_values: [active]
 # Prose guidance served to agents writing entities of this type.
 write_rules:
   - "Notes are placeholders — split recurring shapes into dedicated types."

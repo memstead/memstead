@@ -154,6 +154,11 @@ entries). They validate on 0.25.0, and on later engines after
 `in` / `out` and `relationships`. The packages stay as they are, as the dated
 evidence of the 2026-11-10 run.
 
+2026-11-11, second run: [`2026-11-11/`](2026-11-11/README.md) declares the
+due date from a recorded check (`check_kind`) on stock rules 1 and 9, lab rule
+2 and inspection rule 2, in migrated copies of the packages, and reads each of
+the four carried.
+
 ## Files
 
 | Path | What it is |
@@ -161,4 +166,5 @@ evidence of the 2026-11-10 run.
 | `2026-11-10/stockadmin/` | The schema for the managed stock: nine types. |
 | `2026-11-10/labqm/` | The schema for laboratory quality management: seven types. |
 | `2026-11-10/inspection-body/` | The schema for the inspection body: seven types. |
+| `2026-11-11/` | The second run: the four due rules read from the check ledger. |
 | `README.md` | This note. |

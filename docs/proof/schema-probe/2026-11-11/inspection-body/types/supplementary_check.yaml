@@ -1,0 +1,18 @@
+name: supplementary_check
+description: The additional check a class-b item needs.
+when_to_use: One per class-b item.
+sections:
+  - key: scope
+    heading: Scope
+    required: true
+    search_weight: 5.0
+    catch_all: true
+metadata_fields: []
+title_weight: 100.0
+text_fields: [scope]
+hierarchy_relationship: PART_OF
+updatable_fields: [title, scope, tags]
+health_required_fields: [scope]
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep entries factual."

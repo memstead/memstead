@@ -9,6 +9,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **A due date from the check ledger.** A type's `due` block may take
+  `check_kind: <kind>` (an engine kind or an `x-` kind) in place of
+  `date_field`; exactly one of the two is declared, and `schema validate`
+  refuses both or neither naming the two keys. When the entity's newest
+  record of that kind confirms (ok, fresh against the current content,
+  independent, in a checking role), it is due on the UTC date of the
+  check's act plus `offset_days`, so a recorded check moves the date
+  without anyone typing one. Otherwise it is listed due now with the
+  standing in place of a date (`never_checked`, `check_stale`,
+  `check_failed`, `self_checked`, a role label): `memstead due` renders
+  it as "**due now**", the JSON brief and `health --include due` carry it
+  under `due_now`, and no overdue count is invented for it. The reading
+  refuses no write and never fails `health --strict`; a schema that does
+  not declare the key reads exactly as before. One clock pin:
+  `memstead due` and `health --include due` now take `MEMSTEAD_TODAY` when
+  `--today` is not given, as the staleness clock and the anchors overlay
+  already did. A second dated run of the schema probe
+  (`docs/proof/schema-probe/2026-11-11/`) reads the four rules the first
+  run found missing as carried.
+
 - **`memstead-mcp --pin-identity` makes the declared identity the
   session's one identity.** A server started with `--identity <name>`
   (or `MEMSTEAD_IDENTITY`) and `--pin-identity` refuses a tool call whose

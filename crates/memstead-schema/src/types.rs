@@ -806,16 +806,6 @@ pub struct TableFormat {
     pub column_patterns: IndexMap<String, String>,
 }
 
-/// A type's declared **due axis**: which
-/// of its fields carry deadline semantics, so the engine's due-brief
-/// (`memstead due`) can render "what is due next" without knowing any
-/// domain vocabulary. Validated at schema load: `date_field` must be
-/// a date-typed metadata field of the type, `status_field` an
-/// enum-typed one, every `open_values` entry a member of that enum,
-/// and `lead_section` (optional — rendered as "what must happen
-/// first") a declared section key. The axis is rendering-only: it
-/// never enforces anything (constraints own enforcement) and the
-/// engine never advances a date (the agent loop is the runtime).
 /// A type's declared **resolution condition**: the section in which an open entity states
 /// what would resolve it, and the check kind under which that condition
 /// counts as checked. With it the `open_questions` health axis answers
@@ -848,6 +838,18 @@ pub struct ResolutionAxis {
     pub check_kind: Option<String>,
 }
 
+/// A type's declared **due axis**: which
+/// of its fields carry deadline semantics, so the engine's due-brief
+/// (`memstead due`) can render "what is due next" without knowing any
+/// domain vocabulary. The due date comes from exactly one of
+/// `date_field` (a date-typed metadata field of the type, or an
+/// engine-stamped timestamp) and `check_kind` (the act of the newest
+/// confirming check of that kind). Validated at schema load:
+/// `status_field` an enum-typed field, every `open_values` entry a
+/// member of that enum, and `lead_section` (optional, rendered as "what
+/// must happen first") a declared section key. The axis is a reading:
+/// it never enforces anything (constraints own enforcement) and the
+/// engine never advances a date (the agent loop is the runtime).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DueAxis {
@@ -855,11 +857,22 @@ pub struct DueAxis {
     /// field of the type, or one of the engine-stamped timestamps every
     /// entity carries (`created_date`, `last_modified`; the date part is read)
     /// — so a deadline can be "N days after the last change" without an
-    /// author writing a date.
-    pub date_field: String,
-    /// Days added to `date_field` to reach the due date (default 0). An
+    /// author writing a date. Exactly one of `date_field` and
+    /// `check_kind` is declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date_field: Option<String>,
+    /// The check kind whose newest record dates the entity: an engine
+    /// kind (`verification`, `conformance`) or an `x-<name>` kind. When
+    /// that record confirms (ok, fresh against the current content,
+    /// independent, in a checking role), the due date is the UTC date of
+    /// its act plus `offset_days`; otherwise the entity is due now and
+    /// the brief names the standing instead of a date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_kind: Option<String>,
+    /// Days added to the base date to reach the due date (default 0). An
     /// archive window, a review interval, a grace period: the date the
-    /// field holds plus this offset is when the entity is due.
+    /// field holds (or the check was made) plus this offset is when the
+    /// entity is due.
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub offset_days: u32,
     /// Enum-typed metadata field holding the lifecycle status.

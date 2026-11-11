@@ -1,0 +1,62 @@
+name: inspection-body
+version: 0.1.0
+description: |
+  Inspected objects, the inspections recorded on them, defects, inspectors
+  and catalogue editions, for a body that approves objects for a limited time.
+when_to_use: |
+  Use for a holding of inspected objects and their time-limited approvals.
+types:
+  - item
+  - inspection
+  - supplementary_check
+  - major_defect
+  - minor_defect
+  - inspector
+  - catalogue_edition
+relationships:
+  mode: strict
+  definitions:
+    - name: RESTS_ON
+      description: The approval of an item rests on this inspection.
+      default_weight: 2.0
+      source_types: [item]
+      target_types: [inspection]
+    - name: PERFORMED_BY
+      description: The inspector who carried out the inspection.
+      default_weight: 2.0
+      source_types: [inspection]
+      target_types: [inspector]
+    - name: INSPECTED_AGAINST
+      description: The catalogue edition the item was approved under.
+      default_weight: 2.0
+      source_types: [item]
+      target_types: [catalogue_edition]
+    - name: NEEDS_CHECK
+      description: A supplementary check the item needs.
+      default_weight: 2.0
+      source_types: [item]
+      target_types: [supplementary_check]
+    - name: MAJOR_DEFECT_OF
+      description: A major defect found on the item.
+      default_weight: 2.0
+      source_types: [major_defect]
+      target_types: [item]
+    - name: MINOR_DEFECT_OF
+      description: A minor defect found on the item.
+      default_weight: 2.0
+      source_types: [minor_defect]
+      target_types: [item]
+    - name: PART_OF
+      description: Hierarchical containment.
+      default_weight: 3.0
+      acyclic: true
+    - name: REFERENCES
+      description: Soft reference. Auto-emitted from body wiki-links.
+      default_weight: 0.5
+    - name: _default
+      description: Fallback weight.
+      default_weight: 1.0
+alias_target_rel_type: REFERENCES
+community:
+  resolution: 1.0
+  seed: 42

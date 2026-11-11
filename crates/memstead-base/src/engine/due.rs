@@ -200,6 +200,9 @@ struct DueEntry {
     overdue: bool,
     /// Signed distance from today in days: negative past the date.
     days_until: i64,
+    /// `Some((check_kind, standing))` for an entity dated by a check kind
+    /// whose newest record does not confirm: due now, with no date.
+    due_now: Option<(String, String)>,
 }
 
 /// One row of the due brief: an open entity whose declared due date falls
@@ -232,6 +235,24 @@ pub struct DueLead {
     pub body: String,
 }
 
+/// One entity due now because the check kind that dates it has no
+/// confirming record: the standing of its newest record of that kind
+/// (`never_checked`, `check_stale`, `check_failed`, `self_checked`, a role
+/// label) stands in for a date, and no overdue count is invented.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DueNowRow {
+    pub mem: String,
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub check_kind: String,
+    pub standing: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub third_party: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lead: Option<DueLead>,
+}
+
 /// The due brief as data: what the markdown renders, for callers that
 /// consume the reading rather than the prose.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -242,6 +263,10 @@ pub struct DueBrief {
     pub mems: Vec<String>,
     pub overdue: Vec<DueRow>,
     pub due_soon: Vec<DueRow>,
+    /// Entities dated by a check kind with no confirming record; absent
+    /// (and the brief byte-identical) when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub due_now: Vec<DueNowRow>,
 }
 
 impl Engine {
@@ -299,8 +324,35 @@ impl Engine {
             today: today_iso,
             through: end,
             mems,
-            overdue: entries.iter().filter(|e| e.overdue).map(row).collect(),
-            due_soon: entries.iter().filter(|e| !e.overdue).map(row).collect(),
+            overdue: entries
+                .iter()
+                .filter(|e| e.overdue && e.due_now.is_none())
+                .map(row)
+                .collect(),
+            due_soon: entries
+                .iter()
+                .filter(|e| !e.overdue && e.due_now.is_none())
+                .map(row)
+                .collect(),
+            due_now: entries
+                .iter()
+                .filter_map(|e| {
+                    let (kind, standing) = e.due_now.as_ref()?;
+                    Some(DueNowRow {
+                        mem: e.mem.clone(),
+                        id: e.id.clone(),
+                        title: e.title.clone(),
+                        status: e.status.clone(),
+                        check_kind: kind.clone(),
+                        standing: standing.clone(),
+                        third_party: e.third_party,
+                        lead: e.lead.as_ref().map(|(section, body)| DueLead {
+                            section: section.clone(),
+                            body: body.clone(),
+                        }),
+                    })
+                })
+                .collect(),
         })
     }
 
@@ -322,6 +374,8 @@ impl Engine {
         // data.
         let mut entries: Vec<DueEntry> = Vec::new();
         let mut declaring_mems: Vec<String> = Vec::new();
+        // The standing the gates read, for axes dated by a check kind.
+        let standing_of = self.check_standing_provider();
         for mounted in &self.mounts {
             let mem = mounted.mount.mem.as_str();
             if let Some(filter) = mem_filter
@@ -384,25 +438,6 @@ impl Engine {
                         continue;
                     }
                 }
-                let date = match entity.metadata.get(&due.date_field) {
-                    Some(MetadataValue::String(s)) => s.clone(),
-                    _ => continue,
-                };
-                // Dates are ISO strings — take the date part, refuse
-                // malformed values silently (they never entered via
-                // the validated write path). The declared offset moves
-                // the due date past the field's date.
-                let base_part = date.get(..10).unwrap_or(&date).to_string();
-                let Some((by, bm, bd)) = parse_ymd(&base_part) else {
-                    continue;
-                };
-                let due_days = days_from_civil(by, bm, bd) + due.offset_days as i64;
-                let (dy, dm, dd) = civil_from_days(due_days);
-                let date_part = format!("{dy:04}-{dm:02}-{dd:02}");
-                if date_part.as_str() > end.as_str() {
-                    continue;
-                }
-                let days_until = due_days - today_days;
                 let lead = due.lead_section.as_ref().and_then(|key| {
                     entity
                         .sections
@@ -410,6 +445,57 @@ impl Engine {
                         .filter(|body| !body.trim().is_empty())
                         .map(|body| (key.clone(), body.trim().to_string()))
                 });
+                // The base date: the declared field, or the act of the
+                // newest confirming check of the declared kind. A kind
+                // with no confirming record makes the entity due now,
+                // with its standing in place of a date.
+                let base_days = if let Some(kind) = &due.check_kind {
+                    let standing = standing_of(entity, kind);
+                    let newest = standing
+                        .confirms()
+                        .then(|| self.latest_check_record(mem, &entity.id.0, kind))
+                        .flatten();
+                    let Some(record) = newest else {
+                        entries.push(DueEntry {
+                            mem: mem.to_string(),
+                            third_party,
+                            id: entity.id.to_string(),
+                            title: entity.title.clone(),
+                            date: today_iso.clone(),
+                            status,
+                            lead,
+                            overdue: false,
+                            days_until: 0,
+                            due_now: Some((kind.clone(), standing.label().to_string())),
+                        });
+                        continue;
+                    };
+                    (record.act_time() / 86_400) as i64
+                } else {
+                    let Some(field) = &due.date_field else {
+                        continue;
+                    };
+                    let date = match entity.metadata.get(field) {
+                        Some(MetadataValue::String(s)) => s.clone(),
+                        _ => continue,
+                    };
+                    // Dates are ISO strings — take the date part, refuse
+                    // malformed values silently (they never entered via
+                    // the validated write path).
+                    let base_part = date.get(..10).unwrap_or(&date).to_string();
+                    let Some((by, bm, bd)) = parse_ymd(&base_part) else {
+                        continue;
+                    };
+                    days_from_civil(by, bm, bd)
+                };
+                // The declared offset moves the due date past the base.
+                let due_days = base_days + due.offset_days as i64;
+                let (dy, dm, dd) = civil_from_days(due_days);
+                let date_part = format!("{dy:04}-{dm:02}-{dd:02}");
+                if date_part.as_str() > end.as_str() {
+                    continue;
+                }
+                let days_until = due_days - today_days;
                 entries.push(DueEntry {
                     mem: mem.to_string(),
                     third_party,
@@ -420,6 +506,7 @@ impl Engine {
                     lead,
                     overdue: date_part.as_str() < today_iso.as_str(),
                     days_until,
+                    due_now: None,
                 });
             }
         }
@@ -429,6 +516,7 @@ impl Engine {
         entries.sort_by(|a, b| {
             b.overdue
                 .cmp(&a.overdue)
+                .then_with(|| b.due_now.is_some().cmp(&a.due_now.is_some()))
                 .then_with(|| a.date.cmp(&b.date))
                 .then_with(|| a.id.cmp(&b.id))
         });
@@ -468,23 +556,37 @@ fn render_due_entries(
             return out;
         }
         let overdue_count = entries.iter().filter(|e| e.overdue).count();
+        let due_now_count = entries.iter().filter(|e| e.due_now.is_some()).count();
         out.push_str(&format!(
-            "{} entr{} ({} overdue)\n\n",
+            "{} entr{} ({} overdue{})\n\n",
             entries.len(),
             if entries.len() == 1 { "y" } else { "ies" },
-            overdue_count
+            overdue_count,
+            if due_now_count > 0 {
+                format!(", {due_now_count} due now")
+            } else {
+                String::new()
+            }
         ));
         for e in entries {
-            let marker = if e.overdue {
-                format!(" **OVERDUE** ({} days past)", -e.days_until)
-            } else {
-                format!(" (in {} days)", e.days_until)
-            };
             let origin = if e.third_party { " [third-party]" } else { "" };
-            out.push_str(&format!(
-                "- `{}` — {} — **{}**{} (status: {}, mem: {}{})\n",
-                e.id, e.title, e.date, marker, e.status, e.mem, origin
-            ));
+            if let Some((kind, standing)) = &e.due_now {
+                out.push_str(&format!(
+                    "- `{}` — {} — **due now**: no confirming `{kind}` check ({standing}) \
+                     (status: {}, mem: {}{})\n",
+                    e.id, e.title, e.status, e.mem, origin
+                ));
+            } else {
+                let marker = if e.overdue {
+                    format!(" **OVERDUE** ({} days past)", -e.days_until)
+                } else {
+                    format!(" (in {} days)", e.days_until)
+                };
+                out.push_str(&format!(
+                    "- `{}` — {} — **{}**{} (status: {}, mem: {}{})\n",
+                    e.id, e.title, e.date, marker, e.status, e.mem, origin
+                ));
+            }
             if let Some((key, body)) = &e.lead {
                 if e.third_party {
                     // Third-party content is quoted data, never the

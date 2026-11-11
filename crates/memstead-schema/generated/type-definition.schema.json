@@ -416,11 +416,22 @@
       ]
     },
     "DueAxis": {
+      "description": "A type's declared **due axis**: which\nof its fields carry deadline semantics, so the engine's due-brief\n(`memstead due`) can render \"what is due next\" without knowing any\ndomain vocabulary. The due date comes from exactly one of\n`date_field` (a date-typed metadata field of the type, or an\nengine-stamped timestamp) and `check_kind` (the act of the newest\nconfirming check of that kind). Validated at schema load:\n`status_field` an enum-typed field, every `open_values` entry a\nmember of that enum, and `lead_section` (optional, rendered as \"what\nmust happen first\") a declared section key. The axis is a reading:\nit never enforces anything (constraints own enforcement) and the\nengine never advances a date (the agent loop is the runtime).",
       "type": "object",
       "properties": {
+        "check_kind": {
+          "description": "The check kind whose newest record dates the entity: an engine\nkind (`verification`, `conformance`) or an `x-<name>` kind. When\nthat record confirms (ok, fresh against the current content,\nindependent, in a checking role), the due date is the UTC date of\nits act plus `offset_days`; otherwise the entity is due now and\nthe brief names the standing instead of a date.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "date_field": {
-          "description": "The metadata field the due date is read from: a `date`-typed\nfield of the type, or one of the engine-stamped timestamps every\nentity carries (`created_date`, `last_modified`; the date part is read)\n— so a deadline can be \"N days after the last change\" without an\nauthor writing a date.",
-          "type": "string"
+          "description": "The metadata field the due date is read from: a `date`-typed\nfield of the type, or one of the engine-stamped timestamps every\nentity carries (`created_date`, `last_modified`; the date part is read)\n— so a deadline can be \"N days after the last change\" without an\nauthor writing a date. Exactly one of `date_field` and\n`check_kind` is declared.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "lead_section": {
           "description": "Optional section key whose content renders with each entry as\n\"what must happen first\".",
@@ -430,7 +441,7 @@
           ]
         },
         "offset_days": {
-          "description": "Days added to `date_field` to reach the due date (default 0). An\narchive window, a review interval, a grace period: the date the\nfield holds plus this offset is when the entity is due.",
+          "description": "Days added to the base date to reach the due date (default 0). An\narchive window, a review interval, a grace period: the date the\nfield holds (or the check was made) plus this offset is when the\nentity is due.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -460,7 +471,6 @@
       },
       "additionalProperties": false,
       "required": [
-        "date_field",
         "status_field",
         "open_values"
       ]
@@ -748,7 +758,7 @@
       ]
     },
     "ResolutionAxis": {
-      "description": "A type's declared **due axis**: which\nof its fields carry deadline semantics, so the engine's due-brief\n(`memstead due`) can render \"what is due next\" without knowing any\ndomain vocabulary. Validated at schema load: `date_field` must be\na date-typed metadata field of the type, `status_field` an\nenum-typed one, every `open_values` entry a member of that enum,\nand `lead_section` (optional — rendered as \"what must happen\nfirst\") a declared section key. The axis is rendering-only: it\nnever enforces anything (constraints own enforcement) and the\nengine never advances a date (the agent loop is the runtime).\nA type's declared **resolution condition**: the section in which an open entity states\nwhat would resolve it, and the check kind under which that condition\ncounts as checked. With it the `open_questions` health axis answers\ntwo questions without reading prose: which open entities have no\ncondition written (`resolution_missing`), and which have one nobody\nhas checked (`resolution_unchecked`, from the check ledger). The\ndeclaration is a reading, not a rule: the write path refuses nothing\nnew, the section's own `required` flag stays the author's choice, and\nthe engine never judges whether a condition is well-formed. Validated\nat schema load: `condition_section` must name a declared section;\n`status_field` (optional) an enum-typed metadata field with every\n`open_values` entry in its enum, and without it every entity of the\ntype counts as open; `check_kind` (optional, default `verification`)\nan engine kind or a well-formed `x-` kind.",
+      "description": "A type's declared **resolution condition**: the section in which an open entity states\nwhat would resolve it, and the check kind under which that condition\ncounts as checked. With it the `open_questions` health axis answers\ntwo questions without reading prose: which open entities have no\ncondition written (`resolution_missing`), and which have one nobody\nhas checked (`resolution_unchecked`, from the check ledger). The\ndeclaration is a reading, not a rule: the write path refuses nothing\nnew, the section's own `required` flag stays the author's choice, and\nthe engine never judges whether a condition is well-formed. Validated\nat schema load: `condition_section` must name a declared section;\n`status_field` (optional) an enum-typed metadata field with every\n`open_values` entry in its enum, and without it every entity of the\ntype counts as open; `check_kind` (optional, default `verification`)\nan engine kind or a well-formed `x-` kind.",
       "type": "object",
       "properties": {
         "check_kind": {

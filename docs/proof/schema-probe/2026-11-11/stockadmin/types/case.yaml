@@ -1,0 +1,59 @@
+name: case
+description: A case with a public authority.
+when_to_use: One entity per case.
+sections:
+  - key: notes
+    heading: Notes
+    catch_all: true
+    search_weight: 1.0
+  - key: matter
+    heading: Matter
+    required: true
+    search_weight: 10.0
+  - key: loss_if_missed
+    heading: Loss If Missed
+    required: true
+    search_weight: 8.0
+  - key: outcome
+    heading: Outcome
+    search_weight: 5.0
+metadata_fields:
+  - key: status
+    required: true
+    description: Case lifecycle.
+    field_type: string
+    default_value: open
+    enum_values: [open, closed]
+    filterable: equality
+  - key: response_deadline
+    required: true
+    description: The authority's response deadline.
+    field_type: date
+    filterable: range
+  - key: reference_number
+    description: The authority's reference number.
+    field_type: string
+due:
+  date_field: response_deadline
+  status_field: status
+  open_values: [open]
+  lead_section: loss_if_missed
+constraints:
+  - kind: requires_when
+    field: outcome
+    when_field: status
+    when_value: closed
+    severity: block
+  - kind: requires_when
+    field: reference_number
+    when_field: status
+    when_value: closed
+    severity: block
+text_fields: [notes, matter, loss_if_missed, outcome]
+updatable_fields: [title, notes, matter, loss_if_missed, outcome, status, response_deadline, reference_number, tags]
+health_required_fields: [matter, loss_if_missed]
+title_weight: 100.0
+hierarchy_relationship: PART_OF
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep it factual."

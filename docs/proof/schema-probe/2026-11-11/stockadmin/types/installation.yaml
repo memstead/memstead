@@ -1,0 +1,33 @@
+name: installation
+description: A technical installation in the managed stock.
+when_to_use: One entity per installation.
+sections:
+  - key: notes
+    heading: Notes
+    catch_all: true
+    search_weight: 1.0
+  - key: summary
+    heading: Summary
+    required: true
+    search_weight: 10.0
+metadata_fields:
+  - key: kind
+    required: true
+    description: Kind of installation.
+    field_type: string
+    enum_values: [gas, electric]
+    filterable: equality
+required_outgoing:
+  - relationships: [HAS_GAS_SAFETY_DUTY]
+    cardinality: at_least_one
+    severity: block
+    when_field: kind
+    when_value: gas
+text_fields: [notes, summary]
+updatable_fields: [title, notes, summary, kind, tags]
+health_required_fields: [summary]
+title_weight: 100.0
+hierarchy_relationship: PART_OF
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep it factual."

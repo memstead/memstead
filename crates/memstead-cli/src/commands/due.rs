@@ -37,9 +37,11 @@ pub struct Args {
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let window = memstead_base::engine::due::parse_due_window(&args.within)
         .map_err(|msg| CliError::new(ExitKind::Validation, "INVALID_INPUT", msg))?;
+    // `--today` first, then the `MEMSTEAD_TODAY` pin every
+    // date-dependent reading takes, then the clock.
     let today = match &args.today {
         Some(t) => t.clone(),
-        None => current_date(),
+        None => memstead_base::ops::health::pinned_today().unwrap_or_else(current_date),
     };
     let engine = ctx.cli_engine()?;
     let brief = engine
@@ -53,7 +55,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             .base()
             .due_brief(&today, &window, args.mem.as_deref())
             .map_err(|msg| CliError::new(ExitKind::Validation, "INVALID_INPUT", msg))?;
-        print_json(&json!({
+        let mut out = json!({
             "today": today,
             "within": args.within,
             "through": data.through,
@@ -62,7 +64,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "overdue": data.overdue,
             "due_soon": data.due_soon,
             "brief": brief,
-        }))?;
+        });
+        // Entities dated by a check kind with no confirming record; the
+        // key is absent when there are none.
+        if !data.due_now.is_empty() {
+            out["due_now"] = json!(data.due_now);
+        }
+        print_json(&out)?;
     } else {
         print_markdown(&brief);
     }

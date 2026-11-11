@@ -1,0 +1,49 @@
+name: procedure
+description: |
+  A controlled laboratory procedure (SOP) in one version.
+when_to_use: |
+  One entity per procedure; a new version is an update of the same entity.
+sections:
+  - key: purpose
+    heading: Purpose
+    required: true
+    search_weight: 10.0
+  - key: steps
+    heading: Steps
+    search_weight: 5.0
+    catch_all: true
+metadata_fields:
+  - key: status
+    required: true
+    description: Lifecycle state.
+    field_type: string
+    default_value: draft
+    enum_values: [draft, effective, retired]
+    filterable: equality
+  - key: version
+    required: true
+    description: Procedure version label.
+    field_type: string
+    default_value: "1"
+  - key: last_reviewed
+    description: Date of the last review (typed by hand).
+    field_type: date
+    filterable: range
+constraints:
+  - kind: transition_requires_self_check
+    field: status
+    to_value: effective
+    check_kind: x-review
+due:
+  check_kind: x-review
+  offset_days: 730
+  status_field: status
+  open_values: [effective]
+title_weight: 100.0
+text_fields: [purpose, steps]
+hierarchy_relationship: PART_OF
+updatable_fields: [title, purpose, steps, status, version, last_reviewed, tags]
+health_required_fields: [purpose]
+staleness_threshold_days: 3650
+write_rules:
+  - "Keep entries factual."

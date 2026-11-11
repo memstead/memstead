@@ -2992,6 +2992,15 @@ pub fn entity_health(entity: &crate::entity::Entity, schema: &TypeDefinition) ->
 /// it traps with `RuntimeError: unreachable` and poisons the wasm
 /// instance — so the wasm build reads the JS-backed
 /// clock instead. Same value, same summary shape on every target.
+/// The `MEMSTEAD_TODAY=YYYY-MM-DD` clock pin, when set to a civil date:
+/// the one pin every date-dependent reading takes (the due brief, the
+/// health due axis, the staleness clock, the anchors overlay).
+pub fn pinned_today() -> Option<String> {
+    let raw = std::env::var("MEMSTEAD_TODAY").ok()?;
+    crate::engine::due::pinned_days_since_epoch(&raw)?;
+    Some(raw)
+}
+
 /// Today as whole days since the Unix epoch, the clock every day-threshold
 /// reading in health uses. `MEMSTEAD_TODAY=YYYY-MM-DD` pins it (the
 /// injection a fixture needs to age entities without waiting), honoured
