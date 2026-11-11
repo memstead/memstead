@@ -261,7 +261,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   commands (`mem init`, `mem rename`, `mem delete`, the other `mem`
   verbs, and every command `UNSUPPORTED_WORKSPACE_SHAPE` already covered)
   refuse `UNSUPPORTED_WORKSPACE_SHAPE`, now an engine value carrying
-  `details.path`. `mem-repo init` over an existing mem-repo refuses
+  `details.path`. Both exit `1`, as every other command's
+  `WORKSPACE_NOT_INITIALISED` and `UNSUPPORTED_WORKSPACE_SHAPE` already
+  did, where `mem init`, `mem rename`, `mem delete` and `mem fork`
+  outside a workspace and `mem rename` and `mem delete` on a
+  filesystem-mem workspace exited `5`. `mem-repo init` over an existing mem-repo refuses
   `MEM_DB_ALREADY_EXISTS` with `details.path`; a broken built-in schema
   catalogue under `init` is the engine's `SCHEMA_RESOLVER_INIT_FAILED`.
   The plugin's `/ingest --clear` recognises a filesystem-mem workspace by
