@@ -370,18 +370,25 @@ impl Engine {
                             .duration_since(std::time::UNIX_EPOCH)
                             .map(|d| d.as_secs() as i64)
                             .unwrap_or(0);
-                        out.by_entity
-                            .entry(entity.to_string())
-                            .or_default()
-                            .push(Touch {
-                                ts,
-                                identity: r.identity.clone(),
-                                reference: crate::filesystem::changelog::format_rfc3339_utc(
-                                    r.timestamp,
-                                ),
-                                seq,
-                            });
+                        // The line's timestamp token plus its ledger position:
+                        // two writes in one millisecond stay two references.
+                        let touch = Touch {
+                            ts,
+                            identity: r.identity.clone(),
+                            reference: format!(
+                                "{}#{seq}",
+                                crate::filesystem::changelog::format_rfc3339_utc(r.timestamp)
+                            ),
+                            seq,
+                        };
+                        // A rename line names the new id and the old one; the
+                        // story is joined as the git-branch notes join it.
+                        match r.renamed_from.as_deref() {
+                            Some(old) => out.absorb(&format!("{old} → {entity}"), touch),
+                            None => out.absorb(entity, touch),
+                        }
                     }
+                    out.follow_renames();
                 }
             }
             crate::workspace::MountStorage::Archive { .. } => {}

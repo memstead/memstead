@@ -309,20 +309,41 @@ pub struct CarriedFrom {
     pub hash: String,
     /// [`CARRY_REASON_TRANSITION`] or [`CARRY_REASON_EXPORT`].
     pub reason: String,
+    /// On a transition carry: the line's place in its carry chain (1 for a
+    /// line carried from a checker's own record, one more for each carry
+    /// onward). A carried line supersedes only records of a lower depth,
+    /// which orders a chain that returns to an earlier hash (two gated
+    /// values on one field, written in one second) without a clock.
+    /// Absent on export carries and on lines earlier engines wrote, which
+    /// read as depth 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<u32>,
 }
 
 impl CarriedFrom {
     pub fn transition(hash: &str) -> Self {
+        Self::transition_at(hash, 1)
+    }
+
+    /// A transition carry at `depth` in its chain.
+    pub fn transition_at(hash: &str, depth: u32) -> Self {
         Self {
             hash: hash.to_string(),
             reason: CARRY_REASON_TRANSITION.to_string(),
+            depth: Some(depth),
         }
+    }
+
+    /// The line's depth in its carry chain (see [`Self::depth`]).
+    pub fn chain_depth(&self) -> u32 {
+        self.depth.unwrap_or(1)
     }
 
     pub fn export(hash: &str) -> Self {
         Self {
             hash: hash.to_string(),
             reason: CARRY_REASON_EXPORT.to_string(),
+            depth: None,
         }
     }
 }
@@ -546,8 +567,9 @@ fn checks_dir(workspace_root: &Path) -> PathBuf {
         .join("checks")
 }
 
-/// The ledger file path for a workspace.
-pub fn check_ledger_path(workspace_root: &Path) -> PathBuf {
+/// The ledger file path for a workspace. Crate-private with the raw read:
+/// a reader outside this module gets rows only in standing order.
+pub(crate) fn check_ledger_path(workspace_root: &Path) -> PathBuf {
     checks_dir(workspace_root).join("checks.jsonl")
 }
 
@@ -669,9 +691,13 @@ impl CheckLedger {
         if latest.entity_hash != pre_hash || latest.verdict != Verdict::Ok.as_str() {
             return Ok(false);
         }
+        let depth = latest
+            .carried_from
+            .as_ref()
+            .map_or(1, |c| c.chain_depth() + 1);
         let carried = CheckRecord {
             entity_hash: post_hash.to_string(),
-            carried_from: Some(CarriedFrom::transition(pre_hash)),
+            carried_from: Some(CarriedFrom::transition_at(pre_hash, depth)),
             ..latest
         };
         self.record(&carried)?;
@@ -795,7 +821,8 @@ impl CheckLedger {
     ///    kind whose `entity_hash` is its `carried_from.hash` and whose act
     ///    is no later than the carried line's (they are keyed to content
     ///    the carry replaced; a check made later, after the content came
-    ///    back to that hash, is a new act); superseded rows come first;
+    ///    back to that hash, is a new act) and that stand lower in the carry
+    ///    chain ([`CarriedFrom::depth`]); superseded rows come first;
     /// 2. among the rest, the earlier time of the act comes first
     ///    ([`CheckRecord::act_time`]);
     /// 3. remaining ties are ordered by the rows' canonical bytes, never
@@ -872,8 +899,9 @@ pub struct RefusedCheckRow {
 /// Sort rows into standing order (see [`CheckLedger::in_standing_order`]).
 /// The one place the order is decided.
 fn standing_order(rows: Vec<CheckRecord>) -> Vec<CheckRecord> {
-    // Each carried line: (entity, kind, hash it left, its time of the act).
-    let carries: Vec<(String, String, String, u64)> = rows
+    // Each carried line: (entity, kind, hash it left, its time of the act,
+    // its depth in the carry chain).
+    let carries: Vec<(String, String, String, u64, Option<u32>)> = rows
         .iter()
         .filter_map(|r| {
             r.carried_from.as_ref().map(|c| {
@@ -882,6 +910,7 @@ fn standing_order(rows: Vec<CheckRecord>) -> Vec<CheckRecord> {
                     sealed_kind_of(r),
                     c.hash.clone(),
                     r.act_time(),
+                    c.depth,
                 )
             })
         })
@@ -889,15 +918,23 @@ fn standing_order(rows: Vec<CheckRecord>) -> Vec<CheckRecord> {
     // A row is superseded by a carried line of its entity and kind that
     // left the row's hash, when the row's act is no later than the
     // carried line's (a check made later at that hash, after the content
-    // came back to it, is a new act and competes by its time). A chain of
-    // carries (h1 to h2 to h3) leaves its last line standing. A cycle (h1
-    // to h2 and back) cannot arise from the engine's carry, which needs a
-    // write entering the gated value; its lines all read superseded and
-    // fall to the bytes, so every machine still reads the same one.
+    // came back to it, is a new act and competes by its time), and when the
+    // row stands lower in the carry chain (a checker's own record is depth
+    // 0). The depth orders a chain that returns to an earlier hash, which
+    // two gated values on one field written in one second produce: every
+    // line of it shares the source's times, and only the last carry stands.
+    // A line an earlier engine carried has no depth and supersedes as it
+    // always did; a row without a depth stands below every depth.
+    let depth_of = |r: &CheckRecord| r.carried_from.as_ref().and_then(|c| c.depth).unwrap_or(0);
     let superseded = |r: &CheckRecord| {
         let kind = sealed_kind_of(r);
-        carries.iter().any(|(entity, k, left, at)| {
-            *entity == r.entity && *k == kind && *left == r.entity_hash && r.act_time() <= *at
+        let depth = depth_of(r);
+        carries.iter().any(|(entity, k, left, at, d)| {
+            *entity == r.entity
+                && *k == kind
+                && *left == r.entity_hash
+                && r.act_time() <= *at
+                && d.is_none_or(|d| depth < d)
         })
     };
     let mut keyed: Vec<(bool, u64, String, CheckRecord)> = rows
@@ -1349,8 +1386,7 @@ mod tests {
 
     /// A check made at the hash a carry left, after the content came back
     /// to it, is a new act and stands by its time. A carry chain stands on
-    /// its last line; a carry cycle, which the engine's carry cannot make,
-    /// still reads the same in every ledger order.
+    /// its last line, and so does a carry cycle, in every ledger order.
     #[test]
     fn a_check_after_a_return_to_the_carried_from_hash_stands() {
         let tmp = TempDir::new().unwrap();
@@ -1372,22 +1408,9 @@ mod tests {
         assert_eq!((standing.verdict.as_str(), standing.ts), ("failed", 500));
 
         let a = at("m--e", "ok", "h1", 100);
-        let mid = CheckRecord {
-            entity_hash: "h2".into(),
-            carried_from: Some(CarriedFrom::transition("h1")),
-            checked_write: None,
-            ..a.clone()
-        };
-        let last = CheckRecord {
-            entity_hash: "h3".into(),
-            carried_from: Some(CarriedFrom::transition("h2")),
-            checked_write: None,
-            ..a.clone()
-        };
-        let back = CheckRecord {
-            entity_hash: "h1".into(),
-            carried_from: Some(CarriedFrom::transition("h2")),
-            checked_write: None,
+        let carry = |hash: &str, from: &str, depth: u32| CheckRecord {
+            entity_hash: hash.into(),
+            carried_from: Some(CarriedFrom::transition_at(from, depth)),
             ..a.clone()
         };
         let read = |rows: &[&CheckRecord]| {
@@ -1400,11 +1423,40 @@ mod tests {
                 .latest_for_kind("m--e", CheckKind::Verification)
                 .unwrap()
         };
+        // A chain h1 to h2 to h3 stands on its last line.
+        let (mid, last) = (carry("h2", "h1", 1), carry("h3", "h2", 2));
         assert_eq!(read(&[&last, &a, &mid]).entity_hash, "h3");
         assert_eq!(read(&[&mid, &last, &a]).entity_hash, "h3");
-        let one = serde_json::to_string(&read(&[&back, &a, &mid])).unwrap();
-        let two = serde_json::to_string(&read(&[&mid, &back, &a])).unwrap();
-        assert_eq!(one, two);
+        // A cycle h1 to h2, back to h1, on to h2 again (two gated values
+        // on one field, written in one second) stands on its last carry
+        // in every ledger order.
+        let (b1, back, b2) = (
+            carry("h2", "h1", 1),
+            carry("h1", "h2", 2),
+            carry("h2", "h1", 3),
+        );
+        for rows in [
+            [&a, &b1, &back, &b2],
+            [&b2, &back, &b1, &a],
+            [&back, &a, &b2, &b1],
+        ] {
+            let standing = read(&rows);
+            assert_eq!(standing.entity_hash, "h2");
+            assert_eq!(standing.carried_from.as_ref().unwrap().depth, Some(3));
+        }
+        // Lines an earlier engine carried (no depth) keep their old reading.
+        let old = |hash: &str, from: &str| CheckRecord {
+            entity_hash: hash.into(),
+            carried_from: Some(CarriedFrom {
+                depth: None,
+                ..CarriedFrom::transition(from)
+            }),
+            ..a.clone()
+        };
+        assert_eq!(
+            read(&[&old("h3", "h2"), &a, &old("h2", "h1")]).entity_hash,
+            "h3"
+        );
     }
 
     /// Two workspaces holding the same rows in different ledger orders,
@@ -1667,13 +1719,7 @@ mod tests {
         assert_eq!(carried.entity_hash, "h2");
         assert_eq!(carried.identity.as_deref(), Some("checker-c"));
         assert_eq!(carried.verdict, "ok");
-        assert_eq!(
-            carried.carried_from,
-            Some(CarriedFrom {
-                hash: "h1".into(),
-                reason: CARRY_REASON_TRANSITION.into()
-            })
-        );
+        assert_eq!(carried.carried_from, Some(CarriedFrom::transition("h1")));
         assert_eq!(derive_state(Some(&carried), "h2"), CheckState::CheckedOk);
         // A second transition carries the carried line onward, one step.
         assert!(

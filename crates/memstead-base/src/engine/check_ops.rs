@@ -1430,6 +1430,51 @@ write_rules: []
         assert_eq!(std::fs::read_to_string(&path).unwrap(), checked);
     }
 
+    /// GRADER c3: a rename on a folder mem must not drop the writers
+    /// recorded under the old id. A creates, B rewrites, C renames, B
+    /// checks the renamed entry: B wrote what it checked and must not read
+    /// `confirmed_independent`; the first author must stay A.
+    #[test]
+    fn a_rename_keeps_every_writer_in_the_story_on_folder() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "x-projection");
+        engine.set_identity(Some("identity-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+        engine.set_identity(Some("identity-b".to_string()));
+        update(&mut engine, &id, None, Some("rewritten by b.")).unwrap();
+        engine.set_identity(Some("identity-c".to_string()));
+        let (actor, client) = crate::engine::test_helpers::cli_actor();
+        let current = engine.get_entity(&id).unwrap().content_hash.clone();
+        let out = engine
+            .rename_entity(
+                crate::engine::RenameEntityArgs {
+                    id: id.clone(),
+                    expected_hash: crate::ExpectedHash::Current(current),
+                    new_title: "The Renamed".to_string(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let new_id = out.new_id.clone();
+        eprintln!(
+            "story {:?}",
+            engine.mem_touches("bundles").story(new_id.as_ref())
+        );
+        check_plan(&mut engine, "identity-b", &new_id, "x-projection");
+        let touches = engine.mem_touches("bundles");
+        let entity = engine.get_entity(&new_id).unwrap().clone();
+        let standing = (engine.check_standing_provider())(&entity, "x-projection");
+        let first = touches.first_author(new_id.as_ref()).map(str::to_string);
+        engine.set_identity(Some("identity-e".to_string()));
+        let gate = set_status(&mut engine, &new_id, "complete");
+        assert_eq!(
+            (standing.label(), first.as_deref(), gate.is_err()),
+            ("self_checked", Some("identity-a"), true)
+        );
+    }
+
     /// Independence on an entity that is not a plan criterion counts every
     /// identity that wrote it up to the write the check saw, on the folder
     /// backend, with the rewrite one second after the create and in the

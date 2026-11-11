@@ -529,6 +529,20 @@ impl Engine {
             self.discard_all_pending();
             return Err(e);
         }
+        // An adopted update that passed a self-check transition on the
+        // stored content's record carries that record to the landed bytes,
+        // as the single and batch update paths do, before anything lands.
+        for a in &adopted {
+            for l in &a.landings {
+                if let Landing::Update(p) = l
+                    && let Err(e) = self.carry_prepared_self_checks(p)
+                {
+                    self.store = store_snapshot;
+                    self.discard_all_pending();
+                    return Err(e);
+                }
+            }
+        }
 
         // ---- The store as it will be, so a deletion's referrers are judged
         //      against the adopted bodies, not the pre-merge ones ----
@@ -611,6 +625,13 @@ impl Engine {
                 return Err(e);
             }
         };
+        for p in &amends {
+            if let Err(e) = self.carry_prepared_self_checks(p) {
+                self.store = store_snapshot;
+                self.discard_all_pending();
+                return Err(e);
+            }
+        }
 
         // ---- The record ----
         // The proposal in the owner's words: the file's slot, trimmed,

@@ -72,10 +72,10 @@ fn check(engine: &mut memstead_base::Engine, identity: &str, id: &EntityId) {
 }
 
 fn ledger_lines(root: &Path) -> Vec<String> {
-    std::fs::read_to_string(memstead_base::check::check_ledger_path(root))
-        .unwrap_or_default()
-        .lines()
-        .map(str::to_string)
+    memstead_base::check::CheckLedger::for_workspace(root)
+        .in_standing_order()
+        .iter()
+        .map(|r| serde_json::to_string(r).unwrap())
         .collect()
 }
 
@@ -123,7 +123,13 @@ fn clone_workspace(a: &Path) -> TempDir {
         .status()
         .unwrap();
     assert!(status.success());
-    let ledger = memstead_base::check::check_ledger_path(b.path());
+    // The copied workspace starts without a ledger of its own.
+    let ledger = b
+        .path()
+        .join(".memstead")
+        .join("state")
+        .join("checks")
+        .join("checks.jsonl");
     if ledger.exists() {
         std::fs::remove_file(&ledger).unwrap();
     }

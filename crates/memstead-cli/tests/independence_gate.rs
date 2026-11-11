@@ -28,19 +28,53 @@ const PLAN_GATE: &str = "constraints:\n  - kind: transition_requires_checks\n   
 const SELF_GATE: &str = "constraints:\n  - kind: transition_requires_self_check\n    field: status\n    to_value: complete\n    check_kind: x-approval\n    severity: block\n";
 
 fn seed_with(plan_gate: &str) -> TempDir {
+    seed_on(plan_gate, false)
+}
+
+/// The fixture on a folder mem (`init`) or a git-branch mem (`mem-repo
+/// init`, then `mem init`).
+fn seed_on(plan_gate: &str, git_branch: bool) -> TempDir {
     let ws = TempDir::new().unwrap();
-    memstead()
-        .current_dir(ws.path())
-        .args([
-            "init",
-            "--name",
-            "plans",
-            "--schema",
-            "default@1.3.0",
-            "--quiet",
-        ])
-        .assert()
-        .success();
+    if git_branch {
+        for args in [
+            &["mem-repo", "init", ".", "--no-gitignore", "--quiet"][..],
+            &[
+                "workspace",
+                "allow-create",
+                "--schema",
+                "*",
+                "p*",
+                "--quiet",
+            ][..],
+            &[
+                "mem",
+                "init",
+                "plans",
+                "--schema",
+                "default@1.3.0",
+                "--quiet",
+            ][..],
+        ] {
+            memstead()
+                .current_dir(ws.path())
+                .args(args)
+                .assert()
+                .success();
+        }
+    } else {
+        memstead()
+            .current_dir(ws.path())
+            .args([
+                "init",
+                "--name",
+                "plans",
+                "--schema",
+                "default@1.3.0",
+                "--quiet",
+            ])
+            .assert()
+            .success();
+    }
     let dir = ws
         .path()
         .join(".memstead")
@@ -478,16 +512,19 @@ fn standing(ws: &Path) -> (String, String) {
     )
 }
 
-/// Independence on a git-branch mem (the CLI's `init` workspace): A
+/// Independence on a git-branch mem and on a folder mem: A
 /// creates, B rewrites one second later and in the same second, B
 /// checks, C sets the gated value: refused naming `self_checked`; the
 /// first author reads A. D, who wrote nothing, checks and completes:
 /// the gate opens. Before the repair the one-second case opened the
 /// gate on B's check (the comparator was the first author only).
 #[test]
-fn independence_counts_every_writer_on_git_branch() {
-    for pause in [true, false] {
-        let ws = seed_with(SELF_GATE);
+fn independence_counts_every_writer_on_both_backends() {
+    for (pause, git_branch) in [(true, true), (false, true), (true, false), (false, false)] {
+        let ws = seed_on(SELF_GATE, git_branch);
+        if git_branch {
+            assert!(ws.path().join("mem-repo").exists(), "a git-branch mem");
+        }
         let root = ws.path();
         create(root, "identity-a", "plan", "The Plan", None);
         if pause {
@@ -513,7 +550,10 @@ fn independence_counts_every_writer_on_git_branch() {
                 "--quiet",
             ],
         );
-        assert!(!out.status.success(), "pause {pause}");
+        assert!(
+            !out.status.success(),
+            "pause {pause} git-branch {git_branch}"
+        );
         let env: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(env["code"], "CONSTRAINT_UNSATISFIED", "{env}");
         assert!(env.to_string().contains("self_checked"), "{env}");

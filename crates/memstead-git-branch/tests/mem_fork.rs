@@ -964,9 +964,13 @@ fn fork_commit_retargets_sidecars_and_self_links_and_records_the_base() {
             .is_none(),
         "a fork starts unchecked"
     );
-    let ledger = std::fs::read_to_string(memstead_base::check::check_ledger_path(tmp.path()))
-        .unwrap_or_default();
-    assert!(!ledger.contains("proposals/specs-001--"), "{ledger}");
+    let rows = memstead_base::check::CheckLedger::for_workspace(tmp.path()).in_standing_order();
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.entity.starts_with("proposals/specs-001--")),
+        "{rows:?}"
+    );
 
     // The source is untouched: branch, sidecar and rows.
     assert_eq!(sha_of(&gitdir, "refs/heads/specs").unwrap(), source_tip);
