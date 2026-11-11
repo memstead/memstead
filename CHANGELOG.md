@@ -41,7 +41,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   mem keeps the writers before it in the entity's story; a
   rename records its writer on every entry whose links it rewrites, and a
   proposal merge names every fork identity that wrote a landed entity in
-  a `Co-Writer:` trailer (carried on through a fork of a fork; a fork write
+  a `Co-Writer:` trailer (carried on through a fork of a fork and across
+  renames on the fork; a fork write
   without an identity rides as `Unattributed-Writer:` and leaves the
   reading `unconfirmable`). A merger who adopts a
   proposal with changes therefore reads `self_checked` on the check it
@@ -66,7 +67,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the side it lands (before, it validated section keys and content
   only), and a proposal merge carries the record across an adopted
   status-only change as an update does, judging an amended entry once by
-  the merge's net effect against the entity as it stood before. Carried lines earlier engines wrote across content edits stay
+  the merge's net effect against the entity as it stood before; a batch update and a proposal merge
+  read the checks gate over the store as the whole write leaves it, so an
+  edit of a checked criterion and the closing of its plan in one write
+  refuse as they do one after the other. Carried lines earlier engines wrote across content edits stay
   in the ledger and keep standing where they stand.
 
 - **The newest check of a kind is the one made last, not the line the

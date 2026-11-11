@@ -248,6 +248,46 @@ impl Engine {
             }
         }
 
+        // The checks form over the store as the whole batch leaves it: an
+        // entry that edits a checked criterion beside an entry that closes
+        // its plan is the same pair of writes refused one after the other.
+        if errors.is_empty() {
+            let mut post = store_snapshot.clone();
+            let mut writes = Vec::new();
+            for p in &prepared {
+                match crate::entity::parser::parse_markdown(
+                    &p.markdown,
+                    &p.file_path,
+                    p.type_def.as_ref(),
+                    &p.mem,
+                ) {
+                    Ok(parsed) => {
+                        post.upsert(parsed.entity.id.clone(), parsed.entity.clone());
+                        writes.push((parsed.entity, p.type_def.clone()));
+                    }
+                    Err(e) => {
+                        self.store = store_snapshot;
+                        self.discard_all_pending();
+                        return Err(EngineError::ParseAfterWrite(e.to_string()));
+                    }
+                }
+            }
+            for (entity, blocked) in self.checks_form_after(&post, &store_snapshot, &writes) {
+                let i = items
+                    .iter()
+                    .position(|(id, _)| *id == entity.id)
+                    .unwrap_or(0);
+                errors.push((
+                    i,
+                    EngineError::ConstraintUnsatisfied {
+                        entity_type: entity.entity_type.clone(),
+                        entity_id: entity.id.to_string(),
+                        violations: blocked,
+                    },
+                ));
+            }
+        }
+
         if !errors.is_empty() {
             // Refuse the whole batch. Roll back store + disk, then
             // report every failing entry — bounded at

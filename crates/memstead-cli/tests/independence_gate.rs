@@ -989,3 +989,160 @@ fn an_anonymous_fork_write_a_merge_lands_reads_unconfirmable() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stdout).contains("unconfirmable"));
 }
+
+fn upd(ws: &Path, id: &str, body: &str, who: Option<&str>) {
+    let section = format!("body={body}");
+    let mut args = vec![
+        "update",
+        id,
+        "--auto-hash",
+        "--section",
+        section.as_str(),
+        "--quiet",
+    ];
+    if let Some(w) = who {
+        args.push("--identity");
+        args.push(w);
+    }
+    must(ws, &args);
+}
+
+fn two_forks(ws: &Path) {
+    create(ws, "identity-a", "plan", "The Plan", None);
+    must(
+        ws,
+        &["workspace", "allow-create", "--schema", "*", "*", "--quiet"],
+    );
+    must(
+        ws,
+        &[
+            "mem",
+            "fork",
+            "plans",
+            "pfork",
+            "--identity",
+            "identity-a",
+            "--quiet",
+        ],
+    );
+    must(
+        ws,
+        &[
+            "mem",
+            "fork",
+            "pfork",
+            "qfork",
+            "--identity",
+            "identity-a",
+            "--quiet",
+        ],
+    );
+}
+
+/// A rename on the middle fork between two merges: the inner fork's
+/// co-writer, recorded under the entity's earlier id, still counts.
+#[test]
+fn a_co_writer_survives_a_rename_between_two_merges() {
+    for checker in ["identity-x", "identity-w"] {
+        let ws = seed_on(SELF_GATE, true);
+        let root = ws.path();
+        two_forks(root);
+        upd(root, "qfork--the-plan", "x wrote", Some("identity-x"));
+        upd(root, "qfork--the-plan", "y wrote", Some("identity-y"));
+        merge_fork(root, "qfork", "the-plan");
+        must(
+            root,
+            &[
+                "rename",
+                "pfork--the-plan",
+                "Renamed Plan",
+                "--auto-hash",
+                "--identity",
+                "identity-y",
+                "--quiet",
+            ],
+        );
+        let brief = must(root, &["proposal", "brief", "pfork", "--json", "--quiet"]);
+        let mut v: serde_json::Value = serde_json::from_slice(&brief.stdout).unwrap();
+        eprintln!(
+            "summary: {} entries: {}",
+            v["summary"],
+            v["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| format!("{}:{}", e["slug"], e["status"]))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let slugs: Vec<String> = v["dispositions"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        for s in &slugs {
+            v["dispositions"][s]["disposition"] = "adopt".into();
+        }
+        let file = root.join("p.json");
+        std::fs::write(&file, v.to_string()).unwrap();
+        must(
+            root,
+            &[
+                "proposal",
+                "merge",
+                "pfork",
+                "--dispositions",
+                file.to_str().unwrap(),
+                "--identity",
+                "identity-m",
+                "--quiet",
+            ],
+        );
+        let l = cli(root, &["list", "--mem", "plans", "--quiet"]);
+        eprintln!("list: {}", String::from_utf8_lossy(&l.stdout));
+        let id = "plans--renamed-plan";
+        must(
+            root,
+            &[
+                "check",
+                id,
+                "--verdict",
+                "ok",
+                "--kind",
+                "x-approval",
+                "--role",
+                "checker",
+                "--identity",
+                checker,
+                "--quiet",
+            ],
+        );
+        let out = cli(
+            root,
+            &[
+                "update",
+                id,
+                "--metadata",
+                "status=complete",
+                "--auto-hash",
+                "--identity",
+                "identity-c",
+                "--quiet",
+                "--json",
+            ],
+        );
+        eprintln!(
+            "[g4 {checker}] complete: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        if checker == "identity-w" {
+            assert!(out.status.success());
+        } else {
+            assert!(
+                !out.status.success(),
+                "x wrote the renamed text and confirmed it"
+            );
+        }
+    }
+}

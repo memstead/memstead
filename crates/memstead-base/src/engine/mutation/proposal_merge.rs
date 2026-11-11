@@ -364,16 +364,33 @@ impl Engine {
             for t in filter_notes_for_entity(fork_id.as_ref(), &notes) {
                 add(t.identity.clone());
             }
+            // Every id the entity had on the fork, along its renames, so a
+            // co-writer an earlier merge recorded under an older id travels.
+            let mut aliases: Vec<String> = vec![fork_id.to_string()];
+            loop {
+                let before = aliases.len();
+                for n in &notes {
+                    if let Some((old_id, new_id)) = n
+                        .entity_id
+                        .as_deref()
+                        .and_then(crate::engine::history::parse_rename_pair)
+                        && aliases.contains(&new_id)
+                        && !aliases.contains(&old_id)
+                    {
+                        aliases.push(old_id);
+                    }
+                }
+                if aliases.len() == before {
+                    break;
+                }
+            }
             for n in &notes {
                 for (id, who) in &n.co_writers {
-                    if id == fork_id.as_ref() {
+                    if aliases.contains(id) {
                         add(Some(who.clone()));
                     }
                 }
-                if n.unattributed_writes
-                    .iter()
-                    .any(|id| id == fork_id.as_ref())
-                {
+                if n.unattributed_writes.iter().any(|id| aliases.contains(id)) {
                     add(None);
                 }
             }
@@ -721,33 +738,8 @@ impl Engine {
                 _ => None,
             };
             let post_hash = crate::entity::parser::compute_hash(&p.markdown);
-            // The checks form is read over the store as the merge leaves it
-            // (the landings are applied), the self-check form by the rule.
-            let checks_form: Vec<_> = {
-                let provider = self.check_standing_provider();
-                crate::ops::health::unsatisfied_constraints(
-                    &self.store,
-                    &next,
-                    p.type_def.as_ref(),
-                    Some(&p.id),
-                    Some(&provider),
-                )
-                .into_iter()
-                .filter(|v| {
-                    matches!(
-                        v,
-                        crate::ops::health::UnsatisfiedConstraint::TransitionRequiresChecks { .. }
-                    )
-                })
-                .collect()
-            };
-            let (violated, carry_kinds) = self.gate_transition_forms(
-                pre,
-                &next,
-                &post_hash,
-                p.type_def.as_ref(),
-                checks_form,
-            );
+            let (violated, carry_kinds) =
+                self.gate_transition_forms(pre, &next, &post_hash, p.type_def.as_ref(), Vec::new());
             if let Some(b) = &before
                 && !carry_kinds.is_empty()
             {
@@ -763,6 +755,76 @@ impl Engine {
                 return Err(EngineError::ConstraintUnsatisfied {
                     entity_type: next.entity_type.clone(),
                     entity_id: p.id.to_string(),
+                    violations: blocked,
+                });
+            }
+        }
+        // The checks form of every entity the merge writes, read over the
+        // store as the whole merge leaves it (landings applied, amends on
+        // top): a merge that edits a checked criterion and closes its plan
+        // is the same pair of writes refused one after the other.
+        {
+            let mut written: BTreeMap<
+                String,
+                (Entity, std::sync::Arc<memstead_schema::TypeDefinition>),
+            > = BTreeMap::new();
+            let parse = |md: &str,
+                         fp: &str,
+                         td: &std::sync::Arc<memstead_schema::TypeDefinition>,
+                         mem: &str| {
+                parse_markdown(md, fp, td.as_ref(), mem)
+                    .map(|parsed| (parsed.entity, td.clone()))
+                    .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))
+            };
+            let mut collected: Result<(), EngineError> = Ok(());
+            for a in &adopted {
+                for l in &a.landings {
+                    let one = match l {
+                        Landing::Update(p) => {
+                            Some(parse(&p.markdown, &p.file_path, &p.type_def, &p.mem))
+                        }
+                        Landing::Create(p) => {
+                            Some(parse(&p.markdown, &p.file_path, &p.type_def, &p.mem))
+                        }
+                        Landing::Delete { .. } => None,
+                    };
+                    match one {
+                        Some(Ok((e, td))) => {
+                            written.insert(e.id.0.clone(), (e, td));
+                        }
+                        Some(Err(e)) => collected = Err(e),
+                        None => {}
+                    }
+                }
+            }
+            for p in &amends {
+                match parse(&p.markdown, &p.file_path, &p.type_def, &p.mem) {
+                    Ok((e, td)) => {
+                        written.insert(e.id.0.clone(), (e, td));
+                    }
+                    Err(e) => collected = Err(e),
+                }
+            }
+            if let Err(e) = collected {
+                self.store = store_snapshot;
+                self.discard_all_pending();
+                return Err(e);
+            }
+            let mut post = self.store.clone();
+            for (e, _) in written.values() {
+                post.upsert(e.id.clone(), e.clone());
+            }
+            let writes: Vec<_> = written.into_values().collect();
+            if let Some((entity, blocked)) = self
+                .checks_form_after(&post, &store_snapshot, &writes)
+                .into_iter()
+                .next()
+            {
+                self.store = store_snapshot;
+                self.discard_all_pending();
+                return Err(EngineError::ConstraintUnsatisfied {
+                    entity_type: entity.entity_type.clone(),
+                    entity_id: entity.id.to_string(),
                     violations: blocked,
                 });
             }

@@ -383,6 +383,69 @@ impl Engine {
         (out, carry)
     }
 
+    /// The `transition_requires_checks` reading of a write that lands
+    /// several entities at once (a batch update, a proposal merge): each
+    /// written entity's checks form is read over `post`, the store as the
+    /// whole write leaves it, so an entry that edits a checked criterion
+    /// and an entry that closes its plan cannot pass on the criterion's
+    /// pre-write check. `before` is the store as it stood when the write
+    /// began (the transition test). Returns each blocking violation with
+    /// the entity it refuses.
+    pub(crate) fn checks_form_after(
+        &self,
+        post: &crate::store::Store,
+        before: &crate::store::Store,
+        writes: &[(
+            crate::entity::Entity,
+            std::sync::Arc<memstead_schema::TypeDefinition>,
+        )],
+    ) -> Vec<(
+        crate::entity::Entity,
+        Vec<crate::ops::health::UnsatisfiedConstraint>,
+    )> {
+        use crate::ops::health::UnsatisfiedConstraint as U;
+        let provider = self.check_standing_provider();
+        let mut out = Vec::new();
+        for (next, td) in writes {
+            let violated: Vec<U> = crate::ops::health::unsatisfied_constraints(
+                post,
+                next,
+                td.as_ref(),
+                Some(&next.id),
+                Some(&provider),
+            )
+            .into_iter()
+            .filter(|v| matches!(v, U::TransitionRequiresChecks { .. }))
+            .collect();
+            if violated.is_empty() {
+                continue;
+            }
+            let stored = before.get(&next.id).filter(|e| !e.stub).cloned();
+            let stored_def = stored.as_ref().and_then(|b| {
+                self.schemas
+                    .get(&b.mem)
+                    .and_then(|schema| schema.get_type(&b.entity_type))
+            });
+            let pre = match (&stored, &stored_def) {
+                (Some(b), Some(d)) => Some((b, d.as_ref())),
+                _ => None,
+            };
+            let (kept, _) =
+                self.gate_transition_forms(pre, next, &next.content_hash, td.as_ref(), violated);
+            let blocked: Vec<U> = kept
+                .into_iter()
+                .filter(|v| {
+                    matches!(v, U::TransitionRequiresChecks { .. })
+                        && v.severity() == memstead_schema::ConstraintSeverity::Block
+                })
+                .collect();
+            if !blocked.is_empty() {
+                out.push((next.clone(), blocked));
+            }
+        }
+        out
+    }
+
     /// Carry the records that licensed a gated transition across the
     /// write they licensed: for each wire kind in `kinds`, the newest
     /// record of `id` that is fresh at `pre_hash` and confirming is
