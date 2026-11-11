@@ -587,7 +587,8 @@ pub fn health_checks_axis(
             // identity that mutated the verified plan, its criteria or
             // its session-log notes since this criterion was written
             // (engine::independence); a non-criterion compares against
-            // its own author. The (actor, client) transport pair is
+            // every identity that wrote it up to the write the check saw.
+            // The (actor, client) transport pair is
             // recorded context and never a comparator. Either side
             // lacking an identity is unconfirmable, never a guessed
             // category.
@@ -632,7 +633,7 @@ pub fn health_checks_axis(
                 "self_checked": capped(self_checked),
                 "confirmed_independent": capped(confirmed_independent),
                 "unconfirmable": capped(unconfirmable),
-                "comparator": "every identity that mutated the verified plan, its criteria or its session-log notes since the criterion was written; a non-criterion compares against its own author",
+                "comparator": "every identity that mutated the verified plan, its criteria or its session-log notes since the criterion was written; a non-criterion compares against every identity that wrote it up to the write the check saw",
                 "executors": serde_json::Value::Object(executors),
                 "readings": serde_json::Value::Object(readings),
             }),

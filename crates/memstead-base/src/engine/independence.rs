@@ -392,8 +392,8 @@ impl Engine {
     /// The executors of `entity` (a criterion): every identity that
     /// mutated the plan(s) it VERIFIES, those plans' other criteria, or the
     /// notes PART_OF those plans, at or after the criterion's first touch.
-    /// `None` when the entity verifies no plan — the reading then falls
-    /// back to the entity's own author.
+    /// `None` when the entity verifies no plan — the reading then compares
+    /// every identity that wrote the entity up to the write the check saw.
     pub fn executors_of(
         &self,
         entity: &crate::entity::Entity,
