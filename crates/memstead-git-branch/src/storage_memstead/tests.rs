@@ -576,3 +576,35 @@ fn extract_manifest_version_handles_quoted_and_unquoted() {
     assert_eq!(extract_manifest_version("name: foo\n"), None);
     assert_eq!(extract_manifest_version(""), None);
 }
+
+/// The branch delete is pinned to the tip the prune decided on: a commit
+/// that landed after that refuses the whole transaction, and the branch
+/// keeps it.
+#[test]
+fn a_prune_refuses_a_branch_that_moved_after_its_decision() {
+    use memstead_base::backend::MemBackend;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let ctx = CommitContext::internal();
+    let writer = crate::storage::git_tree::GitTreeBackend::new(
+        gitdir.clone(),
+        "refs/heads/doomed".to_string(),
+    );
+    writer.write_entity(Path::new("a.md"), b"# A").unwrap();
+    writer.commit("A", &ctx).unwrap();
+    writer.write_mem_config(b"{}", &ctx).unwrap();
+    let decided =
+        gix::ObjectId::from_hex(writer.current_head().unwrap().unwrap().as_bytes()).unwrap();
+    writer.write_entity(Path::new("b.md"), b"# B").unwrap();
+    writer.commit("B lands after the decision", &ctx).unwrap();
+    let landed = writer.current_head().unwrap().unwrap();
+
+    assert!(prune_mem_storage_pinned(&gitdir, "doomed", &ctx, true, Some(decided)).is_err());
+    assert_eq!(writer.current_head().unwrap().unwrap(), landed);
+
+    // At the current tip the prune goes through; at an absent branch it is a no-op.
+    let current = gix::ObjectId::from_hex(landed.as_bytes()).unwrap();
+    prune_mem_storage_pinned(&gitdir, "doomed", &ctx, true, Some(current)).unwrap();
+    assert_eq!(writer.current_head().unwrap(), None);
+    prune_mem_storage_at_gitdir(&gitdir, "doomed", &ctx, true).unwrap();
+}

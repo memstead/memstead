@@ -1196,6 +1196,38 @@ fn prune_mem_storage_at_gitdir(
     ctx: &CommitContext<'_>,
     delete_branch: bool,
 ) -> Result<(), MemRepoWriteError> {
+    // The branch is deleted at the tip seen here, so a commit that lands
+    // while the prune runs fails the transaction instead of vanishing.
+    let branch_tip = if delete_branch {
+        let repo = gix::open(gitdir).map_err(|e| MemRepoWriteError::GixOpen {
+            path: gitdir.display().to_string(),
+            message: e.to_string(),
+        })?;
+        repo.try_find_reference(format!("refs/heads/{branch_leaf}").as_str())
+            .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
+            .map(|r| {
+                r.into_fully_peeled_id()
+                    .map(|id| id.detach())
+                    .map_err(|e| MemRepoWriteError::GitTree(format!("peel {branch_leaf}: {e}")))
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    prune_mem_storage_pinned(gitdir, branch_leaf, ctx, delete_branch, branch_tip)
+}
+
+/// The prune with the branch delete pinned to `branch_tip`: the tip the
+/// caller decided on. A branch that has moved since refuses the whole
+/// transaction; an absent branch (`None`) is not deleted, which keeps the
+/// prune idempotent.
+pub(crate) fn prune_mem_storage_pinned(
+    gitdir: &Path,
+    branch_leaf: &str,
+    ctx: &CommitContext<'_>,
+    delete_branch: bool,
+    branch_tip: Option<gix::ObjectId>,
+) -> Result<(), MemRepoWriteError> {
     use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
     use gix::refs::{FullName, Target};
 
@@ -1287,16 +1319,14 @@ fn prune_mem_storage_at_gitdir(
     // ---- Step 2: ref-edit batch (branch delete + __MEMSTEAD advance) ----
     let mut edits: Vec<RefEdit> = Vec::with_capacity(2);
 
-    if delete_branch {
+    if delete_branch && let Some(tip) = branch_tip {
         let branch_ref = format!("refs/heads/{branch_leaf}");
         let branch_full: FullName = branch_ref.as_str().try_into().map_err(|e| {
             MemRepoWriteError::RefTransaction(format!("invalid branch ref {branch_ref:?}: {e}"))
         })?;
         edits.push(RefEdit {
             change: Change::Delete {
-                // `Any` keeps the delete idempotent — a missing branch
-                // (sibling pruned it, manual surgery) is not an error.
-                expected: PreviousValue::Any,
+                expected: PreviousValue::MustExistAndMatch(Target::Object(tip)),
                 log: RefLog::AndReference,
             },
             name: branch_full,

@@ -131,6 +131,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   it as no head, no config, or a mem whose every entity was removed. A
   missing branch still reads as absent.
 
+- **Deleting a git-branch mem never drops a commit that lands during the
+  delete.** The branch deletion is pinned to the tip the delete started
+  from, where it deleted whatever the branch pointed at.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both
