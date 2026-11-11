@@ -261,7 +261,25 @@ fn run_with_root(
                     .map_err(CliError::from_engine_op)?
             }
             None => assemble_archive(&workspace_root).map_err(|e| match boot_failure {
-                Some(boot) => boot,
+                // Both failed: the boot refusal answers, and the assembly's
+                // own refusal rides beside it so no reason is lost.
+                Some(boot) => match boot.downcast::<CliError>() {
+                    Ok(mut c) => {
+                        let assembly = serde_json::json!({
+                            "code": e.code(),
+                            "message": e.to_string(),
+                            "details": e.details(),
+                        });
+                        match c.details.as_mut().and_then(|d| d.as_object_mut()) {
+                            Some(d) => {
+                                d.insert("assembly".to_string(), assembly);
+                            }
+                            None => c.details = Some(serde_json::json!({ "assembly": assembly })),
+                        }
+                        c.into()
+                    }
+                    Err(other) => other,
+                },
                 None => CliError {
                     kind: ExitKind::Validation,
                     code: e.code(),
