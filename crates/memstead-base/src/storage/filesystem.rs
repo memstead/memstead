@@ -272,6 +272,9 @@ impl FilesystemBackend {
         records: &[Provenance],
         attempt: &mut Attempt,
     ) -> std::io::Result<CommitRecord> {
+        // The record and the ledger live under `.memstead/`; a link there
+        // would carry them outside the mem.
+        refuse_symlinked_meta(&self.root).map_err(|e| std::io::Error::other(e.to_string()))?;
         self.ensure_dir(&self.meta_dir(), attempt)?;
 
         let mut record_ops = Vec::with_capacity(ops.len());
@@ -870,7 +873,7 @@ impl crate::backend::MemBackend for FilesystemBackend {
 
     fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), BackendError> {
         let key = normalise_rel_path(rel_path)?;
-        refuse_symlinked(&self.root, &key)?;
+        refuse_unwritable(&self.root, &key)?;
         let mut pending = self.pending.lock().map_err(|_| {
             BackendError::Path("filesystem writer pending state poisoned".to_string())
         })?;
@@ -882,7 +885,7 @@ impl crate::backend::MemBackend for FilesystemBackend {
 
     fn delete_entity(&self, rel_path: &Path) -> Result<(), BackendError> {
         let key = normalise_rel_path(rel_path)?;
-        refuse_symlinked(&self.root, &key)?;
+        refuse_unwritable(&self.root, &key)?;
         let mut pending = self.pending.lock().map_err(|_| {
             BackendError::Path("filesystem writer pending state poisoned".to_string())
         })?;
@@ -893,8 +896,8 @@ impl crate::backend::MemBackend for FilesystemBackend {
     fn move_entity(&self, from: &Path, to: &Path) -> Result<(), BackendError> {
         let from_key = normalise_rel_path(from)?;
         let to_key = normalise_rel_path(to)?;
-        refuse_symlinked(&self.root, &from_key)?;
-        refuse_symlinked(&self.root, &to_key)?;
+        refuse_unwritable(&self.root, &from_key)?;
+        refuse_unwritable(&self.root, &to_key)?;
         let mut pending = self.pending.lock().map_err(|_| {
             BackendError::Path("filesystem writer pending state poisoned".to_string())
         })?;
@@ -1073,6 +1076,7 @@ impl crate::backend::MemBackend for FilesystemBackend {
         // refusal-to-overwrite check upstream).
         let memstead_dir = self.root.join(crate::mem::MEM_META_DIR);
         std::fs::create_dir_all(&memstead_dir).map_err(BackendError::Io)?;
+        refuse_symlinked_meta(&self.root)?;
         let _lock = ConfigLock::take(self.config_lock_file())?;
         replace_file(&memstead_dir.join("config.json"), bytes)
     }
@@ -1096,6 +1100,7 @@ impl crate::backend::MemBackend for FilesystemBackend {
         // every other config writer of this mem, in any process. It is an
         // operating-system lock: a writer that dies releases it, so there is
         // no stale age to guess and no live holder is ever overtaken.
+        refuse_symlinked_meta(&self.root)?;
         let _lock = ConfigLock::take(self.config_lock_file())?;
 
         let current = match std::fs::read(&config_path) {
@@ -1439,4 +1444,32 @@ impl Drop for ConfigLock {
     fn drop(&mut self) {
         path_lock::release(&self.0);
     }
+}
+
+/// The paths under `.memstead/` an entity-path write may reach: the
+/// sidecars that ride a commit. Everything else there (the commit record,
+/// the ledger, the config, the locks) is the backend's own.
+const WRITABLE_META_PATHS: &[&str] = &[
+    crate::anchor::ANCHOR_SIDECAR_PATH,
+    crate::derivation::DERIVATION_SIDECAR_PATH,
+    crate::ops::proposal::PROPOSAL_RECORD_PATH,
+];
+
+/// Refuse an entity-path write to one of the backend's own files under
+/// `.memstead/`, and any path through a symbolic link.
+fn refuse_unwritable(root: &Path, key: &str) -> Result<(), BackendError> {
+    let meta = format!("{}/", crate::mem::MEM_META_DIR);
+    if key.starts_with(&meta) && !WRITABLE_META_PATHS.contains(&key) {
+        return Err(BackendError::Path(format!(
+            "{key} is the backend's own file; only {} are written through entity paths",
+            WRITABLE_META_PATHS.join(", ")
+        )));
+    }
+    refuse_symlinked(root, key)
+}
+
+/// Refuse a `.memstead` directory that is a symbolic link: the config, the
+/// commit record and the ledger would land outside the mem.
+fn refuse_symlinked_meta(root: &Path) -> Result<(), BackendError> {
+    refuse_symlinked(root, crate::mem::MEM_META_DIR)
 }

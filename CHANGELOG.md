@@ -68,10 +68,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   folder backend's ledger already does, where a cursor equal to the first
   record's timestamp hid the second.
 
-- **A folder mem never writes through a symbolic link.** A write, delete
-  or move whose path passes through a symlink inside the mem refuses at
-  staging, and a link that appears before the commit refuses the commit,
-  where the commit followed the link and wrote outside the mem.
+- **A folder mem never writes through a symbolic link, nor over its own
+  files.** A write, delete or move whose path passes through a symlink
+  inside the mem refuses at staging, and a link that appears before the
+  commit refuses the commit, where the commit followed the link and wrote
+  outside the mem. A `.memstead` that is itself a link refuses the config
+  writes and the commit. Under `.memstead/` an entity path reaches only the
+  declared sidecars (anchors, derivations, proposals), where a staged write
+  to the commit record destroyed it and its own bytes with it.
 
 - **`changes_since` reports an entity renamed from or to a non-entity
   path.** When git pairs such a rename by similarity, the entity side is

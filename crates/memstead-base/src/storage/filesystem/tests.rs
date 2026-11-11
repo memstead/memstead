@@ -1196,3 +1196,68 @@ fn a_symlink_created_after_staging_refuses_the_commit() {
     assert!(writer.commit("through a link", &ctx_for_test()).is_err());
     assert!(std::fs::read_dir(&outside).unwrap().next().is_none());
 }
+
+/// Under `.memstead/` an entity-path write reaches only the declared
+/// sidecars: the commit record, the ledger, the config and the locks are
+/// the backend's own, and a staged write over one of them would destroy it.
+#[test]
+fn an_entity_path_write_cannot_reach_the_backends_own_files() {
+    let tmp = TempDir::new().unwrap();
+    let writer = FilesystemBackend::new(tmp.path().to_path_buf());
+    for reserved in [
+        ".memstead/commit.json",
+        ".memstead/changes.jsonl",
+        ".memstead/config.json",
+        ".memstead/locks/write.lock",
+        ".memstead/anything-else.json",
+    ] {
+        assert!(
+            matches!(
+                writer.write_entity(Path::new(reserved), b"x"),
+                Err(BackendError::Path(_))
+            ),
+            "{reserved}"
+        );
+        assert!(
+            writer.delete_entity(Path::new(reserved)).is_err(),
+            "{reserved}"
+        );
+    }
+    for sidecar in [
+        crate::anchor::ANCHOR_SIDECAR_PATH,
+        crate::derivation::DERIVATION_SIDECAR_PATH,
+        crate::ops::proposal::PROPOSAL_RECORD_PATH,
+    ] {
+        writer.write_entity(Path::new(sidecar), b"{}").unwrap();
+    }
+    writer.commit("sidecars", &ctx_for_test()).unwrap();
+}
+
+/// A `.memstead` that is a symbolic link is refused for the config, the
+/// commit record and the ledger, so none of them lands outside the mem.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_meta_directory_is_refused() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("mem");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join(".memstead")).unwrap();
+    let writer = FilesystemBackend::new(root.clone());
+
+    assert!(writer.write_mem_config(b"{}", &ctx_for_test()).is_err());
+    assert!(
+        writer
+            .write_mem_config_cas(None, b"{}", &ctx_for_test())
+            .is_err()
+    );
+    writer.write_entity(Path::new("a.md"), b"a").unwrap();
+    assert!(
+        writer
+            .commit("through a meta link", &ctx_for_test())
+            .is_err()
+    );
+    let left: Vec<_> = std::fs::read_dir(&outside).unwrap().collect();
+    assert!(left.is_empty(), "{left:?}");
+}
