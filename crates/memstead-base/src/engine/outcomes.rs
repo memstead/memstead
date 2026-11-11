@@ -544,8 +544,8 @@ pub struct RelateEntityOutcome {
     /// no-ops ([`WarningHint::DuplicateRelationship`]),
     /// remove-nonexistent no-ops ([`WarningHint::NoSuchRelationship`]),
     /// and auto-stubbed targets
-    /// ([`WarningHint::AutoStubCreated`]). Pre-Item-03 the auto-stub
-    /// case rode through a deprecated top-level
+    /// ([`WarningHint::AutoStubCreated`]). The auto-stub case once
+    /// rode through a deprecated top-level
     /// `stub_warning: Option<String>` field that didn't follow the
     /// `warnings[]` shape — agents iterating diagnostics silently
     /// skipped it; the field has been retired in favour of the

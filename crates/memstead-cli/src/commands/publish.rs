@@ -216,8 +216,7 @@ fn run_with_root(
         // booted — the mount roster locates the mem folder and its
         // config, so the bare shape works from the workspace root
         // of a current-layout (`workspace.toml` + mounts) workspace
-        // exactly like `--mem` does (sealed-gate finding F6's seam;
-        // the legacy assembly resolved the config against the
+        // exactly like `--mem` does (the legacy assembly resolved the config against the
         // workspace root, which only coincides with the mem folder
         // in the legacy single-mem layout). The legacy folder assembly
         // stays only for an engine that boots but mounts nothing writable.

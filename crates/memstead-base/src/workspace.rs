@@ -53,7 +53,7 @@ pub struct Mount {
     pub capability: MountCapability,
     /// Eager (open the backend at engine start) or lazy (entity load
     /// deferred to first read) — see [`MountLifecycle`] for the full
-    /// contract. Behavioural since flywheel W7/01; opt-in per mount.
+    /// contract. Opt-in per mount.
     pub lifecycle: MountLifecycle,
     /// Whether other mounts in the same workspace may form
     /// cross-mem edges into this mount. Workspace-level cross-mem

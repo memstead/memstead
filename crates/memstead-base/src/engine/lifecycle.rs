@@ -74,7 +74,7 @@ impl Engine {
     }
 
     /// Insert into the engine's schema map, bumping the schemas epoch
-    /// (the second half of the derived-memo key — flywheel W8/01):
+    /// (the second half of the derived-memo key):
     /// derived structures depend on schemas, so any change here must
     /// be visible to the memo-invalidation hooks even when the store
     /// generation did not move.
@@ -94,8 +94,8 @@ impl Engine {
         self.schemas.remove(mem);
     }
 
-    /// Install the unmounted-mem storage discovery hook (flywheel
-    /// W7/02). Full boot sets it; without one, writes referencing
+    /// Install the unmounted-mem storage discovery hook. Full boot
+    /// sets it; without one, writes referencing
     /// unmounted mems keep the forward-reference mechanic unchanged.
     pub fn set_unmounted_storage_prober(&mut self, prober: super::UnmountedStorageProber) {
         self.unmounted_storage_prober = Some(prober);

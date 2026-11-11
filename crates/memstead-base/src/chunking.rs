@@ -591,8 +591,8 @@ mod tests {
     #[test]
     fn apply_chunking_tiny_budgets_with_em_dash() {
         // Direct apply_chunking path — the production call surface.
-        // The frontmatter description text the F5 probe hit carried an
-        // em-dash; recreate that shape.
+        // Frontmatter description text carrying an em-dash broke this
+        // path once; recreate that shape.
         let md = "---\n_hash: x\n---\n\n# Title — with em-dash\n\nMore body — even more.";
         for budget in 0..=2 {
             let result = apply_chunking(md, budget, None, &[]);

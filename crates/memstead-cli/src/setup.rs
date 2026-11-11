@@ -456,7 +456,7 @@ impl CliContext {
     /// also gives subcommands a chdir-free, unit-testable engine seam.
     pub fn cli_engine_at(&self, root: &Path) -> anyhow::Result<CliEngine> {
         let mut engine = self.cli_engine_at_unloaded(root)?;
-        // Default lazy-mount posture (flywheel W7/01): the CLI loads
+        // Default lazy-mount posture: the CLI loads
         // every deferred mem up front, so a one-shot command behaves
         // byte-identically to the all-eager world — no answer computes
         // over a partial store. Commands whose whole answer lives in one

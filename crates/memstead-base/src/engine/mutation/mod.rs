@@ -1314,8 +1314,8 @@ pub(super) fn gc_orphan_stubs_among<'a>(
 /// `memstead_create.relations[]`, future inline-relation surfaces) so a
 /// malformed target id (e.g. `bad@chars$here`) cannot land an
 /// auto-stub at the literal id — that stub would later fail every
-/// wiki-link parse that referenced it. Pre-Item-02 the gate lived
-/// only on `memstead_relate`; the create path admitted the same input
+/// wiki-link parse that referenced it. A gate living only on
+/// `memstead_relate` would let the create path admit the same input
 /// silently.
 pub(super) fn validate_relation_target_grammar(target: &EntityId) -> Result<(), EngineError> {
     if let Err(reason) = crate::entity::id::validate_mem_name_grammar(target.mem()) {
@@ -1462,8 +1462,8 @@ pub(super) fn validate_cross_mem_add_policy(
 }
 
 /// Storage verdict for a cross-mem target whose mem is mounted but
-/// DEFERRED (lazy, not yet loaded) — the write-time verification of
-/// flywheel W7/02. The check asks the mem's real storage through the
+/// DEFERRED (lazy, not yet loaded): the write-time cross-mem target
+/// verification. The check asks the mem's real storage through the
 /// cheap [`crate::backend::MemBackend::entity_exists`] probe
 /// (tree-lookup-class on git-branch, metadata-class on folder) and
 /// never triggers the mem's load: verification must not convert into
@@ -1583,7 +1583,7 @@ pub(super) fn peek_deferred_target_type(
 /// The target-schema REF for cross-schema edge routing. Loaded mems
 /// answer from the engine's schema catalogue; an UNMOUNTED mem with
 /// discoverable storage answers from its stored config's pin via the
-/// discovery hook (flywheel W7/02) — the routing check
+/// discovery hook — the routing check
 /// (`validate_cross_mem_edge`) needs only the ref, never the full
 /// schema, so the source schema's `cross_mem_relationships:` entry
 /// keeps its authority without a mount. `None` falls back to the

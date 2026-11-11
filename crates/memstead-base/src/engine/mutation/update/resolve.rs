@@ -58,8 +58,8 @@ impl Engine {
         // Stub guard — stubs have no body, no metadata, no
         // schema-resolved type to validate against. The recovery is
         // `memstead_create` (stub adoption preserves incoming
-        // references). Pre-Item-02 the update path fell through to
-        // the `type_def` lookup below and surfaced the cryptic
+        // references). Without the guard the update path falls through
+        // to the `type_def` lookup below and surfaces the cryptic
         // `UnknownType { name: "" }` cascade. Mirrors the
         // `StubCannotRelate` guard on `memstead_relate`.
         if entity.stub {

@@ -303,7 +303,7 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     engine.set_workspace_root(workspace_root.to_path_buf());
     engine.set_backend_factory(crate::storage::instantiate_full_backend);
     engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
-    // Unmounted-mem storage discovery (flywheel W7/02): a write that
+    // Unmounted-mem storage discovery: a write that
     // references a mem with NO mount record can still be verified
     // against the mem-repo's branch tree — the workspace layer owns
     // the branch convention memstead-base cannot see. The prober
@@ -369,7 +369,7 @@ mod tests {
         assert!(matches!(err, BootError::NotInitialised(_)));
     }
 
-    /// Unmounted-mem storage discovery (flywheel W7/02): a relate into
+    /// Unmounted-mem storage discovery: a relate into
     /// a mem with NO mount record but a real content branch in the
     /// mem-repo is verified against the branch tree — admitted with a
     /// LoadTime stub and no auto-stub/mem-uncreated warnings when the

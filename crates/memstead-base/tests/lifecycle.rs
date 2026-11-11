@@ -2619,13 +2619,13 @@ fn explicit_and_rule_derived_cross_links_project_as_distinct_entries() {
     );
 }
 
-/// Lazy-mount companion to the incoming-edges refusal above (flywheel
-/// W7/01, third final grade): the `MEM_HAS_INCOMING_REFS` guard walks
+/// Lazy-mount companion to the incoming-edges refusal above: the
+/// `MEM_HAS_INCOMING_REFS` guard walks
 /// incoming edges that can originate in ANY mem — so a referrer living
 /// in a DEFERRED (lazy, not-yet-loaded) mem must still block the
-/// delete. The grade demonstrated the counterexample live: with the
-/// referrer's mem lazy, `delete_mem` destroyed the mem an eager boot
-/// refuses to. The guard now takes the full load first.
+/// delete. The counterexample: with the referrer's mem lazy and no
+/// full load, `delete_mem` destroys the mem an eager boot refuses to.
+/// The guard takes the full load first.
 #[test]
 fn delete_mem_guard_sees_referrers_in_deferred_mems() {
     use memstead_base::ops::RelateArg;

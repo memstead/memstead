@@ -97,8 +97,7 @@ impl Engine {
                     // The schemas epoch just moved (`schemas_remove`),
                     // so a filled search memo is stale-keyed — clear it
                     // here or the next search trips the memo-key
-                    // assert (the first W8/01 grade demonstrated
-                    // exactly that on this branch).
+                    // assert on this branch.
                     self.invalidate_search_indexes();
                 }
             }

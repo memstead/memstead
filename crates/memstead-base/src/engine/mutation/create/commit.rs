@@ -128,7 +128,7 @@ impl Engine {
         });
 
         self.invalidate_communities();
-        // Incremental (flywheel W8/01): the new entity is the whole
+        // Incremental: the new entity is the whole
         // touched set — its stub targets are never indexed.
         self.maintain_search_indexes(std::slice::from_ref(&id));
 

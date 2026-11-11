@@ -13497,7 +13497,7 @@ mod inline_wiki_link_warning {
     }
 }
 
-/// F1 (coprobe-coherence-notice-fixes): reload drift must reach the
+/// Reload drift must reach the
 /// agent on *error* responses too, on the same channel split a
 /// success carries — the full `mem_changed` notice on
 /// `structured_content`, the `MEM_RELOADED` admonition on the text

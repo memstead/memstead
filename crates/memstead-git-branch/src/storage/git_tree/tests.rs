@@ -74,7 +74,7 @@ fn tree_path_exists(gitdir: &Path, ref_name: &str, path: &str) -> bool {
 /// `entity_exists` mirrors `read_entity`'s source selection —
 /// pending upsert true / pending delete false before commit, live
 /// tip between transactions, unborn ref false — while stopping at
-/// the tree entry (flywheel W7/02 primitive).
+/// the tree entry (the write-time cross-mem target check's primitive).
 #[test]
 fn entity_exists_tree_probe_and_pending_precedence() {
     use memstead_base::backend::MemBackend;

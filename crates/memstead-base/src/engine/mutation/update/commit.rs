@@ -120,7 +120,7 @@ impl Engine {
             });
 
         self.invalidate_communities();
-        // Incremental (flywheel W8/01): the updated entity is the
+        // Incremental: the updated entity is the
         // whole touched set — declared-relation stubs are never
         // indexed.
         self.maintain_search_indexes(std::slice::from_ref(&prepared.id));

@@ -45,8 +45,8 @@ pub(super) struct PreparedRelate {
     pub(super) stub_target: Option<EntityId>,
     /// The planned stub's kind: `ForwardReference` for a genuinely
     /// absent target, `LoadTime` for a storage-verified target in a
-    /// deferred mem (the stub is only the until-load representation —
-    /// flywheel W7/02). Meaningless when `stub_target` is `None`.
+    /// deferred mem (the stub is only the until-load representation).
+    /// Meaningless when `stub_target` is `None`.
     pub(super) stub_kind: crate::entity::StubKind,
     pub(super) type_def: std::sync::Arc<memstead_schema::TypeDefinition>,
 }
@@ -482,7 +482,7 @@ impl Engine {
             };
 
         self.invalidate_communities();
-        // Incremental (flywheel W8/01): only the SOURCE entity's file
+        // Incremental: only the SOURCE entity's file
         // was rewritten; stub targets and GC'd orphan stubs were never
         // indexed.
         self.maintain_search_indexes(std::slice::from_ref(&prepared.from));
@@ -645,8 +645,8 @@ impl Engine {
         // locked, a deferred target included: its lock costs no load,
         // and the storage check of the target runs under it. A mem that
         // is only ever a TARGET in this batch and is deferred stays
-        // unloaded: target verification runs against storage (flywheel
-        // W7/02), and loading it would convert verification into a
+        // unloaded: target verification runs against storage, and
+        // loading it would convert verification into a
         // full load. Source mems always load: a write into a mem needs
         // the mem. The batch takes the whole workspace when an item
         // names an end by a bare slug (resolved under the lock) or adds
@@ -713,9 +713,8 @@ impl Engine {
         // `acyclic_sets` set, whose guard walks the set's UNION
         // subgraph) walks the whole subgraph, so the walk must see
         // every mem — deferred (lazy, unloaded) ones included — or a
-        // cycle through an unloaded mem is admitted (the fifth
-        // lazy-mount grade demonstrated exactly that through this
-        // path). Declared signals on either endpoint's schema need
+        // cycle through an unloaded mem is admitted through this
+        // path. Declared signals on either endpoint's schema need
         // the full load for the same reason as the single-item path.
         if relates.iter().any(|(a, _)| {
             self.write_needs_full_load(

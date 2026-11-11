@@ -948,8 +948,8 @@ fn manual_authoring_round_trips_through_loader() {
 }
 
 /// Default `manual_authoring` value is `Allow` so external schemas
-/// without the field stay permissive — pre-Item-21 behavior preserved
-/// for every rel-type that doesn't opt in.
+/// without the field stay permissive for every rel-type that doesn't
+/// opt in.
 #[test]
 fn manual_authoring_defaults_to_allow() {
     use memstead_schema::ManualAuthoring;

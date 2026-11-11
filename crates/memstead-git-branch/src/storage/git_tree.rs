@@ -218,8 +218,8 @@ impl GitTreeBackend {
 
     /// Tree-lookup-class existence probe: ref → commit → tree →
     /// `lookup_entry_by_path`, stopping at the entry — the blob's
-    /// bytes are never read (flywheel W7/02: the write-time cross-mem
-    /// target check's primitive; the listing walk reads every blob and
+    /// bytes are never read (the write-time cross-mem target check's
+    /// primitive; the listing walk reads every blob and
     /// is the wrong tool for one path's existence).
     fn path_exists_from_parent(
         &self,

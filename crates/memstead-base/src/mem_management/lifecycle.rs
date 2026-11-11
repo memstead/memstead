@@ -368,8 +368,7 @@ pub fn delete_mem(
     // The `MEM_HAS_INCOMING_REFS` guard (Step 3a) walks incoming edges
     // that can originate in ANY mem — a deferred (lazy, unloaded)
     // sibling's referrers would be invisible over a partial store, and
-    // the delete would destroy a mem an eager boot refuses to (the
-    // third lazy-mount grade demonstrated exactly that). Full load
+    // the delete would destroy a mem an eager boot refuses to. Full load
     // before any destructive adjudication.
     // So it holds every mem's write lock and reads every mem under
     // it, as an entity delete does: a reference a second process added

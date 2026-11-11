@@ -77,7 +77,7 @@ impl Engine {
 
     /// Drop the cached community detection result and the grounded
     /// labelling memo — unless the store still sits at the generation
-    /// each memo was computed from (flywheel W8/01). The keep case is
+    /// each memo was computed from. The keep case is
     /// exactly the batch-rollback path: the restored snapshot restored
     /// the generation with it, so the memo describes the live state
     /// and recomputing it would be pure waste. Every real mutation

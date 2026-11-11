@@ -745,9 +745,9 @@ pub enum EngineError {
     /// metadata, no schema-resolved type to validate against. The
     /// agent must promote the stub to a real entity via `memstead_create`
     /// (stub adoption preserves any incoming references) before
-    /// updating. Pre-Item-02 surfaced as the cryptic
+    /// updating. Without this variant the case surfaces as the cryptic
     /// `UnknownType { name: "" }` cascade — identical symptom to the
-    /// one `StubCannotRelate` was added to replace on `memstead_relate`.
+    /// one `StubCannotRelate` replaces on `memstead_relate`.
     #[error("entity {id} is a stub — promote it to a real entity via memstead_create first")]
     StubNotUpdatable { id: String },
     /// `memstead_rename` target is a stub — stubs do not have a title to

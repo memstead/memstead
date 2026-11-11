@@ -1773,7 +1773,7 @@ fn write_mig_schema(
 /// metadata) plus loadable `mig-a@0.2.0` (identical shape) and
 /// `mig-b@0.1.0` (required enum `status`) in the workspace
 /// schemas dir. Two conformant-under-A entities are created.
-/// The criterion-4 property test (flywheel W8/01): a
+/// The memo property test: a
 /// deterministic, seeded, hand-rolled generator (xorshift64 — the
 /// house discipline, no dependency) drives mutation sequences
 /// across EVERY kind — create, update, relate, delete, rename,

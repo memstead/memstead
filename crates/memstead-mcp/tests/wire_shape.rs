@@ -3605,12 +3605,11 @@ fn read_hash_of(harness: &mut WireHarness, id: &str) -> Value {
     r["structuredContent"]["_hash"].clone()
 }
 
-/// Lazy-mount regression (flywheel W7/01 final grade): `memstead_entity`
+/// Lazy-mount regression: `memstead_entity`
 /// with `include_relations: true` renders INCOMING edges, which can
 /// originate in any mem — so that form must take the full lazy-mount
-/// load. The refuted first cut scoped the reload to the target's mem and
-/// silently dropped incoming edges from unloaded lazy mems (14 of 25 on
-/// this project's own graph). This pins the fix: an incoming cross-mem edge
+/// load. A reload scoped to the target's mem silently drops incoming
+/// edges from unloaded lazy mems. This pins the fix: an incoming cross-mem edge
 /// from a LAZY, not-yet-loaded mem appears in the answer.
 #[test]
 fn full_entity_include_relations_sees_incoming_edges_from_lazy_mems() {

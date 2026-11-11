@@ -1010,7 +1010,7 @@ pub fn build_entity_envelope(
     // previously inserted post-hoc by the MCP handler alone, which left
     // the CLI's `--json` envelope silently unlabelled — a script
     // branching on trust class treated third-party content as
-    // first-party there (cold-start 0-8-0, F9/F13).
+    // first-party there.
     envelope.insert(
         "origin".to_string(),
         serde_json::Value::String(origin.as_wire().to_string()),
@@ -1021,7 +1021,7 @@ pub fn build_entity_envelope(
     // shared envelope layer for the same reason `origin` is: it was first
     // written on the conformance axis alone, which is opt-in, so the plain
     // read — the one an agent actually makes — still reported them as merely
-    // empty (found by the final grade of that fix).
+    // empty.
     //
     // A marker, not a repair: the bytes are unchanged and no fence is closed.
     // `_unread_sections` names the keys whose content is really sitting in

@@ -739,9 +739,9 @@ impl McpServer {
         // (targets live anywhere; an unloaded real target reads as a
         // stub and would be reported as a broken link) and the
         // workspace-global community partition — are only truthful over
-        // a complete store. The second final grade demonstrated 28
-        // false dangling links on a mem-scoped health over a lazy
-        // workspace; a partial-store count presented as truth is the
+        // a complete store. Without the full load a mem-scoped health
+        // over a lazy workspace reports false dangling links; a
+        // partial-store count presented as truth is the
         // forbidden rendering.
         engine.ensure_mems_loaded(None);
         let drift_warnings = engine.reload_if_stale(p.mem.as_deref());

@@ -110,8 +110,8 @@ pub fn canonical_bytes(
         // the export writer, and it is the worst place to freeze an
         // absorption: the archive travels, gets installed elsewhere, and reads
         // clean on the far side because the buried sections are inside a
-        // legitimately closed fence by then (found by the
-        // final grade via `export --format mem` then `install`).
+        // legitimately closed fence by then (seen via `export --format mem`
+        // then `install`).
         if let Some((section, fence)) = entity.sections.iter().find_map(|(k, v)| {
             crate::markdown::closing_fence_if_unterminated(v.trim()).map(|f| (k.clone(), f))
         }) {

@@ -3695,7 +3695,7 @@ fn mem_init_succeeds_without_a_configured_git_identity() {
     assert!(listed.contains("alpha"), "mem not listed: {listed}");
 }
 
-/// Lazy-mount observability (flywheel W7/01, fifth grade): `mem list`
+/// Lazy-mount observability: `mem list`
 /// reports a lazy mem's TRUE entity count — the `full_engine` seam
 /// loads every deferred mem up front, so an unloaded lazy mem is never
 /// rendered as a bare zero indistinguishable from a genuinely empty
@@ -3765,10 +3765,9 @@ fn mem_list_counts_entities_in_lazy_mems() {
     );
 }
 
-/// Sealed-gate finding F6 (flywheel 10-first-session-residue/01): the
-/// README's own sharing example, `memstead export --format mem`, failed
-/// on every workspace `quickstart` produces — the legacy assembly
-/// resolved the mem config against the WORKSPACE root, which only
+/// The README's own sharing example, `memstead export --format mem`,
+/// once failed on every workspace `quickstart` produces — the legacy
+/// assembly resolved the mem config against the WORKSPACE root, which only
 /// coincides with the mem folder in the legacy single-mem layout. The
 /// front door and the hand-off format must not diverge again: the full
 /// quickstart → export → install round trip is pinned here.

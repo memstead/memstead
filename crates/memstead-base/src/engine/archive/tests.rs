@@ -430,7 +430,7 @@ fn export_embeds_anchors_that_install_reads_back() {
     );
 }
 
-/// Publish-time redaction (W6/03): redacting an exported archive's
+/// Publish-time redaction: redacting an exported archive's
 /// anchors passes validation, survives the canonical re-pack, and
 /// installs with the redacted sidecar reading back intact — the
 /// sentinel where the artifact reference was, the trust metadata

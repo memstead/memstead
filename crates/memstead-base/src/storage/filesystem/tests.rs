@@ -25,7 +25,7 @@ fn ctx_for_test<'a>() -> CommitContext<'a> {
 /// `read_entity`: staged upsert → true before any commit, staged
 /// delete → false while the file still sits on disk, and the
 /// committed state answers between transactions — all without
-/// reading bytes (flywheel W7/02 primitive).
+/// reading bytes (the write-time cross-mem target check's primitive).
 #[test]
 fn entity_exists_metadata_probe_and_pending_precedence() {
     use crate::backend::MemBackend;

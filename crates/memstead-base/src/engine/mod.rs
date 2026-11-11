@@ -223,7 +223,7 @@ pub struct Engine {
     /// calls after a successful write. `OnceCell` is `!Sync`; the
     /// engine is `Send` (it is moved into a `Mutex` by every consumer)
     /// but not `Sync`.
-    /// Generation-keyed (flywheel W8/01): the memo carries the store
+    /// Generation-keyed: the memo carries the store
     /// generation it was computed at; the invalidation hook clears it
     /// only when the store has actually moved past that generation —
     /// which is what makes a rolled-back batch (store snapshot
@@ -518,7 +518,7 @@ impl MemForeignMarks {
     }
 }
 
-/// The validity key for derived-structure memos (flywheel W8/01):
+/// The validity key for derived-structure memos:
 /// the store generation (bumped by every store mutation, carried by
 /// `Store::clone` so batch rollback restores it) plus the schemas
 /// epoch (bumped by every change to the engine's schema map). A memo
@@ -535,8 +535,7 @@ pub struct DerivedKey {
 }
 
 /// Discovered storage for a mem that has NO mount record — the
-/// unmounted half of flywheel W7/02's write-time cross-mem target
-/// verification. The workspace layer owns the discovery convention
+/// unmounted half of the write-time cross-mem target verification. The workspace layer owns the discovery convention
 /// (the mem-repo's branch registry, which memstead-base cannot see
 /// without inverting the crate dependency) and hands back a transient
 /// backend to ask plus the mem's schema pin when its config declares
@@ -954,9 +953,9 @@ pub(super) mod test_helpers {
             storage: MountStorage::Archive { path },
             capability: MountCapability::ReadOnly,
             // Eager, matching every production archive-mount site: these
-            // tests pin archive READ semantics over a loaded store. The
-            // lifecycle slot became real (flywheel W7/01) — a `Lazy`
-            // value here would defer the load these tests read through.
+            // tests pin archive READ semantics over a loaded store. A
+            // `Lazy` value here would defer the load these tests read
+            // through.
             // The lazy behaviour has its own tests in `boot.rs`.
             lifecycle: MountLifecycle::Eager,
             cross_linkable: false,

@@ -750,10 +750,10 @@ fn run_mem_filesystem(
     // legacy single-mem layout the two coincide, but in the current
     // (`workspace.toml` + `state/mounts.json`) layout they do not, so
     // `export --format mem` failed on every workspace `quickstart`
-    // produces while the rest of the CLI worked (sealed-gate finding
-    // F6). One exporter for every backend also keeps the typed
-    // refusals backend-symmetric (MEM_CONFIG_INCOMPLETE on a missing
-    // version, F1) without a special-cased mapping.
+    // produces while the rest of the CLI worked. One exporter for
+    // every backend also keeps the typed refusals backend-symmetric
+    // (MEM_CONFIG_INCOMPLETE on a missing version) without a
+    // special-cased mapping.
     let report = engine
         .export_mem_bytes_report(&workspace_mem)
         .map_err(CliError::from_engine_op)?;

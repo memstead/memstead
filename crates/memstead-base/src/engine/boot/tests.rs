@@ -3119,7 +3119,7 @@ fn search_mem_filter_gates_against_visible_roster() {
 
 // ---- Engine::reload_one_mem -----------------------------------
 
-// ---- lazy mounts (flywheel W7/01) -----------------------------
+// ---- lazy mounts ---------------------------------------------
 
 fn lazy_folder_mount(mem: &str, path: std::path::PathBuf) -> Mount {
     Mount {
@@ -3263,12 +3263,10 @@ fn lazy_load_failure_quarantines_typed() {
     assert!(engine.deferred_mems().is_empty());
 }
 
-/// Quarantine-ENTRY invalidation pin (flywheel W8/01, first
-/// grade's refutation): entering quarantine from a failed deferred
-/// load removes the mem's schema (epoch bump) — a search memo
-/// filled beforehand is then stale-keyed and MUST clear, or the
-/// next search trips the memo-key debug_assert (the grade's live
-/// repro). Same rule pinned for the reattach-failure branch by
+/// Quarantine-ENTRY invalidation pin: entering quarantine from a
+/// failed deferred load removes the mem's schema (epoch bump) — a
+/// search memo filled beforehand is then stale-keyed and MUST clear,
+/// or the next search trips the memo-key debug_assert. Same rule pinned for the reattach-failure branch by
 /// re-failing the reattach.
 #[test]
 fn quarantine_entry_invalidates_both_memos() {
@@ -3392,10 +3390,10 @@ fn lazy_load_runs_the_same_validation_gauntlet() {
 /// The destructive guard sees referrers living in DEFERRED mems:
 /// deleting an entity whose incoming references originate in a lazy,
 /// not-yet-loaded mem refuses `HAS_INCOMING_REFS` exactly as an
-/// eager boot refuses it. The third final grade demonstrated the
-/// counterexample live — the scoped reload left the referrer's mem
-/// unloaded and the delete destroyed the entity an eager boot
-/// protects. The guard now takes the full load first.
+/// eager boot refuses it. Without the full load the scoped reload
+/// leaves the referrer's mem unloaded and the delete destroys the
+/// entity an eager boot protects, so the guard takes the full load
+/// first.
 #[test]
 fn delete_guard_sees_referrers_in_deferred_mems() {
     use crate::engine::{DeleteEntityArgs, RelateEntityArgs};
@@ -3478,11 +3476,10 @@ fn delete_guard_sees_referrers_in_deferred_mems() {
 /// The write-time acyclicity guard sees edges living in DEFERRED
 /// mems: an add that closes a cycle THROUGH a lazy, not-yet-loaded
 /// mem refuses `RELATIONSHIP_CYCLE` exactly as an eager boot
-/// refuses it. The fourth final grade demonstrated the
-/// counterexample on a three-mem chain — the mid-path edge lived on
-/// the lazy mem's entity, the walk over the endpoint mems missed
-/// it, the cycle landed, and the next eager boot dropped an
-/// INNOCENT pre-existing edge to break it. A two-mem fixture would
+/// refuses it. The counterexample is a three-mem chain: the
+/// mid-path edge lives on the lazy mem's entity, a walk over the
+/// endpoint mems alone misses it, the cycle lands, and the next eager
+/// boot drops an INNOCENT pre-existing edge to break it. A two-mem fixture would
 /// pass vacuously (relate loads both endpoint mems); three mems
 /// with the middle one lazy is the discriminating shape.
 #[test]
@@ -3571,9 +3568,8 @@ fn acyclicity_guard_sees_edges_in_deferred_mems() {
 /// same full store: a two-entry batch (the shape MCP routes to
 /// `batch_relate`) whose first entry closes a cycle through a
 /// deferred mid-path mem is refused whole, exactly as an eager
-/// boot refuses it. The fifth lazy-mount grade demonstrated the
-/// complement live: without the batch-path full load the cycle
-/// committed silently.
+/// boot refuses it. Without the batch-path full load the cycle
+/// commits silently.
 #[test]
 fn batch_acyclicity_guard_sees_edges_in_deferred_mems() {
     use crate::engine::RelateEntityArgs;
@@ -3687,7 +3683,7 @@ fn batch_acyclicity_guard_sees_edges_in_deferred_mems() {
     );
 }
 
-/// Write-time cross-mem target verification (flywheel W7/02): a
+/// Write-time cross-mem target verification: a
 /// relate into a DEFERRED Write mem verifies the target against
 /// storage without loading the mem. A storage-verified target is
 /// admitted with a LoadTime stub and NO auto-stub warning (the
@@ -3773,8 +3769,7 @@ fn relate_into_deferred_mem_verifies_against_storage_without_load() {
     );
 }
 
-/// The read-only contract, now answerable without load (flywheel
-/// W7/02): an entity PRESENT in a deferred read-only mem's storage
+/// The read-only contract, answerable without load: an entity PRESENT in a deferred read-only mem's storage
 /// is admitted — the refusal never fires merely because the mem is
 /// unloaded — and an ABSENT one refuses with the existing typed
 /// error. The mem stays deferred through both.

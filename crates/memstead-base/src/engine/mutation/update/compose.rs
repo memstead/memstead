@@ -696,7 +696,7 @@ fn apply_declare_relations(
             .get(&rel.target)
             .map(|e| e.entity_type.clone())
             .filter(|t| !t.is_empty());
-        // Deferred-mem target (flywheel W7/02): the real type comes
+        // Deferred-mem target: the real type comes
         // from the one resolved blob, never from loading the mem.
         let target_type = match target_type {
             Some(t) => Some(t),

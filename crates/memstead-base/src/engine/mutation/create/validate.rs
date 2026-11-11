@@ -325,7 +325,7 @@ impl Engine {
                 .get(&rel.target)
                 .map(|e| e.entity_type.clone())
                 .filter(|t| !t.is_empty());
-            // Deferred-mem target (flywheel W7/02): the store cannot
+            // Deferred-mem target: the store cannot
             // answer for an unloaded mem — the real type comes from
             // the one resolved blob, without loading the mem. `None`
             // for non-deferred or absent targets, unchanged posture.

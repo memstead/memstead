@@ -258,7 +258,7 @@ impl Engine {
         };
 
         self.invalidate_communities();
-        // Incremental (flywheel W8/01): the deleted id is removed from
+        // Incremental: the deleted id is removed from
         // its index whether it left the store or demoted to a Residual
         // stub (stubs are excluded either way); GC'd orphan stubs were
         // never indexed.

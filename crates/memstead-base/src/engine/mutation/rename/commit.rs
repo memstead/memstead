@@ -253,7 +253,7 @@ impl Engine {
             }
 
             let fallback = engine_fallback_type();
-            // Incremental (flywheel W8/01): the touched set is the OLD id
+            // Incremental: the touched set is the OLD id
             // (its document must leave the index) plus every re-parsed
             // entity — the renamed entity at its new id and each rewritten
             // referrer.

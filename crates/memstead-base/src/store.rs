@@ -40,7 +40,7 @@ pub struct InEdge {
 
 /// The graph store. Three maps: nodes, outgoing edges, incoming edges —
 /// plus the store GENERATION, a monotonic counter every mutating method
-/// bumps (flywheel W8/01). Derived-structure memos key on it: a memo
+/// bumps. Derived-structure memos key on it: a memo
 /// computed at generation N is current exactly while the store still
 /// reports N.
 ///

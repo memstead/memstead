@@ -149,7 +149,7 @@ impl Engine {
         // `stage_prepared_relate` so prepare stays store-neutral.
         // The auto-stub surfaces as a typed `AutoStubCreated` warning
         // on the response's `warnings[]` — the deprecated top-level
-        // `stub_warning` field that pre-Item-03 carried this fact has
+        // `stub_warning` field that once carried this fact has
         // been removed, so every diagnostic now follows the uniform
         // `{ code, message, details }` warning shape.
         let mut stub_target: Option<EntityId> = None;

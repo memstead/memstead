@@ -3,8 +3,8 @@
 //! The engine holds `search_indexes: HashMap<String, MemIndex>`, one
 //! per mem in its schema map, each with a long-lived `IndexWriter`,
 //! lazily built on first search behind a generation-keyed memo.
-//! Maintenance is INCREMENTAL on the single-mutation paths (flywheel
-//! W8/01): `Engine::maintain_search_indexes` replaces or removes
+//! Maintenance is INCREMENTAL on the single-mutation paths:
+//! `Engine::maintain_search_indexes` replaces or removes
 //! exactly the touched documents and advances the memo key; batch,
 //! reload, and lifecycle paths — plus the named fallbacks (a
 //! schema-shape change, any index error) — drop the whole map for a

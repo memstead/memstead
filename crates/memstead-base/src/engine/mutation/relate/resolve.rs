@@ -135,7 +135,7 @@ impl Engine {
         } else {
             // Loaded mems answer from the schema catalogue; an
             // unmounted mem with discoverable storage answers from
-            // its stored config's pin (flywheel W7/02) — see
+            // its stored config's pin — see
             // `target_schema_ref_for_routing`.
             crate::engine::mutation::target_schema_ref_for_routing(self, &target_mem)
         };
@@ -174,8 +174,8 @@ impl Engine {
             .get(&args.target)
             .map(|e| e.entity_type.clone())
             .filter(|t| !t.is_empty());
-        // Storage verification for a target in a DEFERRED mem
-        // (flywheel W7/02): the store cannot answer for an unloaded
+        // Storage verification for a target in a DEFERRED mem:
+        // the store cannot answer for an unloaded
         // mem, so existence comes from the cheap storage probe and —
         // when the shape check will need it — the type from the one
         // resolved blob. Neither triggers the mem's load.

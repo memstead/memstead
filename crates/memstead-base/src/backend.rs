@@ -79,8 +79,8 @@ pub trait MemBackend: Send + Sync {
     fn read_entity(&self, rel_path: &Path) -> Result<Option<Vec<u8>>, BackendError>;
 
     /// Does storage hold an entity at `rel_path`? A pure existence
-    /// probe — the write-time cross-mem target check's primitive
-    /// (flywheel W7/02): callers verifying a reference into a mem that
+    /// probe — the write-time cross-mem target check's primitive:
+    /// callers verifying a reference into a mem that
     /// is not loaded ask storage directly instead of forcing the mem's
     /// full load. The answer observes the same pending-buffer
     /// precedence as [`Self::read_entity`] (a staged upsert exists, a

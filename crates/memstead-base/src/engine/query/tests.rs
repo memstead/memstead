@@ -1658,7 +1658,7 @@ fn archive_mount_returns_sealed_indirectly_through_backend_layer() {
 // entities and one relate edge — enough to exercise both the
 // graph-query path and the cache-invalidation hooks.
 
-/// Generation-keyed memos (flywheel W8/01). Four claims: repeated
+/// Generation-keyed memos. Four claims: repeated
 /// reads serve the memo; a REFUSED engine batch leaves the memo
 /// untouched (the refusal path calls no hook — pinned so it stays
 /// cheap); a memo computed from an INTERIM (mid-batch) state never
