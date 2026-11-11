@@ -618,9 +618,9 @@ impl Engine {
             },
             MountStorage::Folder { .. } | MountStorage::InMemory => {
                 limitations.push(
-                    "changelog-backed history: rename records carry only the post-rename id \
-                     (prior-id chains are not stitchable) and batch mutations record no \
-                     per-entity attribution on this backend"
+                    "changelog-backed history: a rename record written before the engine \
+                     recorded the prior id ends the chain there, and batch mutations record \
+                     no per-entity attribution on this backend"
                         .to_string(),
                 );
                 let records = m
@@ -811,8 +811,24 @@ pub(crate) fn filter_notes_for_entity(
             // A proposal merge that lists this id under `Created:`
             // brought it into the target: its creation, same stop.
             let created_by_merge = n.created_ids.iter().any(|id| id == &current);
-            touch.created_by_merge = created_by_merge;
+            // A merge that landed a fork rename creates the new id from
+            // the old one: the story continues under the old id.
+            let renamed_from = n
+                .merge_renames
+                .iter()
+                .filter_map(|pair| parse_rename_pair(pair))
+                .find(|(_, new)| new == &current)
+                .map(|(old, _)| old);
+            touch.created_by_merge = created_by_merge && renamed_from.is_none();
+            if let Some(old) = &renamed_from {
+                touch.renamed_from = Some(old.clone());
+                touch.renamed_to = Some(current.clone());
+            }
             out.push(touch);
+            if let Some(old) = renamed_from {
+                current = old;
+                continue;
+            }
             // A batch-create that lists this entity is its creation —
             // nothing older can touch it, same stop as single create.
             if n.tool_verb.as_deref() == Some("batch-create") || created_by_merge {
@@ -837,48 +853,54 @@ fn filter_provenance_for_entity(
     entity_id: &str,
     records: &[crate::provenance::Provenance],
 ) -> Vec<EntityTouch> {
-    let matching: Vec<&crate::provenance::Provenance> = records
-        .iter()
-        .filter(|p| p.entity.as_deref() == Some(entity_id))
-        .collect();
-    let birth = matching
-        .iter()
-        .rposition(|p| matches!(p.kind, crate::provenance::ProvenanceKind::Create))
-        .unwrap_or(0);
-    let mut out: Vec<EntityTouch> = matching[birth..]
-        .iter()
-        .map(|p| {
-            let is_rename = matches!(p.kind, crate::provenance::ProvenanceKind::Rename);
-            EntityTouch {
-                reference: crate::filesystem::changelog::format_rfc3339_utc(p.timestamp),
-                timestamp: p
-                    .timestamp
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0),
-                id_at_touch: entity_id.to_string(),
-                verb: Some(p.kind.as_str().to_string()),
-                subject: None,
-                note: p.note.clone(),
-                actor: Some(p.actor.as_trailer().to_string()),
-                client: p
-                    .client
-                    .as_ref()
-                    .map(|c| format!("{}@{}", c.name, c.version)),
-                tool: None,
-                renamed_from: None,
-                renamed_to: is_rename.then(|| entity_id.to_string()),
-                batch_entity_ids: Vec::new(),
-                logical_op: p.logical_operation_id.clone(),
-                role: p.role.as_trailer().map(str::to_string),
-                identity: p.identity.clone(),
-                merged_by: None,
-                proposal: None,
-                created_by_merge: false,
-            }
-        })
-        .collect();
-    out.reverse();
+    // Newest first, following each rename line back to the id it left,
+    // and stopping at the creation of whichever id the walk is on.
+    let mut current = entity_id.to_string();
+    let mut out: Vec<EntityTouch> = Vec::new();
+    for p in records.iter().rev() {
+        if p.entity.as_deref() != Some(current.as_str()) {
+            continue;
+        }
+        let is_rename = matches!(p.kind, crate::provenance::ProvenanceKind::Rename);
+        let is_create = matches!(p.kind, crate::provenance::ProvenanceKind::Create);
+        let renamed_from = if is_rename {
+            p.renamed_from.clone()
+        } else {
+            None
+        };
+        out.push(EntityTouch {
+            reference: crate::filesystem::changelog::format_rfc3339_utc(p.timestamp),
+            timestamp: p
+                .timestamp
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+            id_at_touch: current.clone(),
+            verb: Some(p.kind.as_str().to_string()),
+            subject: None,
+            note: p.note.clone(),
+            actor: Some(p.actor.as_trailer().to_string()),
+            client: p
+                .client
+                .as_ref()
+                .map(|c| format!("{}@{}", c.name, c.version)),
+            tool: None,
+            renamed_from: renamed_from.clone(),
+            renamed_to: is_rename.then(|| current.clone()),
+            batch_entity_ids: Vec::new(),
+            logical_op: p.logical_operation_id.clone(),
+            role: p.role.as_trailer().map(str::to_string),
+            identity: p.identity.clone(),
+            merged_by: None,
+            proposal: None,
+            created_by_merge: false,
+        });
+        if let Some(old) = renamed_from {
+            current = old;
+        } else if is_create {
+            break;
+        }
+    }
     out
 }
 
@@ -914,6 +936,7 @@ mod tests {
             proposal: None,
             created_ids: Vec::new(),
             co_writers: Vec::new(),
+            merge_renames: Vec::new(),
             unattributed_writes: Vec::new(),
             timestamp: 1,
         };
@@ -967,6 +990,7 @@ mod tests {
             proposal: Some("f@b".into()),
             created_ids: created.into_iter().map(str::to_string).collect(),
             co_writers: Vec::new(),
+            merge_renames: Vec::new(),
             unattributed_writes: Vec::new(),
             timestamp: 2,
         };
@@ -988,6 +1012,7 @@ mod tests {
             proposal: None,
             created_ids: Vec::new(),
             co_writers: Vec::new(),
+            merge_renames: Vec::new(),
             unattributed_writes: Vec::new(),
             timestamp: 1,
         };
@@ -1119,7 +1144,7 @@ mod tests {
             report
                 .limitations
                 .iter()
-                .any(|l| l.contains("rename records carry only the post-rename id")),
+                .any(|l| l.contains("batch mutations record no per-entity attribution")),
             "folder limitations must be stated: {:?}",
             report.limitations
         );
@@ -1128,7 +1153,7 @@ mod tests {
     }
 
     #[test]
-    fn folder_rename_truncates_visibly_not_silently() {
+    fn folder_rename_follows_the_prior_id_to_the_creation() {
         let tmp = tempfile::TempDir::new().unwrap();
         let mut engine = folder_engine(&tmp);
         let id = create(&mut engine, "Before Rename", "born");
@@ -1150,21 +1175,14 @@ mod tests {
             .unwrap();
         let new_id = outcome.new_id.0;
 
-        // The folder changelog records renames under the post-rename
-        // id only — the story under the new id starts at the rename
-        // and SAYS so (never an unexplained short history).
+        // The rename line names the id it left: the story under the
+        // new id runs through the rename back to the creation.
         let report = engine.entity_history("specs", &new_id, None, None).unwrap();
         assert_eq!(report.touches[0].verb.as_deref(), Some("rename"));
-        assert!(report.touches[0].renamed_from.is_none());
-        match &report.story_start {
-            super::StoryStart::Truncated { reason } => {
-                assert!(
-                    reason.contains("not the entity's creation"),
-                    "reason must explain the truncation: {reason}"
-                );
-            }
-            other => panic!("expected visible truncation, got {other:?}"),
-        }
+        assert_eq!(report.touches[0].renamed_from.as_deref(), Some(id.as_str()));
+        assert_eq!(report.touches[1].verb.as_deref(), Some("create"));
+        assert_eq!(report.touches[1].id_at_touch, id);
+        assert_eq!(report.story_start, super::StoryStart::Recorded);
     }
 
     #[test]

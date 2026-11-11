@@ -114,6 +114,9 @@ struct Adopted {
     landings: Vec<Landing>,
     /// The owner's final body, for `adopt_with_changes`.
     amend: Option<DispositionBody>,
+    /// The target id the fork renamed this entry from, when the merge
+    /// lands that rename.
+    renamed_from: Option<String>,
 }
 
 impl Engine {
@@ -370,14 +373,16 @@ impl Engine {
             loop {
                 let before = aliases.len();
                 for n in &notes {
-                    if let Some((old_id, new_id)) = n
+                    // A rename commit, or a merge that landed one.
+                    let pairs = n
                         .entity_id
-                        .as_deref()
-                        .and_then(crate::engine::history::parse_rename_pair)
-                        && aliases.contains(&new_id)
-                        && !aliases.contains(&old_id)
-                    {
-                        aliases.push(old_id);
+                        .iter()
+                        .chain(n.merge_renames.iter())
+                        .filter_map(|f| crate::engine::history::parse_rename_pair(f));
+                    for (old_id, new_id) in pairs {
+                        if aliases.contains(&new_id) && !aliases.contains(&old_id) {
+                            aliases.push(old_id);
+                        }
                     }
                 }
                 if aliases.len() == before {
@@ -572,6 +577,10 @@ impl Engine {
                     role,
                     landings,
                     amend: slot.body.clone(),
+                    renamed_from: (slot.entry.status == ProposalChange::Renamed)
+                        .then_some(slot.entry.renamed_from.as_deref())
+                        .flatten()
+                        .map(|from| EntityId::new(&target, from).to_string()),
                 });
             }
             Ok(())
@@ -1023,6 +1032,14 @@ impl Engine {
                 created: created.clone(),
                 co_writers,
                 unattributed,
+                renamed: group
+                    .iter()
+                    .filter_map(|a| {
+                        a.renamed_from
+                            .clone()
+                            .map(|old| (old, EntityId::new(&target, &a.slug).to_string()))
+                    })
+                    .collect(),
             });
             let subject = format!("memstead: proposal-merge {}", brief.proposal_id);
             let sha = match self.mounts[target_mount]
@@ -1112,6 +1129,7 @@ impl Engine {
                 created: Vec::new(),
                 co_writers: Vec::new(),
                 unattributed: Vec::new(),
+                renamed: Vec::new(),
             });
             let subject = format!("memstead: proposal-merge {}", brief.proposal_id);
             let sha = match self.mounts[target_mount]
@@ -1222,6 +1240,7 @@ impl Engine {
                 created: Vec::new(),
                 co_writers: Vec::new(),
                 unattributed: Vec::new(),
+                renamed: Vec::new(),
             });
             let subject = format!("memstead: proposal-amend {}", brief.proposal_id);
             let sha = match self.mounts[target_mount]

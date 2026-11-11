@@ -225,6 +225,11 @@ pub struct ProposalTrailers {
     /// one `Unattributed-Writer: <id>` trailer each, read as a write with
     /// no identity (the independence reading then cannot confirm).
     pub unattributed: Vec<String>,
+    /// `old → new` id pairs: an entry the fork renamed, landed by this
+    /// commit as the old id's deletion and the new id's creation. One
+    /// `Renamed: <old> → <new>` trailer each, so the landed entry's story
+    /// continues the old id's.
+    pub renamed: Vec<(String, String)>,
 }
 
 impl<'a> CommitContext<'a> {
@@ -420,6 +425,9 @@ pub fn format_commit_message(prose: &str, ctx: &CommitContext<'_>) -> String {
         }
         for id in &p.unattributed {
             trailers.push(format!("Unattributed-Writer: {id}"));
+        }
+        for (old, new) in &p.renamed {
+            trailers.push(format!("Renamed: {old} → {new}"));
         }
     }
     let note_body = ctx.note.as_deref().map(str::trim).filter(|n| !n.is_empty());

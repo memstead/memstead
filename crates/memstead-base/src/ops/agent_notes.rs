@@ -83,6 +83,10 @@ pub struct CommitNote {
     /// commit: landed entities a fork write without an identity touched.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub unattributed_writes: Vec<String>,
+    /// `old → new` pairs from the `Renamed:` trailers of a proposal
+    /// merge commit: fork renames it landed. Empty on every other commit.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub merge_renames: Vec<String>,
     /// Commit timestamp in seconds since unix epoch.
     pub timestamp: i64,
 }

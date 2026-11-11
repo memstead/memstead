@@ -1240,3 +1240,170 @@ fn a_renamer_who_rewrote_a_fork_referrer_cannot_confirm_it_after_a_merge() {
         String::from_utf8_lossy(&out.stdout)
     );
 }
+
+/// A fork renames an entry and changes nothing else; a proposal merge
+/// lands the rename. The entry's story continues the old id's, so its
+/// creator still wrote it and cannot confirm it, on either gate kind.
+#[test]
+fn the_creator_cannot_confirm_after_a_merge_lands_a_fork_rename() {
+    for x_kind in [false, true] {
+        let gate = if x_kind {
+            SELF_GATE.to_string()
+        } else {
+            SELF_GATE.replace("x-approval", "verification")
+        };
+        let ws = seed_on(&gate, true);
+        let root = ws.path();
+        must(
+            root,
+            &["workspace", "allow-create", "--schema", "*", "*", "--quiet"],
+        );
+        create(root, "identity-a", "plan", "The Plan", None);
+        must(
+            root,
+            &[
+                "mem",
+                "fork",
+                "plans",
+                "pfork",
+                "--identity",
+                "identity-a",
+                "--quiet",
+            ],
+        );
+        must(
+            root,
+            &[
+                "rename",
+                "pfork--the-plan",
+                "Other Plan",
+                "--auto-hash",
+                "--identity",
+                "identity-r",
+                "--quiet",
+            ],
+        );
+        let brief = must(root, &["proposal", "brief", "pfork", "--json", "--quiet"]);
+        let mut v: serde_json::Value = serde_json::from_slice(&brief.stdout).unwrap();
+        let slugs: Vec<String> = v["dispositions"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        for s in &slugs {
+            v["dispositions"][s]["disposition"] = "adopt".into();
+        }
+        let file = root.join("rr.json");
+        std::fs::write(&file, v.to_string()).unwrap();
+        must(
+            root,
+            &[
+                "proposal",
+                "merge",
+                "pfork",
+                "--dispositions",
+                file.to_str().unwrap(),
+                "--identity",
+                "identity-m",
+                "--quiet",
+            ],
+        );
+        let kind = if x_kind { "x-approval" } else { "verification" };
+        must(
+            root,
+            &[
+                "check",
+                "plans--other-plan",
+                "--verdict",
+                "ok",
+                "--method",
+                "t",
+                "--kind",
+                kind,
+                "--identity",
+                "identity-a",
+                "--role",
+                "checker",
+                "--quiet",
+            ],
+        );
+        let out = cli(
+            root,
+            &[
+                "update",
+                "plans--other-plan",
+                "--metadata",
+                "status=complete",
+                "--auto-hash",
+                "--identity",
+                "identity-e",
+                "--json",
+                "--quiet",
+            ],
+        );
+        assert!(
+            !out.status.success(),
+            "{kind}: the creator confirmed its own entry after a merge landed a fork rename: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        let prov = must(
+            root,
+            &[
+                "entity",
+                "plans--other-plan",
+                "--provenance",
+                "--json",
+                "--quiet",
+            ],
+        );
+        let v: serde_json::Value = serde_json::from_slice(&prov.stdout).unwrap();
+        assert_eq!(
+            v.pointer("/mutation_provenance/created_by/identity"),
+            Some(&serde_json::json!("identity-a")),
+            "{v}"
+        );
+    }
+}
+
+/// The first author is the creating write's identity on every backend,
+/// after a rename too.
+#[test]
+fn the_first_author_survives_a_rename_on_both_backends() {
+    for git_branch in [false, true] {
+        let ws = seed_on(SELF_GATE, git_branch);
+        let root = ws.path();
+        create(root, "identity-a", "plan", "The Plan", None);
+        must(
+            root,
+            &[
+                "rename",
+                "plans--the-plan",
+                "Other Plan",
+                "--auto-hash",
+                "--identity",
+                "identity-r",
+                "--quiet",
+            ],
+        );
+        let prov = must(
+            root,
+            &[
+                "entity",
+                "plans--other-plan",
+                "--provenance",
+                "--json",
+                "--quiet",
+            ],
+        );
+        let v: serde_json::Value = serde_json::from_slice(&prov.stdout).unwrap();
+        let created = v
+            .pointer("/mutation_provenance/created_by/identity")
+            .cloned();
+        assert_eq!(
+            created,
+            Some(serde_json::json!("identity-a")),
+            "git_branch {git_branch}: {v}"
+        );
+    }
+}

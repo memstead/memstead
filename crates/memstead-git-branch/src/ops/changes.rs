@@ -505,6 +505,7 @@ mod tests {
             proposal: None,
             created_ids: Vec::new(),
             co_writers: Vec::new(),
+            merge_renames: Vec::new(),
             unattributed_writes: Vec::new(),
             timestamp: 0,
         }
@@ -586,6 +587,7 @@ mod tests {
             proposal: None,
             created_ids: Vec::new(),
             co_writers: Vec::new(),
+            merge_renames: Vec::new(),
             unattributed_writes: Vec::new(),
             timestamp: 0,
         };

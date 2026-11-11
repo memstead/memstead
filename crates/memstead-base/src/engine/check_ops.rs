@@ -1844,6 +1844,13 @@ write_rules: []
             .expect_err("a retype onto the gate changes the type");
         assert!(err.to_string().contains("block-tier constraint"), "{err}");
         assert_eq!(engine.get_entity(&memo).unwrap().content_hash, stored);
+        // The wire details name the violation, not a null.
+        let problem = &err.details()["problems"][0];
+        assert_eq!(problem["code"], "CONSTRAINT_UNSATISFIED", "{problem}");
+        assert_eq!(
+            problem["violations"][0]["kind"], "transition_requires_self_check",
+            "{problem}"
+        );
     }
 
     /// A rename that rewrites a link inside another entry writes that

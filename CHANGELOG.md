@@ -38,12 +38,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   every write at or before their `ts`. Touches are ordered by write
   order on every backend, so the first author is the creating write's
   identity even when two writes share a second, and a rename on a folder
-  mem keeps the writers before it in the entity's story; a
+  mem keeps the writers before it in the entity's story (and
+  `entity --provenance` now names the creator after a rename on a folder
+  mem too, where `created_by` was absent before); a
   rename records its writer on every entry whose links it rewrites, and a
   proposal merge names every fork identity that wrote a landed entity in
   a `Co-Writer:` trailer (carried on through a fork of a fork and across
   renames on the fork, a renamer who rewrote a link inside the landed
-  entry included; a fork write
+  entry included; a merge that lands a fork rename names the pair in a
+  `Renamed: <old> → <new>` trailer, so the landed entry's story and its
+  first author continue the old id's; a fork write
   without an identity rides as `Unattributed-Writer:` and leaves the
   reading `unconfirmable`). A merger who adopts a
   proposal with changes therefore reads `self_checked` on the check it
@@ -61,7 +65,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   record carried to the new hash. A later edit carries nothing: the
   entity reads `check_stale` and the health constraints axis reports the
   gate as a standing violation until a new check is recorded or the
-  value is left. A transition write that also changes content refuses
+  value is left. A retype refused on a constraint or a required edge now
+  names the violation in `details.problems` (it serialized as `null`).
+  A transition write that also changes content refuses
   `CONSTRAINT_UNSATISFIED`, the violation naming the changed content in
   `changed`; fields a schema requires at the gated value are therefore
   written before the check. Conflict resolution now runs both gates on

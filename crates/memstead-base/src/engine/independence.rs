@@ -363,6 +363,11 @@ impl Engine {
                                 },
                             );
                         }
+                        // A merge that landed a fork rename joins the new
+                        // id's story to the old id's, as a rename does.
+                        for pair in &n.merge_renames {
+                            out.absorb(pair, touch.clone());
+                        }
                         for entity in &n.unattributed_writes {
                             out.absorb(
                                 entity,

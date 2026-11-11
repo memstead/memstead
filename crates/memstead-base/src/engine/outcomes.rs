@@ -724,8 +724,12 @@ pub enum RetypeProblem {
         also_from: String,
     },
     EdgeShape(RetypeEdge),
-    RequiredOutgoingUnsatisfied(Vec<crate::ops::MissingRequiredOutgoingBlock>),
-    ConstraintUnsatisfied(Vec<crate::ops::health::UnsatisfiedConstraint>),
+    RequiredOutgoingUnsatisfied {
+        blocks: Vec<crate::ops::MissingRequiredOutgoingBlock>,
+    },
+    ConstraintUnsatisfied {
+        violations: Vec<crate::ops::health::UnsatisfiedConstraint>,
+    },
 }
 
 impl RetypeProblem {
@@ -739,8 +743,8 @@ impl RetypeProblem {
             RetypeProblem::SectionMapSourceMissing { .. } => "SECTION_MAP_SOURCE_MISSING",
             RetypeProblem::SectionMapCollision { .. } => "SECTION_MAP_COLLISION",
             RetypeProblem::EdgeShape(_) => "INVALID_REL_SHAPE",
-            RetypeProblem::RequiredOutgoingUnsatisfied(_) => "MISSING_REQUIRED_OUTGOING",
-            RetypeProblem::ConstraintUnsatisfied(_) => "CONSTRAINT_UNSATISFIED",
+            RetypeProblem::RequiredOutgoingUnsatisfied { .. } => "MISSING_REQUIRED_OUTGOING",
+            RetypeProblem::ConstraintUnsatisfied { .. } => "CONSTRAINT_UNSATISFIED",
         }
     }
 
@@ -788,11 +792,11 @@ impl RetypeProblem {
                 e.to,
                 if e.cross_mem { " (cross-mem)" } else { "" }
             ),
-            RetypeProblem::RequiredOutgoingUnsatisfied(blocks) => format!(
+            RetypeProblem::RequiredOutgoingUnsatisfied { blocks } => format!(
                 "{} block-tier required_outgoing block(s) of the target type unsatisfied",
                 blocks.len()
             ),
-            RetypeProblem::ConstraintUnsatisfied(v) => {
+            RetypeProblem::ConstraintUnsatisfied { violations: v } => {
                 format!(
                     "{} block-tier constraint(s) of the target type violated",
                     v.len()

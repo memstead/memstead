@@ -297,7 +297,7 @@ impl Engine {
                 .cloned()
                 .collect();
             if !blocked.is_empty() {
-                problems.push(RetypeProblem::RequiredOutgoingUnsatisfied(blocked));
+                problems.push(RetypeProblem::RequiredOutgoingUnsatisfied { blocks: blocked });
             }
             warnings.push(WarningHint::MissingRequiredOutgoing {
                 entity_type: args.target_type.clone(),
@@ -344,7 +344,9 @@ impl Engine {
                     .cloned()
                     .collect();
                 if !blocked.is_empty() {
-                    problems.push(RetypeProblem::ConstraintUnsatisfied(blocked));
+                    problems.push(RetypeProblem::ConstraintUnsatisfied {
+                        violations: blocked,
+                    });
                 }
                 warnings.push(WarningHint::ConstraintUnsatisfied {
                     entity_type: args.target_type.clone(),

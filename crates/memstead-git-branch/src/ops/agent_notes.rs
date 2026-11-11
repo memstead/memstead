@@ -95,6 +95,8 @@ pub struct ParsedCommit {
     pub co_writers: Vec<(String, String)>,
     /// Ids from the `Unattributed-Writer:` trailers.
     pub unattributed_writes: Vec<String>,
+    /// `old → new` pairs from the `Renamed:` trailers.
+    pub merge_renames: Vec<String>,
 }
 
 /// Parse one commit body — subject on the first line, optional note
@@ -143,6 +145,7 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
     let mut created_ids: Vec<String> = Vec::new();
     let mut co_writers: Vec<(String, String)> = Vec::new();
     let mut unattributed_writes: Vec<String> = Vec::new();
+    let mut merge_renames: Vec<String> = Vec::new();
     if let Some(start) = first_trailer_idx {
         for line in &body_lines[start..] {
             if let Some((key, value)) = split_trailer(line) {
@@ -161,6 +164,9 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
                     "Merged-By" if merged_by.is_none() => merged_by = Some(value.to_string()),
                     "Proposal" if proposal.is_none() => proposal = Some(value.to_string()),
                     "Created" if created_ids.is_empty() => created_ids = split_id_list(value),
+                    "Renamed" if !value.trim().is_empty() => {
+                        merge_renames.push(value.trim().to_string());
+                    }
                     "Unattributed-Writer" if !value.trim().is_empty() => {
                         unattributed_writes.push(value.trim().to_string());
                     }
@@ -194,6 +200,7 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
         created_ids,
         co_writers,
         unattributed_writes,
+        merge_renames,
     }
 }
 
@@ -389,6 +396,7 @@ pub fn agent_notes_since(
             created_ids: parsed.created_ids,
             co_writers: parsed.co_writers,
             unattributed_writes: parsed.unattributed_writes,
+            merge_renames: parsed.merge_renames,
             timestamp,
         });
     }
@@ -512,6 +520,7 @@ mod tests {
             proposal: Some(memstead_base::vcs::ProposalTrailers {
                 co_writers: Vec::new(),
                 unattributed: Vec::new(),
+                renamed: vec![("specs--old".to_string(), "specs--eta".to_string())],
                 proposal: "specs-fork@abc".to_string(),
                 merged_by: "owner-o1".to_string(),
                 created: vec!["specs--eta".to_string()],
@@ -537,6 +546,7 @@ mod tests {
         assert_eq!(parsed.proposal.as_deref(), Some("specs-fork@abc"));
         assert_eq!(parsed.created_ids, vec!["specs--eta"]);
         assert_eq!(parsed.entity_ids, vec!["specs--beta", "specs--eta"]);
+        assert_eq!(parsed.merge_renames, vec!["specs--old → specs--eta"]);
 
         let plain = parse_commit_message(&crate::vcs::format_commit_message(
             "memstead: update specs--beta",
