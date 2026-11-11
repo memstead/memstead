@@ -46,6 +46,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The scaffold, the gates brief and three messages say what the engine
+  does.** `memstead gates` now lists `transition_requires_self_check`
+  gates beside `transition_requires_checks` ones, each open entity with
+  the standing of its own check, so a planning bundle's own completion
+  gate shows. The `schema new` type file marks every key `schema
+  validate` requires (`updatable_fields`, `health_required_fields`,
+  `staleness_threshold_days`, the type's `write_rules`, a section's
+  `search_weight` and one `catch_all` section, a field's `description`
+  and `field_type`), so each key it leaves unmarked can be deleted. A
+  value that misses a `value_pattern` names the field's declared type
+  (`number`) instead of `String`. `due --help` lists `--today`.
+  `memstead schema <built-in>` renders, after the sealed README, the
+  steps that turn an installed copy into a package you author (install,
+  copy, remove the seal marker, rename, `schema migrate --write`,
+  validate); a test runs them for every built-in.
+
 - **One spelling per concept in the schema language (breaking).** A
   constraint names a direction `out` / `in` and a relation set
   `relationships` in every form: `status_propagation` and

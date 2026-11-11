@@ -1,5 +1,6 @@
 //! The gates brief — the engine-rendered standing of every declared
-//! `transition_requires_checks` gate.
+//! gated transition: `transition_requires_checks` (the related entities'
+//! checks) and `transition_requires_self_check` (the entity's own check).
 //!
 //! For each mounted mem whose schema declares the constraint on at
 //! least one type, the brief lists every non-stub entity of a gated
@@ -59,7 +60,11 @@ impl Engine {
             let mut gated: Vec<(&str, &ConstraintDef)> = Vec::new();
             for td in schema.types.values() {
                 for c in &td.constraints {
-                    if matches!(c, ConstraintDef::TransitionRequiresChecks { .. }) {
+                    if matches!(
+                        c,
+                        ConstraintDef::TransitionRequiresChecks { .. }
+                            | ConstraintDef::TransitionRequiresSelfCheck { .. }
+                    ) {
                         gated.push((td.name.as_str(), c));
                     }
                 }
@@ -75,6 +80,74 @@ impl Engine {
             lines.push(String::new());
 
             for (type_name, c) in &gated {
+                // The entity's own check: its standing is the coverage.
+                if let ConstraintDef::TransitionRequiresSelfCheck {
+                    field,
+                    to_value,
+                    check_kind,
+                    ..
+                } = c
+                {
+                    lines.push(format!(
+                        "Gate: `{type_name}` — `{field}: {to_value}` requires a fresh, independent \
+                         confirming `{check_kind}` check record on the entity itself."
+                    ));
+                    lines.push(String::new());
+                    let mut entities: Vec<_> = self
+                        .store
+                        .all_entities()
+                        .filter(|e| e.mem == mem && !e.stub && e.entity_type == *type_name)
+                        .collect();
+                    entities.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+                    let mut closed: Vec<String> = Vec::new();
+                    let mut open: Vec<String> = Vec::new();
+                    for e in entities {
+                        let value = match e.metadata.get(field.as_str()) {
+                            Some(MetadataValue::String(s)) => s.clone(),
+                            Some(v) => v.to_frontmatter_string(),
+                            None => String::new(),
+                        };
+                        if value == *to_value {
+                            closed.push(format!("`{}`", e.id.0));
+                            continue;
+                        }
+                        let standing = checks(e, check_kind);
+                        let coverage = if standing.confirms() {
+                            format!("own `{check_kind}` check confirmed — gate satisfiable")
+                        } else {
+                            format!(
+                                "own `{check_kind}` check unconfirmed ({})",
+                                standing.label()
+                            )
+                        };
+                        open.push(format!(
+                            "- `{}` — {field}: {} — {coverage}",
+                            e.id.0,
+                            if value.is_empty() {
+                                "(unset)"
+                            } else {
+                                value.as_str()
+                            },
+                        ));
+                    }
+                    lines.push(format!(
+                        "Closed (at `{to_value}`): {}",
+                        if closed.is_empty() {
+                            "none".to_string()
+                        } else {
+                            closed.join(", ")
+                        }
+                    ));
+                    lines.push(String::new());
+                    if open.is_empty() {
+                        lines.push("Open: none — every gated entity stands closed.".to_string());
+                    } else {
+                        lines.push("Open:".to_string());
+                        lines.extend(open);
+                    }
+                    lines.push(String::new());
+                    continue;
+                }
                 let ConstraintDef::TransitionRequiresChecks {
                     field,
                     to_value,
@@ -249,12 +322,16 @@ impl Engine {
             out.push_str(match mem_filter {
                 Some(f) => {
                     sections.push(format!(
-                        "No `transition_requires_checks` gate declared by the schema of `{f}` \
-                         (or the mem is not mounted)."
+                        "No gated transition (`transition_requires_checks` or \
+                         `transition_requires_self_check`) declared by the schema of `{f}` (or \
+                         the mem is not mounted)."
                     ));
                     ""
                 }
-                None => "No mounted mem's schema declares a `transition_requires_checks` gate.",
+                None => {
+                    "No mounted mem's schema declares a gated transition \
+                     (`transition_requires_checks` or `transition_requires_self_check`)."
+                }
             });
         }
         out.push_str(&sections.join("\n"));
@@ -290,9 +367,6 @@ mod tests {
             "{brief}"
         );
         let filtered = engine.render_gates_brief(Some("plain"));
-        assert!(
-            filtered.contains("No `transition_requires_checks` gate declared"),
-            "{filtered}"
-        );
+        assert!(filtered.contains("No gated transition"), "{filtered}");
     }
 }

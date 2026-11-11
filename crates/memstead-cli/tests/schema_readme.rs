@@ -68,7 +68,13 @@ fn every_builtin_renders_its_readme_with_its_own_pin() {
             ),
             Some(shipped) => {
                 with_readme += 1;
-                let rendered = v["readme"].as_str().expect("rendered README is a string");
+                let served = v["readme"].as_str().expect("rendered README is a string");
+                // The copy steps follow the sealed README; the rest is the
+                // README itself.
+                let steps = memstead_schema::builtins::fork_steps(&pkg.name, &pkg.version);
+                let rendered = served
+                    .strip_suffix(steps.as_str())
+                    .unwrap_or_else(|| panic!("{pin}: the copy steps follow the README"));
                 let needle = format!("{}@", pkg.name);
                 // Every own-name pin in the rendered text is the package's
                 // own version; the shipped bytes are the proof the render

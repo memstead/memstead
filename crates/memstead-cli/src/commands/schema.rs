@@ -248,7 +248,14 @@ fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
     let readme = readme_bytes
         .as_deref()
         .and_then(|bytes| std::str::from_utf8(bytes).ok())
-        .map(|text| memstead_schema::builtins::render_package_readme(&name, &ver, text));
+        .map(|text| {
+            let mut out = memstead_schema::builtins::render_package_readme(&name, &ver, text);
+            // A built-in's copy steps, which its sealed README cannot state.
+            if origin == "builtin" {
+                out.push_str(&memstead_schema::builtins::fork_steps(&name, &ver));
+            }
+            out
+        });
     let pin = format!("{name}@{ver}");
     if ctx.json {
         print_json(&json!({
@@ -704,7 +711,8 @@ fn scaffold_example_type() -> String {
 # and appear in the manifest's `types:` list.
 #
 # Keys marked REQUIRED must be present in every type file — deleting
-# one fails `memstead schema validate`. Everything else is optional.
+# one fails `memstead schema validate`. A REQUIRED list's comment names
+# the keys each of its entries needs. Everything else is optional.
 
 # REQUIRED.
 name: note
@@ -717,7 +725,10 @@ when_to_use: |
   as the domain vocabulary firms up.
 
 # REQUIRED. Sections are the entity's markdown body. `required: true`
-# sections must be present on every create.
+# sections must be present on every create. Each section needs `key`,
+# `heading` and `search_weight` (REQUIRED); exactly one section carries
+# `catch_all: true` (REQUIRED), where content under unmatched headings
+# lands. A section's own `write_rules` and `required` are optional.
 sections:
   - key: summary
     heading: Summary
@@ -729,7 +740,7 @@ sections:
     heading: Details
     required: false
     search_weight: 10.0
-    # catch_all: content under unmatched headings lands here.
+    # REQUIRED on one section: content under unmatched headings lands here.
     catch_all: true
     write_rules:
       - "Everything beyond the summary. Bullets over prose."
@@ -737,6 +748,7 @@ sections:
 # REQUIRED (the key; it may be an empty list). Typed, filterable
 # frontmatter fields — beyond the built-in
 # type / created_date / last_modified / tags.
+# Each field needs `key`, `description` and `field_type` (REQUIRED).
 # One rule for fields and sections alike: absence of `required` means
 # optional. `required: true` refuses a create that leaves the field
 # unset — unless a default fills it (required + default = always
@@ -768,11 +780,13 @@ hierarchy_relationship: PART_OF
 # listed here. Nothing propagates; for impact propagation declare a
 # `status_propagation` constraint instead.
 no_self_loop_relationships: [PART_OF]
-# Fields `memstead update` may touch on this type.
+# REQUIRED. Fields `memstead update` may touch on this type.
 updatable_fields: [title, summary, details, status, tags]
-# Sections the health report treats as required.
+# REQUIRED (it may be an empty list). Sections the health report treats
+# as required.
 health_required_fields: [summary]
-# Days without modification before health flags the entity stale.
+# REQUIRED. Days without modification before health flags the entity
+# stale.
 staleness_threshold_days: 180
 # Further optional type-level declarations (engine 0.10.0+), shapes in
 # the authoring guide and the generated type-definition.schema.json:
@@ -800,7 +814,8 @@ staleness_threshold_days: 180
 #                            offset_days: 730
 #                            status_field: status
 #                            open_values: [active]
-# Prose guidance served to agents writing entities of this type.
+# REQUIRED (it may be an empty list). Prose guidance served to agents
+# writing entities of this type.
 write_rules:
   - "Notes are placeholders — split recurring shapes into dedicated types."
 "#

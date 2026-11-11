@@ -1024,7 +1024,12 @@ pub fn parse_metadata_value(
             return Err(ValidationError::InvalidFieldValue {
                 field: key.to_string(),
                 value: (*bad).to_string(),
-                expected_type: "String".to_string(),
+                // The field's declared type, as the schema spells it
+                // (`number`, `date`, `string`): a pattern binds any type.
+                expected_type: serde_json::to_value(field_def.field_type)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .unwrap_or_else(|| "string".to_string()),
                 expected_format: Some(format!("matching the pattern `{pattern}`")),
                 field_description: Some(field_def.description.clone()),
                 entity_type: schema.name.clone(),

@@ -158,6 +158,29 @@ pub fn render_package_readme(name: &str, version: &str, readme: &str) -> String 
     out
 }
 
+/// The steps that turn an installed copy of a built-in package into an
+/// authoring package of one's own, served after a built-in's README by
+/// `memstead schema <ref>`. A built-in installs sealed (the format
+/// marker), and a sealed copy may still carry spellings the language has
+/// retired since, so "install, copy, rename, extend" alone refuses at
+/// `schema validate`. The sealed README cannot say so (its bytes are
+/// sealed), so the engine renders the steps beside it.
+pub fn fork_steps(name: &str, version: &str) -> String {
+    format!(
+        "\n## Starting your own package from this one\n\n\
+         A built-in installs sealed, so a copy of it is not yet a package you can\n\
+         author. In a folder workspace these steps give a copy that validates:\n\n\
+         1. `memstead schema install {name}@{version}`\n\
+         2. `cp -R .memstead/schemas/{name}@{version} my-{name}` (any folder name)\n\
+         3. `rm -f my-{name}/{marker}`: the seal marker, where the install wrote one\n\
+         4. In `my-{name}/schema.yaml`, set `name:` and `version:` to your package's own\n\
+         5. `memstead schema migrate my-{name} --write`: rewrites spellings the schema\n   \
+         language has retired since this package shipped (nothing when there are none)\n\
+         6. `memstead schema validate my-{name}`, then extend the types and validate again\n",
+        marker = crate::loader::SCHEMA_FORMAT_MARKER_FILE,
+    )
+}
+
 /// Length of a leading `MAJOR.MINOR.PATCH` in `s`, or 0 when `s` does
 /// not start with one (a trailing `.4` or a pre-release tag ends the
 /// match at the patch number; a fourth component refuses the match).

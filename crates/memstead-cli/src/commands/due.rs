@@ -28,9 +28,10 @@ pub struct Args {
     #[arg(long)]
     pub mem: Option<String>,
 
-    /// Override the current date (YYYY-MM-DD). Testing hook — the
-    /// brief is deterministic given the store and this date.
-    #[arg(long, hide = true)]
+    /// Read the brief as of this date (YYYY-MM-DD) instead of today:
+    /// the brief is deterministic given the store and this date. Without
+    /// it the `MEMSTEAD_TODAY` pin applies, then the clock (UTC).
+    #[arg(long)]
     pub today: Option<String>,
 }
 

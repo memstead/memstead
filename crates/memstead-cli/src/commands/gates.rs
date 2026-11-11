@@ -1,5 +1,6 @@
 //! `memstead gates` — render the gates brief: the standing of every
-//! schema-declared `transition_requires_checks` gate across the
+//! schema-declared gated transition (`transition_requires_checks` and
+//! `transition_requires_self_check`) across the
 //! workspace's mounted mems. The renderer is the shared engine entry
 //! point `Engine::render_gates_brief`, so every consuming surface
 //! serves byte-identical content — the due-brief precedent. There is
