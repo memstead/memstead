@@ -79,6 +79,10 @@ pub struct CommitNote {
     /// beside the proposer. Empty on every other commit.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub co_writers: Vec<(String, String)>,
+    /// Ids from the `Unattributed-Writer:` trailers of a proposal merge
+    /// commit: landed entities a fork write without an identity touched.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub unattributed_writes: Vec<String>,
     /// Commit timestamp in seconds since unix epoch.
     pub timestamp: i64,
 }

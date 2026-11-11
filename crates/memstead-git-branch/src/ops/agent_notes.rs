@@ -93,6 +93,8 @@ pub struct ParsedCommit {
     pub created_ids: Vec<String>,
     /// `(entity id, identity)` from the `Co-Writer:` trailers.
     pub co_writers: Vec<(String, String)>,
+    /// Ids from the `Unattributed-Writer:` trailers.
+    pub unattributed_writes: Vec<String>,
 }
 
 /// Parse one commit body — subject on the first line, optional note
@@ -140,6 +142,7 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
     let mut proposal: Option<String> = None;
     let mut created_ids: Vec<String> = Vec::new();
     let mut co_writers: Vec<(String, String)> = Vec::new();
+    let mut unattributed_writes: Vec<String> = Vec::new();
     if let Some(start) = first_trailer_idx {
         for line in &body_lines[start..] {
             if let Some((key, value)) = split_trailer(line) {
@@ -158,6 +161,9 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
                     "Merged-By" if merged_by.is_none() => merged_by = Some(value.to_string()),
                     "Proposal" if proposal.is_none() => proposal = Some(value.to_string()),
                     "Created" if created_ids.is_empty() => created_ids = split_id_list(value),
+                    "Unattributed-Writer" if !value.trim().is_empty() => {
+                        unattributed_writes.push(value.trim().to_string());
+                    }
                     "Co-Writer" => {
                         if let Some((id, who)) = value.split_once(' ')
                             && !who.trim().is_empty()
@@ -187,6 +193,7 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
         proposal,
         created_ids,
         co_writers,
+        unattributed_writes,
     }
 }
 
@@ -381,6 +388,7 @@ pub fn agent_notes_since(
             proposal: parsed.proposal,
             created_ids: parsed.created_ids,
             co_writers: parsed.co_writers,
+            unattributed_writes: parsed.unattributed_writes,
             timestamp,
         });
     }
@@ -503,6 +511,7 @@ mod tests {
             entity_ids: Some(vec!["specs--beta".to_string(), "specs--eta".to_string()]),
             proposal: Some(memstead_base::vcs::ProposalTrailers {
                 co_writers: Vec::new(),
+                unattributed: Vec::new(),
                 proposal: "specs-fork@abc".to_string(),
                 merged_by: "owner-o1".to_string(),
                 created: vec!["specs--eta".to_string()],

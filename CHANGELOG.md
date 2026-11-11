@@ -41,7 +41,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   mem keeps the writers before it in the entity's story; a
   rename records its writer on every entry whose links it rewrites, and a
   proposal merge names every fork identity that wrote a landed entity in
-  a `Co-Writer:` trailer. A merger who adopts a
+  a `Co-Writer:` trailer (carried on through a fork of a fork; a fork write
+  without an identity rides as `Unattributed-Writer:` and leaves the
+  reading `unconfirmable`). A merger who adopts a
   proposal with changes therefore reads `self_checked` on the check it
   records for that entity.
 

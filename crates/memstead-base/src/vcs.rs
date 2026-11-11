@@ -221,6 +221,10 @@ pub struct ProposalTrailers {
     /// One `Co-Writer: <id> <identity>` trailer each; independence counts
     /// them as writers of the landed entity.
     pub co_writers: Vec<(String, String)>,
+    /// Ids of landed entities a fork write without an identity touched:
+    /// one `Unattributed-Writer: <id>` trailer each, read as a write with
+    /// no identity (the independence reading then cannot confirm).
+    pub unattributed: Vec<String>,
 }
 
 impl<'a> CommitContext<'a> {
@@ -413,6 +417,9 @@ pub fn format_commit_message(prose: &str, ctx: &CommitContext<'_>) -> String {
         }
         for (id, identity) in &p.co_writers {
             trailers.push(format!("Co-Writer: {id} {identity}"));
+        }
+        for id in &p.unattributed {
+            trailers.push(format!("Unattributed-Writer: {id}"));
         }
     }
     let note_body = ctx.note.as_deref().map(str::trim).filter(|n| !n.is_empty());

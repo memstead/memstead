@@ -349,15 +349,32 @@ impl Engine {
         // Per slug: every identity that wrote the entity on the fork. The
         // landing commit is attributed to the proposer; the others ride it
         // as `Co-Writer:` trailers, so independence counts them as writers.
-        let mut fork_writers: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        // `None` stands for a fork write without an identity. A fork that
+        // itself merged a proposal carries that merge's co-writers and
+        // unattributed writes in its trailers; they travel on.
+        let mut fork_writers: BTreeMap<String, Vec<Option<String>>> = BTreeMap::new();
         for slot in &slots {
             let fork_id = EntityId::new(fork, &slot.entry.slug);
-            let mut writers: Vec<String> = Vec::new();
+            let mut writers: Vec<Option<String>> = Vec::new();
+            let mut add = |w: Option<String>| {
+                if !writers.contains(&w) {
+                    writers.push(w);
+                }
+            };
             for t in filter_notes_for_entity(fork_id.as_ref(), &notes) {
-                if let Some(i) = t.identity.clone()
-                    && !writers.contains(&i)
+                add(t.identity.clone());
+            }
+            for n in &notes {
+                for (id, who) in &n.co_writers {
+                    if id == fork_id.as_ref() {
+                        add(Some(who.clone()));
+                    }
+                }
+                if n.unattributed_writes
+                    .iter()
+                    .any(|id| id == fork_id.as_ref())
                 {
-                    writers.push(i);
+                    add(None);
                 }
             }
             fork_writers.insert(slot.entry.slug.clone(), writers);
@@ -704,8 +721,33 @@ impl Engine {
                 _ => None,
             };
             let post_hash = crate::entity::parser::compute_hash(&p.markdown);
-            let (violated, carry_kinds) =
-                self.gate_transition_forms(pre, &next, &post_hash, p.type_def.as_ref(), Vec::new());
+            // The checks form is read over the store as the merge leaves it
+            // (the landings are applied), the self-check form by the rule.
+            let checks_form: Vec<_> = {
+                let provider = self.check_standing_provider();
+                crate::ops::health::unsatisfied_constraints(
+                    &self.store,
+                    &next,
+                    p.type_def.as_ref(),
+                    Some(&p.id),
+                    Some(&provider),
+                )
+                .into_iter()
+                .filter(|v| {
+                    matches!(
+                        v,
+                        crate::ops::health::UnsatisfiedConstraint::TransitionRequiresChecks { .. }
+                    )
+                })
+                .collect()
+            };
+            let (violated, carry_kinds) = self.gate_transition_forms(
+                pre,
+                &next,
+                &post_hash,
+                p.type_def.as_ref(),
+                checks_form,
+            );
             if let Some(b) = &before
                 && !carry_kinds.is_empty()
             {
@@ -901,24 +943,24 @@ impl Engine {
                 Some(proposer.clone()),
             );
             ctx.entity_ids = Some(ids.clone());
-            let co_writers: Vec<(String, String)> = ids
-                .iter()
-                .flat_map(|id| {
-                    let slug = EntityId(id.clone()).path().to_string();
-                    fork_writers
-                        .get(&slug)
-                        .into_iter()
-                        .flatten()
-                        .filter(|w| *w != proposer)
-                        .map(|w| (id.clone(), w.clone()))
-                        .collect::<Vec<_>>()
-                })
-                .collect();
+            let mut co_writers: Vec<(String, String)> = Vec::new();
+            let mut unattributed: Vec<String> = Vec::new();
+            for id in &ids {
+                let slug = EntityId(id.clone()).path().to_string();
+                for w in fork_writers.get(&slug).into_iter().flatten() {
+                    match w {
+                        Some(w) if w != proposer => co_writers.push((id.clone(), w.clone())),
+                        Some(_) => {}
+                        None => unattributed.push(id.clone()),
+                    }
+                }
+            }
             ctx.proposal = Some(ProposalTrailers {
                 proposal: brief.proposal_id.clone(),
                 merged_by: merger.clone(),
                 created: created.clone(),
                 co_writers,
+                unattributed,
             });
             let subject = format!("memstead: proposal-merge {}", brief.proposal_id);
             let sha = match self.mounts[target_mount]
@@ -1007,6 +1049,7 @@ impl Engine {
                 merged_by: merger.clone(),
                 created: Vec::new(),
                 co_writers: Vec::new(),
+                unattributed: Vec::new(),
             });
             let subject = format!("memstead: proposal-merge {}", brief.proposal_id);
             let sha = match self.mounts[target_mount]
@@ -1116,6 +1159,7 @@ impl Engine {
                 merged_by: merger.clone(),
                 created: Vec::new(),
                 co_writers: Vec::new(),
+                unattributed: Vec::new(),
             });
             let subject = format!("memstead: proposal-amend {}", brief.proposal_id);
             let sha = match self.mounts[target_mount]

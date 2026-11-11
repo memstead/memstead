@@ -847,3 +847,145 @@ fn a_fork_writer_whose_text_a_proposal_merge_lands_cannot_confirm_it() {
         String::from_utf8_lossy(&out.stdout)
     );
 }
+
+fn must(ws: &Path, args: &[&str]) -> std::process::Output {
+    let out = cli(ws, args);
+    assert!(
+        out.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    out
+}
+
+/// Brief the fork, adopt `slug`, merge as identity-m.
+fn merge_fork(ws: &Path, fork: &str, slug: &str) {
+    let brief = must(ws, &["proposal", "brief", fork, "--json", "--quiet"]);
+    let mut v: serde_json::Value = serde_json::from_slice(&brief.stdout).unwrap();
+    v["dispositions"][slug]["disposition"] = "adopt".into();
+    let file = ws.join(format!("{fork}-dispositions.json"));
+    std::fs::write(&file, v.to_string()).unwrap();
+    must(
+        ws,
+        &[
+            "proposal",
+            "merge",
+            fork,
+            "--dispositions",
+            file.to_str().unwrap(),
+            "--identity",
+            "identity-m",
+            "--quiet",
+        ],
+    );
+}
+
+/// A fork of a fork: the co-writer the inner merge recorded travels on
+/// through the outer merge, so the inner fork's writer cannot confirm the
+/// text it wrote after two merges.
+#[test]
+fn a_co_writer_survives_a_second_merge() {
+    let ws = seed_on(SELF_GATE, true);
+    let root = ws.path();
+    create(root, "identity-a", "plan", "The Plan", None);
+    must(
+        root,
+        &["workspace", "allow-create", "--schema", "*", "*", "--quiet"],
+    );
+    must(
+        root,
+        &[
+            "mem",
+            "fork",
+            "plans",
+            "pfork",
+            "--identity",
+            "identity-a",
+            "--quiet",
+        ],
+    );
+    must(
+        root,
+        &[
+            "mem",
+            "fork",
+            "pfork",
+            "qfork",
+            "--identity",
+            "identity-a",
+            "--quiet",
+        ],
+    );
+    for (body, who) in [
+        ("x wrote this", "identity-x"),
+        ("x wrote this.", "identity-y"),
+    ] {
+        must(
+            root,
+            &[
+                "update",
+                "qfork--the-plan",
+                "--auto-hash",
+                "--section",
+                &format!("body={body}"),
+                "--identity",
+                who,
+                "--quiet",
+            ],
+        );
+    }
+    merge_fork(root, "qfork", "the-plan");
+    merge_fork(root, "pfork", "the-plan");
+    approve(root, "identity-x");
+    assert!(!complete(root, "identity-c").status.success());
+}
+
+/// A fork write without an identity lands through a merge as a write
+/// without an identity: no outside check of the merged text confirms.
+#[test]
+fn an_anonymous_fork_write_a_merge_lands_reads_unconfirmable() {
+    let ws = seed_on(SELF_GATE, true);
+    let root = ws.path();
+    create(root, "identity-a", "plan", "The Plan", None);
+    must(
+        root,
+        &[
+            "mem",
+            "fork",
+            "plans",
+            "pfork",
+            "--identity",
+            "identity-a",
+            "--quiet",
+        ],
+    );
+    must(
+        root,
+        &[
+            "update",
+            "pfork--the-plan",
+            "--auto-hash",
+            "--section",
+            "body=anon wrote this",
+            "--quiet",
+        ],
+    );
+    must(
+        root,
+        &[
+            "update",
+            "pfork--the-plan",
+            "--auto-hash",
+            "--section",
+            "body=anon wrote this.",
+            "--identity",
+            "identity-x",
+            "--quiet",
+        ],
+    );
+    merge_fork(root, "pfork", "the-plan");
+    approve(root, "identity-e");
+    let out = complete(root, "identity-c");
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("unconfirmable"));
+}

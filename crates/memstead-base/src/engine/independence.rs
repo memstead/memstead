@@ -363,6 +363,15 @@ impl Engine {
                                 },
                             );
                         }
+                        for entity in &n.unattributed_writes {
+                            out.absorb(
+                                entity,
+                                Touch {
+                                    identity: None,
+                                    ..touch.clone()
+                                },
+                            );
+                        }
                     }
                     out.follow_renames();
                 }
