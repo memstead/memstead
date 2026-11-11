@@ -63,6 +63,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the ref unconditionally; a commit that lands in between makes the move
   decide again on the new tip.
 
+- **An in-memory mem's provenance cursor never hides a record.** Records
+  that format to the same millisecond are clamped strictly forward, as the
+  folder backend's ledger already does, where a cursor equal to the first
+  record's timestamp hid the second.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

@@ -106,6 +106,16 @@ impl Default for InMemoryBackend {
     }
 }
 
+/// Append a provenance record with its timestamp clamped strictly past the
+/// last stored one at the cursor's millisecond grain, as the folder
+/// backend's ledger does: a cursor equal to one record's timestamp then
+/// never hides a later record that formats to the same millisecond.
+fn push_monotonic(log: &mut Vec<Provenance>, mut record: Provenance) {
+    let last = log.last().map(|r| r.timestamp);
+    record.timestamp = crate::filesystem::changelog::monotonic_ts(last, record.timestamp);
+    log.push(record);
+}
+
 impl MemBackend for InMemoryBackend {
     fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
         // Committed state only — pending writes are not listable until
@@ -230,7 +240,9 @@ impl MemBackend for InMemoryBackend {
             }
         }
         let records = std::mem::take(&mut state.pending_provenance);
-        state.provenance.extend(records);
+        for record in records {
+            push_monotonic(&mut state.provenance, record);
+        }
         Ok(make_commit_id())
     }
 
@@ -242,7 +254,7 @@ impl MemBackend for InMemoryBackend {
 
     fn append_provenance(&self, record: &Provenance) -> Result<(), BackendError> {
         let mut state = self.lock()?;
-        state.provenance.push(record.clone());
+        push_monotonic(&mut state.provenance, record.clone());
         Ok(())
     }
 
@@ -491,6 +503,29 @@ mod tests {
         // Matches the folder backend: no fabricated git-like head.
         let b = InMemoryBackend::new();
         assert_eq!(b.current_head().unwrap(), None);
+    }
+
+    #[test]
+    fn provenance_in_one_millisecond_stays_visible_past_a_cursor() {
+        let b = InMemoryBackend::new();
+        let at = UNIX_EPOCH + Duration::from_millis(1_700_000_000_123);
+        let record = |ts| {
+            Provenance::new(
+                ts,
+                ProvenanceKind::Create,
+                Some("specs--a".to_string()),
+                Actor::Cli,
+                None,
+                None,
+            )
+        };
+        b.append_provenance(&record(at)).unwrap();
+        b.append_provenance(&record(at + Duration::from_micros(10)))
+            .unwrap();
+        let all = b.read_provenance(None).unwrap();
+        assert_eq!(all.len(), 2);
+        let cursor = format_rfc3339_utc(all[0].timestamp);
+        assert_eq!(b.read_provenance(Some(&cursor)).unwrap().len(), 1);
     }
 
     #[test]
