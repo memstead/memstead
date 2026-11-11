@@ -214,8 +214,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // `code` and maps to a non-zero exit code via `ExitKind`, consistent
     // with single `update` and the documented exit-code table. A script
     // branching on `$?` (or `--json | jq -r .code`) now detects the
-    // failure without parsing the per-entry envelope. The full result
-    // rides on `details`, so no information is lost. In human mode the
+    // failure without parsing the per-entry envelope. Every entry's
+    // outcome rides on `details.entries`, so no information is lost. In human mode the
     // per-entry breakdown still prints on stdout; the error summary
     // rides stderr. In `--json` mode the single error envelope is the
     // only thing on stdout, so it stays exactly one JSON document.

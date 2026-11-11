@@ -98,9 +98,10 @@ pub(crate) fn render_batch_markdown(
 /// `code` is the stable `BATCH_REFUSED` token; the `ExitKind` mirrors the
 /// dominant (first-reported) entry's failure so `$?` matches the
 /// equivalent single command and the documented table (hash mismatch → 4,
-/// missing entity / mem → 3, schema/policy refusal → 5). The full
-/// [`BatchResult`](memstead_base::ops::BatchResult) rides on `details` —
-/// per-entry codes stay available without re-running.
+/// missing entity / mem → 3, schema/policy refusal → 5). Code, payload
+/// and message are the engine's ([`memstead_base::ops::BatchResult::refusal`]):
+/// one envelope per entry under `details.entries`, so per-entry codes stay
+/// available without re-running.
 pub(crate) fn batch_refused_error(
     result: &memstead_base::ops::BatchResult,
     relations: &[memstead_base::ops::RelateEcho],

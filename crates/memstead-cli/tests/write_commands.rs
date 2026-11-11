@@ -1071,9 +1071,8 @@ fn batch_update_refuses_whole_batch_on_one_bad_entry() {
 /// CLI F12 (`--json`): a refused batch exits non-zero and emits exactly
 /// one JSON document — the standard `{code, message, details}` error
 /// envelope. `code` is the stable `BATCH_REFUSED` token (so a script can
-/// branch on `--json | jq -r .code`), and `details` carries the full
-/// `BatchResult` (`applied:false`, per-entry `results`) so nothing is
-/// lost. A stale hash → exit 4, matching single `update`.
+/// branch on `--json | jq -r .code`), and `details` carries `applied:false`
+/// and one envelope per entry under `entries`, so nothing is lost. A stale hash → exit 4, matching single `update`.
 #[test]
 fn batch_update_json_refusal_exits_nonzero_with_envelope() {
     let tmp = TempDir::new().unwrap();

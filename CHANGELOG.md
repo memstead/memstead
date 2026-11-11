@@ -217,7 +217,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   entry's `code`, `message`, `details`), `applied`, `failed`, `succeeded`
   and `errors_suppressed`. The CLI's `details.results` (the serialized
   batch result, each failure nested under `error`) is retired for
-  `details.entries`; MCP's entries gain `id`, and its `details` gains
+  `details.entries`, and its `details.write_id`, always empty on a
+  refused batch, is retired with it; MCP's entries gain `id`, and its `details` gains
   `applied` and `succeeded`. The message reads `batch refused: <n> of <m>
   operation(s) failed, nothing committed; first failure [<code>] on
   `<id>`: <message>` on both. `check --from`'s refused batch is the
