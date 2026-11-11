@@ -7,7 +7,7 @@ use memstead_base::ops::{ContextResult, Query, SearchScope};
 use memstead_base::render;
 
 use crate::CliError;
-use crate::output::{ExitKind, print_json, print_markdown};
+use crate::output::{print_json, print_markdown};
 use crate::setup::{CliContext, CliEngine};
 
 const DEFAULT_TOKEN_BUDGET: usize = 25_000;
@@ -40,7 +40,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 args.chunk,
                 &[("_cluster_id", cluster_id.as_str())],
             )
-            .map_err(|e| CliError::new(ExitKind::Generic, "CHUNK_OUT_OF_RANGE", e))?;
+            .map_err(CliError::from_engine_op)?;
             if ctx.json {
                 print_json(&json!({ "markdown": chunked, "cluster_id": cluster_id }))?;
             } else {

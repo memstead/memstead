@@ -7,7 +7,7 @@ use memstead_base::chunking::apply_chunking;
 use memstead_base::render;
 
 use crate::CliError;
-use crate::output::{ExitKind, print_markdown};
+use crate::output::print_markdown;
 use crate::setup::{CliContext, CliEngine};
 
 /// Read one entity as markdown.
@@ -199,7 +199,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             args.chunk,
             &[("_hash", &entity.content_hash)],
         )
-        .map_err(|e| CliError::new(ExitKind::Generic, "CHUNK_OUT_OF_RANGE", e))?,
+        .map_err(CliError::from_engine_op)?,
         None => output.to_string(),
     };
 

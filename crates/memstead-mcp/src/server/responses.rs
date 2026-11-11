@@ -102,7 +102,7 @@ pub(super) fn finalize_health_text(
             res.content = vec![rmcp::model::ContentBlock::text(text)];
             res
         }
-        Err(e) => tool_error("INVALID_INPUT", &e),
+        Err(e) => super::errors::engine_err(e),
     }
 }
 

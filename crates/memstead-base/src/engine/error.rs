@@ -1135,6 +1135,9 @@ pub enum EngineError {
         mem: Option<String>,
         operation: String,
     },
+    /// A chunk asked for past the end of a chunked response.
+    #[error("Chunk {chunk} does not exist. Content has {total} chunk{}.", if *total == 1 { "" } else { "s" })]
+    ChunkOutOfRange { chunk: usize, total: usize },
     /// An update template whose `title` or `entity_type` differs from the
     /// entity it targets: an update renames or retypes nothing.
     #[error(
@@ -1746,6 +1749,7 @@ impl EngineError {
             EngineError::MemNotReadOnly { .. } => "MEM_NOT_READ_ONLY",
             EngineError::NotGitBacked { .. } => "INVALID_INPUT",
             EngineError::TemplateIdentityMismatch { .. } => "INVALID_INPUT",
+            EngineError::ChunkOutOfRange { .. } => "CHUNK_OUT_OF_RANGE",
             EngineError::AmbiguousMem { .. } => "AMBIGUOUS_MEM",
             EngineError::UnknownTypes { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::UnknownSchema { .. } => "SCHEMA_NOT_FOUND",
@@ -2554,6 +2558,9 @@ impl EngineError {
             EngineError::MemNotReadOnly { mem } => serde_json::json!({ "mem": mem }),
             EngineError::NotGitBacked { mem, operation } => {
                 serde_json::json!({ "mem": mem, "operation": operation })
+            }
+            EngineError::ChunkOutOfRange { chunk, total } => {
+                serde_json::json!({ "chunk": chunk, "total": total })
             }
             EngineError::TemplateIdentityMismatch {
                 id,

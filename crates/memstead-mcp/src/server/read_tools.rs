@@ -295,7 +295,7 @@ impl McpServer {
                     structured,
                 ),
                 Err(e) => prepend_drift_warnings_to_result_text(
-                    tool_error("INVALID_INPUT", &e),
+                    super::errors::engine_err(e),
                     &drift_warnings,
                 ),
             },
@@ -489,7 +489,7 @@ impl McpServer {
             .collect();
         match apply_chunking(&out.markdown, self.token_budget, p.chunk, &extra_fm) {
             Ok(r) => md_response(prepend_drift_warnings_md(r, &drift_warnings)),
-            Err(e) => tool_error("INVALID_INPUT", &e),
+            Err(e) => super::errors::engine_err(e),
         }
     }
 

@@ -21,7 +21,7 @@ use memstead_base::render;
 use memstead_base::vcs::{Actor, ClientId};
 use memstead_base::{EntityId, SearchScope, ops::MemChangedNotice, ops::WarningHint};
 
-use crate::error_envelope::{tool_error, tool_error_with_payload};
+use crate::error_envelope::tool_error_with_payload;
 use crate::tools::admin::{
     ChangesSinceParams, DiffParams, HealthParams, ProposalBriefParams, ReloadParams,
 };

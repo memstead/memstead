@@ -233,6 +233,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   whose `title` or `entity_type` differs from the entity is the engine's
   `TemplateIdentityMismatch` (`INVALID_INPUT`, with `details.id`,
   `field`, `template`, `current`).
+  A `chunk` past the end of a chunked response is one engine value,
+  `EngineError::ChunkOutOfRange` (`CHUNK_OUT_OF_RANGE`, with
+  `details.chunk` and `details.total`), on MCP's `memstead_overview`,
+  `memstead_entity` and `memstead_health` and the CLI's `overview`,
+  `entity` and `context`: MCP refused it with `INVALID_INPUT`, now
+  retired for this case.
   `memstead publish` refuses a workspace the engine does not boot with
   the boot refusal's own code (`WORKSPACE_STORE_PARSE`, ...), where it
   reported `ARCHIVE_ASSEMBLY_FAILED` or, when the folders could be

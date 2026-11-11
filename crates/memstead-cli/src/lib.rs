@@ -26,10 +26,6 @@ use output::ExitKind;
 /// comment explaining why no recoverable typed code applies.
 pub const INTERNAL_CODE: &str = "INTERNAL";
 
-/// `memstead overview --chunk <N>` refusal: requested chunk index is
-/// beyond the actual chunk count.
-pub const CHUNK_OUT_OF_RANGE_CODE: &str = "CHUNK_OUT_OF_RANGE";
-
 /// Typed CLI error that carries an exit-code kind, a stable
 /// `UPPER_SNAKE_CASE` code (matching `EngineError::code()` for
 /// engine-sourced errors), and an optional structured details payload.
@@ -211,6 +207,7 @@ impl CliError {
             | Parse { .. }
             | Backend { .. }
             | SearchUnavailable
+            | ChunkOutOfRange { .. }
             | NoWritableMem
             | ContextNotComputable { .. } => ExitKind::Generic,
             HashMismatch { .. } => ExitKind::HashMismatch,

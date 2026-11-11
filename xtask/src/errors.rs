@@ -587,7 +587,6 @@ mod surface_codes {
 
     /// A defect in the syntax of the surface's own input.
     const INPUT_SYNTAX: &[&str] = &[
-        "CHUNK_OUT_OF_RANGE",
         "INVALID_CHECK_KIND",
         "INVALID_DOMAIN",
         "INVALID_IDENTITY",
@@ -662,8 +661,8 @@ mod surface_codes {
         ("crates/memstead-cli/src/commands/workspace.rs", 1),
         ("crates/memstead-cli/src/main.rs", 1),
         ("crates/memstead-mcp/src/server/mem_tools.rs", 5),
-        ("crates/memstead-mcp/src/server/read_tools.rs", 5),
-        ("crates/memstead-mcp/src/server/responses.rs", 2),
+        ("crates/memstead-mcp/src/server/read_tools.rs", 3),
+        ("crates/memstead-mcp/src/server/responses.rs", 1),
         ("crates/memstead-mcp/src/server/write_tools.rs", 2),
     ];
 

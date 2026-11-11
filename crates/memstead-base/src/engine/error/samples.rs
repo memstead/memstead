@@ -115,6 +115,7 @@ variant_tags!(
         MemNotReadOnly,
         NotGitBacked,
         TemplateIdentityMismatch,
+        ChunkOutOfRange,
         NoWritableMem,
         AmbiguousMem,
         UnknownTypes,
@@ -1141,6 +1142,10 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
         (
             "MemNotReadOnly".into(),
             EngineError::MemNotReadOnly { mem: s("specs") },
+        ),
+        (
+            "ChunkOutOfRange".into(),
+            EngineError::ChunkOutOfRange { chunk: 3, total: 1 },
         ),
         (
             "TemplateIdentityMismatch".into(),

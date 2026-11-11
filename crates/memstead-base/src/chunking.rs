@@ -86,17 +86,15 @@ pub fn apply_chunking(
     budget: usize,
     chunk: Option<usize>,
     extra_fm: &[(&str, &str)],
-) -> Result<String, String> {
+) -> Result<String, crate::EngineError> {
     let chunks_opt = chunk_markdown(markdown, budget);
     let total = chunks_opt.as_ref().map(|c| c.len()).unwrap_or(1);
     let idx = chunk.unwrap_or(1).saturating_sub(1);
     if idx >= total {
-        return Err(format!(
-            "Chunk {} does not exist. Content has {} chunk{s}.",
-            idx + 1,
+        return Err(crate::EngineError::ChunkOutOfRange {
+            chunk: idx + 1,
             total,
-            s = if total == 1 { "" } else { "s" },
-        ));
+        });
     }
 
     // Single-chunk case: preserve the original frontmatter and body

@@ -4,7 +4,7 @@ use serde_json::json;
 use memstead_base::chunking::apply_chunking;
 
 use crate::CliError;
-use crate::output::{ExitKind, print_json, print_markdown};
+use crate::output::{print_json, print_markdown};
 use crate::setup::CliContext;
 
 // Routes through the shared engine composer so the CLI renders the
@@ -111,7 +111,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         args.chunk,
         &extra_fm,
     )
-    .map_err(|e| CliError::new(ExitKind::Generic, "CHUNK_OUT_OF_RANGE", e))?;
+    .map_err(CliError::from_engine_op)?;
 
     if ctx.json {
         let warnings_json: Vec<_> = out
