@@ -1781,7 +1781,7 @@ fn constraint_transition_requires_checks_min_related_loads_and_defaults() {
     field: status
     to_value: closed
     relationships: [PART_OF]
-    direction: incoming
+    direction: in
     min_related: 1
 "#;
     let schema = load(&minimal_manifest(), &[("sample", &with_floor)]).expect("must load");
@@ -1798,7 +1798,7 @@ fn constraint_transition_requires_checks_min_related_loads_and_defaults() {
     field: status
     to_value: closed
     relationships: [PART_OF]
-    direction: incoming
+    direction: in
 "#;
     let schema = load(&minimal_manifest(), &[("sample", &without)]).expect("must load");
     let ConstraintDef::TransitionRequiresChecks { min_related, .. } =
@@ -1883,7 +1883,7 @@ fn constraint_transition_requires_checks_validates() {
     field: status
     to_value: closed
     relationships: [PART_OF]
-    direction: incoming
+    direction: in
 "#;
     let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
     let td = schema.types.get("sample").unwrap();
@@ -1900,23 +1900,23 @@ fn constraint_transition_requires_checks_validates() {
         ConstraintSeverity::Block,
         "form 6 defaults to block"
     );
-    assert_eq!(*direction, memstead_schema::PropagationDirection::Incoming);
+    assert_eq!(*direction, memstead_schema::ReachDirection::In);
 
     for (yaml, offender) in [
         (
-            "constraints:\n  - kind: transition_requires_checks\n    field: phase\n    to_value: closed\n    relationships: [PART_OF]\n    direction: incoming\n",
+            "constraints:\n  - kind: transition_requires_checks\n    field: phase\n    to_value: closed\n    relationships: [PART_OF]\n    direction: in\n",
             "phase",
         ),
         (
-            "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: archived\n    relationships: [PART_OF]\n    direction: incoming\n",
+            "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: archived\n    relationships: [PART_OF]\n    direction: in\n",
             "archived",
         ),
         (
-            "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: closed\n    relationships: []\n    direction: incoming\n",
+            "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: closed\n    relationships: []\n    direction: in\n",
             "(empty)",
         ),
         (
-            "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: closed\n    relationships: [VERIFIES]\n    direction: incoming\n",
+            "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: closed\n    relationships: [VERIFIES]\n    direction: in\n",
             "VERIFIES",
         ),
     ] {
@@ -1957,8 +1957,8 @@ fn notice_refuses_in_every_constraint_severity_slot() {
     let cases: &[&str] = &[
         "constraints:\n  - kind: requires_when\n    field: body\n    when_field: status\n    when_value: closed\n    severity: notice\n",
         "constraints:\n  - kind: unique\n    fields: [status]\n    severity: notice\n",
-        "constraints:\n  - kind: enum_from_neighbour\n    field: status\n    rel_type: REFERENCES\n    section: body\n    severity: notice\n",
-        "constraints:\n  - kind: status_propagation\n    field: status\n    value: closed\n    rel_type: PART_OF\n    direction: incoming\n    severity: notice\n",
+        "constraints:\n  - kind: enum_from_neighbour\n    field: status\n    relationships: [REFERENCES]\n    section: body\n    severity: notice\n",
+        "constraints:\n  - kind: status_propagation\n    field: status\n    value: closed\n    relationships: [PART_OF]\n    direction: in\n    severity: notice\n",
         "required_outgoing:\n  - relationships: [PART_OF]\n    cardinality: at_least_one\n    severity: notice\n",
     ];
     for case in cases {
@@ -2267,87 +2267,77 @@ fn acyclic_sets_single_member_and_empty_rejected() {
 }
 
 // ---------------------------------------------------------------------------
-// status_propagation relation sets (`rel_types`)
+// status_propagation relation sets (`relationships`)
 // ---------------------------------------------------------------------------
 
-/// The set form parses; the single-name form keeps parsing; the
-/// effective set accessor normalises both.
+/// The relation set parses, one name or several.
 #[test]
-fn constraint_status_propagation_rel_types_accepted() {
+fn constraint_status_propagation_relationships_accepted() {
     use memstead_schema::ConstraintDef;
     let t = minimal_type()
         + r#"constraints:
   - kind: status_propagation
     field: status
     value: closed
-    rel_types: [PART_OF, REFERENCES]
-    direction: incoming
+    relationships: [PART_OF, REFERENCES]
+    direction: in
   - kind: status_propagation
     field: status
     value: closed
-    rel_type: PART_OF
-    direction: outgoing
+    relationships: [PART_OF]
+    direction: out
 "#;
     let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
     let td = schema.types.get("sample").unwrap();
+    let sets: Vec<Vec<String>> = td
+        .constraints
+        .iter()
+        .map(|c| match c {
+            ConstraintDef::StatusPropagation { relationships, .. } => relationships.clone(),
+            other => panic!("expected status_propagation, got {other:?}"),
+        })
+        .collect();
     assert_eq!(
-        td.constraints[0].propagation_rel_types(),
-        Some(vec!["PART_OF".to_string(), "REFERENCES".to_string()])
+        sets,
+        vec![
+            vec!["PART_OF".to_string(), "REFERENCES".to_string()],
+            vec!["PART_OF".to_string()],
+        ]
     );
-    assert_eq!(
-        td.constraints[1].propagation_rel_types(),
-        Some(vec!["PART_OF".to_string()])
-    );
-    let ConstraintDef::StatusPropagation {
-        rel_type,
-        rel_types,
-        ..
-    } = &td.constraints[1]
-    else {
-        panic!("expected status_propagation");
-    };
-    assert_eq!(rel_type.as_deref(), Some("PART_OF"));
-    assert_eq!(*rel_types, None);
 }
 
+/// A sealed declaration carrying both the retired `rel_type` and the
+/// current `relationships` has no single meaning: it refuses.
 #[test]
-fn constraint_status_propagation_both_keys_rejected() {
+fn constraint_status_propagation_retired_and_current_key_rejected() {
     let t = minimal_type()
         + r#"constraints:
   - kind: status_propagation
     field: status
     value: closed
     rel_type: PART_OF
-    rel_types: [REFERENCES]
-    direction: incoming
+    relationships: [REFERENCES]
+    direction: in
 "#;
     let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
     assert!(
-        matches!(err, SchemaLoadError::InvalidConstraint { kind: "status_propagation", ref offender, .. } if offender == "rel_type"),
+        err.to_string()
+            .contains("both the retired `rel_type:` and `relationships:`"),
         "got: {err}"
     );
 }
 
 #[test]
-fn constraint_status_propagation_neither_key_rejected() {
+fn constraint_status_propagation_without_relationships_rejected() {
     let t = minimal_type()
         + r#"constraints:
   - kind: status_propagation
     field: status
     value: closed
-    direction: incoming
+    direction: in
 "#;
     let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
-    assert!(
-        matches!(
-            err,
-            SchemaLoadError::InvalidConstraint {
-                kind: "status_propagation",
-                ..
-            }
-        ),
-        "got: {err}"
-    );
+    assert!(err.to_string().contains("relationships"), "got: {err}");
 }
 
 #[test]
@@ -2357,8 +2347,8 @@ fn constraint_status_propagation_empty_or_undeclared_rel_types_rejected() {
   - kind: status_propagation
     field: status
     value: closed
-    rel_types: []
-    direction: incoming
+    relationships: []
+    direction: in
 "#;
     let err = load(&minimal_manifest(), &[("sample", &empty)]).expect_err("must fail");
     assert!(
@@ -2376,8 +2366,8 @@ fn constraint_status_propagation_empty_or_undeclared_rel_types_rejected() {
   - kind: status_propagation
     field: status
     value: closed
-    rel_types: [PART_OF, GHOSTLY]
-    direction: incoming
+    relationships: [PART_OF, GHOSTLY]
+    direction: in
 "#;
     let err = load(&minimal_manifest(), &[("sample", &undeclared)]).expect_err("must fail");
     assert!(
@@ -2699,13 +2689,13 @@ fn constraint_forms_two_three_five_accepted() {
     fields: [status]
   - kind: enum_from_neighbour
     field: status
-    rel_type: REFERENCES
+    relationships: [REFERENCES]
     section: body
   - kind: status_propagation
     field: status
     value: closed
-    rel_type: PART_OF
-    direction: incoming
+    relationships: [PART_OF]
+    direction: in
 "#;
     let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
     let td = schema.types.get("sample").unwrap();
@@ -2750,7 +2740,7 @@ fn constraint_enum_from_neighbour_unknown_rel_type_rejected() {
         + r#"constraints:
   - kind: enum_from_neighbour
     field: status
-    rel_type: ENUMERATES
+    relationships: [ENUMERATES]
     section: body
 "#;
     let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
@@ -2766,7 +2756,7 @@ fn constraint_enum_from_neighbour_unknown_section_rejected() {
         + r#"constraints:
   - kind: enum_from_neighbour
     field: status
-    rel_type: REFERENCES
+    relationships: [REFERENCES]
     section: vocabulary
 "#;
     let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
@@ -2783,8 +2773,8 @@ fn constraint_status_propagation_value_outside_enum_rejected() {
   - kind: status_propagation
     field: status
     value: fallen
-    rel_type: PART_OF
-    direction: incoming
+    relationships: [PART_OF]
+    direction: in
 "#;
     let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
     assert!(
@@ -2803,8 +2793,8 @@ fn constraint_status_propagation_block_severity_rejected() {
   - kind: status_propagation
     field: status
     value: closed
-    rel_type: PART_OF
-    direction: incoming
+    relationships: [PART_OF]
+    direction: in
     severity: block
 "#;
     let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");

@@ -1745,7 +1745,7 @@ pub enum UnsatisfiedConstraint {
         field: String,
         /// The set value no reached neighbour's section backs.
         value: String,
-        rel_type: String,
+        relationships: Vec<String>,
         section: String,
         severity: memstead_schema::ConstraintSeverity,
     },
@@ -1753,14 +1753,8 @@ pub enum UnsatisfiedConstraint {
         field: String,
         /// The terminal value the ancestor holds.
         value: String,
-        /// Echo of a single-rel-type declaration — present exactly
-        /// when the schema declared `rel_type`, keeping the
-        /// long-standing payload byte-identical.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        rel_type: Option<String>,
-        /// Echo of a relation-set declaration (`rel_types`).
-        #[serde(skip_serializing_if = "Option::is_none")]
-        rel_types: Option<Vec<String>>,
+        /// The relation set the taint travels along.
+        relationships: Vec<String>,
         /// The tainting ancestor — the entity holding the terminal
         /// value that this entity (transitively) reaches.
         tainted_by: String,
@@ -1779,7 +1773,7 @@ pub enum UnsatisfiedConstraint {
         field: String,
         to_value: String,
         relationships: Vec<String>,
-        direction: memstead_schema::PropagationDirection,
+        direction: memstead_schema::ReachDirection,
         /// Every related entity NOT at derived state `checked_ok`,
         /// each with the state it derived, sorted by id.
         unchecked: Vec<UncheckedRelated>,
@@ -1857,12 +1851,13 @@ impl UnsatisfiedConstraint {
             Self::EnumFromNeighbour {
                 field,
                 value,
-                rel_type,
+                relationships,
                 section,
                 ..
             } => format!(
                 "enum_from_neighbour: '{field}' value '{value}' has no backing entry in any \
-                 `{section}` section reached via {rel_type}"
+                 `{section}` section reached via {}",
+                relationships.join(", ")
             ),
             Self::StatusPropagation {
                 field,
@@ -1986,7 +1981,7 @@ pub type CheckStateProvider<'a> =
 ///   own id so an update does not collide with its stored self.
 /// - `enum_from_neighbour`: a set `field` value must appear as a
 ///   bullet entry (`- value` / `* value` line) in the `section` body
-///   of at least one entity reached via an outgoing `rel_type` edge.
+///   of at least one entity reached via an outgoing edge of one of `relationships`.
 /// - `status_propagation` is a reachability property of the graph,
 ///   not of one write — it is evaluated only by the health sweep
 ///   ([`collect_constraint_findings`]), never here.
@@ -2057,7 +2052,7 @@ pub fn unsatisfied_constraints(
             }
             ConstraintDef::EnumFromNeighbour {
                 field,
-                rel_type,
+                relationships,
                 section,
                 severity,
             } => {
@@ -2069,7 +2064,7 @@ pub fn unsatisfied_constraints(
                 let backed = entity
                     .relationships
                     .iter()
-                    .filter(|rel| rel.rel_type == *rel_type)
+                    .filter(|rel| relationships.contains(&rel.rel_type))
                     .filter_map(|rel| store.get(&rel.target))
                     .filter_map(|neighbour| neighbour.sections.get(section.as_str()))
                     .any(|body| bullet_entries(body).contains(&value));
@@ -2079,7 +2074,7 @@ pub fn unsatisfied_constraints(
                 Some(UnsatisfiedConstraint::EnumFromNeighbour {
                     field: field.clone(),
                     value,
-                    rel_type: rel_type.clone(),
+                    relationships: relationships.clone(),
                     section: section.clone(),
                     severity: *severity,
                 })
@@ -2177,18 +2172,18 @@ pub fn transition_gate_standing(
     store: &Store,
     entity: &crate::entity::Entity,
     relationships: &[String],
-    direction: memstead_schema::PropagationDirection,
+    direction: memstead_schema::ReachDirection,
     exclude: Option<&crate::entity::EntityId>,
     checks: Option<CheckStateProvider<'_>>,
 ) -> (usize, Vec<UncheckedRelated>) {
     let related: Vec<&crate::entity::Entity> = match direction {
-        memstead_schema::PropagationDirection::Outgoing => entity
+        memstead_schema::ReachDirection::Out => entity
             .relationships
             .iter()
             .filter(|rel| relationships.contains(&rel.rel_type))
             .filter_map(|rel| store.get(&rel.target))
             .collect(),
-        memstead_schema::PropagationDirection::Incoming => store
+        memstead_schema::ReachDirection::In => store
             .all_entities()
             .filter(|other| {
                 other.id != entity.id
@@ -2423,8 +2418,7 @@ pub fn collect_constraint_findings(
             let ConstraintDef::StatusPropagation {
                 field,
                 value,
-                rel_type,
-                rel_types,
+                relationships,
                 direction,
                 severity,
             } = c
@@ -2438,10 +2432,8 @@ pub fn collect_constraint_findings(
             if !terminal {
                 continue;
             }
-            let set = c
-                .propagation_rel_types()
-                .expect("StatusPropagation always yields a set");
-            for (tainted, path) in reach_transitively(store, &entity.id, &set, *direction) {
+            for (tainted, path) in reach_transitively(store, &entity.id, relationships, *direction)
+            {
                 if let Some(v) = mem_filter
                     && tainted.mem() != v
                 {
@@ -2451,8 +2443,7 @@ pub fn collect_constraint_findings(
                     UnsatisfiedConstraint::StatusPropagation {
                         field: field.clone(),
                         value: value.clone(),
-                        rel_type: rel_type.clone(),
-                        rel_types: rel_types.clone(),
+                        relationships: relationships.clone(),
                         tainted_by: entity.id.to_string(),
                         path: path.iter().map(ToString::to_string).collect(),
                         severity: *severity,
@@ -2483,9 +2474,9 @@ pub fn collect_constraint_findings(
 
 /// Transitive reachability along one rel-type from `start`, excluding
 /// `start` itself, each reached entity with the path the walk took to
-/// it (`start` first, the entity last). `Incoming` walks against edge
+/// it (`start` first, the entity last). `In` walks against edge
 /// direction (the entities whose `rel_type` edges point at the frontier
-/// — "what stands on this"); `Outgoing` follows the frontier's own
+/// — "what stands on this"); `Out` follows the frontier's own
 /// edges. Breadth first with neighbours in id order, so the path is one
 /// shortest path and the same one on every run. Stubs are traversed (an
 /// edge through a stub still transmits the taint) and named on the
@@ -2494,9 +2485,9 @@ fn reach_transitively(
     store: &Store,
     start: &crate::entity::EntityId,
     rel_types: &[String],
-    direction: memstead_schema::PropagationDirection,
+    direction: memstead_schema::ReachDirection,
 ) -> Vec<(crate::entity::EntityId, Vec<crate::entity::EntityId>)> {
-    use memstead_schema::PropagationDirection;
+    use memstead_schema::ReachDirection;
     let mut parent: std::collections::HashMap<crate::entity::EntityId, crate::entity::EntityId> =
         Default::default();
     let mut seen: std::collections::HashSet<crate::entity::EntityId> =
@@ -2505,7 +2496,7 @@ fn reach_transitively(
     let mut reached = Vec::new();
     while let Some(current) = frontier.pop_front() {
         let mut next: Vec<crate::entity::EntityId> = match direction {
-            PropagationDirection::Incoming => store
+            ReachDirection::In => store
                 .all_entities()
                 .filter(|e| {
                     e.relationships
@@ -2514,7 +2505,7 @@ fn reach_transitively(
                 })
                 .map(|e| e.id.clone())
                 .collect(),
-            PropagationDirection::Outgoing => store
+            ReachDirection::Out => store
                 .get(&current)
                 .map(|e| {
                     e.relationships

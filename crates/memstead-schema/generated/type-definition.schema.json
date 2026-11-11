@@ -239,7 +239,7 @@
           ]
         },
         {
-          "description": "Form 3 — enum-from-neighbour: the legal values of `field` are\nthe bullet-list entries (`- value` lines) of the `section`\nsection on the entity reached from this one via a `rel_type`\nedge. A set value with no backing entry in any reached\nneighbour's section — including the no-neighbour and\nmissing-section cases, where nothing can back it — is a\nviolation.",
+          "description": "Form 3 — enum-from-neighbour: the legal values of `field` are\nthe bullet-list entries (`- value` lines) of the `section`\nsection on an entity reached from this one over an outgoing edge\nof one of `relationships`. A set value with no backing entry in any reached\nneighbour's section — including the no-neighbour and\nmissing-section cases, where nothing can back it — is a\nviolation.",
           "type": "object",
           "properties": {
             "field": {
@@ -250,9 +250,12 @@
               "type": "string",
               "const": "enum_from_neighbour"
             },
-            "rel_type": {
-              "description": "The outgoing rel-type that reaches the enumerating entity.",
-              "type": "string"
+            "relationships": {
+              "description": "The outgoing relationships that reach the enumerating\nentities; a value is legal when any entity reached over any\nof them lists it.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "section": {
               "description": "The section key on the reached entity whose bullet entries\nare the legal values.",
@@ -267,17 +270,17 @@
           "required": [
             "kind",
             "field",
-            "rel_type",
+            "relationships",
             "section"
           ]
         },
         {
-          "description": "Form 5 — status propagation: when `field` on an entity of this\ntype holds `value` (the terminal value), every entity reaching\nit — transitively — via `rel_type` edges in `direction` is\ntainted; tainted entities surface as health findings naming\ntheir tainting ancestor. Always warn-tier: the taint arises\nfrom the ancestor's *later* change, so it can never refuse the\ndescendant's historical write (the loader refuses a `block`\ndeclaration on this form rather than accepting a promise the\nengine will not keep).",
+          "description": "Form 5 — status propagation: when `field` on an entity of this\ntype holds `value` (the terminal value), every entity reaching\nit — transitively — via `relationships` edges in `direction` is\ntainted; tainted entities surface as health findings naming\ntheir tainting ancestor. Always warn-tier: the taint arises\nfrom the ancestor's *later* change, so it can never refuse the\ndescendant's historical write (the loader refuses a `block`\ndeclaration on this form rather than accepting a promise the\nengine will not keep).",
           "type": "object",
           "properties": {
             "direction": {
-              "description": "Which direction reaches the dependents: `incoming` taints\nthe entities whose edges point at the terminal entity (and\ntheir dependents, transitively); `outgoing` the entities\nthe terminal entity points at.",
-              "$ref": "#/$defs/PropagationDirection"
+              "description": "Which direction reaches the dependents: `in` taints the\nentities whose edges point at the terminal entity (and their\ndependents, transitively); `out` the entities the terminal\nentity points at.",
+              "$ref": "#/$defs/ReachDirection"
             },
             "field": {
               "description": "The status metadata field on this (the tainting) type.",
@@ -287,19 +290,9 @@
               "type": "string",
               "const": "status_propagation"
             },
-            "rel_type": {
-              "description": "The single rel-type the taint travels along. Exactly one\nof `rel_type` / `rel_types` per declaration — the loader\nrefuses both-present and neither-present.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "rel_types": {
-              "description": "The relation SET the taint travels along — the union\nsubgraph, so a taint crosses rel-type boundaries. Inline\nlist of declared names, per the bundle-wide convention.",
-              "type": [
-                "array",
-                "null"
-              ],
+            "relationships": {
+              "description": "The relation set the taint travels along: the union\nsubgraph, so a taint crosses rel-type boundaries. Inline\nlist of declared names, per the bundle-wide convention.",
+              "type": "array",
               "items": {
                 "type": "string"
               }
@@ -318,6 +311,7 @@
             "kind",
             "field",
             "value",
+            "relationships",
             "direction"
           ]
         },
@@ -326,8 +320,8 @@
           "type": "object",
           "properties": {
             "direction": {
-              "description": "Which side of the edges holds the entities to check:\n`incoming` — entities whose edges point at this one;\n`outgoing` — entities this one points at.",
-              "$ref": "#/$defs/PropagationDirection"
+              "description": "Which side of the edges holds the entities to check: `in`,\nentities whose edges point at this one; `out`, entities this\none points at.",
+              "$ref": "#/$defs/ReachDirection"
             },
             "field": {
               "description": "The metadata field whose value gates (must declare\n`enum_values`; validated by the loader).",
@@ -696,14 +690,6 @@
         "relationships",
         "direction",
         "terminal_types"
-      ]
-    },
-    "PropagationDirection": {
-      "description": "Traversal direction for [`ConstraintDef::StatusPropagation`].",
-      "type": "string",
-      "enum": [
-        "incoming",
-        "outgoing"
       ]
     },
     "ReachDirection": {

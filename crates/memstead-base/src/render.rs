@@ -2139,42 +2139,30 @@ pub fn build_schema_payload_scoped(
                     }
                     memstead_schema::ConstraintDef::EnumFromNeighbour {
                         field,
-                        rel_type,
+                        relationships,
                         section,
                         severity,
                     } => serde_json::json!({
                         "kind": "enum_from_neighbour",
                         "field": field,
-                        "rel_type": rel_type,
+                        "relationships": relationships,
                         "section": section,
                         "severity": severity,
                     }),
                     memstead_schema::ConstraintDef::StatusPropagation {
                         field,
                         value,
-                        rel_type,
-                        rel_types,
+                        relationships,
                         direction,
                         severity,
-                    } => {
-                        let mut c = serde_json::json!({
-                            "kind": "status_propagation",
-                            "field": field,
-                            "value": value,
-                            "direction": direction,
-                            "severity": severity,
-                        });
-                        // Echo the declaration's own shape: the
-                        // single-name key stays byte-identical, a
-                        // relation set rides under `rel_types`.
-                        if let Some(single) = rel_type {
-                            c["rel_type"] = serde_json::json!(single);
-                        }
-                        if let Some(set) = rel_types {
-                            c["rel_types"] = serde_json::json!(set);
-                        }
-                        c
-                    }
+                    } => serde_json::json!({
+                        "kind": "status_propagation",
+                        "field": field,
+                        "value": value,
+                        "relationships": relationships,
+                        "direction": direction,
+                        "severity": severity,
+                    }),
                     memstead_schema::ConstraintDef::TransitionRequiresChecks {
                         field,
                         to_value,

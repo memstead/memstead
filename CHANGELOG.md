@@ -26,6 +26,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **One spelling per concept in the schema language (breaking).** A
+  constraint names a direction `out` / `in` and a relation set
+  `relationships` in every form: `status_propagation` and
+  `transition_requires_checks` no longer take `direction: incoming` /
+  `outgoing`, `status_propagation` no longer takes `rel_type` /
+  `rel_types`, and `enum_from_neighbour` no longer takes `rel_type`
+  (it now reaches neighbours over any of its `relationships`). A package
+  you author with a retired spelling refuses `schema validate` and
+  `schema install` with `SCHEMA_VALIDATION_FAILED`, the message naming
+  the retired spelling, its replacement and the fix: run
+  `memstead schema migrate <package> --write`, which rewrites each one
+  (a single `rel_type: X` becomes `relationships: [X]`), keeps comments
+  and key order, and proves the rewrite resolves to what the engine
+  read before. Sealed and installed packages keep loading with the
+  meaning they had. Wire change: the schema read, the gates brief
+  ("related via [VERIFIES] (in)"), the health constraints axis and the
+  `CONSTRAINT_UNSATISFIED` details render `in` / `out` and
+  `relationships` for these forms, and the generated
+  `type-definition.schema.json` carries one direction type.
+
 - **Independence counts every identity that wrote what was checked
   (breaking).** On an entity that is not a plan criterion, a check reads
   `self_checked` when its identity wrote the entity at any point up to

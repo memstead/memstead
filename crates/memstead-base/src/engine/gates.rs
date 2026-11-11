@@ -98,10 +98,7 @@ impl Engine {
                     "Gate: `{type_name}` — `{field}: {to_value}` requires a fresh confirming \
                      check record on every entity related via [{}] ({}){floor}.",
                     relationships.join(", "),
-                    match direction {
-                        memstead_schema::PropagationDirection::Incoming => "incoming",
-                        memstead_schema::PropagationDirection::Outgoing => "outgoing",
-                    },
+                    direction,
                 ));
                 lines.push(String::new());
 

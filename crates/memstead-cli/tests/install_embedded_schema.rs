@@ -1109,3 +1109,179 @@ fn archive_under_an_unknown_schema_installs_on_a_folder_workspace() {
     );
     read_back("after uninstall and re-install");
 }
+
+/// Each retired constraint spelling of the schema language, with the
+/// current spelling it was retired for: `(label, retired, current,
+/// retired token, replacement token)`. The note type gains an enum
+/// field `stage` for the forms to gate on.
+fn constraint_spelling_cases() -> Vec<(&'static str, String, String, &'static str, &'static str)> {
+    let with = |constraint: &str| -> String {
+        let out = NOTE_TYPE.replace(
+            "    required: true\ntitle_weight:",
+            "    required: true\n  - key: stage\n    description: Where the note stands.\n    field_type: string\n    enum_values: [open, done]\ntitle_weight:",
+        );
+        assert_ne!(out, NOTE_TYPE, "the stage field must be added");
+        format!("{out}constraints:\n{constraint}")
+    };
+    let propagation = |rel: &str, dir: &str| {
+        format!(
+            "  - kind: status_propagation\n    field: stage\n    value: done\n    {rel}\n    direction: {dir}\n"
+        )
+    };
+    let gate = |dir: &str| {
+        format!(
+            "  - kind: transition_requires_checks\n    field: stage\n    to_value: done\n    relationships: [FOLLOWS]\n    direction: {dir}\n"
+        )
+    };
+    let neighbour = |rel: &str| {
+        format!("  - kind: enum_from_neighbour\n    field: stage\n    {rel}\n    section: body\n")
+    };
+    let set = "relationships: [FOLLOWS]";
+    vec![
+        (
+            "propagation-incoming",
+            with(&propagation(set, "incoming")),
+            with(&propagation(set, "in")),
+            "direction: incoming",
+            "direction: in",
+        ),
+        (
+            "propagation-outgoing",
+            with(&propagation(set, "outgoing")),
+            with(&propagation(set, "out")),
+            "direction: outgoing",
+            "direction: out",
+        ),
+        (
+            "gate-incoming",
+            with(&gate("incoming")),
+            with(&gate("in")),
+            "direction: incoming",
+            "direction: in",
+        ),
+        (
+            "gate-outgoing",
+            with(&gate("outgoing")),
+            with(&gate("out")),
+            "direction: outgoing",
+            "direction: out",
+        ),
+        (
+            "propagation-rel-type",
+            with(&propagation("rel_type: FOLLOWS", "in")),
+            with(&propagation(set, "in")),
+            "rel_type:",
+            "relationships: [<name>]",
+        ),
+        (
+            "propagation-rel-types",
+            with(&propagation("rel_types: [FOLLOWS]", "in")),
+            with(&propagation(set, "in")),
+            "rel_types:",
+            "relationships:",
+        ),
+        (
+            "neighbour-rel-type",
+            with(&neighbour("rel_type: FOLLOWS")),
+            with(&neighbour(set)),
+            "rel_type:",
+            "relationships: [<name>]",
+        ),
+    ]
+}
+
+/// Every retired constraint spelling refuses both authoring verbs with
+/// the retired spelling, its replacement and `schema migrate` named; its
+/// current spelling validates; and the retired spelling sealed in an
+/// archive installs and resolves to the very constraint the current
+/// spelling declares.
+#[test]
+fn retired_constraint_spellings_refuse_authoring_and_load_sealed() {
+    let _guard = cache_guard();
+    let sender = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+    let ws = sender.path();
+    // The publisher workspace (a mem-repo) is also where the authoring
+    // verbs run.
+    let archive = publish_fieldnotes_archive(ws, cache.path());
+
+    for (label, retired, current, retired_token, replacement) in constraint_spelling_cases() {
+        let pkg = ws.join(format!("retired-{label}-pkg"));
+        write_package(&pkg, &retired);
+        for verb in ["validate", "install"] {
+            let out = memstead()
+                .current_dir(ws)
+                .env("MEMSTEAD_MEM_CACHE", cache.path())
+                .args(["--json", "schema", verb, pkg.to_str().unwrap()])
+                .assert()
+                .failure()
+                .get_output()
+                .stdout
+                .clone();
+            let rendered = String::from_utf8_lossy(&out).to_string();
+            for needle in [
+                retired_token,
+                replacement,
+                "schema migrate",
+                "SCHEMA_VALIDATION_FAILED",
+            ] {
+                assert!(
+                    rendered.contains(needle),
+                    "{label}: `schema {verb}` must name `{needle}`: {rendered}"
+                );
+            }
+        }
+
+        let current_pkg = ws.join(format!("current-{label}-pkg"));
+        write_package(&current_pkg, &current);
+        run_ok(
+            ws,
+            cache.path(),
+            &["schema", "validate", current_pkg.to_str().unwrap()],
+        );
+        let expected = memstead_schema::load_schema_from_dir(&current_pkg)
+            .unwrap_or_else(|e| panic!("{label}: current spelling must load: {e}"));
+        let expected = serde_json::to_value(&expected.types["note"].constraints).unwrap();
+
+        let sealed = ws.join(format!("sealed-{label}.mem"));
+        repack(&archive, &sealed, NOTE_MEMBER, retired.as_bytes(), &[]);
+        let receiver = TempDir::new().unwrap();
+        fresh_receiver(receiver.path(), cache.path());
+        run_ok(
+            receiver.path(),
+            cache.path(),
+            &["install", sealed.to_str().unwrap()],
+        );
+        let staged = staged_schemas(receiver.path());
+        let fieldnotes = staged
+            .iter()
+            .find(|s| s.manifest.name == "fieldnotes")
+            .unwrap_or_else(|| panic!("{label}: fieldnotes staged"));
+        assert_eq!(
+            serde_json::to_value(&fieldnotes.types["note"].constraints).unwrap(),
+            expected,
+            "{label}: the sealed retired spelling resolves to the current one"
+        );
+        if label.starts_with("gate-") {
+            let brief = memstead()
+                .current_dir(receiver.path())
+                .env("MEMSTEAD_MEM_CACHE", cache.path())
+                .args(["gates", "--mem", "field-log", "--quiet"])
+                .assert()
+                .success()
+                .get_output()
+                .stdout
+                .clone();
+            let brief = String::from_utf8_lossy(&brief).to_string();
+            let want = if label.ends_with("incoming") {
+                "(in)"
+            } else {
+                "(out)"
+            };
+            assert!(
+                brief.contains(want) && !brief.contains("coming)") && !brief.contains("going)"),
+                "{label}: the brief renders the one spelling: {brief}"
+            );
+        }
+    }
+}

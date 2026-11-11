@@ -147,6 +147,13 @@ the few entities the rule names under one identity, and record the check under
 another with `--role checker`. Reports that depend on the date take a fixed day
 through `memstead due --today <date>`.
 
+2026-11-11: the three packages speak the schema language of 0.25.0
+(`direction: incoming` / `outgoing`, `rel_type` / `rel_types` in constraint
+entries). They validate on 0.25.0, and on later engines after
+`memstead schema migrate <package> --write`, which rewrites those spellings to
+`in` / `out` and `relationships`. The packages stay as they are, as the dated
+evidence of the 2026-11-10 run.
+
 ## Files
 
 | Path | What it is |

@@ -23,7 +23,7 @@ fn seed() -> TempDir {
     seed_with(PLAN_GATE)
 }
 
-const PLAN_GATE: &str = "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: complete\n    relationships: [VERIFIES]\n    direction: incoming\n    severity: block\n";
+const PLAN_GATE: &str = "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: complete\n    relationships: [VERIFIES]\n    direction: in\n    severity: block\n";
 
 const SELF_GATE: &str = "constraints:\n  - kind: transition_requires_self_check\n    field: status\n    to_value: complete\n    check_kind: x-approval\n    severity: block\n";
 

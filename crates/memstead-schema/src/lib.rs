@@ -52,9 +52,8 @@ pub use source::{
 };
 pub use types::{
     ConstraintDef, ConstraintSeverity, DueAxis, FieldType, Filterable, MetadataFieldDef, MustReach,
-    PropagationDirection, ReachDirection, RequiredCardinality, RequiredOutgoing, SectionDef,
-    Serialization, SignalDef, SignalKind, SignalLevel, SignalThreshold, TableFormat,
-    TypeDefinition, derive_section_key,
+    ReachDirection, RequiredCardinality, RequiredOutgoing, SectionDef, Serialization, SignalDef,
+    SignalKind, SignalLevel, SignalThreshold, TableFormat, TypeDefinition, derive_section_key,
 };
 pub use types::{ENGINE_CHECK_KINDS, FOREIGN_CHECK_KIND_PREFIX, check_kind_wire_is_well_formed};
 

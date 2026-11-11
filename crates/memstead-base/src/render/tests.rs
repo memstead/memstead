@@ -1741,13 +1741,13 @@ constraints:
     fields: [status, checked_by]
   - kind: enum_from_neighbour
     field: status
-    rel_type: PART_OF
+    relationships: [PART_OF]
     section: body
   - kind: status_propagation
     field: status
     value: checked
-    rel_type: PART_OF
-    direction: incoming
+    relationships: [PART_OF]
+    direction: in
 write_rules: []
 "#;
     let schema = Arc::new(
@@ -1778,7 +1778,7 @@ write_rules: []
         {
             "kind": "enum_from_neighbour",
             "field": "status",
-            "rel_type": "PART_OF",
+            "relationships": ["PART_OF"],
             "section": "body",
             "severity": "warn",
         },
@@ -1786,8 +1786,8 @@ write_rules: []
             "kind": "status_propagation",
             "field": "status",
             "value": "checked",
-            "rel_type": "PART_OF",
-            "direction": "incoming",
+            "relationships": ["PART_OF"],
+            "direction": "in",
             "severity": "warn",
         },
     ]);
@@ -2240,7 +2240,7 @@ community:
 /// `rel_types`, and a schema without sets carries no
 /// `acyclic_sets` key at all.
 #[test]
-fn acyclic_sets_and_propagation_rel_types_visible_at_both_levels() {
+fn acyclic_sets_and_propagation_relationships_visible_at_both_levels() {
     let manifest = r#"name: relsets-render
 version: 0.1.0
 description: relation-set render fixture
@@ -2268,7 +2268,7 @@ community:
   resolution: 1.0
   seed: 42
 "#;
-    let claim = "name: claim\ndescription: t\nwhen_to_use: tests\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: standing\n    description: s\n    field_type: string\n    enum_values: [active, withdrawn]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - standing\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nconstraints:\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    rel_types: [GROUNDS, CONCLUDES]\n    direction: incoming\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    rel_type: PART_OF\n    direction: outgoing\n";
+    let claim = "name: claim\ndescription: t\nwhen_to_use: tests\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: standing\n    description: s\n    field_type: string\n    enum_values: [active, withdrawn]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - standing\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nconstraints:\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    relationships: [GROUNDS, CONCLUDES]\n    direction: in\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    relationships: [PART_OF]\n    direction: out\n";
     let schema = Arc::new(
         memstead_schema::load_schema_from_memory(
             manifest,
@@ -2291,21 +2291,24 @@ community:
         };
         let claim = &payload[types_key].as_array().expect("types array")[0];
         let constraints = claim["constraints"].as_array().expect("constraints array");
+        // One relation-set key and one direction spelling, whatever the
+        // declaration's size.
         assert_eq!(
-            constraints[0]["rel_types"],
+            constraints[0]["relationships"],
             serde_json::json!(["GROUNDS", "CONCLUDES"])
         );
-        assert!(
-            constraints[0].get("rel_type").is_none(),
-            "set declaration carries no single-name key: {:?}",
-            constraints[0]
+        assert_eq!(constraints[0]["direction"], "in");
+        assert_eq!(
+            constraints[1]["relationships"],
+            serde_json::json!(["PART_OF"])
         );
-        assert_eq!(constraints[1]["rel_type"], "PART_OF");
-        assert!(
-            constraints[1].get("rel_types").is_none(),
-            "single-name declaration stays byte-identical: {:?}",
-            constraints[1]
-        );
+        assert_eq!(constraints[1]["direction"], "out");
+        for c in constraints {
+            assert!(
+                c.get("rel_type").is_none() && c.get("rel_types").is_none(),
+                "no retired relation key: {c:?}"
+            );
+        }
     }
 
     // A schema without sets carries no `acyclic_sets` key.

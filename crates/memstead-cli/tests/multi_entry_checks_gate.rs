@@ -36,7 +36,7 @@ fn package(ws: &Path, version: &str, gate: bool) {
     )
     .unwrap();
     let constraints = if gate {
-        "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: complete\n    relationships: [VERIFIES]\n    direction: incoming\n    min_related: 1\n    severity: block\n"
+        "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: complete\n    relationships: [VERIFIES]\n    direction: in\n    min_related: 1\n    severity: block\n"
     } else {
         ""
     };
@@ -319,4 +319,116 @@ fn batch_create_with_an_unchecked_new_criterion_cannot_close_its_plan() {
         "batch create landed status: complete beside a never-checked criterion: {}\n{ent}",
         String::from_utf8_lossy(&out.stdout)
     );
+}
+
+/// The schema-language direction and relation set render in their one
+/// spelling on every surface that shows a checks gate: the gates brief,
+/// the `CONSTRAINT_UNSATISFIED` details and the health constraints axis.
+#[test]
+fn the_checks_gate_renders_in_and_relationships_on_every_surface() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let ws = tmp.path();
+    setup(ws);
+    let brief = String::from_utf8_lossy(&run(ws, &["gates", "--mem", "plans"]).stdout).to_string();
+    assert!(brief.contains("related via [VERIFIES] (in)"), "{brief}");
+
+    // A second, unchecked criterion: the transition refuses.
+    run(
+        ws,
+        &[
+            "create",
+            "--identity",
+            "author-a",
+            "--type",
+            "criterion",
+            "--title",
+            "Open",
+            "--section",
+            "body=never checked",
+            "--relation",
+            "VERIFIES:plans--beta",
+        ],
+    );
+    let out = Command::cargo_bin("memstead")
+        .unwrap()
+        .current_dir(ws)
+        .args([
+            "update",
+            "plans--beta",
+            "--metadata",
+            "status=complete",
+            "--auto-hash",
+            "--identity",
+            "author-b",
+            "--json",
+            "--quiet",
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let refusal: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let violation = refusal
+        .pointer("/details/violations/0")
+        .unwrap_or_else(|| panic!("{refusal}"));
+    assert_eq!(violation["direction"], "in", "{violation}");
+    assert_eq!(
+        violation["relationships"],
+        serde_json::json!(["VERIFIES"]),
+        "{violation}"
+    );
+
+    // Check it, close the plan, then edit a criterion: the health axis
+    // reports the standing violation in the same spelling.
+    run(
+        ws,
+        &[
+            "check",
+            "plans--open",
+            "--verdict",
+            "ok",
+            "--method",
+            "t",
+            "--identity",
+            "checker-c",
+            "--role",
+            "checker",
+        ],
+    );
+    run(
+        ws,
+        &[
+            "update",
+            "plans--beta",
+            "--metadata",
+            "status=complete",
+            "--auto-hash",
+            "--identity",
+            "author-b",
+        ],
+    );
+    run(
+        ws,
+        &[
+            "update",
+            "plans--open",
+            "--section",
+            "body=edited",
+            "--auto-hash",
+            "--identity",
+            "author-a",
+        ],
+    );
+    let health = run(ws, &["health", "--include", "constraints", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&health.stdout).unwrap();
+    let standing = &v["constraints"][0]["violations"][0];
+    assert_eq!(standing["direction"], "in", "{standing}");
+    assert_eq!(
+        standing["relationships"],
+        serde_json::json!(["VERIFIES"]),
+        "{standing}"
+    );
+    let text = v["constraints"].to_string();
+    for retired in ["incoming", "outgoing", "rel_type"] {
+        assert!(!text.contains(retired), "`{retired}` in {text}");
+    }
 }

@@ -110,7 +110,9 @@ pub enum SchemaCommand {
     /// Rewrite an authoring package's retired keys into the current
     /// schema language — the keys `schema validate` refuses
     /// (`propagating_relationships`, `optional:`, the retired `examples:`
-    /// list, the exemplar-relation `to:`/`type:` spelling) — by exactly
+    /// list, the exemplar-relation `to:`/`type:` spelling, and in
+    /// constraint entries the direction `incoming`/`outgoing` and the
+    /// `rel_type`/`rel_types` keys, now `in`/`out` and `relationships`) — by exactly
     /// the translations the engine applies when it reads sealed
     /// content. Dry run by default: prints one line per rewrite and
     /// writes nothing. `--write` applies the rewrites in place, keeping
@@ -780,9 +782,12 @@ staleness_threshold_days: 180
 #   must_reach         — reachability obligations over a relation set
 #                        (direction out/in, terminal_types, max_depth);
 #                        health-sweep only, always warn
-#   constraints        — the five-form vocabulary (requires_when,
-#                        unique, enum_from_neighbour, status_propagation
-#                        with rel_type or rel_types)
+#   constraints        — the form vocabulary (requires_when, unique,
+#                        enum_from_neighbour, status_propagation,
+#                        transition_requires_checks,
+#                        transition_requires_self_check); forms that
+#                        walk edges name them in `relationships` and
+#                        a direction as out/in
 #   signals            — edge_load counts with notice/warn thresholds,
 #                        served with contributors on every read
 # Prose guidance served to agents writing entities of this type.

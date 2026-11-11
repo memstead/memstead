@@ -100,6 +100,23 @@ pub enum SchemaLoadError {
     )]
     ExemplarRelationSpellingRetired { type_name: String },
 
+    /// A constraint entry used a retired spelling in an authoring
+    /// context: a direction `incoming` / `outgoing` (now `in` / `out`),
+    /// or a single `rel_type` / `rel_types` relation key (now
+    /// `relationships`). Sealed content keeps loading with the spelling
+    /// translated by the same table `schema migrate` rewrites from.
+    #[error(
+        "type '{type_name}': the `{kind}` constraint spells `{retired}`, retired for \
+         `{replacement}`. Run `memstead schema migrate <package>` to rewrite it, then retry. \
+         (Sealed packages with the old spelling keep loading; only authoring refuses.)"
+    )]
+    ConstraintSpellingRetired {
+        type_name: String,
+        kind: String,
+        retired: String,
+        replacement: String,
+    },
+
     /// An exemplar relation entry is missing `target:` or `rel_type:`
     /// after legacy translation — the entry cannot name an edge.
     #[error(
@@ -418,6 +435,24 @@ fn format_multiple(errors: &[SchemaLoadError]) -> String {
         .map(|(i, e)| format!("  {}. {e}", i + 1))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+impl SchemaLoadError {
+    /// Does this refusal (or any refusal it wraps) name a retired
+    /// spelling an authoring package must migrate?
+    pub fn names_a_retired_spelling(&self) -> bool {
+        match self {
+            SchemaLoadError::Multiple { errors } => {
+                errors.iter().any(SchemaLoadError::names_a_retired_spelling)
+            }
+            SchemaLoadError::PropagatingRelationshipsRenamed { .. }
+            | SchemaLoadError::ExamplesRetired { .. }
+            | SchemaLoadError::ExemplarRelationSpellingRetired { .. }
+            | SchemaLoadError::OptionalRetired { .. }
+            | SchemaLoadError::ConstraintSpellingRetired { .. } => true,
+            _ => false,
+        }
+    }
 }
 
 /// Fold an accumulated violation list into one error: a single
@@ -1091,7 +1126,33 @@ fn load_with_context(
             .map(|d| d.join(format!("{stem}.yaml")))
             .unwrap_or_else(|| PathBuf::from(format!("<memory>/{stem}.yaml")));
 
-        let mut td: TypeDefinition = match serde_yaml_ng::from_str(text) {
+        // Retired constraint spellings are translated on a parsed
+        // document by the migration table; the typed read then sees only
+        // the current spelling. Authoring refuses below on what was found.
+        let mut retired_spellings = Vec::new();
+        let parsed: Result<TypeDefinition, serde_yaml_ng::Error> = match serde_yaml_ng::from_str::<
+            serde_yaml_ng::Value,
+        >(text)
+        {
+            Ok(mut doc) => match crate::migrate::translate_retired_constraint_spellings(&mut doc) {
+                Ok(found) if found.is_empty() => serde_yaml_ng::from_str(text),
+                Ok(found) => {
+                    retired_spellings = found;
+                    serde_yaml_ng::from_value(doc)
+                }
+                Err(reason) => {
+                    errors.push(SchemaLoadError::InvalidConstraint {
+                        type_name: stem.clone(),
+                        kind: "constraints",
+                        offender: "retired spelling".to_string(),
+                        reason,
+                    });
+                    serde_yaml_ng::from_str(text)
+                }
+            },
+            Err(_) => serde_yaml_ng::from_str(text),
+        };
+        let mut td: TypeDefinition = match parsed {
             Ok(td) => td,
             Err(e) => {
                 // A type file that does not parse cannot be checked
@@ -1106,6 +1167,17 @@ fn load_with_context(
                 continue;
             }
         };
+
+        if types_dir.is_some() {
+            for found in retired_spellings.drain(..) {
+                errors.push(SchemaLoadError::ConstraintSpellingRetired {
+                    type_name: td.name.clone(),
+                    kind: found.kind.to_string(),
+                    retired: found.retired,
+                    replacement: found.replacement,
+                });
+            }
+        }
 
         if td.name != *stem {
             errors.push(SchemaLoadError::TypeNameMismatch {
@@ -2053,6 +2125,36 @@ fn validate_signals(
     }
 }
 
+/// A constraint form's `relationships` set: at least one name, each in
+/// the schema's relationship vocabulary.
+fn check_relationship_set(
+    td: &TypeDefinition,
+    kind: &'static str,
+    relationships: &[String],
+    rel_names: &std::collections::HashSet<String>,
+    errors: &mut Vec<SchemaLoadError>,
+) {
+    if relationships.is_empty() {
+        errors.push(SchemaLoadError::InvalidConstraint {
+            type_name: td.name.clone(),
+            kind,
+            offender: "(empty)".to_string(),
+            reason: "`relationships` must name at least one declared relationship".to_string(),
+        });
+    }
+    for rel in relationships {
+        if !rel_names.contains(rel) {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind,
+                offender: rel.clone(),
+                reason: "`relationships` entry is not in the schema's relationship vocabulary"
+                    .to_string(),
+            });
+        }
+    }
+}
+
 /// A constraint that names a metadata field and one of its values: the
 /// field must exist on the type, and where it declares `enum_values` the
 /// value must be one of them. `field` and `value` pair the declaration's
@@ -2148,7 +2250,9 @@ fn validate_constraints(
                 }
             }
             crate::types::ConstraintDef::EnumFromNeighbour {
-                field, rel_type, ..
+                field,
+                relationships,
+                ..
             } => {
                 if !field_keys.contains(field.as_str()) {
                     errors.push(SchemaLoadError::InvalidConstraint {
@@ -2158,15 +2262,7 @@ fn validate_constraints(
                         reason: "`field` names no metadata field of this type".to_string(),
                     });
                 }
-                if !rel_names.contains(rel_type) {
-                    errors.push(SchemaLoadError::InvalidConstraint {
-                        type_name: td.name.clone(),
-                        kind: "enum_from_neighbour",
-                        offender: rel_type.clone(),
-                        reason: "`rel_type` is not in the schema's relationship vocabulary"
-                            .to_string(),
-                    });
-                }
+                check_relationship_set(td, "enum_from_neighbour", relationships, rel_names, errors);
                 // `section` names a key on the *reached* type, which
                 // this per-type pass cannot see — the schema-level
                 // pass after all types load checks it.
@@ -2235,8 +2331,7 @@ fn validate_constraints(
             crate::types::ConstraintDef::StatusPropagation {
                 field,
                 value,
-                rel_type,
-                rel_types,
+                relationships,
                 severity,
                 ..
             } => {
@@ -2247,60 +2342,7 @@ fn validate_constraints(
                     ("value", value),
                     errors,
                 );
-                // Exactly one of `rel_type` / `rel_types`; every named
-                // member must be declared; an empty set is a defect.
-                match (rel_type, rel_types) {
-                    (Some(_), Some(_)) => {
-                        errors.push(SchemaLoadError::InvalidConstraint {
-                            type_name: td.name.clone(),
-                            kind: "status_propagation",
-                            offender: "rel_type".to_string(),
-                            reason: "declare `rel_type` or `rel_types`, not both".to_string(),
-                        });
-                    }
-                    (None, None) => {
-                        errors.push(SchemaLoadError::InvalidConstraint {
-                            type_name: td.name.clone(),
-                            kind: "status_propagation",
-                            offender: "(missing)".to_string(),
-                            reason: "one of `rel_type` / `rel_types` is required".to_string(),
-                        });
-                    }
-                    (Some(single), None) => {
-                        if !rel_names.contains(single) {
-                            errors.push(SchemaLoadError::InvalidConstraint {
-                                type_name: td.name.clone(),
-                                kind: "status_propagation",
-                                offender: single.clone(),
-                                reason: "`rel_type` is not in the schema's relationship vocabulary"
-                                    .to_string(),
-                            });
-                        }
-                    }
-                    (None, Some(set)) => {
-                        if set.is_empty() {
-                            errors.push(SchemaLoadError::InvalidConstraint {
-                                type_name: td.name.clone(),
-                                kind: "status_propagation",
-                                offender: "(empty)".to_string(),
-                                reason: "`rel_types` must name at least one relationship"
-                                    .to_string(),
-                            });
-                        }
-                        for name in set {
-                            if !rel_names.contains(name) {
-                                errors.push(SchemaLoadError::InvalidConstraint {
-                                    type_name: td.name.clone(),
-                                    kind: "status_propagation",
-                                    offender: name.clone(),
-                                    reason: "`rel_types` entry is not in the schema's \
-                                             relationship vocabulary"
-                                        .to_string(),
-                                });
-                            }
-                        }
-                    }
-                }
+                check_relationship_set(td, "status_propagation", relationships, rel_names, errors);
                 if *severity == crate::types::ConstraintSeverity::Block {
                     // Propagation can never refuse a write (the taint
                     // arises from the ancestor's later change), so a

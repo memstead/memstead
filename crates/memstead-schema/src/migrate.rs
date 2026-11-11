@@ -54,6 +54,9 @@ pub enum LegacyScope {
     MetadataField,
     /// A key on one entry of `exemplar: relations:`.
     ExemplarRelation,
+    /// A key on one entry of `constraints:` whose `kind:` is the named
+    /// constraint form.
+    Constraint { kind: &'static str },
 }
 
 /// What the loader's sealed translation does with the key — and
@@ -71,6 +74,15 @@ pub enum LegacyRewrite {
     /// `<to>: true`. When the entry already carries `<to>`, the loader
     /// lets it win and the retired key is simply removed.
     InvertBool { to: &'static str },
+    /// A single-name key replaced by a list key: `<retired>: X` becomes
+    /// `<to>: [X]`.
+    RenameToList { to: &'static str },
+    /// A retired value of the key: `<retired>: <from>` becomes
+    /// `<retired>: <to>`.
+    Value {
+        from: &'static str,
+        to: &'static str,
+    },
 }
 
 /// One retired key: its spelling, where it sits, what replaces it.
@@ -116,7 +128,178 @@ pub const LEGACY_KEYS: &[LegacyKey] = &[
         scope: LegacyScope::MetadataField,
         rewrite: LegacyRewrite::InvertBool { to: "required" },
     },
+    // One direction type: the forms that spelled a direction
+    // `incoming` / `outgoing` speak `in` / `out` like every other form.
+    LegacyKey {
+        retired: "direction",
+        scope: LegacyScope::Constraint {
+            kind: "status_propagation",
+        },
+        rewrite: LegacyRewrite::Value {
+            from: "incoming",
+            to: "in",
+        },
+    },
+    LegacyKey {
+        retired: "direction",
+        scope: LegacyScope::Constraint {
+            kind: "status_propagation",
+        },
+        rewrite: LegacyRewrite::Value {
+            from: "outgoing",
+            to: "out",
+        },
+    },
+    LegacyKey {
+        retired: "direction",
+        scope: LegacyScope::Constraint {
+            kind: "transition_requires_checks",
+        },
+        rewrite: LegacyRewrite::Value {
+            from: "incoming",
+            to: "in",
+        },
+    },
+    LegacyKey {
+        retired: "direction",
+        scope: LegacyScope::Constraint {
+            kind: "transition_requires_checks",
+        },
+        rewrite: LegacyRewrite::Value {
+            from: "outgoing",
+            to: "out",
+        },
+    },
+    // One relation-set key: every form names the relationships it
+    // walks under `relationships`.
+    LegacyKey {
+        retired: "rel_type",
+        scope: LegacyScope::Constraint {
+            kind: "status_propagation",
+        },
+        rewrite: LegacyRewrite::RenameToList {
+            to: "relationships",
+        },
+    },
+    LegacyKey {
+        retired: "rel_types",
+        scope: LegacyScope::Constraint {
+            kind: "status_propagation",
+        },
+        rewrite: LegacyRewrite::Rename {
+            to: "relationships",
+        },
+    },
+    LegacyKey {
+        retired: "rel_type",
+        scope: LegacyScope::Constraint {
+            kind: "enum_from_neighbour",
+        },
+        rewrite: LegacyRewrite::RenameToList {
+            to: "relationships",
+        },
+    },
 ];
+
+impl LegacyKey {
+    /// The current spelling this row's retired spelling becomes, as an
+    /// author would write it.
+    pub fn replacement(&self) -> String {
+        match self.rewrite {
+            LegacyRewrite::Rename { to } => format!("{to}:"),
+            LegacyRewrite::Drop { pointer } => format!("{pointer}:"),
+            LegacyRewrite::InvertBool { to } => format!("{to}:"),
+            LegacyRewrite::RenameToList { to } => format!("{to}: [<name>]"),
+            LegacyRewrite::Value { to, .. } => format!("{}: {to}", self.retired),
+        }
+    }
+
+    /// The retired spelling, as an author would have written it.
+    pub fn spelling(&self) -> String {
+        match self.rewrite {
+            LegacyRewrite::Value { from, .. } => format!("{}: {from}", self.retired),
+            _ => format!("{}:", self.retired),
+        }
+    }
+}
+
+/// One retired constraint spelling found in a type document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetiredConstraintSpelling {
+    /// The constraint form (`kind:`) it sits in.
+    pub kind: &'static str,
+    /// The retired spelling (`direction: incoming`, `rel_type:`).
+    pub retired: String,
+    /// The current spelling that replaces it.
+    pub replacement: String,
+}
+
+/// Translate every retired constraint spelling in a parsed type
+/// document into the current one, by the rows of [`LEGACY_KEYS`], and
+/// report what was found. The loader runs this on every type file: an
+/// authoring package refuses on a non-empty report, a sealed one loads
+/// the translated document. An entry that carries both a retired key
+/// and its replacement is reported as an error (`Err`), since no single
+/// meaning follows from it.
+pub fn translate_retired_constraint_spellings(
+    doc: &mut serde_yaml_ng::Value,
+) -> Result<Vec<RetiredConstraintSpelling>, String> {
+    use serde_yaml_ng::Value;
+    let mut found = Vec::new();
+    let Some(list) = doc.get_mut("constraints").and_then(Value::as_sequence_mut) else {
+        return Ok(found);
+    };
+    for entry in list.iter_mut() {
+        let Some(map) = entry.as_mapping_mut() else {
+            continue;
+        };
+        let Some(kind) = map.get("kind").and_then(Value::as_str).map(str::to_string) else {
+            continue;
+        };
+        for row in LEGACY_KEYS {
+            let LegacyScope::Constraint { kind: row_kind } = row.scope else {
+                continue;
+            };
+            if row_kind != kind {
+                continue;
+            }
+            let key = Value::String(row.retired.to_string());
+            match row.rewrite {
+                LegacyRewrite::Value { from, to } => {
+                    if map.get(&key).and_then(Value::as_str) == Some(from) {
+                        map.insert(key, Value::String(to.to_string()));
+                    } else {
+                        continue;
+                    }
+                }
+                LegacyRewrite::Rename { to } | LegacyRewrite::RenameToList { to } => {
+                    let Some(value) = map.remove(&key) else {
+                        continue;
+                    };
+                    let target = Value::String(to.to_string());
+                    if map.contains_key(&target) {
+                        return Err(format!(
+                            "a `{kind}` constraint declares both the retired `{}:` and `{to}:`",
+                            row.retired
+                        ));
+                    }
+                    let value = match row.rewrite {
+                        LegacyRewrite::RenameToList { .. } => Value::Sequence(vec![value]),
+                        _ => value,
+                    };
+                    map.insert(target, value);
+                }
+                LegacyRewrite::Drop { .. } | LegacyRewrite::InvertBool { .. } => continue,
+            }
+            found.push(RetiredConstraintSpelling {
+                kind: row_kind,
+                retired: row.spelling(),
+                replacement: row.replacement(),
+            });
+        }
+    }
+    Ok(found)
+}
 
 /// Why a migration could not be computed or written.
 #[derive(Debug, thiserror::Error)]
@@ -395,6 +578,14 @@ pub fn migrate_package(dir: &Path) -> Result<MigrateReport, MigrateError> {
         required_added,
     };
     if report.is_noop() {
+        // Nothing the rewriter reaches; a retired spelling it cannot
+        // reach (a quoted key, a flow-style mapping) still refuses the
+        // authoring read, and is then the author's to rewrite.
+        if let Err(source) = load_authoring_package_from_memory(&manifest, &before)
+            && source.names_a_retired_spelling()
+        {
+            return Err(MigrateError::RewriteLeavesViolations { source });
+        }
         return Ok(report);
     }
 
@@ -688,8 +879,16 @@ fn strip_comment(value: &str) -> &str {
     value
 }
 
-fn matches_scope(path: &[&str], scope: LegacyScope) -> bool {
+/// Does a key at `path` sit in `scope`? `constraint_kind` is the
+/// `kind:` of the constraint entry the key belongs to, when it does.
+fn matches_scope(path: &[&str], scope: LegacyScope, constraint_kind: Option<&str>) -> bool {
     match scope {
+        LegacyScope::Constraint { kind } => {
+            path.len() == 3
+                && path[0] == "constraints"
+                && path[1] == ITEM
+                && constraint_kind == Some(kind)
+        }
         LegacyScope::TypeTop => path.len() == 1,
         LegacyScope::MetadataField => {
             path.len() == 3 && path[0] == "metadata_fields" && path[1] == ITEM
@@ -719,7 +918,7 @@ struct FileOutcome {
 fn carries_legacy_optional(text: &str) -> bool {
     scan_key_lines(text)
         .iter()
-        .any(|k| k.key == "optional" && matches_scope(&k.path, LegacyScope::MetadataField))
+        .any(|k| k.key == "optional" && matches_scope(&k.path, LegacyScope::MetadataField, None))
 }
 
 fn rewrite_type_file(
@@ -740,15 +939,31 @@ fn rewrite_type_file(
     let has_sibling = |parent: usize, key: &str| -> bool {
         keys.iter().any(|k| k.parent == parent && k.key == key)
     };
+    // The `kind:` of the constraint entry a key belongs to.
+    let constraint_kind = |parent: usize| -> Option<&str> {
+        keys.iter()
+            .find(|k| {
+                k.parent == parent
+                    && k.key == "kind"
+                    && k.path.len() == 3
+                    && k.path[0] == "constraints"
+            })
+            .map(|k| k.value.trim_matches(|c| c == '"' || c == '\''))
+    };
 
     let mut edits: Vec<Edit> = Vec::new();
     let mut rewrites: Vec<Rewrite> = Vec::new();
 
     for k in &keys {
-        let Some(row) = LEGACY_KEYS
-            .iter()
-            .find(|row| row.retired == k.key && matches_scope(&k.path, row.scope))
-        else {
+        let unquoted = k.value.trim_matches(|c| c == '"' || c == '\'');
+        let Some(row) = LEGACY_KEYS.iter().find(|row| {
+            row.retired == k.key
+                && matches_scope(&k.path, row.scope, constraint_kind(k.parent))
+                && match row.rewrite {
+                    LegacyRewrite::Value { from, .. } => unquoted == from,
+                    _ => true,
+                }
+        }) else {
             continue;
         };
         let raw = lines[k.idx];
@@ -760,7 +975,14 @@ fn rewrite_type_file(
                 k.key
             ),
             LegacyScope::ExemplarRelation => format!("exemplar.relations[].{}", k.key),
+            LegacyScope::Constraint { kind } => format!("constraints[{kind}].{}", k.key),
         };
+        // The text after `key:` up to a trailing comment, and the comment.
+        let value_start = k.col + k.key.len();
+        let after_key = &raw[value_start..];
+        let colon = after_key.find(':').unwrap_or(0);
+        let tail = &after_key[colon + 1..];
+        let comment_at = tail.find(" #").map(|i| &tail[i..]).unwrap_or("");
         let action = match row.rewrite {
             LegacyRewrite::Rename { to } => {
                 let mut new_line = String::with_capacity(raw.len() + to.len());
@@ -798,16 +1020,37 @@ fn rewrite_type_file(
                         reason: "absence means optional".to_string(),
                     }
                 } else {
-                    let value_start = k.col + k.key.len();
-                    let after_key = &raw[value_start..];
-                    let colon = after_key.find(':').unwrap_or(0);
-                    let tail = &after_key[colon + 1..];
-                    let comment_at = tail.find(" #").map(|i| &tail[i..]).unwrap_or("");
                     let with = format!("{to}: true");
                     let new_line = format!("{}{with}{comment_at}", &raw[..k.col]);
                     edits.push(Edit::Replace(k.idx, new_line));
                     RewriteAction::Replaced { with }
                 }
+            }
+            LegacyRewrite::RenameToList { to } => {
+                // Only a plain inline name can become a one-element list;
+                // anything else is the author's to rewrite.
+                if k.value.is_empty() || k.value.starts_with(['[', '{', '|', '>', '&', '*', '!']) {
+                    return Err(MigrateError::UnmigratableValue {
+                        file: rel.to_string(),
+                        line: k.idx + 1,
+                        key: row.retired,
+                        value: k.value.to_string(),
+                    });
+                }
+                let with = format!("{to}: [{}]", k.value);
+                edits.push(Edit::Replace(
+                    k.idx,
+                    format!("{}{with}{comment_at}", &raw[..k.col]),
+                ));
+                RewriteAction::Replaced { with }
+            }
+            LegacyRewrite::Value { to, .. } => {
+                let with = format!("{}: {to}", row.retired);
+                edits.push(Edit::Replace(
+                    k.idx,
+                    format!("{}{with}{comment_at}", &raw[..k.col]),
+                ));
+                RewriteAction::Replaced { with }
             }
         };
         rewrites.push(Rewrite {
@@ -931,8 +1174,13 @@ mod tests {
     #[test]
     fn table_and_loader_sentinels_are_the_same_set() {
         let sentinels = sentinel_keys_in_source();
-        let table: std::collections::BTreeSet<String> =
-            LEGACY_KEYS.iter().map(|k| k.retired.to_string()).collect();
+        // Constraint spellings carry no sentinel: the loader translates
+        // them by this table itself, on the parsed document.
+        let table: std::collections::BTreeSet<String> = LEGACY_KEYS
+            .iter()
+            .filter(|k| !matches!(k.scope, LegacyScope::Constraint { .. }))
+            .map(|k| k.retired.to_string())
+            .collect();
         assert_eq!(
             sentinels, table,
             "LEGACY_KEYS and the legacy_* sentinels in types.rs must name the same retired keys"
@@ -980,6 +1228,44 @@ community:
             LegacyScope::MetadataField => format!("    {}: true # was optional\n", row.retired),
             _ => String::new(),
         };
+        let constraint = match (row.scope, row.rewrite) {
+            (LegacyScope::Constraint { kind }, LegacyRewrite::Value { from, .. }) => {
+                let rest = match kind {
+                    "status_propagation" => "    value: done\n    relationships: [PART_OF]\n",
+                    _ => "    to_value: done\n    relationships: [PART_OF]\n",
+                };
+                format!(
+                    "constraints:\n  - kind: {kind} # the form\n    field: phase\n{rest}    direction: {from} # walk side\n"
+                )
+            }
+            (
+                LegacyScope::Constraint {
+                    kind: "status_propagation",
+                },
+                _,
+            ) => {
+                let key = if row.retired == "rel_types" {
+                    "rel_types: [PART_OF] # the set"
+                } else {
+                    "rel_type: PART_OF # the set"
+                };
+                format!(
+                    "constraints:\n  - kind: status_propagation\n    field: phase\n    value: done\n    {key}\n    direction: in\n"
+                )
+            }
+            (LegacyScope::Constraint { kind }, _) => format!(
+                "constraints:\n  - kind: {kind}\n    field: phase\n    rel_type: PART_OF # the walk\n    section: body\n"
+            ),
+            _ => String::new(),
+        };
+        let field_extra = format!(
+            "{field_extra}{}",
+            if constraint.is_empty() {
+                ""
+            } else {
+                "  - key: phase\n    description: Step\n    field_type: string\n    enum_values: [open, done]\n"
+            }
+        );
         let exemplar = match row.scope {
             LegacyScope::ExemplarRelation => {
                 let (to_key, type_key) = match row.retired {
@@ -1015,7 +1301,7 @@ hierarchy_relationship: PART_OF
 {top}updatable_fields: [title, body, status]
 health_required_fields: [body]
 staleness_threshold_days: 90
-{exemplar}write_rules:
+{exemplar}{constraint}write_rules:
   - Keep it short.
 "#
         )
@@ -1067,6 +1353,141 @@ staleness_threshold_days: 90
             load_schema_from_dir(dir.path())
                 .unwrap_or_else(|e| panic!("migrated `{}` must validate: {e}", row.retired));
         }
+    }
+
+    /// A type file carrying every retired constraint spelling, each with
+    /// a comment beside it.
+    fn type_with_every_constraint_spelling() -> String {
+        let base = type_with(&LEGACY_KEYS[LEGACY_KEYS.len() - 1]);
+        let constraints = "constraints:
+  # the taint walks up
+  - kind: status_propagation # form five
+    field: phase
+    value: done
+    rel_type: PART_OF # one name
+    direction: incoming # walk side
+  - kind: status_propagation
+    field: phase
+    value: done
+    rel_types: # a block list
+      - PART_OF
+    direction: outgoing
+  - kind: transition_requires_checks
+    field: phase
+    to_value: done
+    relationships: [PART_OF]
+    direction: incoming # gate side
+  - kind: transition_requires_checks
+    field: phase
+    to_value: open
+    relationships: [PART_OF]
+    direction: \"outgoing\"
+  - kind: enum_from_neighbour
+    field: phase
+    rel_type: PART_OF # reached over
+    section: body
+";
+        // The base carries one constraint block of its own: swap it out.
+        let start = base
+            .find("constraints:\n")
+            .expect("base carries a constraint block");
+        let end = base.find("write_rules:\n  - Keep it short.").unwrap();
+        format!("{}{constraints}{}", &base[..start], &base[end..])
+    }
+
+    /// Every retired constraint spelling in one package migrates to a
+    /// package that validates, resolves to what the sealed read made of
+    /// the original, keeps every comment and the key order, and a second
+    /// run finds nothing to do.
+    #[test]
+    fn every_constraint_spelling_migrates_faithfully_and_once() {
+        let text = type_with_every_constraint_spelling();
+        let dir = tempfile::tempdir().unwrap();
+        write_package(dir.path(), &text);
+        load_schema_from_dir(dir.path()).expect_err("the authoring read refuses the original");
+
+        let report = migrate_package(dir.path()).unwrap();
+        assert_eq!(report.rewrite_count(), 7, "{:?}", report.files);
+        write_migration(&report).unwrap();
+        let migrated = std::fs::read_to_string(dir.path().join("types/sample.yaml")).unwrap();
+        let schema = load_schema_from_dir(dir.path()).expect("the migrated package validates");
+
+        // Resolves to what the sealed read resolved from the original.
+        let sealed = load_schema_from_memory_with_format(
+            &manifest(),
+            &[("sample".to_string(), text.clone())],
+            MetadataPolarityFormat::RequiredOptIn,
+        )
+        .unwrap();
+        assert_eq!(
+            schema.types["sample"].constraints,
+            sealed.types["sample"].constraints
+        );
+
+        // Every comment survives, and the keys keep their order.
+        for comment in text.lines().filter_map(|l| {
+            l.find(" #")
+                .map(|i| &l[i..])
+                .or_else(|| l.trim_start().starts_with('#').then_some(l))
+        }) {
+            assert!(
+                migrated.contains(comment),
+                "comment `{comment}` lost:\n{migrated}"
+            );
+        }
+        let keys = |t: &str| -> Vec<String> {
+            scan_key_lines(t)
+                .iter()
+                .map(|k| match k.key {
+                    "rel_type" | "rel_types" => "relationships".to_string(),
+                    other => other.to_string(),
+                })
+                .collect()
+        };
+        assert_eq!(keys(&text), keys(&migrated));
+        assert!(
+            migrated.contains("relationships: [PART_OF] # one name"),
+            "{migrated}"
+        );
+        assert!(migrated.contains("direction: in # walk side"), "{migrated}");
+        assert!(
+            migrated.contains("relationships: # a block list"),
+            "{migrated}"
+        );
+        assert!(
+            !migrated.contains("incoming") && !migrated.contains("outgoing"),
+            "{migrated}"
+        );
+
+        // Run twice: nothing more to do.
+        let again = migrate_package(dir.path()).unwrap();
+        assert_eq!(again.rewrite_count(), 0);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("types/sample.yaml")).unwrap(),
+            migrated
+        );
+    }
+
+    /// A retired spelling inside a flow-style mapping is out of the
+    /// rewriter's reach: the migration refuses and writes nothing.
+    #[test]
+    fn a_flow_style_constraint_refuses_and_writes_nothing() {
+        let base = type_with(&LEGACY_KEYS[LEGACY_KEYS.len() - 1]);
+        let start = base.find("constraints:\n").unwrap();
+        let end = base.find("write_rules:\n  - Keep it short.").unwrap();
+        let text = format!(
+            "{}constraints:\n  - {{kind: status_propagation, field: phase, value: done, rel_type: PART_OF, direction: in}}\n{}",
+            &base[..start],
+            &base[end..]
+        );
+        let dir = tempfile::tempdir().unwrap();
+        write_package(dir.path(), &text);
+        let err = migrate_package(dir.path()).expect_err("a flow mapping cannot be rewritten");
+        assert_eq!(err.code(), "SCHEMA_MIGRATE_FAILED");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("types/sample.yaml")).unwrap(),
+            text
+        );
     }
 
     #[test]

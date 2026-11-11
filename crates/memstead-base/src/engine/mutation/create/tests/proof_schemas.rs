@@ -104,8 +104,8 @@ constraints:
   - kind: status_propagation
     field: status
     value: fallen
-    rel_type: FOLLOWS_FROM
-    direction: incoming
+    relationships: [FOLLOWS_FROM]
+    direction: in
 write_rules: []
 "#;
 
@@ -343,7 +343,7 @@ constraints:
     severity: {unique_severity}
   - kind: enum_from_neighbour
     field: category
-    rel_type: REFERENCES
+    relationships: [REFERENCES]
     section: terms
 write_rules: []
 "#

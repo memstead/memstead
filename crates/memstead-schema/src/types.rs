@@ -393,16 +393,18 @@ pub enum ConstraintDef {
     },
     /// Form 3 — enum-from-neighbour: the legal values of `field` are
     /// the bullet-list entries (`- value` lines) of the `section`
-    /// section on the entity reached from this one via a `rel_type`
-    /// edge. A set value with no backing entry in any reached
+    /// section on an entity reached from this one over an outgoing edge
+    /// of one of `relationships`. A set value with no backing entry in any reached
     /// neighbour's section — including the no-neighbour and
     /// missing-section cases, where nothing can back it — is a
     /// violation.
     EnumFromNeighbour {
         /// The metadata field whose values the neighbour enumerates.
         field: String,
-        /// The outgoing rel-type that reaches the enumerating entity.
-        rel_type: String,
+        /// The outgoing relationships that reach the enumerating
+        /// entities; a value is legal when any entity reached over any
+        /// of them lists it.
+        relationships: Vec<String>,
         /// The section key on the reached entity whose bullet entries
         /// are the legal values.
         section: String,
@@ -411,7 +413,7 @@ pub enum ConstraintDef {
     },
     /// Form 5 — status propagation: when `field` on an entity of this
     /// type holds `value` (the terminal value), every entity reaching
-    /// it — transitively — via `rel_type` edges in `direction` is
+    /// it — transitively — via `relationships` edges in `direction` is
     /// tainted; tainted entities surface as health findings naming
     /// their tainting ancestor. Always warn-tier: the taint arises
     /// from the ancestor's *later* change, so it can never refuse the
@@ -424,21 +426,15 @@ pub enum ConstraintDef {
         /// The terminal value that starts the taint (validated
         /// against `field`'s enum, when it declares one).
         value: String,
-        /// The single rel-type the taint travels along. Exactly one
-        /// of `rel_type` / `rel_types` per declaration — the loader
-        /// refuses both-present and neither-present.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        rel_type: Option<String>,
-        /// The relation SET the taint travels along — the union
+        /// The relation set the taint travels along: the union
         /// subgraph, so a taint crosses rel-type boundaries. Inline
         /// list of declared names, per the bundle-wide convention.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        rel_types: Option<Vec<String>>,
-        /// Which direction reaches the dependents: `incoming` taints
-        /// the entities whose edges point at the terminal entity (and
-        /// their dependents, transitively); `outgoing` the entities
-        /// the terminal entity points at.
-        direction: PropagationDirection,
+        relationships: Vec<String>,
+        /// Which direction reaches the dependents: `in` taints the
+        /// entities whose edges point at the terminal entity (and their
+        /// dependents, transitively); `out` the entities the terminal
+        /// entity points at.
+        direction: ReachDirection,
         #[serde(default)]
         severity: ConstraintSeverity,
     },
@@ -469,10 +465,10 @@ pub enum ConstraintDef {
         /// Edge names whose related entities must be checked (each
         /// validated against the relationship vocabulary).
         relationships: Vec<String>,
-        /// Which side of the edges holds the entities to check:
-        /// `incoming` — entities whose edges point at this one;
-        /// `outgoing` — entities this one points at.
-        direction: PropagationDirection,
+        /// Which side of the edges holds the entities to check: `in`,
+        /// entities whose edges point at this one; `out`, entities this
+        /// one points at.
+        direction: ReachDirection,
         /// The least number of related entities the transition needs.
         /// Default 0: universal quantification over nothing satisfies,
         /// the sealed semantics every earlier generation carries. `1`
@@ -525,36 +521,6 @@ pub enum ConstraintDef {
         #[serde(default = "ConstraintSeverity::block")]
         severity: ConstraintSeverity,
     },
-}
-
-impl ConstraintDef {
-    /// The effective relation set of a `status_propagation`
-    /// declaration: the single `rel_type` as a one-element list, or
-    /// the declared `rel_types`. The loader guarantees exactly one of
-    /// the two is present. Returns `None` for other constraint forms.
-    pub fn propagation_rel_types(&self) -> Option<Vec<String>> {
-        match self {
-            ConstraintDef::StatusPropagation {
-                rel_type,
-                rel_types,
-                ..
-            } => match (rel_type, rel_types) {
-                (Some(single), None) => Some(vec![single.clone()]),
-                (None, Some(set)) => Some(set.clone()),
-                // Loader-refused shapes; empty keeps callers total.
-                _ => Some(Vec::new()),
-            },
-            _ => None,
-        }
-    }
-}
-
-/// Traversal direction for [`ConstraintDef::StatusPropagation`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum PropagationDirection {
-    Incoming,
-    Outgoing,
 }
 
 /// Required-cardinality variants. `AtLeastOne` is the only variant

@@ -36,7 +36,7 @@ fn package(ws: &Path, version: &str, gate: bool) {
     )
     .unwrap();
     let constraints = if gate {
-        "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: complete\n    relationships: [VERIFIES]\n    direction: incoming\n    min_related: 1\n    severity: block\n"
+        "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: complete\n    relationships: [VERIFIES]\n    direction: in\n    min_related: 1\n    severity: block\n"
     } else {
         ""
     };
