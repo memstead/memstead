@@ -820,7 +820,7 @@ fn the_catch_all_exemption_does_not_weaken_the_guard() {
 
 /// Caller-supplied content carrying
 /// an undeclared heading with NO body refuses, naming what was rejected.
-/// This is the exact complement of the criterion-6 exemption: the catch-all
+/// This is the exact complement of the catch-all exemption: the catch-all
 /// keeps absorbed content but SKIPS empty content, so accepting this write
 /// would drop the heading and tell the caller nothing.
 #[test]

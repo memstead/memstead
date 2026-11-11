@@ -141,7 +141,7 @@ impl ArmText {
 /// The writer/reader prompts, from `prompts.json`.
 ///
 /// Each prompt is a shared skeleton (identical across arms) plus one substrate
-/// block that differs only in substrate/access mechanics — the criterion-5
+/// block that differs only in substrate/access mechanics: the
 /// parity contract, preserved structurally: [`Prompts::writer`] and
 /// [`Prompts::reader`] assemble a prompt by substituting the substrate block and
 /// the round slice / query into the shared skeleton, so the two arms' prompts
@@ -774,7 +774,7 @@ pub struct LedgerSummary {
 }
 
 /// What a writer session produced: the tokens it spent, the tools it called, and
-/// the model it actually ran on. The tool calls are the criterion-5 evidence that
+/// the model it actually ran on. The tool calls are the parity evidence that
 /// Arm B's writes really crossed the MCP mutation surface; `executed_model` is
 /// the model-pin refusal complement — the driver invalidates the round if the
 /// session ran on a model other than the pin ([`ensure_model_honored`]).
@@ -2059,7 +2059,7 @@ mod tests {
 
     #[test]
     fn writer_prompts_differ_only_in_the_substrate_block() {
-        // Criterion-5 parity, mechanically: the two arms' assembled prompts are
+        // Parity, mechanically: the two arms' assembled prompts are
         // identical once the substrate block is accounted for.
         let dir = tmp();
         write_fixture_package(&dir);

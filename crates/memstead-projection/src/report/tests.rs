@@ -558,7 +558,7 @@ fn coverage_does_not_rest_on_an_anchor_whose_entity_is_gone() {
 
 /// The end-to-end workspace, with the set of entities the sidecar's keys
 /// name as a parameter: dropping one is how 03/02's condition is built
-/// (a row whose entity the mem does not hold), and the criterion-5 test
+/// (a row whose entity the mem does not hold), and the unresolvable-row test
 /// below needs the same three-file source and the same three anchors to
 /// compare against.
 fn end_to_end_report(

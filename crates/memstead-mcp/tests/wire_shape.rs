@@ -3224,7 +3224,7 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
     );
 
     // Opt-in read: created-by author, last-modified-by checker — the
-    // criterion-1 fixture retrieved end to end.
+    // fixture retrieved end to end.
     let read = harness.call_tool(
         "memstead_entity",
         json!({ "id": "specs--derived-conclusion", "include_provenance": true }),

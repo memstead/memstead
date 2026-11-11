@@ -955,7 +955,7 @@ mod tests {
 
     /// Render idempotence + prediction: repeated peeks return the same pair
     /// the next consuming selection takes, and leave the cursor and backoff
-    /// files byte-identical — the criterion-3 contract (a re-rendered brief
+    /// files byte-identical — the re-render contract (a re-rendered brief
     /// never silently advances the rotation past a binding).
     #[test]
     fn peek_is_idempotent_and_predicts_consumption() {
@@ -1012,7 +1012,7 @@ mod tests {
     }
 
     /// `not_loop_declared` names every (binding, op) pair the filter admits
-    /// but the binding does not loop-declare — the criterion-4 disclosure
+    /// but the binding does not loop-declare — the loop-declaration disclosure
     /// list for `--all` rendering.
     #[test]
     fn not_loop_declared_lists_undeclared_pairs() {

@@ -1665,7 +1665,7 @@ fn archive_mount_returns_sealed_indirectly_through_backend_layer() {
 /// survives a rollback as fresh — the store-carried generation is
 /// what lets the invalidation hook adjudicate that correctly; and
 /// a real mutation invalidates, with the recomputation identical
-/// to a from-scratch detection (the criterion-3 identity oracle
+/// to a from-scratch detection (the identity oracle
 /// for the mechanism).
 #[test]
 fn generation_keyed_memos_survive_rollback_and_track_mutations() {
