@@ -89,9 +89,16 @@ impl Engine {
             }
             self.lock_for_verb(!dry_run, &locked, &touched_mems, |engine| {
                 items.iter().any(|(a, _)| {
-                    a.relations
-                        .iter()
-                        .any(|r| engine.rel_type_is_acyclic(&a.mem, &r.rel_type))
+                    engine.write_needs_full_load(
+                        &a.mem,
+                        a.relations
+                            .iter()
+                            .map(|r| crate::engine::mutation::EdgeWrite {
+                                rel_type: &r.rel_type,
+                                target_mem: r.target.mem(),
+                                remove: false,
+                            }),
+                    )
                 })
             })?
         };

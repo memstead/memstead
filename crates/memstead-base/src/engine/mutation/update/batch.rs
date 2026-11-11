@@ -125,10 +125,19 @@ impl Engine {
                 |engine| {
                     items.iter().any(|(a, _)| {
                         a.id.mem().is_empty()
-                            || a.declare_relations.iter().any(|r| {
-                                r.target.mem().is_empty()
-                                    || engine.rel_type_is_acyclic(a.id.mem(), &r.rel_type)
-                            })
+                            || a.declare_relations
+                                .iter()
+                                .any(|r| r.target.mem().is_empty())
+                            || engine.write_needs_full_load(
+                                a.id.mem(),
+                                a.declare_relations.iter().map(|r| {
+                                    crate::engine::mutation::EdgeWrite {
+                                        rel_type: &r.rel_type,
+                                        target_mem: r.target.mem(),
+                                        remove: false,
+                                    }
+                                }),
+                            )
                     })
                 },
             )?

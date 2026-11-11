@@ -172,7 +172,17 @@ impl Engine {
                 !args.dry_run,
                 &locked,
                 std::slice::from_ref(&named_source),
-                |engine| short || (adds && engine.rel_type_is_acyclic(&named_source, rel_type)),
+                |engine| {
+                    short
+                        || engine.write_needs_full_load(
+                            &named_source,
+                            [crate::engine::mutation::EdgeWrite {
+                                rel_type,
+                                target_mem: &named_target,
+                                remove: !adds,
+                            }],
+                        )
+                },
             )?
         };
         let (source, source_hint) = self.resolve_entity_id(&args.source)?;
@@ -686,7 +696,14 @@ impl Engine {
                 items.iter().any(|(a, _)| {
                     a.source.mem().is_empty()
                         || a.target.mem().is_empty()
-                        || (!a.remove && engine.rel_type_is_acyclic(a.source.mem(), &a.rel_type))
+                        || engine.write_needs_full_load(
+                            a.source.mem(),
+                            [crate::engine::mutation::EdgeWrite {
+                                rel_type: &a.rel_type,
+                                target_mem: a.target.mem(),
+                                remove: a.remove,
+                            }],
+                        )
                 })
             })?
         };

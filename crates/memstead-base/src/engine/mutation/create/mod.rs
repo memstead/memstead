@@ -107,9 +107,16 @@ impl Engine {
                 &locked,
                 std::slice::from_ref(mem),
                 |engine| {
-                    relations
-                        .iter()
-                        .any(|r| engine.rel_type_is_acyclic(mem, &r.rel_type))
+                    engine.write_needs_full_load(
+                        mem,
+                        relations
+                            .iter()
+                            .map(|r| crate::engine::mutation::EdgeWrite {
+                                rel_type: &r.rel_type,
+                                target_mem: r.target.mem(),
+                                remove: false,
+                            }),
+                    )
                 },
             )?
         };

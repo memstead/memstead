@@ -210,6 +210,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `#anchor`, `|label`) and keeps its decorations, where it rewrote only
   the bare slug and the next update brought the old id back as a stub.
 
+- **A write that reads every mem holds every mem's lock.** A write whose
+  schema (or an edge target's) declares aggregate signals takes the whole
+  workspace's write lock, as a write under an acyclicity law already did,
+  so its threshold-crossing warnings are computed from a view reloaded
+  under that lock, where it read other mems without their locks and could
+  warn from a state another writer was changing.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

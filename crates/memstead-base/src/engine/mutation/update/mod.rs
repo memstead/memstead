@@ -216,9 +216,14 @@ impl Engine {
                 },
                 |engine| {
                     short
-                        || declared
-                            .iter()
-                            .any(|r| engine.rel_type_is_acyclic(&named_mem, &r.rel_type))
+                        || engine.write_needs_full_load(
+                            &named_mem,
+                            declared.iter().map(|r| crate::engine::mutation::EdgeWrite {
+                                rel_type: &r.rel_type,
+                                target_mem: r.target.mem(),
+                                remove: false,
+                            }),
+                        )
                 },
             )?
         };

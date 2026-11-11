@@ -154,7 +154,9 @@ impl super::Engine {
     /// rel-type, or of one in an `acyclic_sets` set (it walks the union
     /// subgraph), on an edge being added; and the threshold-crossing diff
     /// of declared aggregate signals on the written mem's schema or an
-    /// edge target's. A write touching neither skips the cost.
+    /// edge target's. A write touching neither skips the cost. The write
+    /// lock asks the same question: a write that reads every mem holds
+    /// every mem's lock, so each is reloaded under it before it is read.
     pub(crate) fn write_needs_full_load<'a>(
         &self,
         mem: &str,
@@ -165,11 +167,7 @@ impl super::Engine {
                 .get(m)
                 .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
         };
-        let cycle_guarded = |rel: &str| {
-            self.schemas.get(mem).is_some_and(|s| {
-                s.relationship_acyclic(rel) || s.acyclic_set_containing(rel).is_some()
-            })
-        };
+        let cycle_guarded = |rel: &str| self.rel_type_is_acyclic(mem, rel);
         has_signals(mem)
             || edges
                 .into_iter()

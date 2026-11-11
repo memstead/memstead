@@ -1915,3 +1915,79 @@ fn no_self_loop_rel_type_self_loop_refusal_is_pinned() {
         .unwrap_err();
     assert_eq!(err.code(), "RELATIONSHIP_CYCLE");
 }
+
+/// A write whose schema declares aggregate signals reads every mem for
+/// its crossing warnings, so it holds every mem's lock, as a write under
+/// an acyclicity law does: it waits for a writer holding another mem's
+/// lock, where it read that mem without its lock and could warn from a
+/// view the other writer was changing.
+#[test]
+fn a_write_with_aggregate_signals_waits_for_every_mems_lock() {
+    let tmp = TempDir::new().unwrap();
+    drop(engine_with_signals_schema(&tmp));
+    let schemas_dir = tmp.path().join("schemas");
+    let mount = |mem: &str, pin: memstead_schema::SchemaRef| {
+        let dir = tmp.path().join(mem);
+        std::fs::create_dir_all(&dir).unwrap();
+        (
+            crate::workspace::Mount {
+                mem: mem.to_string(),
+                schema: Some(pin),
+                storage: crate::workspace::MountStorage::Folder { path: dir.clone() },
+                capability: crate::workspace::MountCapability::Write,
+                lifecycle: crate::workspace::MountLifecycle::Eager,
+                cross_linkable: true,
+                migration_target: None,
+            },
+            Box::new(FilesystemBackend::new(dir)) as Box<dyn MemBackend>,
+        )
+    };
+    let mut engine = Engine::from_mounts_with_schemas_dir(
+        vec![
+            mount(
+                "mem",
+                memstead_schema::SchemaRef::new("argsig", semver::Version::new(0, 1, 0)),
+            ),
+            mount(
+                "other",
+                memstead_schema::SchemaRef::new("default", semver::Version::new(1, 0, 0)),
+            ),
+        ],
+        Some(&schemas_dir),
+    )
+    .unwrap();
+    let other_lock = std::fs::canonicalize(tmp.path().join("other"))
+        .unwrap()
+        .join(".memstead/locks/write.lock");
+    std::fs::create_dir_all(other_lock.parent().unwrap()).unwrap();
+
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&other_lock)
+            .unwrap();
+        f.lock().unwrap();
+        held_tx.send(()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        f.unlock().unwrap();
+    });
+    held_rx.recv().unwrap();
+
+    let started = std::time::Instant::now();
+    let (actor, client) = cli_actor();
+    let mut args = objection_args("Waits", Some("open"), None);
+    args.mem = "mem".to_string();
+    engine
+        .create_entity(args, actor, Some(&client), None)
+        .expect("the write lands once the other lock is free");
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    assert!(
+        waited >= std::time::Duration::from_millis(1000),
+        "the write did not wait for the other mem's lock ({waited:?})"
+    );
+}
