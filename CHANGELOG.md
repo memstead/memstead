@@ -38,7 +38,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   every write at or before their `ts`. Touches are ordered by write
   order on every backend, so the first author is the creating write's
   identity even when two writes share a second, and a rename on a folder
-  mem keeps the writers before it in the entity's story. A merger who adopts a
+  mem keeps the writers before it in the entity's story; a
+  rename records its writer on every entry whose links it rewrites, and a
+  proposal merge names every fork identity that wrote a landed entity in
+  a `Co-Writer:` trailer. A merger who adopts a
   proposal with changes therefore reads `self_checked` on the check it
   records for that entity.
 
@@ -60,7 +63,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   written before the check. Conflict resolution now runs both gates on
   the side it lands (before, it validated section keys and content
   only), and a proposal merge carries the record across an adopted
-  status-only change as an update does. Carried lines earlier engines wrote across content edits stay
+  status-only change as an update does, judging an amended entry once by
+  the merge's net effect against the entity as it stood before. Carried lines earlier engines wrote across content edits stay
   in the ledger and keep standing where they stand.
 
 - **The newest check of a kind is the one made last, not the line the

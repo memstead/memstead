@@ -352,6 +352,17 @@ impl Engine {
                         for entity in &n.entity_ids {
                             out.absorb(entity, touch.clone());
                         }
+                        // A proposal merge names every fork identity that
+                        // wrote a landed entity beside its proposer.
+                        for (entity, identity) in &n.co_writers {
+                            out.absorb(
+                                entity,
+                                Touch {
+                                    identity: Some(identity.clone()),
+                                    ..touch.clone()
+                                },
+                            );
+                        }
                     }
                     out.follow_renames();
                 }

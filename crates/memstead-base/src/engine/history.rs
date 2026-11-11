@@ -907,6 +907,7 @@ mod tests {
             merged_by: None,
             proposal: None,
             created_ids: Vec::new(),
+            co_writers: Vec::new(),
             timestamp: 1,
         };
         // Newest-first: an update, then the batch create, then an
@@ -958,6 +959,7 @@ mod tests {
             merged_by: Some("owner".into()),
             proposal: Some("f@b".into()),
             created_ids: created.into_iter().map(str::to_string).collect(),
+            co_writers: Vec::new(),
             timestamp: 2,
         };
         let create = CommitNote {
@@ -977,6 +979,7 @@ mod tests {
             merged_by: None,
             proposal: None,
             created_ids: Vec::new(),
+            co_writers: Vec::new(),
             timestamp: 1,
         };
         let notes = vec![

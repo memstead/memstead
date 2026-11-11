@@ -776,3 +776,74 @@ fn an_edge_whitespace_change_beside_the_transition_refuses() {
         assert_eq!(fs::read_to_string(&ledger).unwrap(), before);
     }
 }
+
+/// A proposal merge lands an entry two fork identities wrote under the
+/// last one's name; the earlier writer rides the merge commit as a
+/// `Co-Writer:` and its own check of the merged text does not open the
+/// self-check gate.
+#[test]
+fn a_fork_writer_whose_text_a_proposal_merge_lands_cannot_confirm_it() {
+    let ws = seed_on(SELF_GATE, true);
+    let root = ws.path();
+    create(root, "identity-a", "plan", "The Plan", None);
+    let ok = |args: &[&str]| {
+        let out = cli(root, args);
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        out
+    };
+    ok(&[
+        "mem",
+        "fork",
+        "plans",
+        "pfork",
+        "--identity",
+        "identity-a",
+        "--quiet",
+    ]);
+    ok(&[
+        "update",
+        "pfork--the-plan",
+        "--auto-hash",
+        "--section",
+        "body=x wrote this",
+        "--identity",
+        "identity-x",
+        "--quiet",
+    ]);
+    ok(&[
+        "update",
+        "pfork--the-plan",
+        "--auto-hash",
+        "--section",
+        "body=x wrote this.",
+        "--identity",
+        "identity-y",
+        "--quiet",
+    ]);
+    let brief = ok(&["proposal", "brief", "pfork", "--json", "--quiet"]);
+    let mut v: serde_json::Value = serde_json::from_slice(&brief.stdout).unwrap();
+    v["dispositions"]["the-plan"]["disposition"] = "adopt".into();
+    let file = root.join("dispositions.json");
+    std::fs::write(&file, v.to_string()).unwrap();
+    ok(&[
+        "proposal",
+        "merge",
+        "pfork",
+        "--dispositions",
+        file.to_str().unwrap(),
+        "--identity",
+        "identity-m",
+        "--quiet",
+    ]);
+    approve(root, "identity-x");
+    let out = complete(root, "identity-e");
+    assert!(
+        !out.status.success(),
+        "identity-x wrote the merged text and confirmed it: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}

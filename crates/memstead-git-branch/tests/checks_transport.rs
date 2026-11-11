@@ -370,7 +370,7 @@ fn a_push_keeps_and_names_the_rows_its_import_refused() {
         .collect();
     std::fs::write(&ledger, rewritten).unwrap();
     {
-        let mut engine_b = engine_from_workspace_root(b.path()).unwrap();
+        let engine_b = engine_from_workspace_root(b.path()).unwrap();
         engine_b.push("specs", "hub", false).unwrap();
     }
     assert!(

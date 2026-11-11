@@ -504,6 +504,7 @@ mod tests {
             merged_by: None,
             proposal: None,
             created_ids: Vec::new(),
+            co_writers: Vec::new(),
             timestamp: 0,
         }
     }
@@ -583,6 +584,7 @@ mod tests {
             merged_by: None,
             proposal: None,
             created_ids: Vec::new(),
+            co_writers: Vec::new(),
             timestamp: 0,
         };
         let map = build_authoritative_rename_map(&[note]);

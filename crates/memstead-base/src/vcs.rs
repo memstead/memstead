@@ -216,6 +216,11 @@ pub struct ProposalTrailers {
     pub proposal: String,
     pub merged_by: String,
     pub created: Vec<String>,
+    /// `(entity id, identity)`: every fork identity that wrote an entity
+    /// this commit lands, beside the proposer the commit is attributed to.
+    /// One `Co-Writer: <id> <identity>` trailer each; independence counts
+    /// them as writers of the landed entity.
+    pub co_writers: Vec<(String, String)>,
 }
 
 impl<'a> CommitContext<'a> {
@@ -405,6 +410,9 @@ pub fn format_commit_message(prose: &str, ctx: &CommitContext<'_>) -> String {
         trailers.push(format!("Proposal: {}", p.proposal));
         if !p.created.is_empty() {
             trailers.push(format!("Created: {}", p.created.join(", ")));
+        }
+        for (id, identity) in &p.co_writers {
+            trailers.push(format!("Co-Writer: {id} {identity}"));
         }
     }
     let note_body = ctx.note.as_deref().map(str::trim).filter(|n| !n.is_empty());

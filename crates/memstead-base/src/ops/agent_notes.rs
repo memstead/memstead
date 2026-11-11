@@ -74,6 +74,11 @@ pub struct CommitNote {
     /// those entities' creation. Empty on every other commit.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub created_ids: Vec<String>,
+    /// `(entity id, identity)` pairs from the `Co-Writer:` trailers of a
+    /// proposal merge commit: fork identities that wrote a landed entity
+    /// beside the proposer. Empty on every other commit.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub co_writers: Vec<(String, String)>,
     /// Commit timestamp in seconds since unix epoch.
     pub timestamp: i64,
 }

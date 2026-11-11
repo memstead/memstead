@@ -346,8 +346,21 @@ impl Engine {
         // commits allow it, so the record still names who proposed, and
         // is silently unattributed otherwise (nothing lands under it).
         let mut proposers: BTreeMap<String, (String, Role)> = BTreeMap::new();
+        // Per slug: every identity that wrote the entity on the fork. The
+        // landing commit is attributed to the proposer; the others ride it
+        // as `Co-Writer:` trailers, so independence counts them as writers.
+        let mut fork_writers: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for slot in &slots {
             let fork_id = EntityId::new(fork, &slot.entry.slug);
+            let mut writers: Vec<String> = Vec::new();
+            for t in filter_notes_for_entity(fork_id.as_ref(), &notes) {
+                if let Some(i) = t.identity.clone()
+                    && !writers.contains(&i)
+                {
+                    writers.push(i);
+                }
+            }
+            fork_writers.insert(slot.entry.slug.clone(), writers);
             let touch = filter_notes_for_entity(fork_id.as_ref(), &notes)
                 .into_iter()
                 .next();
@@ -500,7 +513,12 @@ impl Engine {
                     }
                     _ => {
                         let landing = &versions[slug];
-                        match self.plan_landing(&target_id, landing, &creates)? {
+                        // An amended entry is judged once, by the merge's net
+                        // effect, after its amend is prepared.
+                        self.defer_transition_gates = slot.body.is_some();
+                        let planned = self.plan_landing(&target_id, landing, &creates);
+                        self.defer_transition_gates = false;
+                        match planned? {
                             Some(l) => landings.push(l),
                             None => noops.push(slug.to_string()),
                         }
@@ -595,10 +613,13 @@ impl Engine {
         let amends: Result<Vec<PreparedUpdate>, EngineError> = (|| {
             let mut prepared: Vec<PreparedUpdate> = Vec::new();
             for a in &adopted {
-                if let Some(body) = &a.amend
-                    && let Some(p) = self.plan_amend(&EntityId::new(&target, &a.slug), body)?
-                {
-                    prepared.push(p);
+                if let Some(body) = &a.amend {
+                    self.defer_transition_gates = true;
+                    let planned = self.plan_amend(&EntityId::new(&target, &a.slug), body);
+                    self.defer_transition_gates = false;
+                    if let Some(p) = planned? {
+                        prepared.push(p);
+                    }
                 }
             }
             Ok(prepared)
@@ -611,12 +632,58 @@ impl Engine {
                 return Err(e);
             }
         };
+        let mut net_carries: Vec<(EntityId, Vec<String>, String, String)> = Vec::new();
         // A merge is one write of each adopted entity: an amend that lands
         // beside an adopted status change is judged against the entity as
         // it stood before the merge, so the merge cannot reach a gated
         // value on text no record names (the landing entered the value, the
         // amend then changes the content).
-        for p in &amends {
+        // The writes judged by their net effect: each amend, and the landing
+        // of an amended entry whose amend prepared to nothing (the landed
+        // version already equals it).
+        struct NetWrite {
+            id: EntityId,
+            markdown: String,
+            file_path: String,
+            type_def: std::sync::Arc<memstead_schema::TypeDefinition>,
+            mem: String,
+        }
+        let mut net_writes: Vec<NetWrite> = amends
+            .iter()
+            .map(|p| NetWrite {
+                id: p.id.clone(),
+                markdown: p.markdown.clone(),
+                file_path: p.file_path.clone(),
+                type_def: p.type_def.clone(),
+                mem: p.mem.clone(),
+            })
+            .collect();
+        for a in adopted.iter().filter(|a| a.amend.is_some()) {
+            let id = EntityId::new(&target, &a.slug);
+            if amends.iter().any(|p| p.id == id) {
+                continue;
+            }
+            for l in &a.landings {
+                match l {
+                    Landing::Update(p) => net_writes.push(NetWrite {
+                        id: p.id.clone(),
+                        markdown: p.markdown.clone(),
+                        file_path: p.file_path.clone(),
+                        type_def: p.type_def.clone(),
+                        mem: p.mem.clone(),
+                    }),
+                    Landing::Create(p) => net_writes.push(NetWrite {
+                        id: p.id.clone(),
+                        markdown: p.markdown.clone(),
+                        file_path: p.file_path.clone(),
+                        type_def: p.type_def.clone(),
+                        mem: p.mem.clone(),
+                    }),
+                    Landing::Delete { .. } => {}
+                }
+            }
+        }
+        for p in &net_writes {
             let next = match parse_markdown(&p.markdown, &p.file_path, p.type_def.as_ref(), &p.mem)
             {
                 Ok(parsed) => parsed.entity,
@@ -636,13 +703,14 @@ impl Engine {
                 (Some(b), Some(d)) => Some((b, d.as_ref())),
                 _ => None,
             };
-            let (violated, _) = self.gate_transition_forms(
-                pre,
-                &next,
-                &crate::entity::parser::compute_hash(&p.markdown),
-                p.type_def.as_ref(),
-                Vec::new(),
-            );
+            let post_hash = crate::entity::parser::compute_hash(&p.markdown);
+            let (violated, carry_kinds) =
+                self.gate_transition_forms(pre, &next, &post_hash, p.type_def.as_ref(), Vec::new());
+            if let Some(b) = &before
+                && !carry_kinds.is_empty()
+            {
+                net_carries.push((p.id.clone(), carry_kinds, b.content_hash.clone(), post_hash));
+            }
             let blocked: Vec<_> = violated
                 .into_iter()
                 .filter(|v| v.severity() == memstead_schema::ConstraintSeverity::Block)
@@ -670,6 +738,13 @@ impl Engine {
                     self.discard_all_pending();
                     return Err(e);
                 }
+            }
+        }
+        for (id, kinds, pre, post) in &net_carries {
+            if let Err(e) = self.carry_checks_across_transition(id, kinds, pre, post) {
+                self.store = store_snapshot;
+                self.discard_all_pending();
+                return Err(e);
             }
         }
         for p in &amends {
@@ -826,10 +901,24 @@ impl Engine {
                 Some(proposer.clone()),
             );
             ctx.entity_ids = Some(ids.clone());
+            let co_writers: Vec<(String, String)> = ids
+                .iter()
+                .flat_map(|id| {
+                    let slug = EntityId(id.clone()).path().to_string();
+                    fork_writers
+                        .get(&slug)
+                        .into_iter()
+                        .flatten()
+                        .filter(|w| *w != proposer)
+                        .map(|w| (id.clone(), w.clone()))
+                        .collect::<Vec<_>>()
+                })
+                .collect();
             ctx.proposal = Some(ProposalTrailers {
                 proposal: brief.proposal_id.clone(),
                 merged_by: merger.clone(),
                 created: created.clone(),
+                co_writers,
             });
             let subject = format!("memstead: proposal-merge {}", brief.proposal_id);
             let sha = match self.mounts[target_mount]
@@ -917,6 +1006,7 @@ impl Engine {
                 proposal: brief.proposal_id.clone(),
                 merged_by: merger.clone(),
                 created: Vec::new(),
+                co_writers: Vec::new(),
             });
             let subject = format!("memstead: proposal-merge {}", brief.proposal_id);
             let sha = match self.mounts[target_mount]
@@ -1025,6 +1115,7 @@ impl Engine {
                 proposal: brief.proposal_id.clone(),
                 merged_by: merger.clone(),
                 created: Vec::new(),
+                co_writers: Vec::new(),
             });
             let subject = format!("memstead: proposal-amend {}", brief.proposal_id);
             let sha = match self.mounts[target_mount]

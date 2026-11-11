@@ -288,6 +288,18 @@ impl Engine {
     ) -> (Vec<crate::ops::health::UnsatisfiedConstraint>, Vec<String>) {
         use crate::ops::health::UnsatisfiedConstraint as U;
         use memstead_schema::ConstraintDef as C;
+        if self.defer_transition_gates {
+            let kept = violated
+                .into_iter()
+                .filter(|v| {
+                    !matches!(
+                        v,
+                        U::TransitionRequiresChecks { .. } | U::TransitionRequiresSelfCheck { .. }
+                    )
+                })
+                .collect();
+            return (kept, Vec::new());
+        }
         let holds = |e: &crate::entity::Entity, field: &str, value: &str| {
             e.metadata
                 .get(field)

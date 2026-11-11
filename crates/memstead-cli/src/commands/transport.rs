@@ -197,8 +197,12 @@ pub fn run_push(ctx: &CliContext, args: PushArgs) -> anyhow::Result<()> {
             None => "already on the remote".to_string(),
         };
         crate::output::print_markdown(&format!(
-            "# Pushed `{}` to `{}`{force_note}\n\n- Branch ref: `{}`\n- New SHA at remote: `{}`\n- Check records: {checks}",
-            outcome.mem, outcome.remote, outcome.branch_ref, outcome.new_sha,
+            "# Pushed `{}` to `{}`{force_note}\n\n- Branch ref: `{}`\n- New SHA at remote: `{}`\n- Check records: {checks}{}",
+            outcome.mem,
+            outcome.remote,
+            outcome.branch_ref,
+            outcome.new_sha,
+            refused_check_lines(&outcome.checks_refused),
         ));
     }
     Ok(())
@@ -238,6 +242,15 @@ fn run_push_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
                 p.previous_sha.clone()
             };
             println!("{} {prev} -> {}", p.ref_name, p.new_sha);
+        }
+        for r in &outcome.checks_refused {
+            println!(
+                "check record refused: `{}` ({}) by {}: {}",
+                r.entity,
+                r.kind,
+                r.identity.as_deref().unwrap_or("(no identity)"),
+                r.reason
+            );
         }
     }
     if let Some(first) = outcome.refused.first() {

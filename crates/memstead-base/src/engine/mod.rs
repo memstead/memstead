@@ -403,6 +403,12 @@ pub struct Engine {
     /// it `None` and `Engine::changes_since` / `Engine::export_mem`
     /// fall through to the folder/archive-only branches.
     git_branch_ops: Option<GitBranchOps>,
+    /// Set while a proposal merge prepares the landing and the amend of an
+    /// entity the owner amends: the merge is one write of that entity, so
+    /// the transition forms judge its net effect against the pre-merge
+    /// entity once, after both are prepared, and the per-step reading is
+    /// deferred ([`Self::gate_transition_forms`]).
+    pub(crate) defer_transition_gates: bool,
     /// Per-mem subscriber registry for [`MemChangedEvent`]s. Held
     /// behind `Arc<Mutex<_>>` so [`SubscriptionHandle`]s — which own
     /// the consumer's view of the subscription lifetime — can call
