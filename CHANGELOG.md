@@ -154,6 +154,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   rename arrives as one `renamed` event, where it surfaced as an update
   of the new id.
 
+- **A section may open with an indented code block whose first line looks
+  like a heading.** The write gate reads a body as the parser stores it
+  (leading blank lines dropped, the first line's indent kept), so
+  `    ## not a heading` leading a section is accepted and round-trips
+  unchanged, where it was refused `SECTION_CONTENT_INVALID` although the
+  same block after a prose line was accepted.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

@@ -872,7 +872,7 @@ pub fn validate_section_content<'a>(
         // see in it. `stored` and `masked` share byte offsets and line
         // count, so the two line sequences correspond one-to-one and
         // the refusal can quote the real line.
-        let stored = value.trim();
+        let stored = crate::entity::parser::stored_section_text(value).0;
         let masked = crate::markdown::mask_code_blocks(stored);
         for (line, masked_line) in stored.lines().zip(masked.lines()) {
             // Match the parser's regex shape: `^## ` (two hashes, one

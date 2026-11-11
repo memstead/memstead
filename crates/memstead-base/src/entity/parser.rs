@@ -624,16 +624,21 @@ fn section_heading_re() -> &'static Regex {
 /// runtime validator's embedded-heading guard keeps its own full
 /// trim, so the mutation path refuses exactly what it refused.
 fn section_content(body: &str, content_start: usize, content_end: usize) -> (&str, usize) {
-    let raw = &body[content_start..content_end];
+    let (text, offset) = stored_section_text(&body[content_start..content_end]);
+    (text, content_start + offset)
+}
+
+/// A section body as the splitter stores it: leading blank lines dropped,
+/// the first visible line kept with its indent, trailing whitespace cut;
+/// with the byte offset the stored text starts at. The write gate reads a
+/// proposed body through this too, so it judges what will be stored.
+pub(crate) fn stored_section_text(raw: &str) -> (&str, usize) {
     let visible_start = raw
         .split_inclusive('\n')
         .take_while(|line| line.trim().is_empty())
         .map(str::len)
         .sum::<usize>();
-    (
-        raw[visible_start..].trim_end(),
-        content_start + visible_start,
-    )
+    (raw[visible_start..].trim_end(), visible_start)
 }
 
 /// Every section boundary of `body` in document order, each the byte

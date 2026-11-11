@@ -1001,36 +1001,6 @@ fn section_content_admits_a_heading_inside_a_code_block() {
     }
 }
 
-/// The trim-fork class: the splitter stores the *trimmed* body, so
-/// an indented code block that opens a section loses its indent on
-/// write-back and its `## ` line lands at column 0 on the next
-/// parse. The guard sees what the reparse will see.
-#[test]
-fn section_content_refuses_the_trim_fork() {
-    let err = validate_section_content(
-        [("body", "    ## Not A Heading\n    more\n")].into_iter(),
-        None,
-    )
-    .expect_err("content whose trim exposes a column-0 heading must be refused");
-    assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
-    match err {
-        ValidationError::SectionContentInvalid {
-            embedded_heading, ..
-        } => assert_eq!(
-            embedded_heading, "## Not A Heading",
-            "the refusal quotes the line the reparse will see"
-        ),
-        other => panic!("unexpected error: {other}"),
-    }
-}
-
-#[test]
-fn section_content_refuses_the_trim_fork_for_h1_too() {
-    let err = validate_section_content([("body", "  # Not A Title\n")].into_iter(), None)
-        .expect_err("h1 exposed by the trim must be refused");
-    assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
-}
-
 /// A heading the parser keys onto a declared section forks the entity
 /// whatever its spelling: case, inner spaces against underscores, and
 /// trailing blanks all derive the same key, so each is refused like the
@@ -1056,4 +1026,24 @@ fn the_catch_all_exemption_refuses_every_spelling_of_a_declared_heading() {
                 .expect_err(heading);
         assert_eq!(err.code(), "SECTION_CONTENT_INVALID", "{heading}");
     }
+}
+
+/// The heading check reads a section as the parser stores it: leading
+/// blank lines dropped, the first visible line's indent kept. An indented
+/// code block whose first line is `    ## x` is no heading to the parser,
+/// so it is accepted, as the same block after a prose line already is.
+#[test]
+fn an_indented_code_block_leading_a_section_is_not_a_heading() {
+    for value in [
+        "    ## Not A Heading\n    more\n",
+        "\n\n    ## Not A Heading\n",
+        "intro\n\n    ## Not A Heading\n",
+    ] {
+        validate_section_content([("body", value)].into_iter(), None)
+            .unwrap_or_else(|e| panic!("{value:?}: {e:?}"));
+    }
+    // A column-0 heading after leading blank lines is still one.
+    let err = validate_section_content([("body", "\n\n## Real\n")].into_iter(), None)
+        .expect_err("a heading after blank lines is a heading");
+    assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
 }
