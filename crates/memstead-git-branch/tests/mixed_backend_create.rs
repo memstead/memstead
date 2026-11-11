@@ -870,3 +870,59 @@ fn a_mem_create_whose_roster_write_fails_serves_no_mem() {
     let again = mem_management::create_mem(&mut engine, params()).unwrap_err();
     assert_eq!(again.code(), "MEM_STORAGE_RESIDUE_DETECTED");
 }
+
+/// A branch reset leaves the engine serving the tree it reset to, so a
+/// later write starts from that tree, where the store kept the discarded
+/// commits' contents and the next write put them back on the branch.
+#[test]
+fn a_branch_reset_serves_the_tree_it_reset_to() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "specs", "Body Spec");
+    let id = memstead_base::EntityId::new("specs", "body-spec");
+    let mount = engine.mount("specs").cloned().unwrap();
+    let head = || {
+        memstead_git_branch::storage::instantiate_full_backend(&mount)
+            .unwrap()
+            .current_head()
+            .unwrap()
+            .unwrap()
+    };
+    let at_a = head();
+    let before = engine.get_entity(&id).unwrap().clone();
+
+    let mut sections = indexmap::IndexMap::new();
+    sections.insert("purpose".to_string(), "the discarded purpose".to_string());
+    engine
+        .update_entity(
+            memstead_base::UpdateEntityArgs {
+                id: id.clone(),
+                expected_hash: memstead_base::ExpectedHash::from_token(Some(
+                    before.content_hash.clone(),
+                )),
+                sections,
+                append_sections: Default::default(),
+                patch_sections: Default::default(),
+                sections_unset: Vec::new(),
+                metadata: Default::default(),
+                metadata_unset: Vec::new(),
+                declare_relations: Vec::new(),
+                dry_run: false,
+                relations_unset: Vec::new(),
+                anchors: Vec::new(),
+                anchors_unset: Vec::new(),
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .unwrap();
+    let at_b = head();
+    assert_ne!(at_a, at_b);
+
+    engine.branch_reset("specs", &at_a, Some(&at_b)).unwrap();
+    let served = engine.get_entity(&id).unwrap();
+    assert_eq!(served.sections["purpose"], before.sections["purpose"]);
+    assert_eq!(served.content_hash, before.content_hash);
+}

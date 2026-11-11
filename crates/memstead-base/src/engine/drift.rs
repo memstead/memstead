@@ -359,6 +359,31 @@ impl Engine {
     /// Remember that the drift reload of `mem` failed: its view is
     /// behind storage until a reload succeeds, and no write may land on
     /// it meanwhile ([`Self::commit_staged`]).
+    /// After this engine moved a mem's branch (a pull, a reset): serve the
+    /// tree the branch now names. The head cursor moves only with a
+    /// reload that went through; a failed one marks the view stale, so
+    /// the next operation reloads again and no write lands from the old
+    /// view in the meantime.
+    fn adopt_moved_head(
+        &mut self,
+        mount_idx: usize,
+        mem: &str,
+        new_head: &str,
+    ) -> Result<(), EngineError> {
+        match self.reload_one_mem(mem) {
+            Ok(_) => {
+                if let Some(state) = self.mounts.get_mut(mount_idx) {
+                    state.last_known_head = Some(new_head.to_string());
+                }
+                Ok(())
+            }
+            Err(e) => {
+                self.note_reload_failure(mem, &e);
+                Err(e)
+            }
+        }
+    }
+
     pub(in crate::engine) fn note_reload_failure(&mut self, mem: &str, error: &EngineError) {
         if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == mem) {
             state.reload_failure = Some(error.to_string());
@@ -841,10 +866,7 @@ impl Engine {
         // long-lived engine used to serve the old content until its
         // next stale probe), then emit the change event.
         if outcome.previous_sha != outcome.new_sha {
-            if let Some(state) = self.mounts.get_mut(mount_idx) {
-                state.last_known_head = Some(outcome.new_sha.clone());
-            }
-            if let Err(e) = self.reload_one_mem(mem) {
+            if let Err(e) = self.adopt_moved_head(mount_idx, mem, &outcome.new_sha) {
                 outcome.notices.push(format!(
                     "mem `{mem}` was pulled but did not reload in this process: {e}"
                 ));
@@ -2073,9 +2095,10 @@ impl Engine {
         // Then emit a change event so subscribers see the transition
         // (skipping the no-op case where previous == new).
         if outcome.previous_sha != outcome.new_sha {
-            if let Some(state) = self.mounts.get_mut(mount_idx) {
-                state.last_known_head = Some(outcome.new_sha.clone());
-            }
+            // The store serves the tree the branch was reset to; a reload
+            // that fails leaves the view marked stale, so no write lands
+            // from the discarded commits' contents.
+            let _ = self.adopt_moved_head(mount_idx, mem, &outcome.new_sha);
             let event = crate::engine::events::MemChangedEvent {
                 mem: mem.to_string(),
                 head: outcome.new_sha.clone(),

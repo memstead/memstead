@@ -975,3 +975,98 @@ fn folder_feed_pairs_a_rename_of_an_id_that_was_deleted_and_created_again() {
         other => panic!("expected one renamed event, got {other:?}"),
     }
 }
+
+/// Taking a moved head (after a pull or a reset) moves the cursor only
+/// with a reload that went through. A reload that cannot read the mem
+/// leaves the cursor where it was and marks the view behind, so the next
+/// operation reloads again and a write refuses meanwhile; the cursor used
+/// to move first, which made the stale view read as current.
+#[test]
+fn a_moved_head_whose_reload_fails_leaves_the_view_marked_behind() {
+    struct Flaky {
+        inner: std::sync::Arc<ManualHeadBackend>,
+        unreadable: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl MemBackend for Flaky {
+        fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
+            self.inner.list_entities()
+        }
+        fn read_entity(&self, rel: &Path) -> Result<Option<Vec<u8>>, BackendError> {
+            self.inner.read_entity(rel)
+        }
+        fn read_all_entities(&self) -> Result<Vec<crate::backend::EntityRead>, BackendError> {
+            if self.unreadable.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(vec![(
+                    PathBuf::from("lost.md"),
+                    Err(BackendError::Other("blob unreadable".to_string())),
+                )]);
+            }
+            Ok(Vec::new())
+        }
+        fn write_entity(&self, p: &Path, b: &[u8]) -> Result<(), BackendError> {
+            self.inner.write_entity(p, b)
+        }
+        fn delete_entity(&self, p: &Path) -> Result<(), BackendError> {
+            self.inner.delete_entity(p)
+        }
+        fn move_entity(&self, f: &Path, t: &Path) -> Result<(), BackendError> {
+            self.inner.move_entity(f, t)
+        }
+        fn commit(
+            &self,
+            m: &str,
+            c: &CommitContext<'_>,
+        ) -> Result<crate::storage::CommitId, BackendError> {
+            self.inner.commit(m, c)
+        }
+        fn stage_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
+            self.inner.stage_provenance(r)
+        }
+        fn append_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
+            self.inner.append_provenance(r)
+        }
+        fn read_provenance(&self, c: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
+            self.inner.read_provenance(c)
+        }
+        fn current_head(&self) -> Result<Option<String>, BackendError> {
+            self.inner.current_head()
+        }
+    }
+    let inner = std::sync::Arc::new(ManualHeadBackend::new(Some("aaa")));
+    let unreadable = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mount = Mount {
+        mem: "specs".to_string(),
+        schema: Some(pin("default")),
+        storage: MountStorage::Folder {
+            path: PathBuf::from("/dev/null"),
+        },
+        capability: MountCapability::Write,
+        lifecycle: MountLifecycle::Eager,
+        cross_linkable: true,
+        migration_target: None,
+    };
+    let backend = Box::new(Flaky {
+        inner: inner.clone(),
+        unreadable: unreadable.clone(),
+    });
+    let mut engine = Engine::from_mounts(vec![(mount, backend)]).unwrap();
+    let _ = engine.reload_if_stale(Some("specs"));
+    let before = engine.mounts[0].last_known_head.clone();
+
+    inner.set_head(Some("bbb"));
+    unreadable.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(engine.adopt_moved_head(0, "specs", "bbb").is_err());
+    assert_eq!(
+        engine.mounts[0].last_known_head, before,
+        "the cursor did not move"
+    );
+    assert!(
+        engine.mounts[0].reload_failure.is_some(),
+        "the view is marked behind"
+    );
+
+    unreadable.store(false, std::sync::atomic::Ordering::SeqCst);
+    engine.adopt_moved_head(0, "specs", "bbb").unwrap();
+    assert_eq!(engine.mounts[0].last_known_head.as_deref(), Some("bbb"));
+    assert!(engine.mounts[0].reload_failure.is_none());
+}

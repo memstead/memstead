@@ -180,6 +180,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   serves no mem the roster does not name, and the seeded storage is the
   residue the next create reports (`MEM_STORAGE_RESIDUE_DETECTED`).
 
+- **After a pull or a branch reset the engine serves the branch as it now
+  stands, or takes no write.** `branch_reset` reloads the mem, where the
+  store kept the discarded commits' contents and the next write put them
+  back on the reset branch. `pull` moves its head cursor only with a
+  reload that went through; a reload that fails marks the view behind, so
+  writes refuse until a reload succeeds, where the pre-pull view read as
+  current and its writes landed on the pulled tip.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both
