@@ -242,6 +242,100 @@ fn create_entity_rejects_inline_relation_with_shape_violation() {
     );
 }
 
+/// The same shape gate holds when the rel type is written in lower case:
+/// create canonicalises it before any schema lookup, as relate does.
+#[test]
+fn create_entity_rejects_inline_relation_with_shape_violation_for_a_lowercase_rel_type() {
+    use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
+    let tmp = TempDir::new().unwrap();
+    let mem_dir = tmp.path().to_path_buf();
+    let writer = FilesystemBackend::new(mem_dir.clone());
+    let mount = Mount {
+        mem: "code".to_string(),
+        schema: Some(memstead_schema::SchemaRef::new(
+            "software",
+            semver::Version::new(0, 1, 0),
+        )),
+        storage: MountStorage::Folder { path: mem_dir },
+        capability: MountCapability::Write,
+        lifecycle: MountLifecycle::Eager,
+        cross_linkable: true,
+        migration_target: None,
+    };
+    let mut engine =
+        Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
+    let (actor, client) = cli_actor();
+
+    // Seed an existing target so the shape gate evaluates the
+    // real target type (not `None`, which the gate admits as the
+    // stub-bound case). The `requirement` type requires `statement` +
+    // `rationale` sections plus `verified_on` + `source` metadata
+    // (the schema lists these without `default_value` or
+    // `optional: true`, so the strict-on-create gate refuses
+    // unless supplied).
+    let target = engine
+        .create_entity(
+            CreateEntityArgs {
+                anchors: Vec::new(),
+                mem: "code".to_string(),
+                title: "Target Requirement".to_string(),
+                entity_type: "requirement".to_string(),
+                sections: IndexMap::from_iter([
+                    ("statement".to_string(), "MUST hold.".to_string()),
+                    ("rationale".to_string(), "Because tests.".to_string()),
+                ]),
+                metadata: IndexMap::from_iter([
+                    ("verified_on".to_string(), "2026-05-19".to_string()),
+                    ("source".to_string(), "test fixture".to_string()),
+                ]),
+                relations: Vec::new(),
+                dry_run: false,
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+
+    // `VIOLATES` declares `source_types: [incident]`. A `spec`
+    // create with `VIOLATES` violates the shape. The `spec` type
+    // in the software schema requires `identity` + `purpose`;
+    // supply both so the shape gate (not the missing-sections
+    // gate) is what fires.
+    let args = CreateEntityArgs {
+        anchors: Vec::new(),
+        mem: "code".to_string(),
+        title: "Misshape Source".to_string(),
+        entity_type: "spec".to_string(),
+        sections: IndexMap::from_iter([
+            ("identity".to_string(), "this spec".to_string()),
+            (
+                "purpose".to_string(),
+                "exercising the shape gate".to_string(),
+            ),
+        ]),
+        metadata: IndexMap::new(),
+        relations: vec![crate::ops::RelateArg {
+            target: target.id.clone(),
+            rel_type: "violates".to_string(),
+            description: None,
+        }],
+        dry_run: false,
+    };
+    let err = engine
+        .create_entity(args, actor, Some(&client), None)
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            EngineError::Validation(
+                crate::runtime_validator::ValidationError::InvalidRelationshipShape { .. }
+            )
+        ),
+        "shape violation must trip Validation(InvalidRelationshipShape); got {err:?}",
+    );
+}
+
 #[test]
 fn create_entity_canonicalises_inline_relation_rel_types_to_upper_snake_case() {
     // Wire-level contract: rel_type on inline relations is
