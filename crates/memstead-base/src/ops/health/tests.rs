@@ -2410,3 +2410,54 @@ fn constraint_findings_serialize_one_relation_key_and_direction() {
         "out"
     );
 }
+
+/// `enum_from_neighbour` with a longer relation set (new with the one
+/// `relationships` key): a value is legal when an entity reached over
+/// ANY of the set lists it, and a neighbour over a relationship outside
+/// the set backs nothing.
+#[test]
+fn enum_from_neighbour_reaches_neighbours_over_any_of_its_relationships() {
+    use crate::entity::{MetadataValue, Relationship};
+    let mut td = (**gated_transition_schema().types.get("plan").unwrap()).clone();
+    td.constraints = vec![memstead_schema::ConstraintDef::EnumFromNeighbour {
+        field: "status".into(),
+        relationships: vec!["FIRST".into(), "SECOND".into()],
+        section: "body".into(),
+        severity: memstead_schema::ConstraintSeverity::Warn,
+    }];
+    let mut store = Store::default();
+    let mut listing = |slug: &str, values: &str| {
+        let mut e = make_typed_entity("g", slug, "criterion");
+        e.sections.insert("body".into(), values.to_string());
+        store.upsert(e.id.clone(), e.clone());
+        e.id
+    };
+    let first = listing("first", "- alpha\n");
+    let second = listing("second", "- beta\n");
+    let other = listing("other", "- gamma\n");
+    let mut entity = make_typed_entity("g", "subject", "plan");
+    for (rel, target) in [("FIRST", &first), ("SECOND", &second), ("OTHER", &other)] {
+        entity.relationships.push(Relationship {
+            rel_type: rel.into(),
+            target: target.clone(),
+            description: None,
+        });
+    }
+    let with = |value: &str| {
+        let mut e = entity.clone();
+        e.metadata
+            .insert("status".into(), MetadataValue::String(value.into()));
+        e
+    };
+    assert!(unsatisfied_constraints(&store, &with("alpha"), &td, None, None).is_empty());
+    assert!(
+        unsatisfied_constraints(&store, &with("beta"), &td, None, None).is_empty(),
+        "a neighbour over the second relationship backs the value"
+    );
+    let outside = unsatisfied_constraints(&store, &with("gamma"), &td, None, None);
+    assert_eq!(
+        outside.len(),
+        1,
+        "a neighbour outside the set backs nothing: {outside:?}"
+    );
+}

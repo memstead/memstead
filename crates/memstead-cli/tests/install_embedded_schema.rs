@@ -1219,9 +1219,13 @@ fn retired_constraint_spellings_refuse_authoring_and_load_sealed() {
                 .stdout
                 .clone();
             let rendered = String::from_utf8_lossy(&out).to_string();
+            // Quoted as the message prints them, so `direction: in` is
+            // not matched inside `direction: incoming`.
+            let retired_quoted = format!("spells `{retired_token}`");
+            let replacement_quoted = format!("retired for `{replacement}`");
             for needle in [
-                retired_token,
-                replacement,
+                retired_quoted.as_str(),
+                replacement_quoted.as_str(),
                 "schema migrate",
                 "SCHEMA_VALIDATION_FAILED",
             ] {
