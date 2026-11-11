@@ -59,7 +59,8 @@ impl Engine {
         // with its mem's commit.
         let record = self
             .provenance_record(ProvenanceKind::Rename, &new_id, actor, client, note)
-            .with_logical_operation_id(logical_op_id.clone());
+            .with_logical_operation_id(logical_op_id.clone())
+            .with_renamed_from(id.to_string());
 
         // Every peer's head, taken before the first write and pinned
         // through `commit_with_expected_parent`. Each peer is locked

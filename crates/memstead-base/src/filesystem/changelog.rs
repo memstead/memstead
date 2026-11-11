@@ -138,6 +138,9 @@ pub struct ChangeEntry<'a> {
     /// Caller-declared identity; `None` omits
     /// the field — absence recorded as absence, same as the role.
     pub identity: Option<&'a str>,
+    /// On a rename, the id the entity had before it; `None` omits the
+    /// field.
+    pub renamed_from: Option<&'a str>,
 }
 
 /// Errors surfaced by [`append_change`].
@@ -313,6 +316,8 @@ pub(crate) fn render_change_line(
         role: Option<&'static str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         identity: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        renamed_from: Option<&'a str>,
     }
 
     let mut line = serde_json::to_string(&Wire {
@@ -325,6 +330,7 @@ pub(crate) fn render_change_line(
         role: entry.role.as_trailer(),
         identity: entry.identity,
         logical_operation_id: entry.logical_operation_id,
+        renamed_from: entry.renamed_from,
     })?;
     line.push('\n');
     Ok(line)
@@ -486,6 +492,7 @@ mod tests {
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
                 identity: None,
+                renamed_from: None,
             },
             ts(1_715_000_000, 1),
         )
@@ -526,6 +533,7 @@ mod tests {
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
                 identity: Some("agent-a"),
+                renamed_from: None,
             },
             ts(1_715_000_000, 1),
         )
@@ -549,6 +557,7 @@ mod tests {
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
                 identity: None,
+                renamed_from: None,
             },
             ts(0, 0),
         )
@@ -573,6 +582,7 @@ mod tests {
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
                 identity: None,
+                renamed_from: None,
             },
             ts(0, 0),
         )
@@ -596,6 +606,7 @@ mod tests {
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
                 identity: None,
+                renamed_from: None,
             },
             ts(0, 0),
         )
@@ -625,6 +636,7 @@ mod tests {
                     logical_operation_id: None,
                     role: crate::vcs::Role::Unspecified,
                     identity: None,
+                    renamed_from: None,
                 },
                 ts(t, 0),
             )
@@ -660,6 +672,7 @@ mod tests {
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
                 identity: None,
+                renamed_from: None,
             },
             ts(0, 0),
         )
@@ -716,6 +729,7 @@ mod tests {
             logical_operation_id: None,
             role: crate::vcs::Role::Unspecified,
             identity: None,
+            renamed_from: None,
         }
     }
 
@@ -831,7 +845,10 @@ impl LedgerReconciliation {
 /// Called on demand, never on the staleness probe: that runs before every
 /// operation, and turning it into a directory walk would change the cost
 /// profile of the whole folder backend.
-pub fn reconcile_ledger(mem_root: &Path) -> Result<LedgerReconciliation, ChangelogError> {
+pub fn reconcile_ledger(
+    mem_root: &Path,
+    mem: &str,
+) -> Result<LedgerReconciliation, ChangelogError> {
     let mut on_disk: std::collections::BTreeSet<String> = Default::default();
     let meta_dir = mem_root.join(crate::mem::MEM_META_DIR);
     let mut stack = vec![mem_root.to_path_buf()];
@@ -854,7 +871,7 @@ pub fn reconcile_ledger(mem_root: &Path) -> Result<LedgerReconciliation, Changel
             }
             if path.is_dir() {
                 stack.push(path);
-            } else if path.extension().is_some_and(|x| x == "md")
+            } else if is_entity_file(&path)
                 && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
             {
                 on_disk.insert(stem.to_string());
@@ -862,6 +879,18 @@ pub fn reconcile_ledger(mem_root: &Path) -> Result<LedgerReconciliation, Changel
         }
     }
 
+    // The ledger replayed: the ids of this mem that its record says exist
+    // now. A delete retires an id, a rename retires the id it names as
+    // its origin; a line about another mem's entity (a peer's rename row)
+    // says nothing about this mem's files. Ids compare on the slug, which
+    // is what the file name carries.
+    let own = |entity: &str| -> Option<String> {
+        match entity.split_once("--") {
+            Some((m, slug)) if m == mem => Some(slug.to_string()),
+            Some(_) => None,
+            None => Some(entity.to_string()),
+        }
+    };
     let mut in_ledger: std::collections::BTreeSet<String> = Default::default();
     let log_path = changelog_path(mem_root);
     match std::fs::read_to_string(&log_path) {
@@ -871,14 +900,24 @@ pub fn reconcile_ledger(mem_root: &Path) -> Result<LedgerReconciliation, Changel
                 if trimmed.is_empty() {
                     continue;
                 }
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed)
-                    && let Some(entity) = v.get("entity").and_then(|x| x.as_str())
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+                    continue;
+                };
+                let Some(entity) = v.get("entity").and_then(|x| x.as_str()) else {
+                    continue;
+                };
+                let kind = v.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+                if let Some(from) = v.get("renamed_from").and_then(|x| x.as_str())
+                    && let Some(slug) = own(from)
                 {
-                    // Ledger ids are mem-qualified (`mem--slug`); files are
-                    // named by the slug alone. Compare on the slug, which is
-                    // what both surfaces actually agree on.
-                    let slug = entity.rsplit("--").next().unwrap_or(entity);
-                    in_ledger.insert(slug.to_string());
+                    in_ledger.remove(&slug);
+                }
+                if let Some(slug) = own(entity) {
+                    if kind == MutationKind::Delete.as_str() {
+                        in_ledger.remove(&slug);
+                    } else {
+                        in_ledger.insert(slug);
+                    }
                 }
             }
         }
@@ -895,6 +934,14 @@ pub fn reconcile_ledger(mem_root: &Path) -> Result<LedgerReconciliation, Changel
         ledger_without_file: in_ledger.difference(&on_disk).cloned().collect(),
         file_without_ledger: on_disk.difference(&in_ledger).cloned().collect(),
     })
+}
+
+/// Whether `path` names an entity file of a folder mem: markdown, and not
+/// the folder's README. The one rule the entity walk and the ledger
+/// reconciliation share.
+pub(crate) fn is_entity_file(path: &Path) -> bool {
+    path.extension().and_then(|s| s.to_str()) == Some("md")
+        && path.file_name().is_some_and(|n| n != "README.md")
 }
 
 #[cfg(test)]
@@ -922,7 +969,7 @@ mod reconcile_tests {
     fn both_directions_of_ledger_divergence_are_named_separately() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path(), &["alpha", "orphaned-file"], &["alpha", "ghost"]);
-        let r = reconcile_ledger(tmp.path()).unwrap();
+        let r = reconcile_ledger(tmp.path(), "docs").unwrap();
         assert_eq!(r.ledger_without_file, vec!["ghost".to_string()]);
         assert_eq!(r.file_without_ledger, vec!["orphaned-file".to_string()]);
         assert!(!r.is_clean());
@@ -946,7 +993,7 @@ mod reconcile_tests {
             .map(|e| (e.path(), e.metadata().map(|m| m.len()).unwrap_or(0)))
             .collect();
 
-        let _ = reconcile_ledger(tmp.path()).unwrap();
+        let _ = reconcile_ledger(tmp.path(), "docs").unwrap();
 
         assert_eq!(std::fs::read(&ledger).unwrap(), before_ledger);
         let after_files: Vec<_> = std::fs::read_dir(tmp.path())
@@ -963,7 +1010,7 @@ mod reconcile_tests {
     fn an_agreeing_mem_reconciles_clean() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path(), &["alpha", "beta"], &["alpha", "beta"]);
-        assert!(reconcile_ledger(tmp.path()).unwrap().is_clean());
+        assert!(reconcile_ledger(tmp.path(), "docs").unwrap().is_clean());
     }
 
     /// The engine's own sidecar is not entity content: counting
@@ -977,6 +1024,6 @@ mod reconcile_tests {
             b"not an entity\n",
         )
         .unwrap();
-        assert!(reconcile_ledger(tmp.path()).unwrap().is_clean());
+        assert!(reconcile_ledger(tmp.path(), "docs").unwrap().is_clean());
     }
 }

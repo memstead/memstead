@@ -333,8 +333,11 @@ pub fn folder_changes_since(
         };
         {
             let life = lifetimes.entry(entity_id.clone()).or_default();
-            if matches!(kind, ProvenanceKind::Create) && life.created_at.is_none() {
+            // A create revives an id a delete retired: its lifetime is the
+            // newest one, and its creation instant is that create's.
+            if matches!(kind, ProvenanceKind::Create) {
                 life.created_at = Some(ts_str.to_string());
+                life.deleted = false;
             }
             if ts_str >= life.last_at.as_str() {
                 life.last_at = ts_str.to_string();

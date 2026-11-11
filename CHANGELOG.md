@@ -145,6 +145,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   as such, while every other entity loads, as the backend contract
   states, where the whole read failed and the mem did not load.
 
+- **A folder mem's ledger reconciliation and change feed agree with what
+  the engine wrote.** The health reconciliation replays the ledger, so a
+  deleted entity, an id a rename retired, a peer mem's rename row and the
+  folder's `README.md` no longer read as divergence; a rename's ledger
+  line now names the id it retired (`renamed_from`). The change feed
+  treats an id that was deleted and created again as alive, so its later
+  rename arrives as one `renamed` event, where it surfaced as an update
+  of the new id.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

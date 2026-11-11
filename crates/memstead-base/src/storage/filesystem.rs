@@ -1208,6 +1208,9 @@ impl crate::backend::MemBackend for FilesystemBackend {
             if let Some(id) = logical_operation_id {
                 record = record.with_logical_operation_id(id);
             }
+            if let Some(from) = value.get("renamed_from").and_then(|v| v.as_str()) {
+                record = record.with_renamed_from(from.to_string());
+            }
             if let Some(role) = value
                 .get("role")
                 .and_then(|v| v.as_str())
@@ -1251,8 +1254,7 @@ fn walk_for_md(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Ba
             }
             walk_for_md(root, &path, out)?;
         } else if file_type.is_file()
-            && path.extension().and_then(|s| s.to_str()) == Some("md")
-            && entry.file_name() != "README.md"
+            && crate::filesystem::changelog::is_entity_file(&path)
             && let Ok(rel) = path.strip_prefix(root)
         {
             out.push(rel.to_path_buf());
@@ -1273,6 +1275,7 @@ fn change_entry(record: &Provenance) -> ChangeEntry<'_> {
         logical_operation_id: record.logical_operation_id.as_deref(),
         role: record.role,
         identity: record.identity.as_deref(),
+        renamed_from: record.renamed_from.as_deref(),
     }
 }
 

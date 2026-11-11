@@ -900,3 +900,78 @@ fn reload_if_stale_fires_every_call_no_throttle() {
         "no throttle window — the moved ref reloads on the next probe"
     );
 }
+
+/// An id deleted and created again is alive again for the folder feed: a
+/// later rename of it pairs, and arrives as one renamed event, where the
+/// earlier delete kept the old id marked gone and the rename surfaced as
+/// a removed id plus an updated one.
+#[test]
+fn folder_feed_pairs_a_rename_of_an_id_that_was_deleted_and_created_again() {
+    use crate::engine::test_helpers::*;
+    use crate::engine::{CreateEntityArgs, DeleteEntityArgs, RenameEntityArgs};
+    use crate::storage::FilesystemBackend;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mem_dir = tmp.path().to_path_buf();
+    let writer = FilesystemBackend::new(mem_dir.clone());
+    let mut engine = Engine::from_mounts(vec![(
+        folder_mount("specs", mem_dir.clone()),
+        Box::new(writer) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+    engine.set_workspace_root(mem_dir.clone());
+    let (actor, client) = cli_actor();
+    let tick = || std::thread::sleep(std::time::Duration::from_millis(5));
+
+    let first: CreateEntityArgs = empty_create_args("specs", "Alpha");
+    let first = engine
+        .create_entity(first, actor, Some(&client), None)
+        .unwrap();
+    tick();
+    engine
+        .delete_entity(
+            DeleteEntityArgs {
+                id: first.id.clone(),
+                expected_hash: crate::ExpectedHash::Current(first.content_hash.clone()),
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    tick();
+    let again = engine
+        .create_entity(
+            empty_create_args("specs", "Alpha"),
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    let between = engine
+        .changes_since("specs", "", None)
+        .unwrap()
+        .head
+        .clone();
+    tick();
+    let renamed = engine
+        .rename_entity(
+            RenameEntityArgs {
+                id: again.id.clone(),
+                expected_hash: crate::ExpectedHash::Current(again.content_hash.clone()),
+                new_title: "Beta".to_string(),
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+
+    let later = engine.changes_since("specs", &between, None).unwrap();
+    match later.changes.as_slice() {
+        [crate::ops::ChangeEnvelope::Renamed { from_id, to_id, .. }] => {
+            assert_eq!(from_id, &again.id);
+            assert_eq!(to_id, &renamed.new_id);
+        }
+        other => panic!("expected one renamed event, got {other:?}"),
+    }
+}

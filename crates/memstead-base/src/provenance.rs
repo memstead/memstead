@@ -112,6 +112,10 @@ pub struct Provenance {
     /// as absence on both backends (no trailer, no ledger field) —
     /// old records read back as `None`, never backfilled or inferred.
     pub identity: Option<String>,
+    /// On a rename, the id the entity had before it. Recorded so a
+    /// reader of the change record knows which id the rename retired;
+    /// `None` on every other kind and on records written before it.
+    pub renamed_from: Option<String>,
 }
 
 impl Provenance {
@@ -143,6 +147,7 @@ impl Provenance {
             logical_operation_id: None,
             role: crate::vcs::Role::Unspecified,
             identity: None,
+            renamed_from: None,
         }
     }
 
@@ -156,6 +161,12 @@ impl Provenance {
     /// ([`crate::vcs::normalise_identity`]); `None` stays absence.
     pub fn with_identity(mut self, identity: Option<String>) -> Self {
         self.identity = identity;
+        self
+    }
+
+    /// Builder: on a rename, the id the entity had before it.
+    pub fn with_renamed_from(mut self, id: String) -> Self {
+        self.renamed_from = Some(id);
         self
     }
 

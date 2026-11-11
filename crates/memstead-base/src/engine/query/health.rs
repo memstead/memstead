@@ -416,7 +416,7 @@ impl Engine {
             let crate::workspace::MountStorage::Folder { path } = &m.mount.storage else {
                 continue;
             };
-            if let Ok(r) = crate::filesystem::changelog::reconcile_ledger(path) {
+            if let Ok(r) = crate::filesystem::changelog::reconcile_ledger(path, &m.mount.mem) {
                 out.insert(m.mount.mem.clone(), r);
             }
         }

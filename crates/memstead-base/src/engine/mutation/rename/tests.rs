@@ -2071,3 +2071,70 @@ fn rename_carries_check_records_to_the_new_id() {
         .unwrap();
     assert_eq!(state.0, CheckState::CheckStale);
 }
+
+/// The ledger reconciliation of a folder mem the engine alone wrote is
+/// clean: an entity deleted, one renamed, one deleted and created again,
+/// and a README beside them, which is no entity, report nothing.
+#[test]
+fn an_engine_written_folder_mem_reconciles_clean() {
+    let tmp = TempDir::new().unwrap();
+    let (mut engine, seeded) = engine_with_seed(&tmp, "Renamed Soon");
+    let (actor, client) = cli_actor();
+    let delete = |engine: &mut Engine, id: &crate::EntityId| {
+        let hash = engine.get_entity(id).unwrap().content_hash.clone();
+        engine
+            .delete_entity(
+                crate::engine::DeleteEntityArgs {
+                    id: id.clone(),
+                    expected_hash: crate::ExpectedHash::Current(hash),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+    };
+    let gone = engine
+        .create_entity(
+            empty_create_args("specs", "Gone"),
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    delete(&mut engine, &gone.id);
+    let again = engine
+        .create_entity(
+            empty_create_args("specs", "Again"),
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    delete(&mut engine, &again.id);
+    engine
+        .create_entity(
+            empty_create_args("specs", "Again"),
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    engine
+        .rename_entity(
+            RenameEntityArgs {
+                id: seeded.id.clone(),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
+                new_title: "Renamed Now".to_string(),
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    std::fs::write(tmp.path().join("README.md"), "# About this folder\n").unwrap();
+
+    let report = engine.ledger_reconciliation();
+    let specs = report.get("specs").expect("the folder mem is reconciled");
+    assert!(specs.is_clean(), "{specs:?}");
+}
