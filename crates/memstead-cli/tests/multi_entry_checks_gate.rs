@@ -236,3 +236,87 @@ fn proposal_merge_editing_the_criterion_cannot_close_its_plan() {
         String::from_utf8_lossy(&out.stdout)
     );
 }
+
+/// A batch create that creates a never-checked criterion beside the plan
+/// it closes refuses, as the two creates do one after the other.
+#[test]
+fn batch_create_with_an_unchecked_new_criterion_cannot_close_its_plan() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let ws = tmp.path();
+    run(ws, &["mem-repo", "init"]);
+    run(
+        ws,
+        &[
+            "workspace",
+            "allow-create",
+            "plans",
+            "--schema",
+            "default@1.3.0",
+        ],
+    );
+    run(ws, &["mem", "init", "plans", "--schema", "default@1.3.0"]);
+    package(ws, "0.1.0", true);
+    run(ws, &["mem", "set-schema", "plans", "gated@0.1.0"]);
+    run(
+        ws,
+        &[
+            "create",
+            "--identity",
+            "author-a",
+            "--type",
+            "criterion",
+            "--title",
+            "Crit",
+            "--section",
+            "body=checked criterion",
+            "--relation",
+            "VERIFIES:plans--beta",
+        ],
+    );
+    run(
+        ws,
+        &[
+            "check",
+            "plans--crit",
+            "--verdict",
+            "ok",
+            "--method",
+            "t",
+            "--identity",
+            "checker-c",
+            "--role",
+            "checker",
+        ],
+    );
+    let f = ws.join("c.json");
+    fs::write(
+        &f,
+        r#"{"creates":[{"title":"Fresh","entity_type":"criterion","mem":"plans","sections":{"body":"never checked"},"relations":[{"rel_type":"VERIFIES","target":"plans--beta"}]},{"title":"Beta","entity_type":"plan","mem":"plans","sections":{"body":"b"},"metadata":{"status":"complete"}}]}"#,
+    )
+    .unwrap();
+    let out = Command::cargo_bin("memstead")
+        .unwrap()
+        .current_dir(ws)
+        .args([
+            "batch-create",
+            "--from",
+            f.to_str().unwrap(),
+            "--identity",
+            "author-a",
+            "--quiet",
+        ])
+        .output()
+        .unwrap();
+    let ent = Command::cargo_bin("memstead")
+        .unwrap()
+        .current_dir(ws)
+        .args(["entity", "plans--beta", "--quiet"])
+        .output()
+        .unwrap();
+    let ent = String::from_utf8_lossy(&ent.stdout).to_string();
+    assert!(
+        !out.status.success() && !ent.contains("status: complete"),
+        "batch create landed status: complete beside a never-checked criterion: {}\n{ent}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}

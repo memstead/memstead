@@ -790,6 +790,12 @@ pub(crate) fn filter_notes_for_entity(
                 touch.renamed_to = Some(new);
                 out.push(touch);
                 current = old;
+            } else if n.entity_ids.iter().any(|id| id == &current) {
+                // The rename rewrote a link inside this entry: a write
+                // of it, under the renamer's identity.
+                let mut touch = base(&current);
+                touch.batch_entity_ids = n.entity_ids.clone();
+                out.push(touch);
             }
             continue;
         }

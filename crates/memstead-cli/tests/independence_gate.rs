@@ -1146,3 +1146,97 @@ fn a_co_writer_survives_a_rename_between_two_merges() {
         }
     }
 }
+
+/// A rename on a fork rewrites a link inside another entry; a proposal
+/// merge lands that entry. The renamer wrote the landed text, so its
+/// check cannot open the self-check gate after the merge either.
+#[test]
+fn a_renamer_who_rewrote_a_fork_referrer_cannot_confirm_it_after_a_merge() {
+    let ws = seed_on(SELF_GATE, true);
+    let root = ws.path();
+    must(
+        root,
+        &["workspace", "allow-create", "--schema", "*", "*", "--quiet"],
+    );
+    create(root, "identity-a", "plan", "The Target", None);
+    must(
+        root,
+        &[
+            "create",
+            "--type",
+            "plan",
+            "--title",
+            "The Plan",
+            "--section",
+            "body=see [[plans--the-target]].",
+            "--relation",
+            "PART_OF:plans--the-target",
+            "--identity",
+            "identity-a",
+            "--quiet",
+        ],
+    );
+    must(
+        root,
+        &[
+            "mem",
+            "fork",
+            "plans",
+            "pfork",
+            "--identity",
+            "identity-a",
+            "--quiet",
+        ],
+    );
+    upd(
+        root,
+        "pfork--the-plan",
+        "see [[pfork--the-target]] (x).",
+        Some("identity-x"),
+    );
+    must(
+        root,
+        &[
+            "rename",
+            "pfork--the-target",
+            "The Moved",
+            "--auto-hash",
+            "--identity",
+            "identity-r",
+            "--quiet",
+        ],
+    );
+    let brief = must(root, &["proposal", "brief", "pfork", "--json", "--quiet"]);
+    let mut v: serde_json::Value = serde_json::from_slice(&brief.stdout).unwrap();
+    let slugs: Vec<String> = v["dispositions"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    for s in &slugs {
+        v["dispositions"][s]["disposition"] = "adopt".into();
+    }
+    let file = root.join("rr.json");
+    std::fs::write(&file, v.to_string()).unwrap();
+    must(
+        root,
+        &[
+            "proposal",
+            "merge",
+            "pfork",
+            "--dispositions",
+            file.to_str().unwrap(),
+            "--identity",
+            "identity-m",
+            "--quiet",
+        ],
+    );
+    approve(root, "identity-r");
+    let out = complete(root, "identity-e");
+    assert!(
+        !out.status.success(),
+        "identity-r's rename wrote the landed text and its check confirmed it: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
