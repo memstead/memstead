@@ -2369,3 +2369,44 @@ fn transition_requires_self_check_reads_the_declared_kind() {
     let v = unsatisfied_constraints(&store, &bundle, &td, None, None);
     assert!(v.is_empty(), "not triggered before the gated value");
 }
+
+/// The health constraints axis and the `CONSTRAINT_UNSATISFIED` details
+/// carry a relation set under `relationships` and a direction as
+/// `in` / `out`, for every form that has one.
+#[test]
+fn constraint_findings_serialize_one_relation_key_and_direction() {
+    let neighbour = UnsatisfiedConstraint::EnumFromNeighbour {
+        field: "phase".into(),
+        value: "zeta".into(),
+        relationships: vec!["FOLLOWS".into()],
+        section: "body".into(),
+        severity: memstead_schema::ConstraintSeverity::Warn,
+    };
+    let propagation = UnsatisfiedConstraint::StatusPropagation {
+        field: "status".into(),
+        value: "withdrawn".into(),
+        relationships: vec!["GROUNDS".into(), "CONCLUDES".into()],
+        tainted_by: "m--a".into(),
+        path: vec!["m--a".into(), "m--b".into()],
+        severity: memstead_schema::ConstraintSeverity::Warn,
+    };
+    for (finding, set) in [
+        (&neighbour, serde_json::json!(["FOLLOWS"])),
+        (&propagation, serde_json::json!(["GROUNDS", "CONCLUDES"])),
+    ] {
+        let v = serde_json::to_value(finding).unwrap();
+        assert_eq!(v["relationships"], set, "{v}");
+        assert!(
+            v.get("rel_type").is_none() && v.get("rel_types").is_none(),
+            "{v}"
+        );
+    }
+    assert_eq!(
+        serde_json::to_value(memstead_schema::ReachDirection::In).unwrap(),
+        "in"
+    );
+    assert_eq!(
+        serde_json::to_value(memstead_schema::ReachDirection::Out).unwrap(),
+        "out"
+    );
+}

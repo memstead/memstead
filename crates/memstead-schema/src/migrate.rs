@@ -717,6 +717,12 @@ fn first_difference(a: &Schema, b: &Schema) -> Option<String> {
                 "type '{name}': exemplar relations {ra:?} vs {rb:?}"
             ));
         }
+        if ta.constraints != tb.constraints {
+            return Some(format!(
+                "type '{name}': constraints {:?} vs {:?}",
+                ta.constraints, tb.constraints
+            ));
+        }
     }
     None
 }
@@ -1488,6 +1494,34 @@ staleness_threshold_days: 90
             std::fs::read_to_string(dir.path().join("types/sample.yaml")).unwrap(),
             text
         );
+    }
+
+    /// The faithfulness proof covers the constraint scope: two schemas
+    /// whose constraints differ (a direction written the wrong way round)
+    /// never read as the same.
+    #[test]
+    fn first_difference_sees_a_changed_constraint() {
+        let with = |direction: &str| {
+            let base = type_with(&LEGACY_KEYS[LEGACY_KEYS.len() - 1]);
+            let start = base.find("constraints:\n").unwrap();
+            let end = base.find("write_rules:\n  - Keep it short.").unwrap();
+            format!(
+                "{}constraints:\n  - kind: transition_requires_checks\n    field: phase\n    to_value: done\n    relationships: [PART_OF]\n    direction: {direction}\n{}",
+                &base[..start],
+                &base[end..]
+            )
+        };
+        let load = |direction: &str| {
+            load_authoring_package_from_memory(
+                &manifest(),
+                &[("sample".to_string(), with(direction))],
+            )
+            .unwrap()
+        };
+        let detail =
+            first_difference(&load("in"), &load("out")).expect("a changed constraint differs");
+        assert!(detail.contains("constraints"), "{detail}");
+        assert!(first_difference(&load("in"), &load("in")).is_none());
     }
 
     #[test]
