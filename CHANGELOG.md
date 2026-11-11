@@ -107,6 +107,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `SECTION_CONTENT_INVALID`, where it landed and the next parse dropped
   the real section's body.
 
+- **An update or relate that does not land leaves no stub behind.** The
+  stubs its composition made for absent targets (a declared relation, a
+  body wiki-link, a relate target) are taken back when the write refuses,
+  fails to commit, or is a rehearsal, where they stayed in the live store
+  for a target the committed graph never referenced.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

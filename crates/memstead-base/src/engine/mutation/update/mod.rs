@@ -252,12 +252,16 @@ impl Engine {
         ) {
             self.ensure_mems_loaded(None);
         }
-        let mut outcome = match self.prepare_update(args)? {
-            PrepareOutcome::Done(outcome) => outcome,
+        let stubs_before = self.stub_ids();
+        let rehearsal = args.dry_run;
+        let landed = self.prepare_update(args).and_then(|p| match p {
+            PrepareOutcome::Done(outcome) => Ok(outcome),
             PrepareOutcome::Prepared(prepared) => {
-                self.commit_prepared_update(prepared, actor, client, note)?
+                self.commit_prepared_update(prepared, actor, client, note)
             }
-        };
+        });
+        self.drop_stubs_of_an_unlanded_write(&stubs_before, &landed, rehearsal);
+        let mut outcome = landed?;
         drift_warnings.append(&mut outcome.warnings);
         outcome.warnings = drift_warnings;
         Ok(outcome)

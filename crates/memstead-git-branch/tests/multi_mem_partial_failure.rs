@@ -1007,3 +1007,38 @@ fn a_lost_branch_race_refuses_with_the_entity_and_its_current_hash() {
         .update_entity(retry, Actor::Cli, None, None)
         .expect("the retry with the reported hash lands");
 }
+
+/// A relate whose commit fails leaves no stub for its absent target in the
+/// live store: the stub composition made goes with the failed write.
+#[test]
+fn a_relate_whose_commit_fails_leaves_no_target_stub() {
+    let ws = Workspace::new([Kind::GitBranch; 3]);
+    let tap: Tap = Arc::new(|mem, method| {
+        mem == LEFT && (method == "commit" || method == "commit_with_expected_parent")
+    });
+    let mut engine = ws.engine(Some(tap));
+    let source = id(LEFT, "alpha");
+    let ghost = id(LEFT, "ghost");
+    let hash = engine.get_entity(&source).unwrap().content_hash.clone();
+
+    engine
+        .relate_entity(
+            memstead_base::RelateEntityArgs {
+                source: source.clone(),
+                expected_hash: Some(hash),
+                rel_type: "USES".to_string(),
+                target: ghost.clone(),
+                remove: false,
+                description: None,
+                dry_run: false,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .expect_err("the commit is failed by the tap");
+    assert!(
+        engine.get_entity(&ghost).is_none(),
+        "the failed relate left a stub for its target"
+    );
+}

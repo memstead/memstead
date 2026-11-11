@@ -110,6 +110,44 @@ pub(crate) struct EdgeWrite<'a> {
 }
 
 impl super::Engine {
+    /// The ids of the stubs in the store, read before a single write so a
+    /// refusal can take back the stubs the write's composition created.
+    pub(in crate::engine) fn stub_ids(&self) -> std::collections::HashSet<EntityId> {
+        self.store
+            .all_entities()
+            .filter(|e| e.stub)
+            .map(|e| e.id.clone())
+            .collect()
+    }
+
+    /// Take back what a write that did not land left in the store: every
+    /// stub not in `before` was made by its composition (a declared or
+    /// wiki-linked target), and no committed edge points at it. A commit
+    /// that is decided and not yet applied counts as landed.
+    pub(in crate::engine) fn drop_stubs_of_an_unlanded_write<T>(
+        &mut self,
+        before: &std::collections::HashSet<EntityId>,
+        landed: &Result<T, EngineError>,
+        rehearsal: bool,
+    ) {
+        if !rehearsal
+            && !matches!(landed, Err(e) if !matches!(e, EngineError::CommitNotApplied { .. }))
+        {
+            return;
+        }
+        let made: Vec<EntityId> = self
+            .store
+            .all_entities()
+            .filter(|e| e.stub && !before.contains(&e.id))
+            .map(|e| e.id.clone())
+            .collect();
+        for id in made {
+            self.store.remove(&id);
+        }
+    }
+}
+
+impl super::Engine {
     /// Whether a write to `mem` touching `edges` needs every mem loaded
     /// first: a partial store would mis-judge it. Two guards read edges
     /// that can originate in any mem: the cycle guard of an acyclic

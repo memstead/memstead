@@ -1180,3 +1180,55 @@ fn update_entity_noop_preserves_expected_hash_across_chain() {
     assert!(!real.write_id.is_empty());
     assert_ne!(real.content_hash, seeded.content_hash);
 }
+
+/// A refused update leaves the store as it found it: the target stub a
+/// declared relation created during composition goes with the refusal.
+#[test]
+fn a_refused_update_leaves_no_stub_for_its_declared_target() {
+    let tmp = TempDir::new().unwrap();
+    let (mut engine, seeded) = engine_with_seed(&tmp, "Stub Source");
+    let (actor, client) = cli_actor();
+    let ghost = EntityId("specs--ghost".to_string());
+    assert!(engine.get_entity(&ghost).is_none());
+
+    let mut patches = IndexMap::new();
+    patches.insert(
+        "identity".to_string(),
+        vec![crate::ops::PatchArg {
+            old: "text that is not there".to_string(),
+            new: "anything".to_string(),
+            all: false,
+        }],
+    );
+    let err = engine
+        .update_entity(
+            UpdateEntityArgs {
+                anchors: Vec::new(),
+                relations_unset: Vec::new(),
+                anchors_unset: Vec::new(),
+                id: seeded.id.clone(),
+                expected_hash: crate::ExpectedHash::Current(seeded.content_hash.clone()),
+                sections: IndexMap::new(),
+                append_sections: IndexMap::new(),
+                patch_sections: patches,
+                sections_unset: Vec::new(),
+                metadata: IndexMap::new(),
+                metadata_unset: Vec::new(),
+                dry_run: false,
+                declare_relations: vec![crate::ops::RelateArg {
+                    rel_type: "USES".to_string(),
+                    target: ghost.clone(),
+                    description: None,
+                }],
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap_err();
+    assert_eq!(err.code(), "PATCH_OLD_NOT_FOUND", "{err:?}");
+    assert!(
+        engine.get_entity(&ghost).is_none(),
+        "the refused update left a stub for its declared target"
+    );
+}

@@ -2816,3 +2816,37 @@ fn batch_relate_refuses_whole_batch_reporting_every_failure() {
     assert_eq!(head_before, head_after, "mem head unmoved");
     assert_eq!(engine.store().all_entities().count(), count_before);
 }
+
+/// A relate that does not land leaves no stub for its target: a rehearsal
+/// writes nothing, and a refusal after composition takes back the stub
+/// composition made.
+#[test]
+fn a_relate_that_does_not_land_leaves_no_target_stub() {
+    let tmp = TempDir::new().unwrap();
+    let (mut engine, source) = engine_with_seed(&tmp, "Relate Source");
+    let (actor, client) = cli_actor();
+    let ghost = crate::EntityId("specs--ghost".to_string());
+    let args = |dry_run: bool, hash: &str| RelateEntityArgs {
+        source: source.id.clone(),
+        expected_hash: Some(hash.to_string()),
+        rel_type: "USES".to_string(),
+        target: ghost.clone(),
+        remove: false,
+        description: None,
+        dry_run,
+    };
+
+    engine
+        .relate_entity(args(true, &source.content_hash), actor, Some(&client), None)
+        .unwrap();
+    assert!(
+        engine.get_entity(&ghost).is_none(),
+        "a rehearsal made a stub"
+    );
+
+    let err = engine
+        .relate_entity(args(false, "0000000000000000"), actor, Some(&client), None)
+        .unwrap_err();
+    assert_eq!(err.code(), "HASH_MISMATCH", "{err:?}");
+    assert!(engine.get_entity(&ghost).is_none(), "a refusal made a stub");
+}

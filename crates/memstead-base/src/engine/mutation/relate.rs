@@ -209,15 +209,22 @@ impl Engine {
         }
 
         let dry_run = args.dry_run;
-        match self.prepare_relate(args, drift_warnings)? {
-            RelatePrepareOutcome::Done(outcome) => {
-                self.relate_noop_outcome(outcome, dry_run, actor, client, note)
-            }
-            RelatePrepareOutcome::Prepared(prepared) if dry_run => self.relate_preview(prepared),
-            RelatePrepareOutcome::Prepared(prepared) => {
-                self.commit_prepared_relate(prepared, actor, client, note)
-            }
-        }
+        let stubs_before = self.stub_ids();
+        let landed = self
+            .prepare_relate(args, drift_warnings)
+            .and_then(|p| match p {
+                RelatePrepareOutcome::Done(outcome) => {
+                    self.relate_noop_outcome(outcome, dry_run, actor, client, note)
+                }
+                RelatePrepareOutcome::Prepared(prepared) if dry_run => {
+                    self.relate_preview(prepared)
+                }
+                RelatePrepareOutcome::Prepared(prepared) => {
+                    self.commit_prepared_relate(prepared, actor, client, note)
+                }
+            });
+        self.drop_stubs_of_an_unlanded_write(&stubs_before, &landed, dry_run);
+        landed
     }
 
     /// The duplicate-add re-baseline. Called
