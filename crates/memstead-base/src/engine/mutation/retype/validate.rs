@@ -314,6 +314,18 @@ impl Engine {
                 Some(id),
                 Some(&check_provider),
             );
+            // The write changes the type, so a self-check gate the result
+            // enters passes only on a record naming the result's own hash
+            // (`next` carries the stored hash here; the retyped bytes are
+            // never checked before they exist): it refuses.
+            let source_def = resolved.schema.get_type(&resolved.entity.entity_type);
+            let (violated, _) = self.gate_transition_forms(
+                source_def.as_deref().map(|d| (&resolved.entity, d)),
+                next,
+                "",
+                target_def.as_ref(),
+                violated,
+            );
             if !violated.is_empty() {
                 let blocked: Vec<_> = violated
                     .iter()

@@ -1799,6 +1799,14 @@ pub enum UnsatisfiedConstraint {
         /// independent `checked_ok` (`never_checked`, `check_stale`,
         /// `check_failed`, `self_checked`, `unconfirmable`).
         state: String,
+        /// On a refused transition write: what the write changed beside
+        /// the gated field and the engine-stamped timestamps
+        /// (`section:<key>`, `metadata:<key>`, `title`, `type`,
+        /// `relationships`). A self-check transition write may change
+        /// nothing else, because the record it rests on checked the
+        /// content as stored. Empty on the health axis.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        changed: Vec<String>,
         severity: memstead_schema::ConstraintSeverity,
     },
     /// The entity reaches no non-stub entity of a terminal type along
@@ -1917,12 +1925,24 @@ impl UnsatisfiedConstraint {
                 to_value,
                 check_kind,
                 state,
+                changed,
                 ..
-            } => format!(
-                "transition_requires_self_check: {field}={to_value} requires a fresh confirming \
-                 `{check_kind}` check record on this entity under an identity other than its \
-                 author — derived: {state}"
-            ),
+            } => {
+                let mut m = format!(
+                    "transition_requires_self_check: {field}={to_value} requires a fresh confirming \
+                     `{check_kind}` check record on this entity under an identity other than its \
+                     author — derived: {state}"
+                );
+                if !changed.is_empty() {
+                    m.push_str(&format!(
+                        "; the write also changes {}, and a self-check transition write may \
+                         change nothing but `{field}`: write those changes first, check the \
+                         result, then set `{field}`",
+                        changed.join(", ")
+                    ));
+                }
+                m
+            }
         }
     }
 }
@@ -2134,6 +2154,7 @@ pub fn unsatisfied_constraints(
                     to_value: to_value.clone(),
                     check_kind: check_kind.clone(),
                     state: standing.label().to_string(),
+                    changed: Vec::new(),
                     severity: *severity,
                 })
             }

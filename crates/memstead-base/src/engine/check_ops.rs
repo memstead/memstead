@@ -255,40 +255,114 @@ impl Engine {
             })
     }
 
-    /// The `transition_requires_self_check` kinds a prepared write passes
-    /// on the strength of a fresh, independent record: every such
-    /// constraint of `type_def` whose gated value `next` holds and whose
-    /// declared kind the provider confirms against `next.content_hash`
-    /// (the PRE-write hash: the caller hands the composed entity before
-    /// the store or disk moved). These are the records the write is
-    /// about to stale; [`Self::carry_checks_across_transition`] carries
-    /// them. Empty when the type declares no such gate or none passes.
-    pub(crate) fn licensed_self_check_kinds(
+    /// The write-time reading of both transition forms. A form gates only
+    /// the transition: a write after which the entity holds the form's
+    /// gated value where before it did not exist, was of a type without
+    /// the form, or did not hold the value. `before` is the stored entity
+    /// with its type definition (`None` on a create). `violated` is the
+    /// shared constraints pass over the result ([`crate::ops::health::unsatisfied_constraints`]);
+    /// the result keeps its non-transition violations, keeps a
+    /// `transition_requires_checks` violation only on a transition, and
+    /// replaces every `transition_requires_self_check` reading with the
+    /// transition rule: the write passes when a fresh independent
+    /// confirming record of the declared kind names `result_hash` (the
+    /// hash of the bytes the write produces: nothing to carry), or names
+    /// the stored entity's hash while the write changes nothing but the
+    /// gated field and the engine-stamped timestamps (the record is then
+    /// carried, and its kind is returned). Otherwise the form reports a
+    /// violation naming the content the write changed beside the gated
+    /// field. The health axis keeps its state-based reading.
+    pub(crate) fn gate_transition_forms(
         &self,
+        before: Option<(&crate::entity::Entity, &memstead_schema::TypeDefinition)>,
         next: &crate::entity::Entity,
+        result_hash: &str,
         type_def: &memstead_schema::TypeDefinition,
-    ) -> Vec<String> {
+        violated: Vec<crate::ops::health::UnsatisfiedConstraint>,
+    ) -> (Vec<crate::ops::health::UnsatisfiedConstraint>, Vec<String>) {
+        use crate::ops::health::UnsatisfiedConstraint as U;
+        use memstead_schema::ConstraintDef as C;
+        let holds = |e: &crate::entity::Entity, field: &str, value: &str| {
+            e.metadata
+                .get(field)
+                .is_some_and(|v| v.to_frontmatter_string() == value)
+        };
+        // Whether the stored entity already stood at the gated value under
+        // the same form: then the write is not the transition.
+        let stood = |self_check: bool, field: &str, value: &str| {
+            before.is_some_and(|(b, def)| {
+                holds(b, field, value)
+                    && def.constraints.iter().any(|c| match c {
+                        C::TransitionRequiresSelfCheck {
+                            field: f,
+                            to_value: v,
+                            ..
+                        } => self_check && f == field && v == value,
+                        C::TransitionRequiresChecks {
+                            field: f,
+                            to_value: v,
+                            ..
+                        } => !self_check && f == field && v == value,
+                        _ => false,
+                    })
+            })
+        };
+        let mut out: Vec<U> = violated
+            .into_iter()
+            .filter(|v| match v {
+                U::TransitionRequiresChecks {
+                    field, to_value, ..
+                } => !stood(false, field, to_value),
+                U::TransitionRequiresSelfCheck { .. } => false,
+                _ => true,
+            })
+            .collect();
         let provider = self.check_standing_provider();
-        let mut kinds: Vec<String> = Vec::new();
+        let mut result_entity = next.clone();
+        result_entity.content_hash = result_hash.to_string();
+        let mut carry: Vec<String> = Vec::new();
         for c in &type_def.constraints {
-            let memstead_schema::ConstraintDef::TransitionRequiresSelfCheck {
+            let C::TransitionRequiresSelfCheck {
                 field,
                 to_value,
                 check_kind,
-                ..
+                severity,
             } = c
             else {
                 continue;
             };
-            let triggered = next
-                .metadata
-                .get(field.as_str())
-                .is_some_and(|v| v.to_frontmatter_string() == *to_value);
-            if triggered && !kinds.contains(check_kind) && provider(next, check_kind).confirms() {
-                kinds.push(check_kind.clone());
+            if !holds(next, field, to_value) || stood(true, field, to_value) {
+                continue;
             }
+            let at_result = provider(&result_entity, check_kind);
+            if at_result.confirms() {
+                continue;
+            }
+            let mut state = at_result.label().to_string();
+            let mut changed = Vec::new();
+            if let Some((b, _)) = before {
+                let at_stored = provider(b, check_kind);
+                if at_stored.confirms() {
+                    changed = content_changed_beside(b, next, field);
+                    if changed.is_empty() {
+                        if !carry.contains(check_kind) {
+                            carry.push(check_kind.clone());
+                        }
+                        continue;
+                    }
+                }
+                state = at_stored.label().to_string();
+            }
+            out.push(U::TransitionRequiresSelfCheck {
+                field: field.clone(),
+                to_value: to_value.clone(),
+                check_kind: check_kind.clone(),
+                state,
+                changed,
+                severity: *severity,
+            });
         }
-        kinds
+        (out, carry)
     }
 
     /// Carry the records that licensed a gated transition across the
@@ -445,6 +519,65 @@ impl Engine {
     }
 }
 
+/// The engine-stamped frontmatter keys a self-check transition write may
+/// move beside the gated field.
+const STAMPED_TIMESTAMPS: &[&str] = &["created_date", "last_modified"];
+
+/// What `next` changes against `before` beside the gated `field` and the
+/// engine-stamped timestamps: `type`, `title`, `section:<key>`,
+/// `metadata:<key>`, `relationships`, in that order. Empty when the write
+/// moves nothing but the gated value.
+pub(crate) fn content_changed_beside(
+    before: &crate::entity::Entity,
+    next: &crate::entity::Entity,
+    field: &str,
+) -> Vec<String> {
+    let mut changed = Vec::new();
+    if before.entity_type != next.entity_type {
+        changed.push("type".to_string());
+    }
+    if before.title != next.title {
+        changed.push("title".to_string());
+    }
+    let mut keys: Vec<&String> = before.sections.keys().chain(next.sections.keys()).collect();
+    keys.sort();
+    keys.dedup();
+    for k in keys {
+        let norm = |s: Option<&String>| s.map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
+        if norm(before.sections.get(k)) != norm(next.sections.get(k)) {
+            changed.push(format!("section:{k}"));
+        }
+    }
+    let mut keys: Vec<&String> = before.metadata.keys().chain(next.metadata.keys()).collect();
+    keys.sort();
+    keys.dedup();
+    for k in keys {
+        if k == field || STAMPED_TIMESTAMPS.contains(&k.as_str()) {
+            continue;
+        }
+        let v = |m: &indexmap::IndexMap<String, crate::entity::MetadataValue>| {
+            m.get(k.as_str()).map(|v| v.to_frontmatter_string())
+        };
+        if v(&before.metadata) != v(&next.metadata) {
+            changed.push(format!("metadata:{k}"));
+        }
+    }
+    let edges = |e: &crate::entity::Entity| {
+        let mut r: Vec<(String, String)> = e
+            .relationships
+            .iter()
+            .map(|r| (r.rel_type.clone(), r.target.0.clone()))
+            .collect();
+        r.sort();
+        r.dedup();
+        r
+    };
+    if edges(before) != edges(next) {
+        changed.push("relationships".to_string());
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use crate::check::{CheckKind, CheckLedger, CheckRecord, CheckState, Verdict};
@@ -541,6 +674,10 @@ metadata_fields:
     field_type: string
     default_value: draft
     enum_values: [draft, complete]
+  - key: remark
+    description: r
+    field_type: string
+    required: false
 title_weight: 100.0
 text_fields:
   - body
@@ -549,6 +686,7 @@ updatable_fields:
   - title
   - body
   - status
+  - remark
 health_required_fields: []
 staleness_threshold_days: 90
 constraints:
@@ -633,6 +771,45 @@ write_rules: []
                 id: id.clone(),
                 expected_hash: crate::ExpectedHash::Current(current),
                 sections: indexmap::IndexMap::new(),
+                append_sections: indexmap::IndexMap::new(),
+                patch_sections: indexmap::IndexMap::new(),
+                sections_unset: Vec::new(),
+                metadata,
+                metadata_unset: Vec::new(),
+                declare_relations: vec![],
+                dry_run: false,
+                relations_unset: Vec::new(),
+                anchors_unset: Vec::new(),
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+    }
+
+    /// One update: an optional metadata pair and an optional body text.
+    fn update(
+        engine: &mut crate::Engine,
+        id: &crate::entity::EntityId,
+        meta: Option<(&str, &str)>,
+        body: Option<&str>,
+    ) -> Result<crate::engine::UpdateEntityOutcome, crate::engine::error::EngineError> {
+        let (actor, client) = crate::engine::test_helpers::cli_actor();
+        let current = engine.get_entity(id).unwrap().content_hash.clone();
+        let mut metadata = indexmap::IndexMap::new();
+        if let Some((k, v)) = meta {
+            metadata.insert(k.to_string(), v.to_string());
+        }
+        let mut sections = indexmap::IndexMap::new();
+        if let Some(b) = body {
+            sections.insert("body".to_string(), b.to_string());
+        }
+        engine.update_entity(
+            crate::engine::UpdateEntityArgs {
+                anchors: Vec::new(),
+                id: id.clone(),
+                expected_hash: crate::ExpectedHash::Current(current),
+                sections,
                 append_sections: indexmap::IndexMap::new(),
                 patch_sections: indexmap::IndexMap::new(),
                 sections_unset: Vec::new(),
@@ -796,20 +973,28 @@ write_rules: []
         assert!(lines[0].carried_from.is_none());
         assert_eq!(lines[0].entity_hash, hash_at_check);
 
-        // A later write to the complete plan passes on the carried record
-        // and carries it onward, so the gate keeps holding.
+        // A later edit of the complete plan is not a transition: it
+        // commits, appends no ledger line, and leaves the approval behind.
+        // The entity reads stale and the constraints axis reports the gate
+        // as a standing violation until a new check is recorded.
         engine.set_identity(Some("author-a".to_string()));
+        let lines_before = ledger.in_standing_order().len();
         append_body(&mut engine, &id);
+        assert_eq!(
+            ledger.in_standing_order().len(),
+            lines_before,
+            "nothing carried"
+        );
+        let stale = &engine.latest_foreign_checks("bundles", id.as_ref())[0];
+        assert_ne!(
+            stale.entity_hash,
+            engine.get_entity(&id).unwrap().content_hash,
+            "the approval stays keyed to the content it approved"
+        );
+        let findings = engine.constraint_findings(Some("bundles"));
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        check_plan(&mut engine, "checker-c", &id, "x-projection");
         assert!(engine.constraint_findings(Some("bundles")).is_empty());
-        let onward = &engine.latest_foreign_checks("bundles", id.as_ref())[0];
-        assert_eq!(
-            onward.entity_hash,
-            engine.get_entity(&id).unwrap().content_hash
-        );
-        assert_eq!(
-            onward.carried_from.as_ref().unwrap().hash,
-            outcome.content_hash
-        );
         // A write that leaves the gate unentered carries nothing: back to
         // draft, then an append, and the record is not moved again.
         set_status(&mut engine, &id, "draft").unwrap();
@@ -820,6 +1005,74 @@ write_rules: []
             before,
             "no gate passed, nothing carried"
         );
+    }
+
+    /// On both self-check fixtures (an `x-` kind and `verification`): an
+    /// edit of a section and an edit of a metadata field other than the
+    /// gated one, after the transition, each commit, append nothing and
+    /// leave the entity `check_stale` with the gate listed on the
+    /// constraints axis; a fresh independent check clears it. A write that
+    /// sets the gated value and changes a section in the same call refuses
+    /// `CONSTRAINT_UNSATISFIED` naming the gate and the changed content,
+    /// with storage and ledger unchanged.
+    #[test]
+    fn an_approval_does_not_outlive_an_edit_of_what_it_approved() {
+        for kind in ["x-projection", "verification"] {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let mut engine = self_check_gated_engine(&tmp, kind);
+            engine.set_identity(Some("author-a".to_string()));
+            let id = create_plan(&mut engine, "The Bundle");
+            let ledger = CheckLedger::for_workspace(tmp.path());
+
+            // The combined write refuses first, before any approval stood.
+            check_plan(&mut engine, "checker-c", &id, kind);
+            engine.set_identity(Some("author-a".to_string()));
+            let stored = engine.get_entity(&id).unwrap().content_hash.clone();
+            let lines = ledger.in_standing_order().len();
+            let err = update(
+                &mut engine,
+                &id,
+                Some(("status", "complete")),
+                Some("rewritten."),
+            )
+            .expect_err("a self-check transition write may change nothing else");
+            assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED", "{kind}");
+            let msg = err.to_string();
+            assert!(msg.contains("transition_requires_self_check"), "{msg}");
+            assert!(msg.contains("section:body"), "{msg}");
+            assert_eq!(engine.get_entity(&id).unwrap().content_hash, stored);
+            assert_eq!(ledger.in_standing_order().len(), lines);
+
+            // The transition on its own commits and stands confirming.
+            set_status(&mut engine, &id, "complete").expect("the gate admits the write");
+            let entity = engine.get_entity(&id).unwrap().clone();
+            assert!((engine.check_standing_provider())(&entity, kind).confirms());
+            assert!(engine.constraint_findings(Some("bundles")).is_empty());
+
+            for edit in [
+                (None, Some("a section edit.")),
+                (Some(("remark", "noted")), None),
+            ] {
+                let lines = ledger.in_standing_order().len();
+                update(&mut engine, &id, edit.0, edit.1).expect("an edit is not a transition");
+                assert_eq!(
+                    ledger.in_standing_order().len(),
+                    lines,
+                    "{kind}: nothing carried"
+                );
+                let entity = engine.get_entity(&id).unwrap().clone();
+                let standing = (engine.check_standing_provider())(&entity, kind);
+                assert_eq!(standing.label(), "check_stale", "{kind}");
+                let findings = engine.constraint_findings(Some("bundles"));
+                assert_eq!(findings.len(), 1, "{kind}: {findings:?}");
+                check_plan(&mut engine, "checker-c", &id, kind);
+                engine.set_identity(Some("author-a".to_string()));
+                assert!(
+                    engine.constraint_findings(Some("bundles")).is_empty(),
+                    "{kind}"
+                );
+            }
+        }
     }
 
     /// The `verification` kind through the same gate: after the write the
@@ -1102,6 +1355,58 @@ write_rules: []
         let entity = engine.get_entity(&id).unwrap().clone();
         assert!(!(engine.check_standing_provider())(&entity, "x-projection").confirms());
         assert!(!engine.constraint_findings(Some("bundles")).is_empty());
+    }
+
+    /// Conflict resolution lands a self-check gated value only on a fresh
+    /// independent record naming the resolved bytes' own hash: the side
+    /// that is the checked content commits, the edited side refuses with
+    /// the file and the ledger unchanged. The refusal failed before the
+    /// repair: resolution validated section keys and content only.
+    #[test]
+    fn conflict_resolution_lands_a_self_check_gated_value_only_on_a_record_of_its_bytes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "x-projection");
+        engine.set_identity(Some("author-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+        check_plan(&mut engine, "checker-c", &id, "x-projection");
+        engine.set_identity(Some("author-a".to_string()));
+        set_status(&mut engine, &id, "complete").unwrap();
+        let path = tmp.path().join("bundles").join("the-bundle.md");
+        let checked = std::fs::read_to_string(&path).unwrap();
+        let edited = checked.replace("the plan body.", "an edit nobody checked.");
+        assert_ne!(edited, checked);
+        let conflicted = format!(
+            "<<<<<<< ours\n{}=======\n{}>>>>>>> theirs\n",
+            edited, checked
+        );
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        let (actor, client) = crate::engine::test_helpers::cli_actor();
+
+        std::fs::write(&path, &conflicted).unwrap();
+        let lines = ledger.in_standing_order().len();
+        let err = engine
+            .resolve_merge_conflict(
+                &id,
+                crate::engine::conflicts::ConflictSide::Ours,
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("the edited side was never checked");
+        assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED", "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), conflicted);
+        assert_eq!(ledger.in_standing_order().len(), lines);
+
+        engine
+            .resolve_merge_conflict(
+                &id,
+                crate::engine::conflicts::ConflictSide::Theirs,
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("the checked side lands");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), checked);
     }
 
     #[test]

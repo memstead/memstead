@@ -339,6 +339,49 @@ impl Engine {
             _ => resolved,
         };
 
+        // A gated value lands here as on any other write: the conflicted
+        // file is not in the store, so the resolved side enters every
+        // gated value it holds. A self-check gate commits only on a fresh
+        // independent record naming the resolved bytes' own hash (content
+        // checked before it entered conflict); a checks gate commits when
+        // its related entities meet it. Only the transition forms are
+        // read: the other constraints stay as soft as the missing
+        // required sections above, so a resolution stays possible.
+        {
+            let def: &memstead_schema::TypeDefinition = resolved_type.as_ref();
+            let check_provider = self.check_standing_provider();
+            entity.content_hash = parser::compute_hash(&resolved);
+            let transition_forms: Vec<_> = crate::ops::health::unsatisfied_constraints(
+                &self.store,
+                &entity,
+                def,
+                Some(&entity.id),
+                Some(&check_provider),
+            )
+            .into_iter()
+            .filter(|v| {
+                matches!(
+                    v,
+                    crate::ops::health::UnsatisfiedConstraint::TransitionRequiresChecks { .. }
+                )
+            })
+            .collect();
+            let content_hash = entity.content_hash.clone();
+            let (violated, _) =
+                self.gate_transition_forms(None, &entity, &content_hash, def, transition_forms);
+            let blocked: Vec<_> = violated
+                .into_iter()
+                .filter(|v| v.severity() == memstead_schema::ConstraintSeverity::Block)
+                .collect();
+            if !blocked.is_empty() {
+                return Err(EngineError::ConstraintUnsatisfied {
+                    entity_type: entity.entity_type.clone(),
+                    entity_id: entity.id.to_string(),
+                    violations: blocked,
+                });
+            }
+        }
+
         let backend = self.mounts[mount_idx].backend.as_ref();
         backend.write_entity(Path::new(&entry.relative_path), resolved.as_bytes())?;
         let ctx = self.commit_context(

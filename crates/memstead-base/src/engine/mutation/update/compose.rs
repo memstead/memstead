@@ -39,6 +39,9 @@ impl Engine {
         } = validated;
         let id = &args.id;
 
+        // The entity as the store holds it when the write began: the
+        // transition forms gate only a write that enters their value.
+        let before = entity.clone();
         let mut next = entity;
 
         // Repair-shaped removals, applied before declarations so a
@@ -496,6 +499,13 @@ impl Engine {
             Some(id),
             Some(&check_provider),
         );
+        let (violated, carry_kinds) = self.gate_transition_forms(
+            Some((&before, type_def.as_ref())),
+            &next,
+            &crate::entity::parser::compute_hash(&markdown),
+            type_def.as_ref(),
+            violated,
+        );
         if !violated.is_empty() {
             let blocked: Vec<_> = violated
                 .iter()
@@ -515,18 +525,15 @@ impl Engine {
                 violations: violated,
             });
         }
-        // The self-check gates this write passes: `next` still carries the
-        // pre-write hash, so the provider reads the records as they stand
-        // now. The commit step carries them to the post-write hash.
-        let licensed_self_checks = {
-            let kinds = self.licensed_self_check_kinds(&next, type_def.as_ref());
-            (!kinds.is_empty()).then(|| {
-                Box::new(super::LicensedSelfChecks {
-                    hash_before: next.content_hash.clone(),
-                    kinds,
-                })
+        // The self-check transitions this write passes on a record of the
+        // stored content, changing nothing but the gated field: the commit
+        // step carries those records to the post-write hash.
+        let licensed_self_checks = (!carry_kinds.is_empty()).then(|| {
+            Box::new(super::LicensedSelfChecks {
+                hash_before: before.content_hash.clone(),
+                kinds: carry_kinds,
             })
-        };
+        });
 
         // Mirror the create-path emission shape — drive the warning from
         // the synthesised relations the alias pass just emitted, not

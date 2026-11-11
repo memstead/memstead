@@ -319,3 +319,73 @@ fn old_ledger_rows_derive_under_the_new_comparator() {
             .contains("since the criterion was written")
     );
 }
+
+/// The checks gate after completion: a write that completes the plan and
+/// changes its body in the same call commits (its checks sit on other
+/// entities, nothing is carried). An edit of a criterion afterwards leaves
+/// the criterion `check_stale` and the constraints axis lists the plan's
+/// gate as a standing violation.
+#[test]
+fn a_criterion_edited_after_completion_reads_stale_and_the_gate_stands_violated() {
+    let ws = seed();
+    let root = ws.path();
+    create(root, "identity-a", "plan", "The Plan", None);
+    create(
+        root,
+        "identity-a",
+        "criterion",
+        "The Criterion",
+        Some("VERIFIES:plans--the-plan"),
+    );
+    check(root, Some("identity-c"), "plans--the-criterion");
+    memstead()
+        .current_dir(root)
+        .args([
+            "update",
+            "plans--the-plan",
+            "--metadata",
+            "status=complete",
+            "--section",
+            "body=rewritten in the completing write",
+            "--auto-hash",
+            "--identity",
+            "identity-a",
+            "--role",
+            "author",
+            "--quiet",
+        ])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(root)
+        .args([
+            "update",
+            "plans--the-criterion",
+            "--section",
+            "body=edited after completion",
+            "--auto-hash",
+            "--identity",
+            "identity-a",
+            "--quiet",
+        ])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "health",
+            "--include",
+            "checks,constraints",
+            "--json",
+            "--quiet",
+        ])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["checks"]["plans"]["check_stale"], 1, "{v}");
+    let text = v["constraints"].to_string();
+    assert!(
+        text.contains("plans--the-plan") && text.contains("transition_requires_checks"),
+        "{text}"
+    );
+}

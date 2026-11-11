@@ -147,7 +147,7 @@ pub(in crate::engine::mutation) struct PreparedUpdate {
 }
 
 /// The `transition_requires_self_check` gates a prepared write passed on
-/// a fresh independent record ([`Engine::licensed_self_check_kinds`]),
+/// a fresh independent record of the stored content ([`Engine::gate_transition_forms`]),
 /// with the hash those records are keyed to.
 pub(in crate::engine::mutation) struct LicensedSelfChecks {
     /// The entity's `content_hash` before the write.

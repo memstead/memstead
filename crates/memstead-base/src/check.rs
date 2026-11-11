@@ -780,9 +780,10 @@ impl CheckLedger {
     /// ledgers hold them in:
     ///
     /// 1. a carried line supersedes every record of the same entity and
-    ///    kind whose `entity_hash` is its `carried_from.hash` (all of them
-    ///    are keyed to content the carry replaced); superseded rows come
-    ///    first;
+    ///    kind whose `entity_hash` is its `carried_from.hash` and whose act
+    ///    is no later than the carried line's (they are keyed to content
+    ///    the carry replaced; a check made later, after the content came
+    ///    back to that hash, is a new act); superseded rows come first;
     /// 2. among the rest, the earlier time of the act comes first
     ///    ([`CheckRecord::act_time`]);
     /// 3. remaining ties are ordered by the rows' canonical bytes, never
@@ -859,24 +860,40 @@ pub struct RefusedCheckRow {
 /// Sort rows into standing order (see [`CheckLedger::in_standing_order`]).
 /// The one place the order is decided.
 fn standing_order(rows: Vec<CheckRecord>) -> Vec<CheckRecord> {
-    let carried_over: std::collections::HashSet<(String, String, String)> = rows
+    // Each carried line: (entity, kind, hash it left, its time of the act).
+    let carries: Vec<(String, String, String, u64)> = rows
         .iter()
         .filter_map(|r| {
-            r.carried_from
-                .as_ref()
-                .map(|c| (r.entity.clone(), sealed_kind_of(r), c.hash.clone()))
+            r.carried_from.as_ref().map(|c| {
+                (
+                    r.entity.clone(),
+                    sealed_kind_of(r),
+                    c.hash.clone(),
+                    r.act_time(),
+                )
+            })
         })
         .collect();
+    // A row is superseded by a carried line of its entity and kind that
+    // left the row's hash, when the row's act is no later than the
+    // carried line's (a check made later at that hash, after the content
+    // came back to it, is a new act and competes by its time). A chain of
+    // carries (h1 to h2 to h3) leaves its last line standing. A cycle (h1
+    // to h2 and back) cannot arise from the engine's carry, which needs a
+    // write entering the gated value; its lines all read superseded and
+    // fall to the bytes, so every machine still reads the same one.
+    let superseded = |r: &CheckRecord| {
+        let kind = sealed_kind_of(r);
+        carries.iter().any(|(entity, k, left, at)| {
+            *entity == r.entity && *k == kind && *left == r.entity_hash && r.act_time() <= *at
+        })
+    };
     let mut keyed: Vec<(bool, u64, String, CheckRecord)> = rows
         .into_iter()
         .map(|r| {
-            let superseded = carried_over.contains(&(
-                r.entity.clone(),
-                sealed_kind_of(&r),
-                r.entity_hash.clone(),
-            ));
+            let sup = superseded(&r);
             let bytes = serde_json::to_string(&r).unwrap_or_default();
-            (!superseded, r.act_time(), bytes, r)
+            (!sup, r.act_time(), bytes, r)
         })
         .collect();
     keyed.sort_by(|a, b| (a.0, a.1, &a.2).cmp(&(b.0, b.1, &b.2)));
@@ -1313,6 +1330,62 @@ mod tests {
             assert_eq!(standing.entity_hash, "h2", "order reversed: {order}");
             assert!(standing.carried_from.is_some());
         }
+    }
+
+    /// A check made at the hash a carry left, after the content came back
+    /// to it, is a new act and stands by its time. A carry chain stands on
+    /// its last line; a carry cycle, which the engine's carry cannot make,
+    /// still reads the same in every ledger order.
+    #[test]
+    fn a_check_after_a_return_to_the_carried_from_hash_stands() {
+        let tmp = TempDir::new().unwrap();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        let source = at("m--e", "ok", "h1", 100);
+        ledger.record(&source).unwrap();
+        ledger
+            .record(&CheckRecord {
+                entity_hash: "h2".into(),
+                carried_from: Some(CarriedFrom::transition("h1")),
+                ..source.clone()
+            })
+            .unwrap();
+        ledger.record(&at("m--e", "failed", "h1", 500)).unwrap();
+        let standing = ledger
+            .latest_for_kind("m--e", CheckKind::Verification)
+            .unwrap();
+        assert_eq!((standing.verdict.as_str(), standing.ts), ("failed", 500));
+
+        let a = at("m--e", "ok", "h1", 100);
+        let mid = CheckRecord {
+            entity_hash: "h2".into(),
+            carried_from: Some(CarriedFrom::transition("h1")),
+            ..a.clone()
+        };
+        let last = CheckRecord {
+            entity_hash: "h3".into(),
+            carried_from: Some(CarriedFrom::transition("h2")),
+            ..a.clone()
+        };
+        let back = CheckRecord {
+            entity_hash: "h1".into(),
+            carried_from: Some(CarriedFrom::transition("h2")),
+            ..a.clone()
+        };
+        let read = |rows: &[&CheckRecord]| {
+            let tmp = TempDir::new().unwrap();
+            let ledger = CheckLedger::for_workspace(tmp.path());
+            for r in rows {
+                ledger.record(r).unwrap();
+            }
+            ledger
+                .latest_for_kind("m--e", CheckKind::Verification)
+                .unwrap()
+        };
+        assert_eq!(read(&[&last, &a, &mid]).entity_hash, "h3");
+        assert_eq!(read(&[&mid, &last, &a]).entity_hash, "h3");
+        let one = serde_json::to_string(&read(&[&back, &a, &mid])).unwrap();
+        let two = serde_json::to_string(&read(&[&mid, &back, &a])).unwrap();
+        assert_eq!(one, two);
     }
 
     /// Two workspaces holding the same rows in different ledger orders,

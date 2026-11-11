@@ -26,6 +26,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **A gated approval no longer outlives an edit of what it approved
+  (breaking).** `transition_requires_checks` and
+  `transition_requires_self_check` now gate the transition only: a write
+  that moves an entity onto the gated value (from another value, from a
+  type without the form, or by creating it). A write that leaves the
+  entity at the value is not gated. On a self-check gate the transition
+  write passes on a fresh independent record of the result's own bytes,
+  or on a record of the stored content when the write changes nothing
+  but the gated field and the engine-stamped timestamps; only then is the
+  record carried to the new hash. A later edit carries nothing: the
+  entity reads `check_stale` and the health constraints axis reports the
+  gate as a standing violation until a new check is recorded or the
+  value is left. A transition write that also changes content refuses
+  `CONSTRAINT_UNSATISFIED`, the violation naming the changed content in
+  `changed`; fields a schema requires at the gated value are therefore
+  written before the check. Conflict resolution now runs both gates on
+  the side it lands (before, it validated section keys and content
+  only). Carried lines earlier engines wrote across content edits stay
+  in the ledger and keep standing where they stand.
+
 - **The newest check of a kind is the one made last, not the line the
   ledger holds last (breaking).** Every reader of a standing (an
   entity's check state and foreign checks, the gate provider, the
