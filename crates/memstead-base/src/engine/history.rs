@@ -648,7 +648,7 @@ impl Engine {
             // single create, and treating it as truncation erased
             // `created_by` for every batch-authored entity, which
             // silently degraded the checks independence gate to
-            // `unconfirmable` (found 2026-08-28, graph-plans pilot).
+            // `unconfirmable`.
             // A proposal merge that lists the id under `Created:` brought
             // the entity into the target: its creation, under the
             // proposer's identity (plan-proposal 03).
