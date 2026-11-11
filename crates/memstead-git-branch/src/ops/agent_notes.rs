@@ -281,13 +281,13 @@ pub fn agent_notes_since(
 ) -> Result<AgentNotesReport, VcsError> {
     let repo = gix::open(git_dir)?;
 
+    // A missing branch reads as the empty tree; a branch that exists and
+    // cannot be read is an error, never an empty mem.
     let head_lookup: Result<gix::Commit<'_>, ()> = match head_ref {
-        Some(ref_name) => repo
-            .rev_parse_single(ref_name)
-            .ok()
-            .and_then(|id| id.object().ok())
-            .and_then(|obj| obj.try_into_commit().ok())
-            .ok_or(()),
+        Some(ref_name) => match crate::ops::changes::branch_tip_commit(&repo, ref_name)? {
+            Some(c) => Ok(c),
+            None => Err(()),
+        },
         None => repo.head_commit().map_err(|_| ()),
     };
     let head_commit = match head_lookup {

@@ -844,39 +844,29 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
     }
 
     fn current_head(&self) -> Result<Option<String>, memstead_base::backend::BackendError> {
-        // Open the gitdir and peel the per-mem branch ref to its
-        // commit object id. Missing ref / missing repo / peel failure
-        // collapse to `Ok(None)` — the engine treats them as "no
-        // drift signal", same as folder/archive. Surfaced log lines
-        // give operators a breadcrumb when a branch genuinely
-        // disappears between probes.
-        let repo = match gix::open(&self.gitdir) {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::debug!(
-                    gitdir = %self.gitdir.display(),
-                    error = %e,
-                    "current_head: open gitdir failed; treating as no baseline"
-                );
-                return Ok(None);
-            }
+        // The per-mem branch tip's commit id. A missing branch is the one
+        // absence (`Ok(None)`); a repository that does not open, a lookup
+        // that fails or a ref that does not peel is a storage failure the
+        // engine must hear as one, so it reloads and a write waits.
+        use memstead_base::backend::BackendError;
+        let repo = gix::open(&self.gitdir)
+            .map_err(|e| BackendError::Other(format!("open {}: {e}", self.gitdir.display())))?;
+        let Some(mut reference) = repo
+            .try_find_reference(&self.ref_name)
+            .map_err(|e| BackendError::Other(format!("find ref {}: {e}", self.ref_name)))?
+        else {
+            return Ok(None);
         };
-        let mut reference = match repo.try_find_reference(&self.ref_name) {
-            Ok(Some(r)) => r,
-            Ok(None) => return Ok(None),
-            Err(e) => {
-                tracing::debug!(
-                    ref_name = %self.ref_name,
-                    error = %e,
-                    "current_head: ref lookup failed; treating as no baseline"
-                );
-                return Ok(None);
-            }
-        };
-        Ok(reference
+        let id = reference
             .peel_to_id()
-            .ok()
-            .map(|id| id.detach().to_hex().to_string()))
+            .map_err(|e| BackendError::Other(format!("peel {}: {e}", self.ref_name)))?;
+        // A ref naming an object the repository does not hold peels to
+        // that id all the same; reading the commit is what proves the tip.
+        id.object()
+            .map_err(|e| BackendError::Other(format!("read tip of {}: {e}", self.ref_name)))?
+            .try_into_commit()
+            .map_err(|e| BackendError::Other(format!("tip of {}: {e}", self.ref_name)))?;
+        Ok(Some(id.detach().to_hex().to_string()))
     }
 
     fn read_mem_config(&self) -> Result<Option<Vec<u8>>, memstead_base::backend::BackendError> {
@@ -1050,10 +1040,9 @@ pub(crate) fn read_blob_from_ref(
     ref_name: &str,
     path: &str,
 ) -> Result<Option<Vec<u8>>, memstead_base::backend::BackendError> {
-    let repo = match gix::open(gitdir) {
-        Ok(r) => r,
-        Err(_) => return Ok(None),
-    };
+    let repo = gix::open(gitdir).map_err(|e| {
+        memstead_base::backend::BackendError::Other(format!("open {}: {e}", gitdir.display()))
+    })?;
     let reference = match repo.try_find_reference(ref_name) {
         Ok(Some(r)) => r,
         Ok(None) => return Ok(None),
@@ -1069,10 +1058,9 @@ pub(crate) fn read_blob_from_ref(
     let object = id.object().map_err(|e| {
         memstead_base::backend::BackendError::Other(format!("read obj {ref_name}: {e}"))
     })?;
-    let commit = match object.try_into_commit() {
-        Ok(c) => c,
-        Err(_) => return Ok(None),
-    };
+    let commit = object.try_into_commit().map_err(|e| {
+        memstead_base::backend::BackendError::Other(format!("{ref_name} is not a commit: {e}"))
+    })?;
     let tree = commit.tree().map_err(|e| {
         memstead_base::backend::BackendError::Other(format!("read tree {ref_name}: {e}"))
     })?;

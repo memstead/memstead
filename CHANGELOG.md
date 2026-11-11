@@ -124,6 +124,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   name refused `CROSS_MEM_LINK_NOT_ALLOWED`, and the old name stayed
   granted.
 
+- **A git-branch mem whose branch cannot be read reports a storage error,
+  never an empty or unconfigured mem.** The head probe, the config read
+  and the change feed refuse a repository that does not open and a branch
+  that exists but does not resolve to a readable commit, where they read
+  it as no head, no config, or a mem whose every entity was removed. A
+  missing branch still reads as absent.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

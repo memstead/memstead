@@ -1153,23 +1153,6 @@ fn current_head_advances_on_subsequent_commits() {
     assert_eq!(head_after_second, second);
 }
 
-#[test]
-fn current_head_returns_none_for_missing_gitdir() {
-    // A writer pointed at a non-existent gitdir collapses to
-    // Ok(None) (with a debug log) rather than surfacing the
-    // open failure as an Err. Drift detection is best-effort —
-    // a transient broken mount doesn't poison the read it
-    // accompanies.
-    let tmp = TempDir::new().unwrap();
-    let writer = GitTreeBackend::new(
-        tmp.path().join("does-not-exist.git"),
-        "refs/heads/specs".to_string(),
-    );
-    let head =
-        <GitTreeBackend as memstead_base::backend::MemBackend>::current_head(&writer).unwrap();
-    assert!(head.is_none());
-}
-
 // ---- git-branch changes_since dispatch --------------------------
 //
 // Tests the `FULL_GIT_BRANCH_OPS.changes_since` dispatcher that
@@ -1653,4 +1636,48 @@ fn changes_since_reports_an_entity_renamed_from_or_to_a_non_entity_path() {
         "{:?}",
         result.changes
     );
+}
+
+/// A ref that exists but cannot be read is a storage failure, never an
+/// absence: the head probe, the config read and the change feed all
+/// refuse it, while a ref that is missing still reads as absent.
+#[test]
+fn an_unreadable_ref_is_an_error_not_an_absence() {
+    let tmp = TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
+    writer.write_entity(Path::new("a.md"), b"# A").unwrap();
+    let since = writer.commit("seed", &ctx_for_test()).unwrap();
+    writer.write_mem_config(b"{}", &ctx_for_test()).unwrap();
+
+    // Absent stays absent.
+    let missing = GitTreeBackend::new(gitdir.clone(), "refs/heads/nothing".to_string());
+    assert_eq!(missing.current_head().unwrap(), None);
+
+    // A ref pointing at an object the repository does not hold.
+    let bogus = "0123456789abcdef0123456789abcdef01234567";
+    for r in ["refs/heads/specs", "refs/heads/__MEMSTEAD"] {
+        let path = gitdir.join(r);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, format!("{bogus}\n")).unwrap();
+    }
+    assert!(
+        writer.current_head().is_err(),
+        "{:?}",
+        writer.current_head()
+    );
+    assert!(
+        writer.read_mem_config().is_err(),
+        "{:?}",
+        writer.read_mem_config()
+    );
+    assert!(dispatch_changes(&gitdir, "specs", "specs", &since).is_err());
+
+    // A gitdir that cannot be opened.
+    let gone = GitTreeBackend::new(
+        tmp.path().join("no-repo.git"),
+        "refs/heads/specs".to_string(),
+    );
+    assert!(gone.current_head().is_err());
+    assert!(gone.read_mem_config().is_err());
 }

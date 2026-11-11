@@ -108,13 +108,13 @@ pub fn changes_since(
     // (fresh repo, fresh ref) the head tree is the empty tree — fresh
     // clients sync against a fresh mem via the sentinel without first
     // forcing a mutation.
+    // A missing branch reads as the empty tree; a branch that exists and
+    // cannot be read is an error, never an empty mem.
     let head_lookup: Result<gix::Commit<'_>, ()> = match head_ref {
-        Some(ref_name) => repo
-            .rev_parse_single(ref_name)
-            .ok()
-            .and_then(|id| id.object().ok())
-            .and_then(|obj| obj.try_into_commit().ok())
-            .ok_or(()),
+        Some(ref_name) => match crate::ops::changes::branch_tip_commit(&repo, ref_name)? {
+            Some(c) => Ok(c),
+            None => Err(()),
+        },
         None => repo.head_commit().map_err(|_| ()),
     };
     let (head_sha, head_tree) = match head_lookup {
@@ -450,6 +450,35 @@ fn title_for(store: &Store, id: &EntityId) -> Option<String> {
 /// (including removed-in-this-diff entities) → `None`.
 fn type_for(store: &Store, id: &EntityId) -> Option<String> {
     store.get(id).map(|e| e.entity_type.clone())
+}
+
+/// The commit `head` names: a ref, or any revision (a commit id). A ref
+/// that exists and does not resolve to a readable commit is an error, never
+/// an absence; a name that is no ref resolves as a revision, `None` when it
+/// names nothing.
+pub(crate) fn branch_tip_commit<'r>(
+    repo: &'r gix::Repository,
+    head: &str,
+) -> Result<Option<gix::Commit<'r>>, VcsError> {
+    let reference = repo
+        .try_find_reference(head)
+        .map_err(|e| VcsError::Git(format!("find ref {head}: {e}")))?;
+    let Some(mut reference) = reference else {
+        return Ok(repo
+            .rev_parse_single(head)
+            .ok()
+            .and_then(|id| id.object().ok())
+            .and_then(|obj| obj.try_into_commit().ok()));
+    };
+    let id = reference
+        .peel_to_id()
+        .map_err(|e| VcsError::Git(format!("peel {head}: {e}")))?;
+    let commit = id
+        .object()
+        .map_err(|e| VcsError::Git(format!("read tip of {head}: {e}")))?
+        .try_into_commit()
+        .map_err(|e| VcsError::Git(format!("tip of {head}: {e}")))?;
+    Ok(Some(commit))
 }
 
 #[cfg(test)]
