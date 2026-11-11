@@ -1025,7 +1025,25 @@ pub fn parse_metadata_value(
     }
 
     Ok(match field_def.field_type {
-        FieldType::Boolean => MetadataValue::Bool(value == "true" || value == "1"),
+        FieldType::Boolean => {
+            // `true` / `false` in any case, or their digits. Anything else
+            // is refused like a non-number in a Number field: read as
+            // `false`, a typo would land as a real value.
+            if value.eq_ignore_ascii_case("true") || value == "1" {
+                MetadataValue::Bool(true)
+            } else if value.eq_ignore_ascii_case("false") || value == "0" {
+                MetadataValue::Bool(false)
+            } else {
+                return Err(ValidationError::InvalidFieldValue {
+                    field: key.to_string(),
+                    value: value.to_string(),
+                    expected_type: "Boolean".to_string(),
+                    expected_format: Some("true or false".to_string()),
+                    field_description: Some(field_def.description.clone()),
+                    entity_type: schema.name.clone(),
+                });
+            }
+        }
         FieldType::Number => {
             if let Ok(n) = value.parse::<i64>() {
                 MetadataValue::Integer(n)

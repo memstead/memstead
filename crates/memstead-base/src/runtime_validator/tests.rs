@@ -585,6 +585,10 @@ metadata_fields:
     description: numeric ordering within a plan
     field_type: number
     optional: true
+  - key: active
+    description: whether the widget is in use
+    field_type: boolean
+    optional: true
   - key: note
     description: free-form note
     field_type: string
@@ -678,6 +682,44 @@ fn number_field_accepts_integer_and_float() {
         parse_metadata_value("order", "2.5", &ty).unwrap(),
         MetadataValue::Float(_)
     ));
+}
+
+#[test]
+fn boolean_field_accepts_true_false_and_their_digits() {
+    let ty = typed_field_type();
+    for (raw, want) in [
+        ("true", true),
+        ("TRUE", true),
+        ("True", true),
+        ("1", true),
+        ("false", false),
+        ("False", false),
+        ("0", false),
+    ] {
+        match parse_metadata_value("active", raw, &ty).unwrap() {
+            MetadataValue::Bool(b) => assert_eq!(b, want, "{raw}"),
+            other => panic!("{raw}: expected Bool, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn boolean_field_rejects_a_value_that_is_neither_true_nor_false() {
+    let ty = typed_field_type();
+    for raw in ["perhaps", "yes", ""] {
+        let err = parse_metadata_value("active", raw, &ty).unwrap_err();
+        match err {
+            ValidationError::InvalidFieldValue {
+                field,
+                expected_type,
+                ..
+            } => {
+                assert_eq!(field, "active", "{raw}");
+                assert_eq!(expected_type, "Boolean", "{raw}");
+            }
+            other => panic!("{raw}: expected InvalidFieldValue, got {other:?}"),
+        }
+    }
 }
 
 #[test]

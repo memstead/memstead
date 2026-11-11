@@ -26,6 +26,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **A boolean metadata field refuses a value that is neither true nor
+  false.** `create`, `update` and `retype` read `true` / `false` in any
+  case, and `1` / `0`; any other value refuses `INVALID_FIELD_VALUE`
+  (`expected_type: Boolean`), as a Number or Date field already does,
+  where it was stored as `false`. Health's integrity check reports a
+  stored value of that kind the same way.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both
