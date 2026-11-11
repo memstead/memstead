@@ -236,7 +236,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `memstead publish` refuses a workspace the engine does not boot with
   the boot refusal's own code (`WORKSPACE_STORE_PARSE`, ...), where it
   reported `ARCHIVE_ASSEMBLY_FAILED` or, when the folders could be
-  assembled, published them behind the refusal. The assembly's own
+  assembled, published them behind the refusal; when the folder assembly
+  would fail too, its refusal rides beside the boot refusal under
+  `details.assembly` (`code`, `message`, `details`). The assembly's own
   refusals are the engine's (`AssembleError::code`, `details`: `stage`,
   `reason`, `path` where known); a schema source or anchors refusal now
   reports its own code (the schema source's, or

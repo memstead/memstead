@@ -219,16 +219,35 @@ fn run_with_root(
         // exactly like `--mem` does (sealed-gate finding F6's seam;
         // the legacy assembly resolved the config against the
         // workspace root, which only coincides with the mem folder
-        // in the legacy single-mem layout). The legacy folder
-        // assembly stays as the fallback for exactly that layout,
-        // where no engine boots.
-        // Exactly one writable mem routes through the engine;
-        // multiple demand `--mem`; zero (an engine that boots but
-        // mounts nothing writable — some legacy-shaped test trees)
-        // falls through to the folder assembly. A workspace the engine
-        // refuses to boot is refused here, never packaged from its folders
-        // behind the refusal.
-        let engine = ctx.cli_engine_at(&workspace_root)?.into_base();
+        // in the legacy single-mem layout). The legacy folder assembly
+        // stays only for an engine that boots but mounts nothing writable.
+        // Exactly one writable mem routes through the engine; multiple
+        // demand `--mem`. A workspace the engine refuses to boot is
+        // refused, never packaged from its folders behind the refusal; the
+        // folder assembly's own refusal for the same workspace rides
+        // beside it under `details.assembly`, so no reason is lost.
+        let engine = match ctx.cli_engine_at(&workspace_root) {
+            Ok(e) => e.into_base(),
+            Err(boot) => {
+                let Ok(mut c) = boot.downcast::<CliError>() else {
+                    return Err(anyhow::anyhow!("engine boot failed"));
+                };
+                if let Err(e) = assemble_archive(&workspace_root) {
+                    let assembly = serde_json::json!({
+                        "code": e.code(),
+                        "message": e.to_string(),
+                        "details": e.details(),
+                    });
+                    match c.details.as_mut().and_then(|d| d.as_object_mut()) {
+                        Some(d) => {
+                            d.insert("assembly".to_string(), assembly);
+                        }
+                        None => c.details = Some(serde_json::json!({ "assembly": assembly })),
+                    }
+                }
+                return Err(c.into());
+            }
+        };
         // No writable mem is not a refusal here: publish falls back to the
         // workspace's archive path.
         let engine_mem: Option<(memstead_base::Engine, String)> = match engine.sole_writable_mem() {

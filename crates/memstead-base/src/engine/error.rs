@@ -1138,7 +1138,7 @@ pub enum EngineError {
     /// An update template whose `title` or `entity_type` differs from the
     /// entity it targets: an update renames or retypes nothing.
     #[error(
-        "template `{field}` {template:?} differs from the entity's current {field} {current:?}; an update cannot change it"
+        "template `{field}` {template:?} differs from the entity's current {field} {current:?}; an update cannot change it."
     )]
     TemplateIdentityMismatch {
         id: String,
