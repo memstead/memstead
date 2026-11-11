@@ -911,7 +911,18 @@ const VERBS: &[(&str, &[Verb])] = &[
         "engine/mutation/relate.rs::batch_relate",
         &[Verb::BatchRelate],
     ),
-    ("engine/mutation/retype.rs::retype_entity", &[Verb::Retype]),
+    (
+        "engine/mutation/retype/mod.rs::retype_entity",
+        &[Verb::Retype],
+    ),
+    (
+        "engine/mutation/retype/stage.rs::stage_retype",
+        &[Verb::Retype],
+    ),
+    (
+        "engine/mutation/retype/commit.rs::commit_retype",
+        &[Verb::Retype],
+    ),
     (
         "engine/mutation/mod.rs::stage_proposal_marks_retype",
         &[Verb::Retype],
