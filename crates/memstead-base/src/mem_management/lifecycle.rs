@@ -610,9 +610,29 @@ pub fn delete_mem(
     // Returns the backend handle so step 5 can drive backend-side
     // cleanup without re-resolving the mount through the router
     // (which has already lost the entry by the time we get here).
+    let mount_record = engine.mount(&params.name).cloned();
     let removed_backend = engine.unregister_writable_mem(&params.name)?;
     let backend =
         removed_backend.expect("mem_router().is_writable check above guarantees a present mount");
+
+    // The roster first, before any storage is touched: a delete whose
+    // roster write fails has deleted nothing, and the mem is registered
+    // again so this engine keeps serving what the roster still names.
+    // In the other order a failure left storage gone under a roster
+    // entry that still named it.
+    if let Err(e) = engine.persist_state() {
+        if let Some(mount) = mount_record {
+            let factory = engine.backend_factory();
+            if let Ok(restored) = factory(&mount) {
+                let _ = engine.register_writable_mem(
+                    mount,
+                    restored,
+                    crate::mem::MemOrigin::ExplicitToml,
+                );
+            }
+        }
+        return Err(e.into());
+    }
 
     // ---- Step 4b: tombstone write (unregister-only path) ----
     // When the operator asked for
@@ -772,12 +792,6 @@ pub fn delete_mem(
     } else {
         false
     };
-
-    // Symmetric persistence with `create_mem`: write the post-
-    // unregister mount manifest so a sibling process boots without
-    // the deleted mem. If the workspace_root is unset (tests /
-    // ad-hoc consumers) the call is a no-op.
-    engine.persist_state()?;
 
     // ---- Step 6: policy scrub on destructive delete ----
     // When both refusal gates admitted and the destructive delete
@@ -1854,7 +1868,15 @@ pub fn create_mem(
     // on every follow-up call. Engine-side rather than orchestrator-
     // side so every caller (MCP, CLI, in-process embedding)
     // inherits persistence by construction.
-    engine.persist_state()?;
+    //
+    // A failed roster write takes the registration back: the engine then
+    // serves no mem the roster does not name, and the seeded storage is
+    // residue the next create of this name reports
+    // (MEM_STORAGE_RESIDUE_DETECTED, with its recovery choices).
+    if let Err(e) = engine.persist_state() {
+        let _ = engine.unregister_writable_mem(&params.name);
+        return Err(e.into());
+    }
 
     // `require_notes` provenance nudge — inherited from the engine's
     // single enforcement point so mem lifecycle matches entity

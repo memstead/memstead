@@ -172,6 +172,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `WRITE_FOLLOW_UP_FAILED` (step `policy_scrub`), where the failure was
   only logged and the delete read as complete.
 
+- **A mem create or delete whose roster write fails leaves a coherent
+  workspace.** A delete writes the roster before it touches storage, so a
+  failed roster write deletes nothing and the mem stays served, where the
+  storage was already gone under a roster entry still naming it. A create
+  whose roster write fails takes its registration back, so the engine
+  serves no mem the roster does not name, and the seeded storage is the
+  residue the next create reports (`MEM_STORAGE_RESIDUE_DETECTED`).
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

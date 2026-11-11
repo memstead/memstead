@@ -781,3 +781,92 @@ fn a_mem_delete_reports_a_grant_scrub_that_failed() {
     );
     assert!(std::fs::read_to_string(&config).unwrap().contains("doomed"));
 }
+
+/// Make the workspace's state directory read-only for the scope of `f`,
+/// so the roster write fails and nothing else does.
+#[cfg(unix)]
+fn with_unwritable_roster<T>(root: &std::path::Path, f: impl FnOnce() -> T) -> T {
+    use std::os::unix::fs::PermissionsExt;
+    let state = root.join(".memstead").join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let out = f();
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+    out
+}
+
+/// A delete whose roster write fails deletes nothing: the mem stays
+/// served and its branch stays, where the storage was removed first and
+/// the roster went on naming a mem that no longer existed.
+#[cfg(unix)]
+#[test]
+fn a_mem_delete_whose_roster_write_fails_deletes_nothing() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("doomed", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    create_entity_in(&mut engine, "doomed", "Kept Spec");
+
+    let result = with_unwritable_roster(tmp.path(), || {
+        mem_management::delete_mem(
+            &mut engine,
+            mem_management::MemDeleteParams {
+                name: "doomed".to_string(),
+                delete_files: true,
+                note: None,
+                actor: Actor::Cli,
+                client: None,
+                operator_mode: true,
+                detach_incoming: false,
+            },
+        )
+    });
+    assert!(result.is_err(), "the roster write failed");
+    assert!(
+        engine
+            .get_entity(&memstead_base::EntityId::new("doomed", "kept-spec"))
+            .is_some(),
+        "the mem is still served"
+    );
+    let rebooted = engine_from_workspace_root(tmp.path()).expect("reboot");
+    assert!(
+        rebooted
+            .get_entity(&memstead_base::EntityId::new("doomed", "kept-spec"))
+            .is_some(),
+        "the branch and the roster entry survive"
+    );
+}
+
+/// A create whose roster write fails leaves no mem this engine serves
+/// and the roster does not name: the error stands, the seeded storage is
+/// residue the next create reports, where the engine went on serving a
+/// mem no fresh process would mount.
+#[cfg(unix)]
+#[test]
+fn a_mem_create_whose_roster_write_fails_serves_no_mem() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("keeper", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    let params = || mem_management::MemCreateParams {
+        name: "fresh".to_string(),
+        location: std::path::PathBuf::from("fresh"),
+        schema_ref: "default@1.0.0".parse().unwrap(),
+        vcs: None,
+        note: None,
+        operator_mode: true,
+        recovery: None,
+        write_guidance: Default::default(),
+        storage: Some(StorageKind::GitBranch),
+        actor: Actor::Cli,
+        client: None,
+    };
+    let result = with_unwritable_roster(tmp.path(), || {
+        mem_management::create_mem(&mut engine, params())
+    });
+    assert!(result.is_err(), "the roster write failed");
+    assert!(
+        !engine.mem_router().is_writable("fresh"),
+        "the engine serves no mem the roster does not name"
+    );
+    let again = mem_management::create_mem(&mut engine, params()).unwrap_err();
+    assert_eq!(again.code(), "MEM_STORAGE_RESIDUE_DETECTED");
+}
