@@ -82,6 +82,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   branch holds.** `mem create` and `mem fork` report that number in the
   message and in `details.entity_count`, where both always said 0.
 
+- **A write that loses the race to another writer on a git-branch mem
+  refuses with the entity and its current hash.** `HASH_MISMATCH` names
+  the entity and carries its content hash at the new tip, so retrying
+  with that hash lands; it carried an empty id and the commit id as
+  `current`, which no retry could match. An entity the other writer
+  removed refuses as not found.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

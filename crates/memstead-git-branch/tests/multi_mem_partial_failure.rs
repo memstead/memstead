@@ -949,3 +949,61 @@ fn a_batch_over_three_mems_whose_second_commit_fails() {
         }
     }
 }
+
+/// A commit that loses the branch race to an out-of-band writer refuses
+/// with the entity-level `HASH_MISMATCH`: the entity's id and its content
+/// hash at the new tip, so the retry that value asks for goes through.
+#[test]
+fn a_lost_branch_race_refuses_with_the_entity_and_its_current_hash() {
+    let ws = Workspace::new([Kind::GitBranch; 3]);
+    let mount = ws.mounts.iter().find(|m| m.mem == LEFT).unwrap().clone();
+    let target = id(LEFT, "alpha");
+    let raced = Arc::new(AtomicBool::new(false));
+    let sibling_hash = Arc::new(std::sync::Mutex::new(String::new()));
+    let tap: Tap = {
+        let raced = Arc::clone(&raced);
+        let sibling_hash = Arc::clone(&sibling_hash);
+        Arc::new(move |mem, method| {
+            if mem == LEFT
+                && (method == "commit" || method == "commit_with_expected_parent")
+                && !raced.swap(true, Ordering::SeqCst)
+            {
+                let sibling = instantiate_full_backend(&mount).unwrap();
+                let path = Path::new("alpha.md");
+                let old = String::from_utf8(sibling.read_entity(path).unwrap().unwrap()).unwrap();
+                let new = old.replace("Alpha purpose", "Alpha purpose, rewritten out of band");
+                assert_ne!(old, new);
+                sibling.write_entity(path, new.as_bytes()).unwrap();
+                sibling
+                    .commit("an out-of-band rewrite", &CommitContext::internal())
+                    .unwrap();
+                *sibling_hash.lock().unwrap() = memstead_base::entity::parser::compute_hash(&new);
+            }
+            false
+        })
+    };
+    let mut engine = ws.engine(Some(tap));
+
+    let err = engine
+        .update_entity(
+            update_args(&engine, &target, "first try"),
+            Actor::Cli,
+            None,
+            None,
+        )
+        .unwrap_err();
+    let current = match err {
+        EngineError::HashMismatch { id, current, .. } => {
+            assert_eq!(id, target.to_string());
+            current
+        }
+        other => panic!("expected HashMismatch, got {other:?}"),
+    };
+    assert_eq!(current, *sibling_hash.lock().unwrap());
+
+    let mut retry = update_args(&engine, &target, "second try");
+    retry.expected_hash = memstead_base::ExpectedHash::from_token(Some(current));
+    engine
+        .update_entity(retry, Actor::Cli, None, None)
+        .expect("the retry with the reported hash lands");
+}

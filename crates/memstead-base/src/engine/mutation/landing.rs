@@ -104,7 +104,7 @@ impl Engine {
             .try_for_each(|record| backend.stage_provenance(record));
         let committed = staged
             .and_then(|()| backend.commit_with_expected_parent(subject, ctx, expected_parent));
-        self.settle(mount_idx, committed)
+        self.settle(mount_idx, committed, records)
     }
 
     /// Append `record` on its own, for a mutation that writes no file
@@ -126,7 +126,7 @@ impl Engine {
             .backend
             .append_provenance(record)
             .map(|()| String::new());
-        self.settle(mount_idx, appended)
+        self.settle(mount_idx, appended, std::slice::from_ref(record))
     }
 
     /// For an operation over several mems: one more attempt at a
@@ -162,15 +162,65 @@ impl Engine {
         }
     }
 
+    /// The `HASH_MISMATCH` for a commit that lost the branch race: the
+    /// first entity the mutation wrote and its content hash as stored
+    /// at the new tip. An entity the other writer removed is reported
+    /// as not found. With no entity named (a write of no entity), the
+    /// mem-level conflict carries the new tip.
+    fn lost_race_refusal(
+        &self,
+        mount_idx: usize,
+        records: &[Provenance],
+        tip: String,
+    ) -> EngineError {
+        let Some(id) = records.iter().find_map(|r| r.entity.clone()) else {
+            return EngineError::HashMismatch {
+                id: String::new(),
+                current: tip,
+                is_stub: false,
+            };
+        };
+        let entity_id = EntityId(id.clone());
+        let path = self
+            .store
+            .get(&entity_id)
+            .map(|e| e.file_path.clone())
+            .unwrap_or_else(|| crate::entity::id::id_to_file_path(&entity_id));
+        match self.mounts[mount_idx]
+            .backend
+            .read_entity(std::path::Path::new(&path))
+        {
+            Ok(Some(bytes)) => EngineError::HashMismatch {
+                id,
+                current: crate::entity::parser::compute_hash(&String::from_utf8_lossy(&bytes)),
+                is_stub: false,
+            },
+            Ok(None) => EngineError::NotFound {
+                id,
+                suggestions: Vec::new(),
+            },
+            Err(e) => EngineError::Backend(e),
+        }
+    }
+
     /// The report for what a commit call came to.
     fn settle(
         &self,
         mount_idx: usize,
         committed: Result<String, BackendError>,
+        records: &[Provenance],
     ) -> Result<Landed, EngineError> {
         let state = &self.mounts[mount_idx];
         let backend = state.backend.as_ref();
         match committed {
+            // Another writer advanced the branch between this mutation's
+            // compare and its commit. The refusal is the entity-level one,
+            // naming the entity and its hash at the new tip, so the retry
+            // the payload asks for can match.
+            Err(BackendError::HashMismatch { current: tip }) => {
+                let _ = backend.discard_pending();
+                Err(self.lost_race_refusal(mount_idx, records, tip))
+            }
             Ok(write_id) => Ok(Landed {
                 write_id,
                 warnings: Vec::new(),

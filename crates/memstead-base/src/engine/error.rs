@@ -3318,12 +3318,12 @@ impl BootError {
 }
 
 impl From<BackendError> for EngineError {
-    /// One `HASH_MISMATCH` for both detection levels: a commit-tip CAS
-    /// conflict raised by the backend (the git-tree backend's
-    /// `commit`) maps onto the entity-level envelope, carrying the
-    /// live tip as `current`; the entity id is unknown at the backend
-    /// layer, so the envelope names the mem-level conflict instead.
-    /// Everything else stays a typed backend failure.
+    /// One `HASH_MISMATCH` for both detection levels. A mutation's commit
+    /// that loses the branch race is refused in the engine's landing step
+    /// with the entity's id and its hash at the new tip; this mapping is
+    /// the fallback for a commit that names no entity, which carries the
+    /// new tip as the mem-level conflict. Everything else stays a typed
+    /// backend failure.
     fn from(e: BackendError) -> Self {
         match e {
             BackendError::HashMismatch { current } => EngineError::HashMismatch {
