@@ -824,7 +824,7 @@ fn advance_auto_worked_matches_source_dialect_anchors() {
     assert_eq!(out.disposed, 1);
 }
 
-/// AC9a — an anchored write auto-marks its referenced frozen-slice
+/// An anchored write auto-marks its referenced frozen-slice
 /// artifacts `worked`, so `advance` needs an explicit disposition only for
 /// the residue, held across a HEAD move. Refusals: an artifact with no
 /// anchor is never auto-worked, and an anchor referencing an artifact

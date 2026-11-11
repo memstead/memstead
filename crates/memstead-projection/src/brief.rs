@@ -211,9 +211,9 @@ pub fn render_operative_data(
                 ResolvedSource::Primary(p) => {
                     // Name first, medium type demoted to annotation — the
                     // provenance section instructs `source` = the declared
-                    // NAME, so this section must teach the same token
-                    // (plan 03a: an agent copying this bullet verbatim
-                    // must not earn an INVALID_ANCHOR).
+                    // NAME, so this section must teach the same token:
+                    // an agent copying this bullet verbatim must not earn
+                    // an INVALID_ANCHOR.
                     lines.push(format!(
                         "- **{}** ({}, primary) — `{}`",
                         p.name,

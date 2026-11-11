@@ -2036,8 +2036,8 @@ pub(super) fn synthesise_alias_relations(
             // declare the pointer rel-type for that destination (exact
             // entry or wildcard). Emitting anyway wrote an edge the
             // load-path filter then silently discarded on the next boot
-            // — the write showed a relation the graph would not keep
-            // (graph-plans 02 grading, 2026-08-28). Skip synthesis and
+            // — the write showed a relation the graph would not keep.
+            // Skip synthesis and
             // record the drop; the caller warns, typed, so the author
             // learns the citation is prose only. An unmounted or
             // schema-less target stays permissive (nothing to judge).

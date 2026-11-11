@@ -3682,7 +3682,7 @@ fn a_declared_git_binding_without_a_git_root_cannot_verdict_clean() {
     );
 }
 
-/// The inconclusive gate (the graph-plans 03 pilot):
+/// The inconclusive gate:
 /// `--fail-on-inconclusive` exits **6** with the typed
 /// `PROJECTION_VERIFY_INCONCLUSIVE` on a completed-but-blind run, after
 /// rendering the report; the same run without the flag keeps its

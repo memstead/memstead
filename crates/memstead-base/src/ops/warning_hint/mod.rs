@@ -283,9 +283,9 @@ pub enum WarningHint {
     /// source schema declares no cross-mem entry for (and no wildcard),
     /// so the alias-synthesis pass emitted no edge — the schema
     /// legitimately declines it, and the write still succeeds. Before
-    /// this warning the link became inert prose SILENTLY (found by the
-    /// graph-plans 02 grading: a default-schema scratch mem citing a
-    /// planning mem, 2026-08-28); the write knows it dropped the edge,
+    /// this warning the link became inert prose SILENTLY (a
+    /// default-schema scratch mem citing a planning mem, for example);
+    /// the write knows it dropped the edge,
     /// so it says so, naming the target and the declaration gap. The
     /// remedy is schema-side: declare the destination schema (or a
     /// wildcard) under `cross_mem_relationships`.
