@@ -454,6 +454,30 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         })?;
         self.ensure_snapshot(&mut pending)?;
 
+        // The target is checked before the source is touched, so a
+        // refused move leaves the staged state exactly as it was.
+        match pending.ops.get(&to_key) {
+            Some(PendingState::Upsert(_)) => {
+                return Err(BackendError::Path(format!(
+                    "move target {} already has a pending write",
+                    to.display()
+                )));
+            }
+            Some(PendingState::Delete) => {}
+            None => {
+                let committed = match pending.parent {
+                    Some(p) => self.read_blob_from_parent(p, &to_key)?.is_some(),
+                    None => false,
+                };
+                if committed {
+                    return Err(BackendError::Path(format!(
+                        "move target {} already exists",
+                        to.display()
+                    )));
+                }
+            }
+        }
+
         // Resolve the from-content. If a pending upsert exists, take
         // its bytes; otherwise look up the blob in the snapshotted
         // parent tree. Absent from both: nothing to move.
@@ -484,13 +508,6 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
             }
         };
 
-        if matches!(pending.ops.get(&to_key), Some(PendingState::Upsert(_))) {
-            // A move refuses when the target already has a pending write.
-            return Err(BackendError::Path(format!(
-                "move target {} already has a pending write",
-                to.display()
-            )));
-        }
         pending.ops.insert(from_key, PendingState::Delete);
         pending.ops.insert(to_key, PendingState::Upsert(bytes));
         Ok(())

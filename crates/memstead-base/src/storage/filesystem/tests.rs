@@ -156,6 +156,51 @@ fn move_with_pending_target_upsert_errors() {
 }
 
 #[test]
+fn move_onto_a_committed_target_refuses_and_keeps_both_files() {
+    let tmp = TempDir::new().unwrap();
+    let writer = FilesystemBackend::new(tmp.path().to_path_buf());
+
+    writer
+        .write_entity(Path::new("from.md"), b"source")
+        .unwrap();
+    writer.write_entity(Path::new("to.md"), b"target").unwrap();
+    writer.commit("seed", &ctx_for_test()).unwrap();
+
+    let err = writer
+        .move_entity(Path::new("from.md"), Path::new("to.md"))
+        .unwrap_err();
+    assert!(matches!(err, BackendError::Path(_)));
+    writer
+        .commit("after refused move", &ctx_for_test())
+        .unwrap();
+    assert_eq!(
+        std::fs::read(tmp.path().join("from.md")).unwrap(),
+        b"source"
+    );
+    assert_eq!(std::fs::read(tmp.path().join("to.md")).unwrap(), b"target");
+}
+
+#[test]
+fn a_refused_move_keeps_the_source_staged_bytes() {
+    let tmp = TempDir::new().unwrap();
+    let writer = FilesystemBackend::new(tmp.path().to_path_buf());
+
+    writer.write_entity(Path::new("from.md"), b"new").unwrap();
+    writer.write_entity(Path::new("to.md"), b"other").unwrap();
+    writer
+        .move_entity(Path::new("from.md"), Path::new("to.md"))
+        .unwrap_err();
+    assert_eq!(
+        writer.read_entity(Path::new("from.md")).unwrap(),
+        Some(b"new".to_vec())
+    );
+    writer
+        .commit("after refused move", &ctx_for_test())
+        .unwrap();
+    assert_eq!(std::fs::read(tmp.path().join("from.md")).unwrap(), b"new");
+}
+
+#[test]
 fn multi_op_commit() {
     let tmp = TempDir::new().unwrap();
     let writer = FilesystemBackend::new(tmp.path().to_path_buf());

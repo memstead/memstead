@@ -882,6 +882,26 @@ impl crate::backend::MemBackend for FilesystemBackend {
             BackendError::Path("filesystem writer pending state poisoned".to_string())
         })?;
 
+        // The target is checked before the source is touched, so a
+        // refused move leaves the staged state exactly as it was.
+        match pending.ops.get(&to_key) {
+            Some(PendingState::Upsert(_)) => {
+                return Err(BackendError::Path(format!(
+                    "move target {} already has a pending write",
+                    to.display()
+                )));
+            }
+            Some(PendingState::Delete) => {}
+            None => {
+                if self.read_source(&pending, &to_key)?.is_some() {
+                    return Err(BackendError::Path(format!(
+                        "move target {} already exists",
+                        to.display()
+                    )));
+                }
+            }
+        }
+
         let bytes = match pending.ops.remove(&from_key) {
             Some(PendingState::Upsert(b)) => b,
             Some(PendingState::Delete) => {
@@ -902,12 +922,6 @@ impl crate::backend::MemBackend for FilesystemBackend {
             },
         };
 
-        if matches!(pending.ops.get(&to_key), Some(PendingState::Upsert(_))) {
-            return Err(BackendError::Path(format!(
-                "move target {} already has a pending write",
-                to.display()
-            )));
-        }
         pending.ops.insert(from_key, PendingState::Delete);
         pending.ops.insert(to_key, PendingState::Upsert(bytes));
         Ok(())

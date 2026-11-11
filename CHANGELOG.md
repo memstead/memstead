@@ -33,6 +33,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   where it was stored as `false`. Health's integrity check reports a
   stored value of that kind the same way.
 
+- **A storage backend's move refuses an occupied target and leaves the
+  staged state untouched.** `move_entity` on the folder, in-memory and
+  git-branch backends refuses when the target is already committed, where
+  it overwrote that file, and a refused move keeps the source's staged
+  bytes, where it dropped them.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

@@ -161,6 +161,26 @@ impl MemBackend for InMemoryBackend {
         let to_key = normalise_rel_path(to)?;
         let mut state = self.lock()?;
 
+        // The target is checked before the source is touched, so a
+        // refused move leaves the staged state exactly as it was.
+        match state.pending.get(&to_key) {
+            Some(PendingState::Upsert(_)) => {
+                return Err(BackendError::Other(format!(
+                    "move target {} already has a pending write",
+                    to.display()
+                )));
+            }
+            Some(PendingState::Delete) => {}
+            None => {
+                if state.committed.contains_key(&to_key) {
+                    return Err(BackendError::Other(format!(
+                        "move target {} already exists",
+                        to.display()
+                    )));
+                }
+            }
+        }
+
         // Resolve the source bytes from the pending buffer if staged,
         // otherwise from committed state — mirroring the folder
         // backend's `read_source`.
@@ -184,12 +204,6 @@ impl MemBackend for InMemoryBackend {
             },
         };
 
-        if matches!(state.pending.get(&to_key), Some(PendingState::Upsert(_))) {
-            return Err(BackendError::Other(format!(
-                "move target {} already has a pending write",
-                to.display()
-            )));
-        }
         state.pending.insert(from_key, PendingState::Delete);
         state.pending.insert(to_key, PendingState::Upsert(bytes));
         Ok(())
@@ -394,6 +408,38 @@ mod tests {
             .move_entity(Path::new("ghost.md"), Path::new("here.md"))
             .unwrap_err();
         assert!(matches!(err, BackendError::Other(_)));
+    }
+
+    #[test]
+    fn move_onto_a_committed_target_refuses_and_keeps_both_files() {
+        let b = InMemoryBackend::new();
+        b.write_entity(Path::new("from.md"), b"source").unwrap();
+        b.write_entity(Path::new("to.md"), b"target").unwrap();
+        b.commit("seed", &ctx()).unwrap();
+        b.move_entity(Path::new("from.md"), Path::new("to.md"))
+            .unwrap_err();
+        b.commit("after refused move", &ctx()).unwrap();
+        assert_eq!(
+            b.read_entity(Path::new("from.md")).unwrap(),
+            Some(b"source".to_vec())
+        );
+        assert_eq!(
+            b.read_entity(Path::new("to.md")).unwrap(),
+            Some(b"target".to_vec())
+        );
+    }
+
+    #[test]
+    fn a_refused_move_keeps_the_source_staged_bytes() {
+        let b = InMemoryBackend::new();
+        b.write_entity(Path::new("from.md"), b"new").unwrap();
+        b.write_entity(Path::new("to.md"), b"other").unwrap();
+        b.move_entity(Path::new("from.md"), Path::new("to.md"))
+            .unwrap_err();
+        assert_eq!(
+            b.read_entity(Path::new("from.md")).unwrap(),
+            Some(b"new".to_vec())
+        );
     }
 
     #[test]

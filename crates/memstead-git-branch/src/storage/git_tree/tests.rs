@@ -254,6 +254,52 @@ fn git_tree_writer_move_renames_path() {
 }
 
 #[test]
+fn git_tree_writer_move_onto_a_committed_target_refuses_and_keeps_both_files() {
+    let tmp = TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/test".to_string());
+
+    writer
+        .write_entity(Path::new("from.md"), b"source")
+        .unwrap();
+    writer.write_entity(Path::new("to.md"), b"target").unwrap();
+    writer.commit("seed", &ctx_for_test()).unwrap();
+
+    writer
+        .move_entity(Path::new("from.md"), Path::new("to.md"))
+        .unwrap_err();
+    assert_eq!(
+        read_blob(&gitdir, "refs/heads/test", "from.md").unwrap(),
+        b"source"
+    );
+    assert_eq!(
+        read_blob(&gitdir, "refs/heads/test", "to.md").unwrap(),
+        b"target"
+    );
+    assert_eq!(
+        writer.read_entity(Path::new("to.md")).unwrap(),
+        Some(b"target".to_vec())
+    );
+}
+
+#[test]
+fn git_tree_writer_a_refused_move_keeps_the_source_staged_bytes() {
+    let tmp = TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/test".to_string());
+
+    writer.write_entity(Path::new("from.md"), b"new").unwrap();
+    writer.write_entity(Path::new("to.md"), b"other").unwrap();
+    writer
+        .move_entity(Path::new("from.md"), Path::new("to.md"))
+        .unwrap_err();
+    assert_eq!(
+        writer.read_entity(Path::new("from.md")).unwrap(),
+        Some(b"new".to_vec())
+    );
+}
+
+#[test]
 fn git_tree_writer_multi_op_commit() {
     let tmp = TempDir::new().unwrap();
     let gitdir = fresh_repo_dir(tmp.path());
