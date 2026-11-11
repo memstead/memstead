@@ -26,6 +26,11 @@ pub struct FetchOutcome {
     /// carries none, or none new.
     #[serde(default)]
     pub checks_imported: usize,
+    /// Check-ledger rows the import refused, each named: a row whose time
+    /// of the act lies more than five minutes ahead of this engine's
+    /// clock is refused as a local record with such a time is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks_refused: Vec<crate::check::RefusedCheckRow>,
 }
 
 /// One ref's transition recorded by a successful fetch / pull.
@@ -63,6 +68,11 @@ pub struct PullOutcome {
     /// for the mem, into the workspace ledger.
     #[serde(default)]
     pub checks_imported: usize,
+    /// Check-ledger rows the import refused, each named: a row whose time
+    /// of the act lies more than five minutes ahead of this engine's
+    /// clock is refused as a local record with such a time is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks_refused: Vec<crate::check::RefusedCheckRow>,
     /// What the pull could not finish in this process: today only a
     /// store reload that failed after the branch moved (the ref move
     /// stands; the next operation reloads again). Empty on a clean pull.
@@ -179,6 +189,11 @@ pub struct PullAllOutcome {
     pub unmounted_on_remote: Vec<UnmountedRemoteMem>,
     /// Check-ledger rows imported for the mounted mems.
     pub checks_imported: usize,
+    /// Check-ledger rows the import refused, each named: a row whose time
+    /// of the act lies more than five minutes ahead of this engine's
+    /// clock is refused as a local record with such a time is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks_refused: Vec<crate::check::RefusedCheckRow>,
 }
 
 /// A mem on the remote that this workspace does not mount.

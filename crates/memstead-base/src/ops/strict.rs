@@ -435,7 +435,7 @@ pub fn compose_strict_axis(
     let mut standing: BTreeMap<(String, String), Acknowledgement> = BTreeMap::new();
     let mut withdrawn: BTreeMap<(String, String), ()> = BTreeMap::new();
     if let Some(ledger) = ledger {
-        for rec in ledger.all() {
+        for rec in ledger.in_standing_order() {
             let Some(f) = &rec.finding else { continue };
             if !is_health_condition(&f.code) {
                 continue;
@@ -646,6 +646,40 @@ mod tests {
         // A mem filter drops stale acknowledgements of other mems.
         let scoped = compose_strict_axis(&report, Some(&ledger), Some("other"));
         assert!(scoped.stale_acknowledgements.is_empty());
+    }
+
+    /// "A later ok withdraws" means the later act, not the later line:
+    /// an ok made after the acknowledgement but arriving before it (a
+    /// transport merge) still withdraws it, and an ok made before it does
+    /// not.
+    #[test]
+    fn withdrawal_follows_the_time_of_the_act_not_the_line() {
+        let tmp = TempDir::new().unwrap();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        ledger
+            .record(&record("m--loud", "ok", "SIGNAL_WARN", 4))
+            .unwrap();
+        ledger
+            .record(&record("m--loud", "failed", "SIGNAL_WARN", 3))
+            .unwrap();
+        ledger
+            .record(&record("m--quiet", "ok", "SIGNAL_WARN", 1))
+            .unwrap();
+        ledger
+            .record(&record("m--quiet", "failed", "SIGNAL_WARN", 2))
+            .unwrap();
+        let report = report_with(serde_json::json!([
+            {"id": "m--loud", "axis": "signals", "code": "SIGNAL_WARN", "detail": {}},
+            {"id": "m--quiet", "axis": "signals", "code": "SIGNAL_WARN", "detail": {}},
+        ]));
+        let axis = compose_strict_axis(&report, Some(&ledger), None);
+        let by: BTreeMap<&str, bool> = axis
+            .findings
+            .iter()
+            .map(|f| (f.entity.as_str(), f.acknowledged))
+            .collect();
+        assert_eq!(by.get("m--loud"), Some(&false), "{:?}", axis.findings);
+        assert_eq!(by.get("m--quiet"), Some(&true), "{:?}", axis.findings);
     }
 
     /// No ledger, no findings: a clean axis with zero violations.

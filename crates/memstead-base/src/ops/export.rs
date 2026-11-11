@@ -175,9 +175,10 @@ pub fn build_redacted_sealed_checks(
 
     let carried: std::collections::BTreeSet<&str> =
         entity_paths.iter().map(String::as_str).collect();
-    // Ledger order is record order: a later line of the same (entity,
-    // kind) supersedes an earlier one, exactly as `latest_for_wire_kind`
-    // reads the ledger.
+    // `records` arrive in standing order
+    // ([`crate::check::CheckLedger::in_standing_order`]): a later row of
+    // the same (entity, kind) supersedes an earlier one, exactly as
+    // `latest_for_wire_kind` reads the ledger.
     let mut latest: BTreeMap<String, BTreeMap<String, crate::check::CheckRecord>> = BTreeMap::new();
     for rec in records {
         let id = EntityId(rec.entity.clone());
@@ -236,7 +237,7 @@ pub fn sealed_checks_bytes_for(
     let Some(root) = workspace_root else {
         return (None, Vec::new());
     };
-    let records = crate::check::CheckLedger::for_workspace(root).all();
+    let records = crate::check::CheckLedger::for_workspace(root).in_standing_order();
     let (sealed, redactions) = build_redacted_sealed_checks(&records, mem_name, entity_paths, rows);
     (sealed.and_then(|s| s.to_archive_bytes().ok()), redactions)
 }

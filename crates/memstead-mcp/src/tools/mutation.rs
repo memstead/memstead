@@ -495,7 +495,7 @@ pub struct CheckParams {
     )]
     pub finding: Option<CheckFindingParam>,
     #[schemars(
-        description = "When the check was MADE, when that is not now: an ISO-8601 UTC instant (`YYYY-MM-DDTHH:MM:SSZ`) or a civil date (`YYYY-MM-DD`, midnight UTC). For a recorder transcribing checks made earlier or out of order: stored as `observed_at` beside the engine's own write time `ts`, echoed here and in health; a reader ordering checks by time takes `observed_at` where present and `ts` otherwise. Informational: which record is the newest of its kind is still decided by ledger order. An unreadable shape or an instant more than five minutes ahead of the engine's clock refuses `INVALID_INPUT`."
+        description = "When the check was MADE, when that is not now: an ISO-8601 UTC instant (`YYYY-MM-DDTHH:MM:SSZ`) or a civil date (`YYYY-MM-DD`, midnight UTC). For a recorder transcribing checks made earlier or out of order: stored as `observed_at` beside the engine's own write time `ts`, echoed here and in health. It is the record's time of the act (`observed_at` where present, `ts` otherwise), and the newest record of a kind is the one whose act is latest, never the one the ledger holds last: a line the engine carried across a licensed transition stands over the record it carried, and equal times are ordered by the rows' bytes, so two machines holding the same rows read the same newest. An unreadable shape or an instant more than five minutes ahead of the engine's clock refuses `INVALID_INPUT`."
     )]
     pub observed_at: Option<String>,
 }

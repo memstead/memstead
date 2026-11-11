@@ -95,6 +95,7 @@ pub fn fetch_in_gitdir(
         refspecs: refspecs.to_vec(),
         updated_refs,
         checks_imported: 0,
+        checks_refused: Vec::new(),
     })
 }
 
@@ -160,6 +161,7 @@ pub fn pull_in_gitdir(
         new_sha: remote_sha,
         updated_refs: fetched.updated_refs,
         checks_imported: 0,
+        checks_refused: Vec::new(),
         notices: Vec::new(),
     })
 }

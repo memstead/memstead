@@ -340,7 +340,7 @@ struct CheckMaps {
     foreign_by_entity: std::collections::BTreeMap<String, Vec<String>>,
     /// Newest record of any kind per entity, for the finding it may carry.
     newest_any: std::collections::BTreeMap<String, crate::check::CheckRecord>,
-    /// Every verification record per entity, oldest first: the per-record
+    /// Every verification record per entity, in standing order: the per-record
     /// readings show each check's standing, not only the newest one's.
     all_verification: std::collections::BTreeMap<String, Vec<crate::check::CheckRecord>>,
 }
@@ -422,7 +422,7 @@ pub fn health_checks_axis(
     // verification record, or the reverse.
     let ledger_records: Vec<crate::check::CheckRecord> = engine
         .workspace_root()
-        .map(|root| crate::check::CheckLedger::for_workspace(root).all())
+        .map(|root| crate::check::CheckLedger::for_workspace(root).in_standing_order())
         .unwrap_or_default();
     let from_ledger = CheckMaps::from_records(ledger_records.iter());
 

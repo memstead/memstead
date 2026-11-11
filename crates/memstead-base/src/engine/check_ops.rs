@@ -192,15 +192,16 @@ impl Engine {
             carried_from: None,
         };
         ledger
-            .record(&record)
+            .record_local(record)
             .map_err(|e| EngineError::CheckNotRecorded {
                 reason: format!("ledger append failed: {e}"),
-            })?;
-        Ok(record)
+            })
     }
 
-    /// The check records of one mem's entities as the ledger stores them,
-    /// oldest first: every row, every kind, nothing derived. The read a
+    /// The check records of one mem's entities, in standing order
+    /// ([`CheckLedger::in_standing_order`]: by time of the act, a carried
+    /// line after the records it supersedes, ties by the rows' bytes):
+    /// every row, every kind, nothing derived. The read a
     /// consumer takes instead of parsing `checks.jsonl` itself, so the
     /// line shape can grow (as it did with `observed_at`) without
     /// breaking a reader. Refuses an unknown mem; an engine with no
@@ -215,16 +216,16 @@ impl Engine {
         let mounted = self.mounts.iter().any(|m| m.mount.mem == mem_name);
         let rows = self
             .workspace_root()
-            .map(|root| CheckLedger::for_workspace(root).records_for_mem(mem_name))
+            .map(|root| CheckLedger::for_workspace(root).rows_for_mem(mem_name))
             .unwrap_or_default();
         (rows, mounted)
     }
 
-    /// Every record of the workspace ledger, oldest first, whatever mem
+    /// Every record of the workspace ledger, in standing order, whatever mem
     /// the entity belongs to and whether that mem is mounted.
     pub fn check_records_all(&self) -> Vec<CheckRecord> {
         self.workspace_root()
-            .map(|root| CheckLedger::for_workspace(root).all())
+            .map(|root| CheckLedger::for_workspace(root).in_standing_order())
             .unwrap_or_default()
     }
 
@@ -381,7 +382,7 @@ impl Engine {
         };
         let mut latest: std::collections::BTreeMap<String, CheckRecord> =
             std::collections::BTreeMap::new();
-        for rec in ledger.all() {
+        for rec in ledger.in_standing_order() {
             if rec.entity != entity_id {
                 continue;
             }
@@ -787,7 +788,7 @@ write_rules: []
         // Append-only: the checker's original line stays, unmarked.
         let ledger = CheckLedger::for_workspace(tmp.path());
         let lines: Vec<CheckRecord> = ledger
-            .all()
+            .in_standing_order()
             .into_iter()
             .filter(|r| r.entity == id.as_ref())
             .collect();
@@ -812,10 +813,10 @@ write_rules: []
         // A write that leaves the gate unentered carries nothing: back to
         // draft, then an append, and the record is not moved again.
         set_status(&mut engine, &id, "draft").unwrap();
-        let before = ledger.all().len();
+        let before = ledger.in_standing_order().len();
         append_body(&mut engine, &id);
         assert_eq!(
-            ledger.all().len(),
+            ledger.in_standing_order().len(),
             before,
             "no gate passed, nothing carried"
         );
@@ -991,11 +992,18 @@ write_rules: []
         // The author edits after the check: the record goes stale.
         engine.set_identity(Some("author-a".to_string()));
         append_body(&mut engine, &id);
-        let before = CheckLedger::for_workspace(tmp.path()).all().len();
+        let before = CheckLedger::for_workspace(tmp.path())
+            .in_standing_order()
+            .len();
         let err = set_status(&mut engine, &id, "complete").unwrap_err();
         assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED");
         assert!(err.to_string().contains("check_stale"), "{err}");
-        assert_eq!(CheckLedger::for_workspace(tmp.path()).all().len(), before);
+        assert_eq!(
+            CheckLedger::for_workspace(tmp.path())
+                .in_standing_order()
+                .len(),
+            before
+        );
         assert_ne!(
             engine
                 .get_entity(&id)
@@ -1012,6 +1020,90 @@ write_rules: []
     /// Complement: a read-only mount refuses a check
     /// typed (`READ_ONLY_MOUNT`) — capability gating runs before the
     /// entity lookup, same as every mutation-shaped guard.
+    /// Every reader of a standing reads the record whose act is latest,
+    /// whatever order the ledger holds the lines in: rows arrive here
+    /// newest first (as a transport merge appends an older row after a
+    /// newer local one), and the entity read, the foreign-kind read, the
+    /// gate provider, the constraints axis, the health checks axis and the
+    /// export seal each stand on the newest act.
+    #[test]
+    fn every_reader_stands_on_the_newest_act_not_the_last_line() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "x-projection");
+        engine.set_identity(Some("author-a".to_string()));
+        let id = create_plan(&mut engine, "The Bundle");
+        let hash = engine.get_entity(&id).unwrap().content_hash.clone();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        let row = |verdict: &str, kind: Option<&str>, ts: u64| CheckRecord {
+            ts,
+            observed_at: None,
+            entity: id.as_ref().to_string(),
+            verdict: verdict.to_string(),
+            method: None,
+            entity_hash: hash.clone(),
+            actor: "cli".to_string(),
+            client: None,
+            role: "checker".to_string(),
+            identity: Some("checker-c".to_string()),
+            kind: kind.map(str::to_string),
+            schema_ref: None,
+            finding: None,
+            renamed_from: None,
+            carried_from: None,
+        };
+        // Local ok at t2, then a merged failed check made at t1 < t2.
+        ledger.record(&row("ok", None, 2_000)).unwrap();
+        ledger
+            .record(&row("ok", Some("x-projection"), 2_000))
+            .unwrap();
+        ledger.record(&row("failed", None, 1_000)).unwrap();
+        ledger
+            .record(&row("failed", Some("x-projection"), 1_000))
+            .unwrap();
+
+        let (state, latest) = engine.entity_check_state("bundles", id.as_ref()).unwrap();
+        assert_eq!(state, crate::check::CheckState::CheckedOk);
+        assert_eq!(latest.unwrap().ts, 2_000);
+        let foreign = engine.latest_foreign_checks("bundles", id.as_ref());
+        assert_eq!(foreign[0].verdict, "ok");
+        let entity = engine.get_entity(&id).unwrap().clone();
+        assert!((engine.check_standing_provider())(&entity, "x-projection").confirms());
+        let axis = crate::ops::health::health_checks_axis(&engine, Some("bundles"));
+        assert_eq!(axis["bundles"]["checked_ok"], 1, "{axis}");
+        assert_eq!(axis["bundles"]["check_failed"], 0, "{axis}");
+        let (sealed, _) = crate::ops::export::sealed_checks_bytes_for(
+            Some(tmp.path()),
+            "bundles",
+            &[id.path().to_string()],
+            None,
+        );
+        let sealed = crate::check::SealedChecks::from_archive_bytes(&sealed.unwrap()).unwrap();
+        assert_eq!(
+            sealed.latest(id.path(), "verification").unwrap().verdict,
+            "ok"
+        );
+        assert_eq!(
+            sealed.latest(id.path(), "x-projection").unwrap().verdict,
+            "ok"
+        );
+        // The gate admits the transition on the standing record, and the
+        // constraints axis reads no violation after it.
+        set_status(&mut engine, &id, "complete").expect("the newest act confirms");
+        assert!(engine.constraint_findings(Some("bundles")).is_empty());
+
+        // A merged failed check made later than the carried line stands.
+        let post = engine.get_entity(&id).unwrap().content_hash.clone();
+        ledger
+            .record(&CheckRecord {
+                entity_hash: post,
+                ..row("failed", Some("x-projection"), 3_000)
+            })
+            .unwrap();
+        let entity = engine.get_entity(&id).unwrap().clone();
+        assert!(!(engine.check_standing_provider())(&entity, "x-projection").confirms());
+        assert!(!engine.constraint_findings(Some("bundles")).is_empty());
+    }
+
     #[test]
     fn check_refuses_read_only_mounts_typed() {
         let tmp = tempfile::TempDir::new().unwrap();

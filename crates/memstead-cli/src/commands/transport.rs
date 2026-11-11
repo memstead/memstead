@@ -108,7 +108,7 @@ pub fn run_fetch(ctx: &CliContext, args: FetchArgs) -> anyhow::Result<()> {
                 .join("\n")
         };
         crate::output::print_markdown(&format!(
-            "# Fetched from `{}`\n\n- Refspecs: {}\n- Updated refs:\n{}\n- Check records imported: {}",
+            "# Fetched from `{}`\n\n- Refspecs: {}\n- Updated refs:\n{}\n- Check records imported: {}{}",
             outcome.remote,
             if outcome.refspecs.is_empty() {
                 "<defaults>".to_string()
@@ -117,9 +117,25 @@ pub fn run_fetch(ctx: &CliContext, args: FetchArgs) -> anyhow::Result<()> {
             },
             updated,
             outcome.checks_imported,
+            refused_check_lines(&outcome.checks_refused),
         ));
     }
     Ok(())
+}
+
+/// The markdown lines naming the check-ledger rows an import refused.
+fn refused_check_lines(rows: &[memstead_base::check::RefusedCheckRow]) -> String {
+    rows.iter()
+        .map(|r| {
+            format!(
+                "\n- Check record refused: `{}` ({}) by {}: {}",
+                r.entity,
+                r.kind,
+                r.identity.as_deref().unwrap_or("(no identity)"),
+                r.reason
+            )
+        })
+        .collect()
 }
 
 pub fn run_pull(ctx: &CliContext, args: PullArgs) -> anyhow::Result<()> {
@@ -146,7 +162,8 @@ pub fn run_pull(ctx: &CliContext, args: PullArgs) -> anyhow::Result<()> {
             .notices
             .iter()
             .map(|n| format!("\n- Notice: {n}"))
-            .collect::<String>();
+            .collect::<String>()
+            + &refused_check_lines(&outcome.checks_refused);
         crate::output::print_markdown(&format!(
             "# Pulled `{}`\n\n- Branch ref: `{}`\n- Source ref: `{}`\n- Previous: `{prev}`\n- New: `{}`\n- Check records imported: {}{notices}",
             outcome.mem,
@@ -335,6 +352,15 @@ fn run_pull_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
                     u.branch, u.branch
                 );
             }
+        }
+        for r in &outcome.checks_refused {
+            println!(
+                "check record refused: `{}` ({}) by {}: {}",
+                r.entity,
+                r.kind,
+                r.identity.as_deref().unwrap_or("(no identity)"),
+                r.reason
+            );
         }
         for n in &outcome.notices {
             println!("notice: {n}");

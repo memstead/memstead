@@ -95,21 +95,24 @@ impl Engine {
     }
 
     /// Fetch the remote's transport ref (when it has one) and union the
-    /// rows of `mems` into the workspace ledger. Returns the number of
-    /// rows appended. A workspace without a root has no ledger and
-    /// imports nothing.
+    /// rows of `mems` into the workspace ledger. Returns the rows
+    /// appended and the rows refused, each named (a row dated beyond the
+    /// clock skew ahead of this engine's clock,
+    /// [`CheckLedger::merge_transport_lines`]). A workspace without a
+    /// root has no ledger and imports nothing.
     pub(crate) fn import_checks(
         &self,
         hook: &GitBranchOps,
         gitdir: &Path,
         remote: &str,
         mems: &[&str],
-    ) -> Result<usize, EngineError> {
+    ) -> Result<crate::check::MergedRows, EngineError> {
+        let mut merged = crate::check::MergedRows::default();
         let Some(root) = self.workspace_root() else {
-            return Ok(0);
+            return Ok(merged);
         };
         if self.remote_checks_tip(hook, gitdir, remote)?.is_none() {
-            return Ok(0);
+            return Ok(merged);
         }
         let tracking = tracking_ref(remote);
         (hook.fetch)(
@@ -123,16 +126,21 @@ impl Engine {
         .map_err(lift_remote)?;
         let backend = self.checks_backend(gitdir, &tracking)?;
         let ledger = CheckLedger::for_workspace(root);
-        let mut appended = 0;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         for mem in mems {
             let path = crate::checks_ref_member_path(mem);
             if let Some(bytes) = backend.read_entity(Path::new(&path))? {
-                appended += ledger.merge_transport_lines(&bytes).map_err(|e| {
+                let one = ledger.merge_transport_lines(&bytes, now).map_err(|e| {
                     EngineError::Mem(format!("check ledger: appending imported rows: {e}"))
                 })?;
+                merged.appended += one.appended;
+                merged.refused.extend(one.refused);
             }
         }
-        Ok(appended)
+        Ok(merged)
     }
 
     /// Publish the ledger rows of `mems` on the transport ref and push
@@ -168,7 +176,7 @@ impl Engine {
             let mut changed = false;
             for mem in mems {
                 let path = crate::checks_ref_member_path(mem);
-                let bytes = CheckLedger::transport_lines(&ledger.records_for_mem(mem));
+                let bytes = ledger.transport_lines_for_mem(mem);
                 let current = backend.read_entity(Path::new(&path))?;
                 if bytes.is_empty() && current.is_none() {
                     continue;

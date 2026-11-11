@@ -768,7 +768,9 @@ impl Engine {
                     // The mem's check-ledger rows travel with it: the
                     // remote's transport ref, unioned into the local
                     // ledger (engine::checks_transport).
-                    outcome.checks_imported = self.import_checks(hook, gitdir, remote, &[mem])?;
+                    let merged = self.import_checks(hook, gitdir, remote, &[mem])?;
+                    outcome.checks_imported = merged.appended;
+                    outcome.checks_refused = merged.refused;
                     Ok(outcome)
                 }
                 None => Err(EngineError::Backend(BackendError::Other(
@@ -859,7 +861,9 @@ impl Engine {
             other => EngineError::Backend(other),
         })?;
         // The mem's check-ledger rows travel with it (engine::checks_transport).
-        outcome.checks_imported = self.import_checks(&hook, &gitdir, remote, &[mem])?;
+        let merged = self.import_checks(&hook, &gitdir, remote, &[mem])?;
+        outcome.checks_imported = merged.appended;
+        outcome.checks_refused = merged.refused;
 
         // Rewind cached head, reload the store so it serves the pulled
         // state before this call returns (as `pull_all` does; a
@@ -1643,7 +1647,9 @@ impl Engine {
                 continue;
             }
             let mem_refs: Vec<&str> = mems.iter().map(String::as_str).collect();
-            outcome.checks_imported += self.import_checks(&hook, gitdir, remote, &mem_refs)?;
+            let merged = self.import_checks(&hook, gitdir, remote, &mem_refs)?;
+            outcome.checks_imported += merged.appended;
+            outcome.checks_refused.extend(merged.refused);
         }
 
         outcome.quarantined = self

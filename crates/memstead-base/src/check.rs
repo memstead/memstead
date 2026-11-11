@@ -337,11 +337,12 @@ pub struct CheckRecord {
     /// said so (`observed_at` on `memstead check`, a `--from` row and
     /// `memstead_check`): a recorder transcribing checks that were made
     /// earlier, or out of order, states the time of each act here and
-    /// `ts` keeps the time of the transcription. Informational: a reader
-    /// ordering checks by time takes `observed_at` where present and `ts`
-    /// otherwise; the engine's own state derivation ("the newest record
-    /// of a kind") reads ledger order and ignores both. Absent on every
-    /// line written without it, so existing ledgers parse unchanged.
+    /// `ts` keeps the time of the transcription. It is the record's time
+    /// of the act ([`CheckRecord::act_time`]: `observed_at` where present,
+    /// `ts` otherwise), and the newest record of a kind is the one whose
+    /// act is latest ([`CheckLedger::in_standing_order`]), never the one
+    /// the ledger happens to hold last. Absent on every line written
+    /// without it, so existing ledgers parse unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<u64>,
     /// Full entity id (`mem--slug`).
@@ -408,6 +409,12 @@ pub struct CheckRecord {
     pub carried_from: Option<CarriedFrom>,
 }
 
+/// How far past the engine's clock an entity's newest act may lie for a
+/// new local check to be stamped one second after it
+/// ([`CheckLedger::record_local`]). Well inside [`OBSERVED_AT_SKEW_SECS`],
+/// so a stamped row never reads as dated in the future on another machine.
+pub const LOCAL_TIE_WINDOW_SECS: u64 = 60;
+
 /// The largest lead an `observed_at` may have over the engine's clock
 /// before it refuses as "in the future": two machines' clocks disagree by
 /// seconds, a transcription of a check that has not happened yet is a
@@ -438,6 +445,13 @@ pub fn parse_observed_at(raw: &str, now: u64) -> Result<u64, String> {
 }
 
 impl CheckRecord {
+    /// The time of the act: `observed_at` where the recorder stated one,
+    /// `ts` otherwise. The newest record of a kind is the one with the
+    /// latest act ([`CheckLedger::in_standing_order`]).
+    pub fn act_time(&self) -> u64 {
+        self.observed_at.unwrap_or(self.ts)
+    }
+
     /// The record's ENGINE kind, legacy lines included: an absent or
     /// unrecognised kind reads as `verification`, which is exactly what
     /// every pre-kind line was; a foreign `x-<name>` kind is `None` —
@@ -555,6 +569,36 @@ impl CheckLedger {
         f.write_all(line.as_bytes())
     }
 
+    /// Append one check this engine just made, stamped so it never ties
+    /// with an earlier act on the same entity: `ts` is the engine's clock,
+    /// and when the entity's newest act already sits at or up to
+    /// [`LOCAL_TIE_WINDOW_SECS`] past it (a re-check within the same
+    /// second as the last one, say after an edit), `ts` moves to one
+    /// second past that act. Whole-second clocks would otherwise tie the
+    /// two, and the tie would go to the rows' bytes, which could stand
+    /// the check of the replaced content over the check just made. A
+    /// record whose caller stated `observed_at` is appended as stated:
+    /// the caller named the time of the act. Returns the record as
+    /// appended.
+    pub fn record_local(&self, mut rec: CheckRecord) -> std::io::Result<CheckRecord> {
+        if rec.observed_at.is_none() {
+            let newest = self
+                .raw_lines()
+                .iter()
+                .filter(|r| r.entity == rec.entity)
+                .map(CheckRecord::act_time)
+                .max();
+            if let Some(newest) = newest
+                && newest >= rec.ts
+                && newest <= rec.ts.saturating_add(LOCAL_TIE_WINDOW_SECS)
+            {
+                rec.ts = newest + 1;
+            }
+        }
+        self.record(&rec)?;
+        Ok(rec)
+    }
+
     /// Carry every record of `old` across a rename to `new`: each line
     /// keyed by the old id is appended again under the new id with
     /// `renamed_from` set, in ledger order, as one write of whole lines.
@@ -563,7 +607,7 @@ impl CheckLedger {
     /// lines carried; zero (and no write) when the old id has none.
     pub fn carry_rename(&self, old: &str, new: &str) -> std::io::Result<usize> {
         let carried: Vec<CheckRecord> = self
-            .all()
+            .raw_lines()
             .into_iter()
             .filter(|r| r.entity == old)
             .map(|mut r| {
@@ -622,14 +666,22 @@ impl CheckLedger {
         Ok(true)
     }
 
-    /// The records of one mem's entities, oldest first: every record
-    /// whose entity id is qualified by `mem`.
-    pub fn records_for_mem(&self, mem: &str) -> Vec<CheckRecord> {
+    /// The records of one mem's entities, in standing order
+    /// ([`Self::in_standing_order`]): every record whose entity id is
+    /// qualified by `mem`.
+    pub fn rows_for_mem(&self, mem: &str) -> Vec<CheckRecord> {
         let prefix = format!("{mem}--");
-        self.all()
-            .into_iter()
-            .filter(|r| r.entity.starts_with(&prefix))
-            .collect()
+        standing_order(
+            self.raw_lines()
+                .into_iter()
+                .filter(|r| r.entity.starts_with(&prefix))
+                .collect(),
+        )
+    }
+
+    /// The transport form of one mem's rows ([`Self::transport_lines`]).
+    pub fn transport_lines_for_mem(&self, mem: &str) -> Vec<u8> {
+        Self::transport_lines(&self.rows_for_mem(mem))
     }
 
     /// The transport form of a set of records: one JSON line per
@@ -653,19 +705,25 @@ impl CheckLedger {
     }
 
     /// Union `lines` (the transport form, from another machine) into
-    /// this ledger: every record not already present is appended, in
-    /// the order the lines carry; a record already present (the same
-    /// bytes) is skipped, so a round trip adds nothing. Unparseable
-    /// lines are skipped. Returns the number of records appended.
-    /// Rows keep every field they arrived with: identity, role, hash,
-    /// timestamp; nothing is rewritten on import.
-    pub fn merge_transport_lines(&self, lines: &[u8]) -> std::io::Result<usize> {
+    /// this ledger: every record not already present is appended; a
+    /// record already present (the same bytes) is skipped, so a round
+    /// trip adds nothing. Unparseable lines are skipped. Rows keep every
+    /// field they arrived with: identity, role, hash, timestamps; nothing
+    /// is rewritten on import, and a merged row counts by its own fields
+    /// (its time of the act places it, never its arrival).
+    ///
+    /// A row whose time of the act lies more than
+    /// [`OBSERVED_AT_SKEW_SECS`] ahead of `now` (the receiving engine's
+    /// clock) is refused as a local record with such a time is, and named
+    /// in the outcome: ordered by time, a row from a machine with a wrong
+    /// clock would otherwise stand for good.
+    pub fn merge_transport_lines(&self, lines: &[u8], now: u64) -> std::io::Result<MergedRows> {
         let present: std::collections::HashSet<String> = self
-            .all()
+            .raw_lines()
             .iter()
             .filter_map(|r| serde_json::to_string(r).ok())
             .collect();
-        let mut appended = 0;
+        let mut out = MergedRows::default();
         for line in String::from_utf8_lossy(lines).lines() {
             let Ok(rec) = serde_json::from_str::<CheckRecord>(line) else {
                 continue;
@@ -676,16 +734,35 @@ impl CheckLedger {
             if present.contains(&canonical) {
                 continue;
             }
+            if rec.act_time() > now.saturating_add(OBSERVED_AT_SKEW_SECS) {
+                out.refused.push(RefusedCheckRow {
+                    entity: rec.entity.clone(),
+                    kind: sealed_kind_of(&rec),
+                    act_time: rec.act_time(),
+                    identity: rec.identity.clone(),
+                    reason: format!(
+                        "the row's time of the act ({}) lies more than {OBSERVED_AT_SKEW_SECS} \
+                         seconds ahead of this engine's clock ({now}); a check is recorded after \
+                         it was made, never before",
+                        rec.act_time()
+                    ),
+                });
+                continue;
+            }
             self.record(&rec)?;
-            appended += 1;
+            out.appended += 1;
         }
-        Ok(appended)
+        Ok(out)
     }
 
-    /// All records, oldest first. A missing ledger is an empty one;
-    /// unparseable lines are skipped (a torn tail must not poison the
-    /// readable history).
-    pub fn all(&self) -> Vec<CheckRecord> {
+    /// The ledger's lines in arrival order. Private by construction:
+    /// arrival order is not an order any reading may rest on (two machines
+    /// holding the same rows hold them in different orders), so every
+    /// reader outside this module gets rows only through
+    /// [`Self::in_standing_order`] and the lookups built on it. A missing
+    /// ledger is an empty one; unparseable lines are skipped (a torn tail
+    /// must not poison the readable history).
+    fn raw_lines(&self) -> Vec<CheckRecord> {
         let Ok(content) = std::fs::read_to_string(&self.path) else {
             return Vec::new();
         };
@@ -695,18 +772,41 @@ impl CheckLedger {
             .collect()
     }
 
-    /// The newest record for one entity, of any kind. State
-    /// derivation is per (entity, kind) — use [`Self::latest_for_kind`]
-    /// there; this remains the "what happened last" accessor.
+    /// Every record, in standing order: the one order every reader of a
+    /// standing folds, so the last row of any (entity, kind) group, and of
+    /// any narrower group of one entity's rows, is that group's newest
+    /// record. The order is derived from the rows alone, so two machines
+    /// holding the same rows derive the same newest whatever order their
+    /// ledgers hold them in:
+    ///
+    /// 1. a carried line supersedes every record of the same entity and
+    ///    kind whose `entity_hash` is its `carried_from.hash` (all of them
+    ///    are keyed to content the carry replaced); superseded rows come
+    ///    first;
+    /// 2. among the rest, the earlier time of the act comes first
+    ///    ([`CheckRecord::act_time`]);
+    /// 3. remaining ties are ordered by the rows' canonical bytes, never
+    ///    by ledger position.
+    pub fn in_standing_order(&self) -> Vec<CheckRecord> {
+        standing_order(self.raw_lines())
+    }
+
+    /// The newest record for one entity, of any kind
+    /// ([`Self::in_standing_order`]). State derivation is per (entity,
+    /// kind) — use [`Self::latest_for_kind`] there; this remains the
+    /// "what happened last" accessor.
     pub fn latest_for(&self, entity: &str) -> Option<CheckRecord> {
-        self.all().into_iter().rev().find(|r| r.entity == entity)
+        self.in_standing_order()
+            .into_iter()
+            .rev()
+            .find(|r| r.entity == entity)
     }
 
     /// The newest record for one entity of one kind. A later check of
     /// the OTHER kind never supersedes it: the two derivations answer
     /// different questions.
     pub fn latest_for_kind(&self, entity: &str, kind: CheckKind) -> Option<CheckRecord> {
-        self.all()
+        self.in_standing_order()
             .into_iter()
             .rev()
             .find(|r| r.entity == entity && r.resolved_kind() == Some(kind))
@@ -721,12 +821,66 @@ impl CheckLedger {
         match CheckKind::from_wire(kind) {
             Some(k) => self.latest_for_kind(entity, k),
             None => self
-                .all()
+                .in_standing_order()
                 .into_iter()
                 .rev()
                 .find(|r| r.entity == entity && r.kind.as_deref() == Some(kind)),
         }
     }
+}
+
+/// What [`CheckLedger::merge_transport_lines`] did with a set of rows
+/// from another machine.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MergedRows {
+    /// Rows appended to the local ledger.
+    pub appended: usize,
+    /// Rows refused, each named.
+    pub refused: Vec<RefusedCheckRow>,
+}
+
+/// A merged row the receiving engine refused: its time of the act lies
+/// beyond the clock skew allowance ahead of the receiving clock.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefusedCheckRow {
+    /// Full entity id (`mem--slug`).
+    pub entity: String,
+    /// Wire kind.
+    pub kind: String,
+    /// The row's time of the act, epoch seconds.
+    pub act_time: u64,
+    /// The row's declared identity, when it carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
+    /// Why it was refused.
+    pub reason: String,
+}
+
+/// Sort rows into standing order (see [`CheckLedger::in_standing_order`]).
+/// The one place the order is decided.
+fn standing_order(rows: Vec<CheckRecord>) -> Vec<CheckRecord> {
+    let carried_over: std::collections::HashSet<(String, String, String)> = rows
+        .iter()
+        .filter_map(|r| {
+            r.carried_from
+                .as_ref()
+                .map(|c| (r.entity.clone(), sealed_kind_of(r), c.hash.clone()))
+        })
+        .collect();
+    let mut keyed: Vec<(bool, u64, String, CheckRecord)> = rows
+        .into_iter()
+        .map(|r| {
+            let superseded = carried_over.contains(&(
+                r.entity.clone(),
+                sealed_kind_of(&r),
+                r.entity_hash.clone(),
+            ));
+            let bytes = serde_json::to_string(&r).unwrap_or_default();
+            (!superseded, r.act_time(), bytes, r)
+        })
+        .collect();
+    keyed.sort_by(|a, b| (a.0, a.1, &a.2).cmp(&(b.0, b.1, &b.2)));
+    keyed.into_iter().map(|(_, _, _, r)| r).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1071,6 +1225,180 @@ mod tests {
         }
     }
 
+    fn at(entity: &str, verdict: &str, hash: &str, ts: u64) -> CheckRecord {
+        CheckRecord {
+            ts,
+            ..rec(entity, verdict, hash)
+        }
+    }
+
+    fn line(r: &CheckRecord) -> Vec<u8> {
+        let mut l = serde_json::to_vec(r).unwrap();
+        l.push(b'\n');
+        l
+    }
+
+    /// The newest record of a kind is the one made last, whatever order
+    /// the ledger holds the lines in: a merged row older than the local
+    /// one does not displace it, a merged row made later does.
+    #[test]
+    fn a_merged_row_stands_by_its_time_of_the_act_not_its_arrival() {
+        let now = 10_000;
+        let tmp = TempDir::new().unwrap();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        ledger.record(&at("m--e", "ok", "h1", 200)).unwrap();
+        let merged = ledger
+            .merge_transport_lines(&line(&at("m--e", "failed", "h1", 100)), now)
+            .unwrap();
+        assert_eq!(merged.appended, 1);
+        let standing = ledger
+            .latest_for_kind("m--e", CheckKind::Verification)
+            .unwrap();
+        assert_eq!((standing.verdict.as_str(), standing.ts), ("ok", 200));
+
+        ledger
+            .merge_transport_lines(&line(&at("m--e", "failed", "h1", 300)), now)
+            .unwrap();
+        let standing = ledger
+            .latest_for_kind("m--e", CheckKind::Verification)
+            .unwrap();
+        assert_eq!((standing.verdict.as_str(), standing.ts), ("failed", 300));
+    }
+
+    /// `observed_at` is the time of the act: checks transcribed out of
+    /// order stand by it, not by the transcription time `ts`.
+    #[test]
+    fn checks_recorded_out_of_order_stand_by_observed_at() {
+        let tmp = TempDir::new().unwrap();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        let mut later = at("m--e", "ok", "h1", 500);
+        later.observed_at = Some(400);
+        let mut earlier = at("m--e", "failed", "h1", 501);
+        earlier.observed_at = Some(100);
+        ledger.record(&later).unwrap();
+        ledger.record(&earlier).unwrap();
+        let standing = ledger.latest_for_wire_kind("m--e", "verification").unwrap();
+        assert_eq!(standing.verdict, "ok");
+    }
+
+    /// A carried line shares its source's times by construction; it
+    /// supersedes every record of the entity and kind keyed to the hash
+    /// it was carried from, whatever the bytes would say.
+    #[test]
+    fn a_carried_line_stands_over_its_source() {
+        for order in [false, true] {
+            let tmp = TempDir::new().unwrap();
+            let ledger = CheckLedger::for_workspace(tmp.path());
+            let mut source = at("m--e", "ok", "h1", 100);
+            source.kind = Some("x-approval".into());
+            let carried = CheckRecord {
+                entity_hash: "h2".into(),
+                carried_from: Some(CarriedFrom::transition("h1")),
+                ..source.clone()
+            };
+            // A second record at the source's hash, same second: also
+            // keyed to the replaced content, also superseded.
+            let mut sibling = at("m--e", "ok", "zz-sibling", 100);
+            sibling.entity_hash = "h1".into();
+            sibling.kind = Some("x-approval".into());
+            sibling.method = Some("zzzz".into());
+            let mut rows = vec![source.clone(), carried.clone(), sibling];
+            if order {
+                rows.reverse();
+            }
+            for r in &rows {
+                ledger.record(r).unwrap();
+            }
+            let standing = ledger.latest_for_wire_kind("m--e", "x-approval").unwrap();
+            assert_eq!(standing.entity_hash, "h2", "order reversed: {order}");
+            assert!(standing.carried_from.is_some());
+        }
+    }
+
+    /// Two workspaces holding the same rows in different ledger orders,
+    /// two of them with equal times of the act, derive the same standing.
+    #[test]
+    fn two_ledgers_with_the_same_rows_derive_the_same_newest() {
+        let mut a = at("m--e", "ok", "h1", 100);
+        a.identity = Some("grader-a".into());
+        let mut b = at("m--e", "failed", "h1", 100);
+        b.identity = Some("grader-b".into());
+        let c = at("m--e", "ok", "h1", 50);
+        let rows = [a, b, c];
+        let mut standings = Vec::new();
+        for perm in [[0, 1, 2], [1, 0, 2], [2, 1, 0], [1, 2, 0]] {
+            let tmp = TempDir::new().unwrap();
+            let ledger = CheckLedger::for_workspace(tmp.path());
+            for i in perm {
+                ledger.record(&rows[i]).unwrap();
+            }
+            let s = ledger
+                .latest_for_kind("m--e", CheckKind::Verification)
+                .unwrap();
+            standings.push(serde_json::to_string(&s).unwrap());
+            assert_eq!(
+                serde_json::to_string(&ledger.in_standing_order()).unwrap(),
+                serde_json::to_string(&standing_order(rows.to_vec())).unwrap(),
+                "the whole order is derived from the rows alone"
+            );
+        }
+        standings.dedup();
+        assert_eq!(standings.len(), 1, "{standings:?}");
+    }
+
+    /// A check this engine makes right after another on the same entity,
+    /// in the same second, stands over it: the local stamp moves past the
+    /// earlier act instead of tying with it. A stated `observed_at` is
+    /// kept as stated.
+    #[test]
+    fn a_local_recheck_in_the_same_second_stands_over_the_earlier_check() {
+        let tmp = TempDir::new().unwrap();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        // "zz" sorts after "h2": by bytes alone the old check would win.
+        ledger
+            .record_local(at("m--e", "ok", "zz-old", 1000))
+            .unwrap();
+        let fresh = ledger.record_local(at("m--e", "ok", "h2", 1000)).unwrap();
+        assert_eq!(fresh.ts, 1001);
+        let standing = ledger
+            .latest_for_kind("m--e", CheckKind::Verification)
+            .unwrap();
+        assert_eq!(standing.entity_hash, "h2");
+        let mut stated = at("m--e", "ok", "h3", 1000);
+        stated.observed_at = Some(900);
+        assert_eq!(ledger.record_local(stated).unwrap().ts, 1000);
+        // Far behind the clock: nothing moves.
+        assert_eq!(
+            ledger.record_local(at("m--f", "ok", "h", 5000)).unwrap().ts,
+            5000
+        );
+    }
+
+    /// A merged row dated beyond the clock skew ahead of the receiving
+    /// clock is refused as a local record with such a time is, and named;
+    /// the rows beside it still land.
+    #[test]
+    fn a_merged_row_from_the_future_is_refused_and_named() {
+        let now = 10_000;
+        let tmp = TempDir::new().unwrap();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        let mut future = at("m--e", "ok", "h1", now + OBSERVED_AT_SKEW_SECS + 1);
+        future.identity = Some("clock-wrong".into());
+        let mut dated_future = at("m--e", "ok", "h1", 100);
+        dated_future.observed_at = Some(now + 10 * OBSERVED_AT_SKEW_SECS);
+        let inside = at("m--e", "ok", "h1", now + OBSERVED_AT_SKEW_SECS);
+        let mut bytes = line(&future);
+        bytes.extend(line(&dated_future));
+        bytes.extend(line(&inside));
+        let merged = ledger.merge_transport_lines(&bytes, now).unwrap();
+        assert_eq!(merged.appended, 1);
+        assert_eq!(merged.refused.len(), 2);
+        assert_eq!(merged.refused[0].entity, "m--e");
+        assert_eq!(merged.refused[0].identity.as_deref(), Some("clock-wrong"));
+        assert_eq!(merged.refused[1].act_time, now + 10 * OBSERVED_AT_SKEW_SECS);
+        assert_eq!(ledger.raw_lines().len(), 1);
+    }
+
     #[test]
     fn state_derivation_covers_all_four_states() {
         assert_eq!(derive_state(None, "h1"), CheckState::NeverChecked);
@@ -1089,14 +1417,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let ledger = CheckLedger::for_workspace(tmp.path());
         assert!(ledger.latest_for("m--a").is_none());
-        ledger.record(&rec("m--a", "failed", "h1")).unwrap();
-        ledger.record(&rec("m--b", "ok", "h9")).unwrap();
-        ledger.record(&rec("m--a", "ok", "h2")).unwrap();
+        ledger.record(&at("m--a", "failed", "h1", 1)).unwrap();
+        ledger.record(&at("m--b", "ok", "h9", 2)).unwrap();
+        ledger.record(&at("m--a", "ok", "h2", 3)).unwrap();
         let latest = ledger.latest_for("m--a").unwrap();
         assert_eq!(latest.verdict, "ok");
         assert_eq!(latest.entity_hash, "h2");
         // Supersession never erases: all three records remain.
-        assert_eq!(ledger.all().len(), 3);
+        assert_eq!(ledger.raw_lines().len(), 3);
     }
 
     /// A rename carries the old id's lines under the new id, marked
@@ -1130,7 +1458,7 @@ mod tests {
         ledger.record(&rec("m--old", "ok", "h2")).unwrap();
         assert_eq!(ledger.carry_rename("m--old", "m--new").unwrap(), 2);
         let carried: Vec<CheckRecord> = ledger
-            .all()
+            .raw_lines()
             .into_iter()
             .filter(|r| r.entity == "m--new")
             .collect();
@@ -1167,7 +1495,7 @@ mod tests {
         assert_eq!(ledger.carry_rename("m--old", "m--new").unwrap(), 2);
         assert_eq!(ledger.carry_rename("m--absent", "m--new").unwrap(), 0);
 
-        let all = ledger.all();
+        let all = ledger.raw_lines();
         assert_eq!(all.len(), 5);
         assert!(all.iter().filter(|r| r.entity == "m--old").count() == 2);
         let carried: Vec<&CheckRecord> = all.iter().filter(|r| r.entity == "m--new").collect();
@@ -1232,14 +1560,14 @@ mod tests {
                 .carry_transition("m--plan", "verification", "h1", "h2")
                 .unwrap()
         );
-        assert_eq!(ledger.all().len(), 1, "nothing appended so far");
+        assert_eq!(ledger.raw_lines().len(), 1, "nothing appended so far");
 
         assert!(
             ledger
                 .carry_transition("m--plan", "x-projection", "h1", "h2")
                 .unwrap()
         );
-        let all = ledger.all();
+        let all = ledger.raw_lines();
         assert_eq!(all.len(), 2, "append-only: the original stays");
         let carried = ledger
             .latest_for_wire_kind("m--plan", "x-projection")

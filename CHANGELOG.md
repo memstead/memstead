@@ -26,6 +26,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The newest check of a kind is the one made last, not the line the
+  ledger holds last (breaking).** Every reader of a standing (an
+  entity's check state and foreign checks, the gate provider, the
+  constraints and checks axes of `health`, the acknowledgements of
+  `health --strict`, the gates brief, the export seal) now reads one
+  order derived from the rows alone: a line the engine carried across a
+  licensed transition stands over the records it carried; among the
+  rest the latest time of the act wins (`observed_at` where present,
+  else `ts`); equal times are ordered by the rows' canonical bytes. Two
+  machines holding the same rows therefore read the same newest record.
+  Before, a check fetched from another machine and appended after a
+  newer local one displaced it. A local check made in the same second
+  as the entity's previous act is stamped one second past it, so a
+  re-check after an edit never ties with the check it replaces. `fetch`,
+  `pull` and `pull --all` refuse an imported row whose time of the act
+  lies more than five minutes ahead of the receiving clock, as a local
+  `observed_at` that far ahead refuses, and name each such row in
+  `checks_refused`. `memstead check list` lists rows in that order.
+
 - **A boolean metadata field refuses a value that is neither true nor
   false.** `create`, `update` and `retype` read `true` / `false` in any
   case, and `1` / `0`; any other value refuses `INVALID_FIELD_VALUE`
