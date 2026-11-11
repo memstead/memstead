@@ -122,19 +122,16 @@ impl Engine {
         // schema or any relation target's schema need the full load
         // too: the threshold-crossing diff counts edges that can
         // originate in any mem.
-        if args.relations.iter().any(|r| {
-            self.schemas.get(&args.mem).is_some_and(|s| {
-                s.relationship_acyclic(&r.rel_type)
-                    || s.acyclic_set_containing(&r.rel_type).is_some()
-            }) || self
-                .schemas
-                .get(r.target.mem())
-                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
-        }) || self
-            .schemas
-            .get(&args.mem)
-            .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
-        {
+        if self.write_needs_full_load(
+            &args.mem,
+            args.relations
+                .iter()
+                .map(|r| crate::engine::mutation::EdgeWrite {
+                    rel_type: &r.rel_type,
+                    target_mem: r.target.mem(),
+                    remove: false,
+                }),
+        ) {
             self.ensure_mems_loaded(None);
         }
         match self.prepare_create(args, None, drift_warnings)? {

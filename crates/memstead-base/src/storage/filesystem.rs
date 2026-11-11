@@ -693,12 +693,10 @@ pub(crate) fn refuse_cut_off_commit(root: &Path) -> Result<(), BackendError> {
 
 /// Normalise a mem-relative path to a forward-slash key. Rejects
 /// empty paths, absolute paths, and any path that escapes the mem
-/// root via `..`. Mirrors `git_tree::normalise_rel_path` so the two
-/// adapters reject the same inputs.
-///
-/// `pub(crate)` so the in-memory backend reuses the exact same
-/// rejection rules — a third hand-rolled copy would be free to drift.
-pub(crate) fn normalise_rel_path(rel_path: &Path) -> Result<String, BackendError> {
+/// root via `..`. Every backend (folder, in-memory, git-branch) keys
+/// its entries through this one function, so they reject the same
+/// inputs.
+pub fn normalise_rel_path(rel_path: &Path) -> Result<String, BackendError> {
     if rel_path.as_os_str().is_empty() {
         return Err(BackendError::Path("mem-relative path is empty".to_string()));
     }

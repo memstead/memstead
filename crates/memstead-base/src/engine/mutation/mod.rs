@@ -102,6 +102,43 @@ pub(crate) fn render_for_write(
     ))
 }
 
+/// One edge a write adds or removes, as the full-load decision reads it.
+pub(crate) struct EdgeWrite<'a> {
+    pub rel_type: &'a str,
+    pub target_mem: &'a str,
+    pub remove: bool,
+}
+
+impl super::Engine {
+    /// Whether a write to `mem` touching `edges` needs every mem loaded
+    /// first: a partial store would mis-judge it. Two guards read edges
+    /// that can originate in any mem: the cycle guard of an acyclic
+    /// rel-type, or of one in an `acyclic_sets` set (it walks the union
+    /// subgraph), on an edge being added; and the threshold-crossing diff
+    /// of declared aggregate signals on the written mem's schema or an
+    /// edge target's. A write touching neither skips the cost.
+    pub(crate) fn write_needs_full_load<'a>(
+        &self,
+        mem: &str,
+        edges: impl IntoIterator<Item = EdgeWrite<'a>>,
+    ) -> bool {
+        let has_signals = |m: &str| {
+            self.schemas
+                .get(m)
+                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+        };
+        let cycle_guarded = |rel: &str| {
+            self.schemas.get(mem).is_some_and(|s| {
+                s.relationship_acyclic(rel) || s.acyclic_set_containing(rel).is_some()
+            })
+        };
+        has_signals(mem)
+            || edges
+                .into_iter()
+                .any(|e| (!e.remove && cycle_guarded(e.rel_type)) || has_signals(e.target_mem))
+    }
+}
+
 pub(crate) fn unknown_type_error(schema: &memstead_schema::Schema, attempted: &str) -> EngineError {
     let mut declared: Vec<String> = schema.types.keys().cloned().collect();
     declared.sort();

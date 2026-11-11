@@ -166,17 +166,14 @@ impl Engine {
         // any mem, so a partial store silently mis-levels it. Full
         // load before the guard; writes touching neither skip the
         // cost.
-        let cycle_guard_needs_full = !args.remove
-            && self.schemas.get(&source_mem).is_some_and(|s| {
-                s.relationship_acyclic(&args.rel_type)
-                    || s.acyclic_set_containing(&args.rel_type).is_some()
-            });
-        let signal_diff_needs_full = [source_mem.as_str(), args.target.mem()].iter().any(|m| {
-            self.schemas
-                .get(*m)
-                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
-        });
-        if cycle_guard_needs_full || signal_diff_needs_full {
+        if self.write_needs_full_load(
+            &source_mem,
+            [crate::engine::mutation::EdgeWrite {
+                rel_type: &args.rel_type,
+                target_mem: args.target.mem(),
+                remove: args.remove,
+            }],
+        ) {
             self.ensure_mems_loaded(None);
         }
 
@@ -1184,16 +1181,14 @@ impl Engine {
         // path). Declared signals on either endpoint's schema need
         // the full load for the same reason as the single-item path.
         if relates.iter().any(|(a, _)| {
-            (!a.remove
-                && self.schemas.get(a.source.mem()).is_some_and(|s| {
-                    s.relationship_acyclic(&a.rel_type)
-                        || s.acyclic_set_containing(&a.rel_type).is_some()
-                }))
-                || [a.source.mem(), a.target.mem()].iter().any(|m| {
-                    self.schemas
-                        .get(*m)
-                        .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
-                })
+            self.write_needs_full_load(
+                a.source.mem(),
+                [crate::engine::mutation::EdgeWrite {
+                    rel_type: &a.rel_type,
+                    target_mem: a.target.mem(),
+                    remove: a.remove,
+                }],
+            )
         }) {
             self.ensure_mems_loaded(None);
         }

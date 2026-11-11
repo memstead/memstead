@@ -102,18 +102,16 @@ impl Engine {
         // batch_relate comment). Declared signals on any involved
         // schema need the full load too (see the single-item path).
         if creates.iter().any(|(a, _)| {
-            a.relations.iter().any(|r| {
-                self.schemas.get(&a.mem).is_some_and(|s| {
-                    s.relationship_acyclic(&r.rel_type)
-                        || s.acyclic_set_containing(&r.rel_type).is_some()
-                }) || self
-                    .schemas
-                    .get(r.target.mem())
-                    .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
-            }) || self
-                .schemas
-                .get(&a.mem)
-                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+            self.write_needs_full_load(
+                &a.mem,
+                a.relations
+                    .iter()
+                    .map(|r| crate::engine::mutation::EdgeWrite {
+                        rel_type: &r.rel_type,
+                        target_mem: r.target.mem(),
+                        remove: false,
+                    }),
+            )
         }) {
             self.ensure_mems_loaded(None);
         }

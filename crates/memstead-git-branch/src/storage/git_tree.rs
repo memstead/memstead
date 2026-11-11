@@ -243,43 +243,7 @@ impl GitTreeBackend {
     }
 }
 
-/// Normalise a mem-relative path to forward-slash form. Rejects
-/// empty paths and any path that contains `..` segments — git tree
-/// entries cannot escape upward and this guards the caller against
-/// accidentally writing past the mem root via a relative-path bug.
-fn normalise_rel_path(rel_path: &Path) -> Result<String, BackendError> {
-    if rel_path.as_os_str().is_empty() {
-        return Err(BackendError::Path("mem-relative path is empty".to_string()));
-    }
-    let mut parts: Vec<String> = Vec::new();
-    for component in rel_path.components() {
-        use std::path::Component;
-        match component {
-            Component::Normal(s) => match s.to_str() {
-                Some(p) if !p.is_empty() => parts.push(p.to_string()),
-                _ => {
-                    return Err(BackendError::Path(format!(
-                        "non-utf-8 or empty path component in {}",
-                        rel_path.display()
-                    )));
-                }
-            },
-            Component::CurDir => continue,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(BackendError::Path(format!(
-                    "path traversal or absolute component in {}",
-                    rel_path.display()
-                )));
-            }
-        }
-    }
-    if parts.is_empty() {
-        return Err(BackendError::Path(
-            "mem-relative path is empty after normalisation".to_string(),
-        ));
-    }
-    Ok(parts.join("/"))
-}
+use memstead_base::storage::filesystem::normalise_rel_path;
 
 impl memstead_base::backend::MemBackend for GitTreeBackend {
     /// The per-mem branch ref exists. `list_entities` folds a missing
