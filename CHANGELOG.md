@@ -73,6 +73,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   staging, and a link that appears before the commit refuses the commit,
   where the commit followed the link and wrote outside the mem.
 
+- **`changes_since` reports an entity renamed from or to a non-entity
+  path.** When git pairs such a rename by similarity, the entity side is
+  reported as added or removed, where the pair was dropped and neither
+  change appeared.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

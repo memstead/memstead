@@ -1602,3 +1602,55 @@ fn pinned_ref_move_fails_when_a_commit_landed_after_the_decision() {
     (ops.update_ref)(&gitdir, r, &b, RefPrevious::At(&c)).unwrap();
     assert_eq!(head(), b);
 }
+
+/// A rename whose other side is not an entity path is an appearance or a
+/// disappearance of the entity, even when git pairs the two as a rewrite.
+#[test]
+fn changes_since_reports_an_entity_renamed_from_or_to_a_non_entity_path() {
+    use memstead_base::ops::ChangeEnvelope;
+    let tmp = TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
+    let body = b"# Draft\n\nA body long enough for the similarity pass to pair the two paths.\n";
+
+    writer.write_entity(Path::new("draft.txt"), body).unwrap();
+    writer.write_entity(Path::new("gone.md"), body).unwrap();
+    let since = writer.commit("seed", &ctx_for_test()).unwrap();
+    writer
+        .move_entity(Path::new("draft.txt"), Path::new("draft.md"))
+        .unwrap();
+    writer
+        .move_entity(Path::new("gone.md"), Path::new("gone.txt"))
+        .unwrap();
+    writer.commit("renames", &ctx_for_test()).unwrap();
+
+    let result = dispatch_changes(&gitdir, "specs", "specs", &since).unwrap();
+    let added: Vec<_> = result
+        .changes
+        .iter()
+        .filter_map(|c| match c {
+            ChangeEnvelope::Added { id, .. } => Some(id.0.clone()),
+            _ => None,
+        })
+        .collect();
+    let removed: Vec<_> = result
+        .changes
+        .iter()
+        .filter_map(|c| match c {
+            ChangeEnvelope::Removed { id, .. } => Some(id.0.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        added,
+        vec!["specs--draft".to_string()],
+        "{:?}",
+        result.changes
+    );
+    assert_eq!(
+        removed,
+        vec!["specs--gone".to_string()],
+        "{:?}",
+        result.changes
+    );
+}

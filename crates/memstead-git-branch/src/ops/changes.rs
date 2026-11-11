@@ -229,8 +229,14 @@ pub fn changes_since(
                     } => {
                         let from = path_to_entity_id(mem_name, source_location);
                         let to = path_to_entity_id(mem_name, location);
-                        if let (Some(from_id), Some(to_id)) = (from, to) {
-                            gix_rewrites.push((from_id, to_id));
+                        // Only an entity-to-entity pair is a rename. With one
+                        // side outside the entity paths (not `.md`, or under
+                        // `.memstead/`), the entity appeared or disappeared.
+                        match (from, to) {
+                            (Some(from_id), Some(to_id)) => gix_rewrites.push((from_id, to_id)),
+                            (Some(from_id), None) => deletions.push(from_id),
+                            (None, Some(to_id)) => additions.push(to_id),
+                            (None, None) => {}
                         }
                     }
                 }
