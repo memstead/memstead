@@ -270,6 +270,13 @@ impl FilesystemBackend {
 
         let mut record_ops = Vec::with_capacity(ops.len());
         for (key, state) in ops {
+            // Checked again at commit: a link can appear after staging.
+            if let Some(link) = symlink_on_path(&self.root, key)? {
+                return Err(std::io::Error::other(format!(
+                    "{key} passes through the symbolic link {}; a mem writes only inside its own directory",
+                    link.display()
+                )));
+            }
             match state {
                 PendingState::Upsert(bytes) => {
                     let target = self.root.join(key);
@@ -857,6 +864,7 @@ impl crate::backend::MemBackend for FilesystemBackend {
 
     fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), BackendError> {
         let key = normalise_rel_path(rel_path)?;
+        refuse_symlinked(&self.root, &key)?;
         let mut pending = self.pending.lock().map_err(|_| {
             BackendError::Path("filesystem writer pending state poisoned".to_string())
         })?;
@@ -868,6 +876,7 @@ impl crate::backend::MemBackend for FilesystemBackend {
 
     fn delete_entity(&self, rel_path: &Path) -> Result<(), BackendError> {
         let key = normalise_rel_path(rel_path)?;
+        refuse_symlinked(&self.root, &key)?;
         let mut pending = self.pending.lock().map_err(|_| {
             BackendError::Path("filesystem writer pending state poisoned".to_string())
         })?;
@@ -878,6 +887,8 @@ impl crate::backend::MemBackend for FilesystemBackend {
     fn move_entity(&self, from: &Path, to: &Path) -> Result<(), BackendError> {
         let from_key = normalise_rel_path(from)?;
         let to_key = normalise_rel_path(to)?;
+        refuse_symlinked(&self.root, &from_key)?;
+        refuse_symlinked(&self.root, &to_key)?;
         let mut pending = self.pending.lock().map_err(|_| {
             BackendError::Path("filesystem writer pending state poisoned".to_string())
         })?;
@@ -1441,4 +1452,34 @@ fn config_lock_is_stale(path: &Path) -> bool {
         .ok()
         .and_then(|t| t.elapsed().ok())
         .is_some_and(|age| age > CONFIG_LOCK_STALE_AFTER)
+}
+
+/// The first component of `key` under `root` that is a symbolic link, if
+/// any. A write or delete through one would land outside the mem, where no
+/// listing, commit record or ledger of this mem sees it.
+fn symlink_on_path(root: &Path, key: &str) -> std::io::Result<Option<PathBuf>> {
+    let mut at = root.to_path_buf();
+    for part in Path::new(key).components() {
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            Ok(md) if md.file_type().is_symlink() => return Ok(Some(at)),
+            // Nothing below a file can exist; the write fails on its own.
+            Ok(md) if !md.is_dir() => return Ok(None),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(None)
+}
+
+/// Refuse `key` when it passes through a symbolic link inside the mem.
+fn refuse_symlinked(root: &Path, key: &str) -> Result<(), BackendError> {
+    match symlink_on_path(root, key).map_err(BackendError::Io)? {
+        Some(link) => Err(BackendError::Path(format!(
+            "{key} passes through the symbolic link {}; a mem writes only inside its own directory",
+            link.display()
+        ))),
+        None => Ok(()),
+    }
 }

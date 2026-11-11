@@ -1148,3 +1148,45 @@ fn config_cas_breaks_a_stale_lock() {
     );
     assert!(!lock.exists());
 }
+
+/// A path through a symbolic link inside the mem is refused at staging, so
+/// no write lands in the directory the link points at.
+#[cfg(unix)]
+#[test]
+fn a_write_through_a_symlinked_directory_is_refused() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("mem");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+    let writer = FilesystemBackend::new(root.clone());
+
+    assert!(matches!(
+        writer.write_entity(Path::new("link/secret.md"), b"x"),
+        Err(BackendError::Path(_))
+    ));
+    assert!(writer.delete_entity(Path::new("link/secret.md")).is_err());
+    writer
+        .commit("after refused write", &ctx_for_test())
+        .unwrap();
+    assert!(std::fs::read_dir(&outside).unwrap().next().is_none());
+}
+
+/// A link that appears between staging and commit refuses the commit, and
+/// nothing reaches the link's target.
+#[cfg(unix)]
+#[test]
+fn a_symlink_created_after_staging_refuses_the_commit() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("mem");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let writer = FilesystemBackend::new(root.clone());
+
+    writer.write_entity(Path::new("sub/x.md"), b"x").unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("sub")).unwrap();
+    assert!(writer.commit("through a link", &ctx_for_test()).is_err());
+    assert!(std::fs::read_dir(&outside).unwrap().next().is_none());
+}

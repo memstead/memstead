@@ -68,6 +68,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   folder backend's ledger already does, where a cursor equal to the first
   record's timestamp hid the second.
 
+- **A folder mem never writes through a symbolic link.** A write, delete
+  or move whose path passes through a symlink inside the mem refuses at
+  staging, and a link that appears before the commit refuses the commit,
+  where the commit followed the link and wrote outside the mem.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both
