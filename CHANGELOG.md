@@ -37,7 +37,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   carried line keeps its source's. Lines without it are read against
   every write at or before their `ts`. Touches are ordered by write
   order on every backend, so the first author is the creating write's
-  identity even when two writes share a second. A merger who adopts a
+  identity even when two writes share a second, and a rename on a folder
+  mem keeps the writers before it in the entity's story. A merger who adopts a
   proposal with changes therefore reads `self_checked` on the check it
   records for that entity.
 
@@ -58,7 +59,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `changed`; fields a schema requires at the gated value are therefore
   written before the check. Conflict resolution now runs both gates on
   the side it lands (before, it validated section keys and content
-  only). Carried lines earlier engines wrote across content edits stay
+  only), and a proposal merge carries the record across an adopted
+  status-only change as an update does. Carried lines earlier engines wrote across content edits stay
   in the ledger and keep standing where they stand.
 
 - **The newest check of a kind is the one made last, not the line the
@@ -72,7 +74,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   else `ts`); equal times are ordered by the rows' canonical bytes. Two
   machines holding the same rows therefore read the same newest record.
   Before, a check fetched from another machine and appended after a
-  newer local one displaced it. A local check made in the same second
+  newer local one displaced it. A carried line supersedes only records
+  made no later than it and lower in its carry chain (a new
+  `carried_from.depth`), so a check made after the content returns to
+  an earlier hash stands, and so does the last carry of a chain that
+  returns to one; lines earlier engines carried keep their reading. A local check made in the same second
   as the entity's previous act is stamped one second past it, so a
   re-check after an edit never ties with the check it replaces. `fetch`,
   `pull` and `pull --all` refuse an imported row whose time of the act
