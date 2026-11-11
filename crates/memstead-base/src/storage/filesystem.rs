@@ -210,6 +210,12 @@ impl FilesystemBackend {
         root.join(".memstead").join("locks").join("write.lock")
     }
 
+    /// The config lock's file, by its canonical path, beside the write lock.
+    fn config_lock_file(&self) -> PathBuf {
+        let root = std::fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone());
+        root.join(".memstead").join("locks").join("config.lock")
+    }
+
     fn record_path(&self) -> PathBuf {
         self.root.join(COMMIT_RECORD_REL)
     }
@@ -1067,20 +1073,16 @@ impl crate::backend::MemBackend for FilesystemBackend {
         // refusal-to-overwrite check upstream).
         let memstead_dir = self.root.join(crate::mem::MEM_META_DIR);
         std::fs::create_dir_all(&memstead_dir).map_err(BackendError::Io)?;
+        let _lock = ConfigLock::take(self.config_lock_file())?;
         replace_file(&memstead_dir.join("config.json"), bytes)
     }
 
-    /// Compare-and-set under an exclusive lock file, which is what makes the
-    /// check and the write one step. `create_new` on the
-    /// lock is the atomic primitive: exactly one process wins it, so no other
-    /// engine can slip a write between this one's compare and its write.
-    ///
-    /// A lock older than a live writer ever holds one (a process killed
-    /// mid-write) is broken; a fresh one is waited on for
-    /// [`CONFIG_LOCK_WAIT`] and then refused, never entered. A hand edit is
-    /// still detected, because the compare reads the file, not the lock.
-    /// The write itself replaces the file through a renamed temp, so a crash
-    /// leaves the old config or the new one.
+    /// Compare-and-set under the mem's config lock (an operating-system
+    /// file lock, shared with [`Self::write_mem_config`]), which is what
+    /// makes the check and the write one step. A hand edit is still
+    /// detected, because the compare reads the file. The write replaces the
+    /// file through a renamed temp, so a crash leaves the old config or the
+    /// new one.
     fn write_mem_config_cas(
         &self,
         expected: Option<&[u8]>,
@@ -1090,65 +1092,23 @@ impl crate::backend::MemBackend for FilesystemBackend {
         let memstead_dir = self.root.join(crate::mem::MEM_META_DIR);
         std::fs::create_dir_all(&memstead_dir).map_err(BackendError::Io)?;
         let config_path = memstead_dir.join("config.json");
-        let lock_path = memstead_dir.join("config.json.lock");
-
-        // Take the lock, or refuse. A lock is broken only when it is older
-        // than a live writer ever holds one; a fresh lock is waited on and
-        // never entered.
-        let token = lock_token();
-        let deadline = std::time::Instant::now() + CONFIG_LOCK_WAIT;
-        loop {
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&lock_path)
-            {
-                Ok(mut f) => {
-                    use std::io::Write as _;
-                    f.write_all(token.as_bytes()).map_err(BackendError::Io)?;
-                    break;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if config_lock_is_stale(&lock_path) {
-                        let _ = std::fs::remove_file(&lock_path);
-                        continue;
-                    }
-                    if std::time::Instant::now() >= deadline {
-                        return Err(BackendError::Other(format!(
-                            "mem config is locked by another writer ({}); retry",
-                            lock_path.display()
-                        )));
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(e) => return Err(BackendError::Io(e)),
-            }
-        }
-        // Release on every exit path, including the mismatch return, and
-        // only while the lock is still this call's own.
-        let release = || {
-            if std::fs::read(&lock_path).is_ok_and(|b| b == token.as_bytes()) {
-                let _ = std::fs::remove_file(&lock_path);
-            }
-        };
+        // The config lock makes the compare and the write one step against
+        // every other config writer of this mem, in any process. It is an
+        // operating-system lock: a writer that dies releases it, so there is
+        // no stale age to guess and no live holder is ever overtaken.
+        let _lock = ConfigLock::take(self.config_lock_file())?;
 
         let current = match std::fs::read(&config_path) {
             Ok(b) => Some(b),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => {
-                release();
-                return Err(BackendError::Io(e));
-            }
+            Err(e) => return Err(BackendError::Io(e)),
         };
         if let Some(expected) = expected
             && current.as_deref() != Some(expected)
         {
-            release();
             return Ok(false);
         }
-        let result = replace_file(&config_path, bytes);
-        release();
-        result.map(|_| true)
+        replace_file(&config_path, bytes).map(|_| true)
     }
 
     fn read_anchors_sidecar(&self) -> Result<Option<Vec<u8>>, BackendError> {
@@ -1392,15 +1352,6 @@ pub(crate) mod io;
 #[cfg(test)]
 mod tests;
 
-/// How long a config compare-and-set waits for another writer's lock
-/// before it refuses.
-pub(crate) const CONFIG_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// Age past which a config lock is taken to belong to a writer that died.
-/// Shorter than [`CONFIG_LOCK_WAIT`], so one call always outlasts a dead
-/// writer's lock; a live writer holds it for milliseconds.
-const CONFIG_LOCK_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
-
 /// Replace `path` with `bytes`: write a sibling temp file, sync it, rename
 /// it over `path` and sync the directory. A crash leaves either the old
 /// file or the new one, never a truncated one.
@@ -1428,8 +1379,7 @@ fn replace_file(path: &Path, bytes: &[u8]) -> Result<(), BackendError> {
     written.map_err(BackendError::Io)
 }
 
-/// A token unique to this process and call, written into a lock file so its
-/// holder removes only its own lock.
+/// A token unique to this process and call, naming a temp file.
 fn lock_token() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -1443,15 +1393,6 @@ fn lock_token() -> String {
         nanos,
         SEQ.fetch_add(1, Ordering::Relaxed)
     )
-}
-
-/// Whether the lock at `path` is older than [`CONFIG_LOCK_STALE_AFTER`].
-fn config_lock_is_stale(path: &Path) -> bool {
-    std::fs::metadata(path)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.elapsed().ok())
-        .is_some_and(|age| age > CONFIG_LOCK_STALE_AFTER)
 }
 
 /// The first component of `key` under `root` that is a symbolic link, if
@@ -1481,5 +1422,21 @@ fn refuse_symlinked(root: &Path, key: &str) -> Result<(), BackendError> {
             link.display()
         ))),
         None => Ok(()),
+    }
+}
+
+/// The mem's config lock, held for the scope of one config write.
+struct ConfigLock(PathBuf);
+
+impl ConfigLock {
+    fn take(path: PathBuf) -> Result<Self, BackendError> {
+        path_lock::acquire(&path).map_err(BackendError::Io)?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for ConfigLock {
+    fn drop(&mut self) {
+        path_lock::release(&self.0);
     }
 }

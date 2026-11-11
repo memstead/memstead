@@ -42,11 +42,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **A folder mem's config write is crash-safe and its lock is never
   entered while held.** The config is written to a temp file and renamed
   into place, where it was truncated and rewritten in place, so a crash
-  leaves the old config or the new one. The compare-and-set breaks a lock
-  only when it is older than two seconds (a dead writer), waits up to three
-  seconds on a fresh one and then refuses, where it deleted any lock after
-  half a second and proceeded without exclusivity; a writer removes only
-  its own lock.
+  leaves the old config or the new one. Every config write, plain or
+  compare-and-set, holds an operating-system lock
+  (`.memstead/locks/config.lock`) that a dying writer releases, where the
+  compare-and-set deleted any lock after half a second and proceeded
+  without exclusivity and the plain write took no lock at all.
 
 - **A schema-pin change no longer overwrites a concurrent config write.**
   `set_mem_schema` and the below-boot pin repair write the pin as a

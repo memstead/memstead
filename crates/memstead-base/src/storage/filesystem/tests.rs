@@ -1070,83 +1070,89 @@ fn config_writes_replace_the_file_instead_of_truncating_it() {
     let leftovers: Vec<_> = std::fs::read_dir(config.parent().unwrap())
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
-        .filter(|n| n != "config.json")
+        .filter(|n| n != "config.json" && n != "locks")
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
 }
 
-/// A lock another writer holds is never taken over while it is fresh: the
-/// compare-and-set refuses with an error after its wait and writes nothing.
+/// A config write, plain or compare-and-set, waits for the writer holding
+/// the config lock however long that writer takes, and the compare then
+/// sees what the holder wrote. A writer that dies holds nothing: the
+/// operating system releases its lock.
 #[test]
-fn config_cas_never_proceeds_past_a_fresh_lock() {
+fn config_writes_wait_for_the_holder_of_the_config_lock() {
+    use std::io::Write as _;
     let tmp = TempDir::new().unwrap();
     let backend = FilesystemBackend::new(tmp.path().to_path_buf());
-    let dir = tmp.path().join(crate::mem::MEM_META_DIR);
     backend
         .write_mem_config(b"{\"v\":1}", &ctx_for_test())
         .unwrap();
+    let root = std::fs::canonicalize(tmp.path()).unwrap();
+    let lock = root.join(".memstead/locks/config.lock");
+    let config = root.join(".memstead/config.json");
 
-    let lock = dir.join("config.json.lock");
+    // A holder that stalls well past any wait a writer might give up after.
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
     let holder = std::thread::spawn({
         let lock = lock.clone();
+        let config = config.clone();
         move || {
-            // A live holder: it keeps its lock fresh for the whole wait.
-            std::fs::write(&lock, b"other").unwrap();
-            let start = std::time::Instant::now();
-            while start.elapsed() < CONFIG_LOCK_WAIT + std::time::Duration::from_millis(500) {
-                let f = std::fs::OpenOptions::new().write(true).open(&lock).unwrap();
-                f.set_modified(std::time::SystemTime::now()).unwrap();
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
+            std::fs::create_dir_all(lock.parent().unwrap()).unwrap();
+            let f = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(&lock)
+                .unwrap();
+            f.lock().unwrap();
+            held_tx.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(4));
+            let mut c = std::fs::File::create(&config).unwrap();
+            c.write_all(b"{\"v\":\"holder\"}").unwrap();
+            drop(c);
+            f.unlock().unwrap();
         }
     });
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    held_rx.recv().unwrap();
 
-    let result = backend.write_mem_config_cas(Some(b"{\"v\":1}"), b"{\"v\":2}", &ctx_for_test());
-    holder.join().unwrap();
-    assert!(result.is_err(), "{result:?}");
-    assert_eq!(
-        std::fs::read(dir.join("config.json")).unwrap(),
-        b"{\"v\":1}"
-    );
-    assert_eq!(
-        std::fs::read(&lock).unwrap(),
-        b"other",
-        "the holder's lock stays"
-    );
-}
-
-/// A lock left by a writer that died is broken once it is older than the
-/// stale age, and the compare-and-set then lands.
-#[test]
-fn config_cas_breaks_a_stale_lock() {
-    let tmp = TempDir::new().unwrap();
-    let backend = FilesystemBackend::new(tmp.path().to_path_buf());
-    let dir = tmp.path().join(crate::mem::MEM_META_DIR);
-    backend
-        .write_mem_config(b"{\"v\":1}", &ctx_for_test())
+    let started = std::time::Instant::now();
+    let landed = backend
+        .write_mem_config_cas(Some(b"{\"v\":1}"), b"{\"v\":2}", &ctx_for_test())
         .unwrap();
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    assert!(
+        waited >= std::time::Duration::from_secs(3),
+        "the CAS did not wait"
+    );
+    assert!(!landed, "the compare must see the holder's write");
+    assert_eq!(std::fs::read(&config).unwrap(), b"{\"v\":\"holder\"}");
 
-    let lock = dir.join("config.json.lock");
-    std::fs::write(&lock, b"dead").unwrap();
-    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
-    std::fs::OpenOptions::new()
+    // The plain write takes the same lock.
+    let f = std::fs::OpenOptions::new()
+        .read(true)
         .write(true)
         .open(&lock)
-        .unwrap()
-        .set_modified(old)
         .unwrap();
-
-    assert!(
-        backend
-            .write_mem_config_cas(Some(b"{\"v\":1}"), b"{\"v\":2}", &ctx_for_test())
-            .unwrap()
-    );
+    f.lock().unwrap();
+    let writer = std::thread::spawn({
+        let root = root.clone();
+        move || {
+            FilesystemBackend::new(root)
+                .write_mem_config(b"{\"v\":3}", &ctx_for_test())
+                .unwrap();
+        }
+    });
+    std::thread::sleep(std::time::Duration::from_millis(300));
     assert_eq!(
-        std::fs::read(dir.join("config.json")).unwrap(),
-        b"{\"v\":2}"
+        std::fs::read(&config).unwrap(),
+        b"{\"v\":\"holder\"}",
+        "the plain write did not wait"
     );
-    assert!(!lock.exists());
+    f.unlock().unwrap();
+    writer.join().unwrap();
+    assert_eq!(std::fs::read(&config).unwrap(), b"{\"v\":3}");
 }
 
 /// A path through a symbolic link inside the mem is refused at staging, so
