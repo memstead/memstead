@@ -1300,8 +1300,7 @@ pub enum CrossMemRelCheck {
 ///
 /// On a match, the cross-mem entry's `definitions` list is the sole
 /// vocabulary for this edge: the source schema's intra-mem
-/// `relationships.definitions` is NOT consulted in this regime (per
-/// AC #6 / #9). A rel-type present intra-mem but absent cross-mem
+/// `relationships.definitions` is NOT consulted in this regime. A rel-type present intra-mem but absent cross-mem
 /// surfaces here as `INVALID_REL_TYPE`; a shape violation surfaces
 /// here as `INVALID_REL_SHAPE` with the cross-mem entry's shape
 /// (not the intra-mem entry's, if both exist).

@@ -654,7 +654,7 @@ fn verify_persists_findings_readable_fresh() {
         vec![
             mk("src/present.rs", AnchorProvenanceClass::Anchored), // recorded hash mismatches prepared form → drifted
             mk("src/gone.rs", AnchorProvenanceClass::Anchored),    // absent → unresolvable-anchor
-            mk("src/present.rs", AnchorProvenanceClass::InformedBy), // present, non-hash → no finding (A2)
+            mk("src/present.rs", AnchorProvenanceClass::InformedBy), // present, non-hash → no finding
         ],
     );
     std::fs::write(
