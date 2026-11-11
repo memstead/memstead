@@ -114,6 +114,7 @@ variant_tags!(
         ContextNotComputable,
         MemNotReadOnly,
         NotGitBacked,
+        TemplateIdentityMismatch,
         NoWritableMem,
         AmbiguousMem,
         UnknownTypes,
@@ -1140,6 +1141,15 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
         (
             "MemNotReadOnly".into(),
             EngineError::MemNotReadOnly { mem: s("specs") },
+        ),
+        (
+            "TemplateIdentityMismatch".into(),
+            EngineError::TemplateIdentityMismatch {
+                id: s("specs--alpha"),
+                field: s("title"),
+                template: s("Beta"),
+                current: s("Alpha"),
+            },
         ),
         (
             "NotGitBacked".into(),

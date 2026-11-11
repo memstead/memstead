@@ -1135,6 +1135,17 @@ pub enum EngineError {
         mem: Option<String>,
         operation: String,
     },
+    /// An update template whose `title` or `entity_type` differs from the
+    /// entity it targets: an update renames or retypes nothing.
+    #[error(
+        "template `{field}` {template:?} differs from the entity's current {field} {current:?}; an update cannot change it"
+    )]
+    TemplateIdentityMismatch {
+        id: String,
+        field: String,
+        template: String,
+        current: String,
+    },
     /// A call that needs a writable mem, in a workspace that mounts none.
     #[error("no writable mem loaded")]
     NoWritableMem,
@@ -1734,6 +1745,7 @@ impl EngineError {
             EngineError::ContextNotComputable { .. } => "CONTEXT_NOT_COMPUTABLE",
             EngineError::MemNotReadOnly { .. } => "MEM_NOT_READ_ONLY",
             EngineError::NotGitBacked { .. } => "INVALID_INPUT",
+            EngineError::TemplateIdentityMismatch { .. } => "INVALID_INPUT",
             EngineError::AmbiguousMem { .. } => "AMBIGUOUS_MEM",
             EngineError::UnknownTypes { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::UnknownSchema { .. } => "SCHEMA_NOT_FOUND",
@@ -2543,6 +2555,17 @@ impl EngineError {
             EngineError::NotGitBacked { mem, operation } => {
                 serde_json::json!({ "mem": mem, "operation": operation })
             }
+            EngineError::TemplateIdentityMismatch {
+                id,
+                field,
+                template,
+                current,
+            } => serde_json::json!({
+                "id": id,
+                "field": field,
+                "template": template,
+                "current": current,
+            }),
         }
     }
 
@@ -3072,6 +3095,35 @@ impl AuthoringPackageError {
                 "error": error,
             }),
         }
+    }
+}
+
+impl EngineError {
+    /// Refuse an update template that names a title or type other than the
+    /// entity's own.
+    pub fn check_template_identity(
+        entity: &crate::Entity,
+        title: Option<&str>,
+        entity_type: Option<&str>,
+    ) -> Result<(), EngineError> {
+        let mismatch =
+            |field: &str, template: &str, current: &str| EngineError::TemplateIdentityMismatch {
+                id: entity.id.to_string(),
+                field: field.to_string(),
+                template: template.to_string(),
+                current: current.to_string(),
+            };
+        if let Some(t) = title
+            && t != entity.title
+        {
+            return Err(mismatch("title", t, &entity.title));
+        }
+        if let Some(ty) = entity_type
+            && ty != entity.entity_type
+        {
+            return Err(mismatch("entity_type", ty, &entity.entity_type));
+        }
+        Ok(())
     }
 }
 

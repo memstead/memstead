@@ -288,6 +288,7 @@ impl CliError {
             | AmbiguousQuery { .. }
             | MemNotReadOnly { .. }
             | NotGitBacked { .. }
+            | TemplateIdentityMismatch { .. }
             | EntityIdTooLong { .. }
             | RenameSimilarityOutOfRange { .. }
             | MarkdownExportUnsupportedBackend { .. }

@@ -226,10 +226,6 @@ fn run_with_root(
         // multiple demand `--mem`; zero (an engine that boots but
         // mounts nothing writable — some legacy-shaped test trees)
         // falls through to the folder assembly like a failed boot.
-        // A boot failure is kept: when the folder assembly fails too, the
-        // boot refusal (the store's own code) is the answer, not the
-        // assembly's.
-        let mut boot_failure: Option<anyhow::Error> = None;
         let engine_mem: Option<(memstead_base::Engine, String)> = match ctx
             .cli_engine_at(&workspace_root)
         {
@@ -245,10 +241,9 @@ fn run_with_root(
                     }
                 }
             }
-            Err(e) => {
-                boot_failure = Some(e);
-                None
-            }
+            // A workspace the engine refuses to boot is refused here too,
+            // never packaged from its folders behind the refusal.
+            Err(e) => return Err(e),
         };
         let bytes = match engine_mem {
             Some((engine, mem_name)) => {
@@ -260,33 +255,11 @@ fn run_with_root(
                     .export_mem_to_bytes(&mem_name)
                     .map_err(CliError::from_engine_op)?
             }
-            None => assemble_archive(&workspace_root).map_err(|e| match boot_failure {
-                // Both failed: the boot refusal answers, and the assembly's
-                // own refusal rides beside it so no reason is lost.
-                Some(boot) => match boot.downcast::<CliError>() {
-                    Ok(mut c) => {
-                        let assembly = serde_json::json!({
-                            "code": e.code(),
-                            "message": e.to_string(),
-                            "details": e.details(),
-                        });
-                        match c.details.as_mut().and_then(|d| d.as_object_mut()) {
-                            Some(d) => {
-                                d.insert("assembly".to_string(), assembly);
-                            }
-                            None => c.details = Some(serde_json::json!({ "assembly": assembly })),
-                        }
-                        c.into()
-                    }
-                    Err(other) => other,
-                },
-                None => CliError {
-                    kind: ExitKind::Validation,
-                    code: e.code(),
-                    details: Some(e.details()),
-                    message: format!("assemble archive: {e}"),
-                }
-                .into(),
+            None => assemble_archive(&workspace_root).map_err(|e| CliError {
+                kind: ExitKind::Validation,
+                code: e.code(),
+                details: Some(e.details()),
+                message: format!("assemble archive: {e}"),
             })?,
         };
         stage_bytes_to_tempfile(&redact_if_requested(&args, bytes)?)?

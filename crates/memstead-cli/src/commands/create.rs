@@ -87,8 +87,6 @@ pub struct Args {
     /// Preview only — validate and compute the result without writing to
     /// disk, mutating the store, or producing a commit. Response carries
     /// the prospective id / file_path / content_hash plus any warnings.
-    /// MEM-REPO WORKSPACES ONLY — refused with `INVALID_INPUT` on the
-    /// filesystem-mem workspace `memstead quickstart` produces.
     #[arg(long = "dry-run")]
     pub dry_run: bool,
 
@@ -393,19 +391,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             // this shape all along. The guard that used to sit here was
             // CLI-local, and refusing what the sibling surface performs
             // reads as an engine limit that does not exist.
-            //
-            // `--dry-run` is untouched by that lift and still refuses:
-            // this branch has never exercised the preview path, and a
-            // rehearsal that quietly landed a real write is the one
-            // failure mode worth keeping a refusal for.
-            if dry_run {
-                return Err(CliError::new(
-                    ExitKind::Validation,
-                    "INVALID_INPUT",
-                    "--dry-run is not yet supported on filesystem-mem `memstead create`",
-                )
-                .into());
-            }
 
             let create_args = CreateEntityArgs {
                 anchors: payload.anchors,
@@ -423,7 +408,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         description: r.description,
                     })
                     .collect(),
-                dry_run: false,
+                dry_run,
             };
             let outcome = engine
                 .create_entity(

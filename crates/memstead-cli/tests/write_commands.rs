@@ -1651,20 +1651,19 @@ fn mem_set_version_persists_through_filesystem_backend() {
 }
 
 /// `memstead export --format markdown` on a filesystem-mem workspace
-/// rejects with a validation error because entities are already on
-/// disk in canonical form. Locks in the explicit "not yet supported"
-/// path instead of a silent no-op.
+/// regenerates the folder mem through the engine's markdown export, the
+/// same call a mem-repo workspace makes (the engine supports folder
+/// storage; the CLI used to refuse it on its own).
 #[test]
-fn export_markdown_on_filesystem_rejects() {
+fn export_markdown_on_filesystem_regenerates_through_the_engine() {
     let tmp = TempDir::new().unwrap();
     init_filesystem(&tmp, "demo");
 
     memstead()
         .current_dir(tmp.path())
-        .args(["export", "--format", "markdown"])
+        .args(["--json", "export", "--format", "markdown"])
         .assert()
-        .failure()
-        .stderr(contains("not yet supported"));
+        .success();
 }
 
 /// `memstead batch-update` is mem-repo-only because every entry needs an

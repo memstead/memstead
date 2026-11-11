@@ -71,10 +71,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 // command was fixed for.
                 // Code, payload and message are the engine's; the condition
                 // that made this schema the answer is this run's fact.
-                let mut err = CliError::from_engine_op(memstead_base::EngineError::UnknownTypes {
+                let mut err = CliError::from_engine_op(memstead_base::EngineError::UnknownType {
+                    name: name.to_string(),
                     schema_ref: schema_label.to_string(),
-                    unknown: vec![name.to_string()],
                     declared: known.iter().map(|t| t.to_string()).collect(),
+                    suggestion: schema.suggest_type(name),
                 });
                 if let Some(d) = err.details.as_mut().and_then(|d| d.as_object_mut()) {
                     d.insert(

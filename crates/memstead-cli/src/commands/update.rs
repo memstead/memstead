@@ -74,9 +74,6 @@ pub struct Args {
     pub sections: Vec<String>,
 
     /// Append to section content: repeatable `--append key=value`.
-    /// Mem-repo workspaces only: on the filesystem-mem workspace
-    /// `memstead quickstart` produces it refuses with `INVALID_INPUT`;
-    /// replace the whole section with `--section` there instead.
     #[arg(long = "append", value_name = "KEY=VALUE", conflicts_with = "from")]
     pub append: Vec<String>,
 
@@ -91,14 +88,11 @@ pub struct Args {
     /// Find-and-replace inside a section: repeatable `--patch key=OLD=>NEW`.
     /// Use `=>` (two chars) as the separator between old and new. Exact match
     /// of the first occurrence; use `--patch-all` to replace every occurrence.
-    /// Mem-repo workspaces only, like `--append`: a filesystem-mem workspace
-    /// refuses it with `INVALID_INPUT`.
     #[arg(long = "patch", value_name = "KEY=OLD=>NEW", conflicts_with = "from")]
     pub patch: Vec<String>,
 
     /// Replace every occurrence of OLD in the section — sibling of `--patch`.
-    /// Repeatable `--patch-all key=OLD=>NEW`. Mem-repo workspaces only, like
-    /// `--patch`.
+    /// Repeatable `--patch-all key=OLD=>NEW`.
     #[arg(
         long = "patch-all",
         value_name = "KEY=OLD=>NEW",
@@ -170,9 +164,7 @@ pub struct Args {
 
     /// Preview what would change without writing. Applies on both the
     /// inline and `--from` paths; with `--from` it forces a dry run even
-    /// when the file's `dry_run` field is absent or `false`. Mem-repo
-    /// workspaces only: a filesystem-mem workspace refuses it with
-    /// `INVALID_INPUT` and writes nothing.
+    /// when the file's `dry_run` field is absent or `false`.
     #[arg(long)]
     pub dry_run: bool,
 
@@ -366,33 +358,18 @@ fn check_template_identity(
     let Some(entity) = entity else {
         return Ok(());
     };
-    if let Some(t) = payload_title
-        && t != entity.title
-    {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "INVALID_INPUT",
-            format!(
-                "template `title` {t:?} differs from the entity's current title {:?} — \
-                 update cannot rename; use `memstead rename`",
-                entity.title
-            ),
-        ));
-    }
-    if let Some(ty) = payload_type
-        && ty != entity.entity_type
-    {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "INVALID_INPUT",
-            format!(
-                "template `entity_type` {ty:?} differs from the entity's current type {:?} — \
-                 update cannot retype; use `memstead retype <id> --type <target>`",
-                entity.entity_type
-            ),
-        ));
-    }
-    Ok(())
+    memstead_base::EngineError::check_template_identity(entity, payload_title, payload_type)
+        .map_err(|e| {
+            let hint = match &e {
+                memstead_base::EngineError::TemplateIdentityMismatch { field, .. }
+                    if field == "entity_type" =>
+                {
+                    "Use `memstead retype <id> --type <target>`."
+                }
+                _ => "Use `memstead rename`.",
+            };
+            CliError::from_engine_with_hint(e, hint)
+        })
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -619,38 +596,25 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 payload.title.as_deref(),
                 payload.entity_type.as_deref(),
             )?;
-            // The filesystem-mem `memstead_update` surface is intentionally
-            // smaller than mem-repo's: whole-section replacement,
-            // metadata set, and metadata unset are honoured;
-            // append_sections / patch_sections / dry_run are not yet
-            // wired on the filesystem engine. Surface that as a clear
-            // validation error rather than silently dropping the flags.
-            if !payload.append_sections.is_empty() {
-                return Err(CliError::new(
-                    ExitKind::Validation,
-                    "INVALID_INPUT",
-                    "--append is not yet supported on filesystem-mem `memstead update`",
-                )
-                .into());
-            }
-            if !payload.patch_sections.is_empty() {
-                return Err(CliError::new(
-                    ExitKind::Validation,
-                    "INVALID_INPUT",
-                    "--patch / --patch-all are not yet supported on filesystem-mem `memstead update`",
-                )
-                .into());
-            }
-            if payload.dry_run {
-                return Err(CliError::new(
-                    ExitKind::Validation,
-                    "INVALID_INPUT",
-                    "--dry-run is not yet supported on filesystem-mem `memstead update`",
-                )
-                .into());
-            }
-
             // Resolved after the args, as on the mem-repo path above.
+            let patch_sections = payload
+                .patch_sections
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        k,
+                        v.into_vec()
+                            .into_iter()
+                            .map(|v| PatchArg {
+                                old: v.old,
+                                new: v.new,
+                                all: v.all,
+                            })
+                            .collect(),
+                    )
+                })
+                .collect();
+            let payload_dry_run = payload.dry_run;
             let explicit_hash = payload.expected_hash.take();
 
             let declare_relations: Vec<memstead_base::ops::RelateArg> = payload
@@ -667,16 +631,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 id: entity_id.clone(),
                 expected_hash: memstead_base::ExpectedHash::Missing,
                 sections: payload.sections,
-                // CLI's update surface doesn't accept
-                // append_sections / patch_sections on its wire
-                // today; pass empty.
-                append_sections: IndexMap::new(),
-                patch_sections: IndexMap::new(),
+                append_sections: payload.append_sections,
+                patch_sections,
                 sections_unset: payload.sections_unset,
                 metadata: payload.metadata,
                 metadata_unset: payload.metadata_unset,
                 declare_relations,
-                dry_run: false,
+                dry_run: payload.dry_run,
                 relations_unset: payload
                     .relations_unset
                     .into_iter()
@@ -721,6 +682,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     // relate/conflicts commands.
                     "write_id": outcome.write_id,
                     "modified_sections": outcome.modified_sections.replaced,
+                    "modified_sections_appended": outcome.modified_sections.appended,
+                    "modified_sections_patched": outcome.modified_sections.patched,
+                    "dry_run": payload_dry_run,
                     "modified_metadata_set": outcome.modified_metadata.set,
                     "modified_metadata_unset": outcome.modified_metadata.unset,
                     "relations_declared": relations_declared,

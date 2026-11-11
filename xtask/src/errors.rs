@@ -630,6 +630,64 @@ mod surface_codes {
     /// syntax spelled with the engine's code).
     const ENGINE_CODE_BUILT_AT_SURFACE: &[&str] = &["INVALID_INPUT"];
 
+    /// Where a surface spells the engine's `INVALID_INPUT` for a defect in
+    /// its own input syntax (a flag's shape, a `--from` file, a batch
+    /// envelope), by file and count. The code alone cannot tell syntax
+    /// from state, so each site is placed: a new site fails the test below
+    /// until it is listed here as syntax, or raises the engine's value.
+    const INVALID_INPUT_SYNTAX_SITES: &[(&str, usize)] = &[
+        ("crates/memstead-cli/src/commands/admin.rs", 3),
+        ("crates/memstead-cli/src/commands/anchors.rs", 2),
+        ("crates/memstead-cli/src/commands/batch.rs", 5),
+        ("crates/memstead-cli/src/commands/batch_create.rs", 2),
+        ("crates/memstead-cli/src/commands/batch_relate.rs", 1),
+        ("crates/memstead-cli/src/commands/batch_update.rs", 3),
+        ("crates/memstead-cli/src/commands/check.rs", 4),
+        ("crates/memstead-cli/src/commands/conflicts.rs", 1),
+        ("crates/memstead-cli/src/commands/create.rs", 9),
+        ("crates/memstead-cli/src/commands/due.rs", 3),
+        ("crates/memstead-cli/src/commands/export.rs", 6),
+        ("crates/memstead-cli/src/commands/install.rs", 1),
+        ("crates/memstead-cli/src/commands/mem.rs", 1),
+        ("crates/memstead-cli/src/commands/mod.rs", 2),
+        ("crates/memstead-cli/src/commands/projection.rs", 1),
+        ("crates/memstead-cli/src/commands/proposal.rs", 2),
+        ("crates/memstead-cli/src/commands/publish.rs", 3),
+        ("crates/memstead-cli/src/commands/quickstart.rs", 9),
+        ("crates/memstead-cli/src/commands/relate.rs", 2),
+        ("crates/memstead-cli/src/commands/retype.rs", 2),
+        ("crates/memstead-cli/src/commands/schema.rs", 5),
+        ("crates/memstead-cli/src/commands/unpublish.rs", 1),
+        ("crates/memstead-cli/src/commands/update.rs", 11),
+        ("crates/memstead-cli/src/commands/workspace.rs", 1),
+        ("crates/memstead-cli/src/main.rs", 1),
+        ("crates/memstead-mcp/src/server/mem_tools.rs", 5),
+        ("crates/memstead-mcp/src/server/read_tools.rs", 5),
+        ("crates/memstead-mcp/src/server/responses.rs", 2),
+        ("crates/memstead-mcp/src/server/write_tools.rs", 2),
+    ];
+
+    #[test]
+    fn invalid_input_is_built_at_a_surface_only_at_the_placed_syntax_sites() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let codes = scan(&root).unwrap();
+        let mut found: std::collections::BTreeMap<String, usize> = Default::default();
+        for o in codes.get("INVALID_INPUT").into_iter().flatten() {
+            if o.surface != Surface::Engine {
+                *found.entry(o.source.clone()).or_default() += 1;
+            }
+        }
+        let listed: std::collections::BTreeMap<String, usize> = INVALID_INPUT_SYNTAX_SITES
+            .iter()
+            .map(|(f, n)| (f.to_string(), *n))
+            .collect();
+        assert_eq!(
+            found, listed,
+            "an INVALID_INPUT site a surface builds is not placed: list it as input syntax, \
+             or raise the engine's value if it reports workspace, mem or entity state"
+        );
+    }
+
     #[test]
     fn engine_codes_built_by_hand_at_a_surface_are_exactly_the_listed_ones() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");

@@ -39,9 +39,9 @@ pub(super) fn engine_err_unified(
     // CLI cannot serve two payloads for one state. The text channel uses
     // the rich-prose renderer so an agent reading only
     // `result.content[0].text` sees the full recovery payload inline.
-    let message = e.prose_render();
-    let code = e.code();
-    tool_error_with_payload(code, &message, envelope(code, message.clone(), e.details()))
+    // One encoder: `engine_err` is the same path, so the parity test that
+    // reaches this function covers both.
+    engine_err(e)
 }
 
 /// Typed-envelope translator for `FullEngineError`. Delegates wrapped

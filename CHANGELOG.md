@@ -176,9 +176,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   already exists` before its advice; malformed binding ids and parts are
   one engine type (`pipeline_store::BindingIdError`, payload unchanged).
   `memstead type <unknown>` refuses with the engine's `UNKNOWN_ENTITY_TYPE`
-  payload: `details.unknown` (a list) replaces `details.name`, beside
-  `schema_ref`, `declared` and the run's `fallback`; its `AMBIGUOUS_MEM`
-  is the engine's value. `verify-anchors --observations` reads the file
+  payload, the one `create` serves (`details.name`, `schema_ref`,
+  `declared`, now `suggestion`), beside the run's `fallback`; its
+  `AMBIGUOUS_MEM` is the engine's value. `verify-anchors --observations` reads the file
   through the engine (`anchor::read_supplied_observations`), whose
   refusals carry `details.path` (and `details.reason`). `schema validate`
   and `schema install` share one engine authoring read
@@ -226,11 +226,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   An engine error that reaches the CLI's exit without a command's own
   mapping renders as the engine's code and payload, where it rendered
   `INTERNAL`.
-  `memstead publish` reports a workspace that does not boot with the
-  boot refusal's own code (`WORKSPACE_STORE_PARSE`, ...) when the folder
-  assembly cannot stand in for it, where it reported
-  `ARCHIVE_ASSEMBLY_FAILED`; the assembly's refusal then rides under
-  `details.assembly` (`code`, `message`, `details`). The assembly's own
+  On a filesystem-mem workspace, `update --append`, `--patch`,
+  `--patch-all` and `--dry-run`, `create --dry-run` and `export --format
+  markdown` run through the engine, as on MCP and a mem-repo workspace,
+  where the CLI refused them with `INVALID_INPUT`. An update template
+  whose `title` or `entity_type` differs from the entity is the engine's
+  `TemplateIdentityMismatch` (`INVALID_INPUT`, with `details.id`,
+  `field`, `template`, `current`).
+  `memstead publish` refuses a workspace the engine does not boot with
+  the boot refusal's own code (`WORKSPACE_STORE_PARSE`, ...), where it
+  reported `ARCHIVE_ASSEMBLY_FAILED` or, when the folders could be
+  assembled, published them behind the refusal. The assembly's own
   refusals are the engine's (`AssembleError::code`, `details`: `stage`,
   `reason`, `path` where known); a schema source or anchors refusal now
   reports its own code (the schema source's, or

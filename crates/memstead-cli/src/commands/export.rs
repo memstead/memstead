@@ -238,17 +238,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             Format::LlmsTxt => unreachable!("dispatched to run_llms_txt above"),
         },
         CliEngine::Filesystem(engine) => match args.format {
-            // `--format markdown` regenerates files in place. The
-            // filesystem engine's writer would do the same, but
-            // there's no `export_markdown` accessor today; surface
-            // the gap as a clear validation error rather than a
-            // silent no-op.
-            Format::Markdown => Err(CliError::new(
-                ExitKind::Validation,
-                "INVALID_INPUT",
-                "--format markdown is not yet supported on filesystem-mem `memstead export` — entities are already on disk in their canonical form",
-            )
-            .into()),
+            // `--format markdown` regenerates the folder mems in place,
+            // through the same engine call as on a mem-repo workspace.
+            Format::Markdown => run_markdown(ctx, &engine, args.mem_name.as_deref()),
             Format::Mem => run_mem_filesystem(ctx, &engine, args),
             Format::Json => unreachable!("dispatched to run_json above"),
             Format::Html => unreachable!("dispatched to run_html above"),
