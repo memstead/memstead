@@ -1720,3 +1720,44 @@ fn a_flat_mem_and_a_hierarchical_namesake_keep_their_own_configs() {
         b"{\"who\":\"flat\"}"
     );
 }
+
+/// One unreadable entity blob is that entity's failure, as the backend
+/// contract states: the whole-mem read returns every other entity and a
+/// per-path error for the one, so a load can carry on past it.
+#[test]
+fn an_unreadable_blob_fails_its_own_row_not_the_whole_read() {
+    let tmp = TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let writer = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
+    writer.write_entity(Path::new("a.md"), b"# A\n").unwrap();
+    writer
+        .write_entity(Path::new("b.md"), b"# B, about to lose its blob\n")
+        .unwrap();
+    writer.commit("seed", &ctx_for_test()).unwrap();
+
+    let repo = gix::open(&gitdir).unwrap();
+    let tree = repo
+        .find_reference("refs/heads/specs")
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .tree()
+        .unwrap();
+    let oid = tree
+        .lookup_entry_by_path("b.md")
+        .unwrap()
+        .unwrap()
+        .oid()
+        .to_hex()
+        .to_string();
+    std::fs::remove_file(gitdir.join("objects").join(&oid[..2]).join(&oid[2..])).unwrap();
+
+    let reader = GitTreeBackend::new(gitdir.clone(), "refs/heads/specs".to_string());
+    let rows = reader
+        .read_all_entities()
+        .expect("the listing itself is readable");
+    let a = rows.iter().find(|(p, _)| p == Path::new("a.md")).unwrap();
+    let b = rows.iter().find(|(p, _)| p == Path::new("b.md")).unwrap();
+    assert_eq!(a.1.as_ref().unwrap(), b"# A\n");
+    assert!(b.1.is_err(), "{:?}", b.1);
+}

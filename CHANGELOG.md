@@ -140,6 +140,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   beside `aaa/alpha`) writes and reads its own config, where the write
   could resolve to the other mem's branch and replace its config.
 
+- **One unreadable entity no longer fails a git-branch mem's whole load.**
+  A blob that cannot be read is that entity's own read failure, reported
+  as such, while every other entity loads, as the backend contract
+  states, where the whole read failed and the mem did not load.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

@@ -372,15 +372,20 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         };
         let mut rows: Vec<memstead_base::backend::EntityRead> = match source {
             None => Vec::new(),
-            Some(id) => read_commit_blobs(&self.gitdir, id)
+            Some(id) => read_commit_entries(&self.gitdir, id)
                 .map_err(|e| {
                     memstead_base::backend::BackendError::Other(format!(
                         "git-tree backend read_all_entities: {e}"
                     ))
                 })?
                 .into_iter()
-                .filter(|b| is_entity(&b.path) && !ops.contains_key(&b.path))
-                .map(|b| (PathBuf::from(b.path), Ok(b.bytes)))
+                .filter(|(path, _)| is_entity(path) && !ops.contains_key(path))
+                .map(|(path, bytes)| {
+                    (
+                        PathBuf::from(path),
+                        bytes.map_err(memstead_base::backend::BackendError::Other),
+                    )
+                })
                 .collect(),
         };
         for (path, state) in ops {
@@ -1331,17 +1336,52 @@ fn read_commit_blobs_in(
         message: format!("peel commit to tree: {e}"),
     })?;
 
-    let mut out: Vec<BranchBlob> = Vec::new();
-    walk_tree(repo, &tree, "", &mut out)?;
+    let mut rows: Vec<TreeEntry> = Vec::new();
+    walk_tree(repo, &tree, "", &mut rows)?;
+    let mut out: Vec<BranchBlob> = Vec::with_capacity(rows.len());
+    for (path, bytes) in rows {
+        let bytes = bytes.map_err(|message| BranchReadError::Read { message })?;
+        out.push(BranchBlob { path, bytes });
+    }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
+}
+
+/// One blob of a commit's tree: its path and its bytes, or why they could
+/// not be read.
+pub type TreeEntry = (String, Result<Vec<u8>, String>);
+
+/// Every blob under one commit's tree with its own outcome: a blob that
+/// cannot be read is that path's error, never the whole read's. A tree
+/// that cannot be read stays the outer error, as nothing under it can be
+/// listed.
+pub fn read_commit_entries(
+    gitdir: &Path,
+    id: gix::ObjectId,
+) -> Result<Vec<TreeEntry>, BranchReadError> {
+    let repo = gix::open(gitdir).map_err(|e| BranchReadError::Open {
+        path: gitdir.display().to_string(),
+        source: e,
+    })?;
+    let commit = repo
+        .find_object(id)
+        .map_err(|e| BranchReadError::Read {
+            message: format!("open commit {id}: {e}"),
+        })?
+        .into_commit();
+    let tree = commit.tree().map_err(|e| BranchReadError::Read {
+        message: format!("peel commit to tree: {e}"),
+    })?;
+    let mut rows = Vec::new();
+    walk_tree(&repo, &tree, "", &mut rows)?;
+    Ok(rows)
 }
 
 fn walk_tree(
     repo: &gix::Repository,
     tree: &gix::Tree<'_>,
     prefix: &str,
-    out: &mut Vec<BranchBlob>,
+    out: &mut Vec<TreeEntry>,
 ) -> Result<(), BranchReadError> {
     use gix::objs::tree::EntryKind;
     let iter = tree.iter();
@@ -1357,15 +1397,11 @@ fn walk_tree(
         };
         match entry.mode().kind() {
             EntryKind::Blob | EntryKind::BlobExecutable => {
-                let object = repo
+                let bytes = repo
                     .find_object(entry.oid())
-                    .map_err(|e| BranchReadError::Read {
-                        message: format!("read blob {full}: {e}"),
-                    })?;
-                out.push(BranchBlob {
-                    path: full,
-                    bytes: object.data.clone(),
-                });
+                    .map(|object| object.data.clone())
+                    .map_err(|e| format!("read blob {full}: {e}"));
+                out.push((full, bytes));
             }
             EntryKind::Tree => {
                 let subtree = repo
