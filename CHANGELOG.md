@@ -101,6 +101,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   case) refuses `SECTION_CONTENT_INVALID`, as the exact heading already
   did, where it was accepted and its text dropped on the next parse.
 
+- **A patch that completes a section heading refuses.** The heading gate
+  now also runs on the section body the patches compose, so a patch whose
+  text turns an indented `## ` into a column-0 heading refuses
+  `SECTION_CONTENT_INVALID`, where it landed and the next parse dropped
+  the real section's body.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

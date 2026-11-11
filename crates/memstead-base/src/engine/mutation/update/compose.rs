@@ -163,6 +163,16 @@ impl Engine {
                 };
                 next.sections.insert(key.clone(), patched);
             }
+            // The fragments passed the heading gate on their own; the body
+            // they compose passes it too, because a fragment can complete a
+            // `## ` line that none of them contains whole.
+            let mut heading_buf: Vec<&str> = Vec::new();
+            let catch_all =
+                crate::runtime_validator::catch_all_context(type_def.as_ref(), &mut heading_buf);
+            crate::runtime_validator::validate_section_content(
+                std::iter::once((key.as_str(), next.sections[&key].as_str())),
+                catch_all,
+            )?;
             modified_sections_patched.push(key);
         }
 

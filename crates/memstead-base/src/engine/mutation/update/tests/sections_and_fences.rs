@@ -683,3 +683,54 @@ fn update_entity_rejects_overlapping_metadata_and_metadata_unset_keys() {
         other => panic!("expected SetAndUnsetConflict, got {other:?}"),
     }
 }
+
+/// The heading gate runs on the section a patch produces, not only on the
+/// patch's own text: a patch that turns ` ## Purpose` into a column-0
+/// `## Purpose` would fork the entity on reparse and drop the real
+/// Purpose body, so it refuses and nothing changes.
+#[test]
+fn a_patch_that_assembles_a_heading_is_refused() {
+    let tmp = TempDir::new().unwrap();
+    let (mut engine, seeded) = engine_with_seed(&tmp, "Heading Patch");
+    let (actor, client) = cli_actor();
+    let staged = engine
+        .update_entity(
+            UpdateEntityArgs {
+                sections: IndexMap::from_iter([(
+                    "identity".to_string(),
+                    "intro\n ## Purpose\nkept".to_string(),
+                )]),
+                ..unset_args(seeded.id.clone(), seeded.content_hash.clone(), &[])
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap();
+    let purpose_before = engine.store().get(&seeded.id).unwrap().sections["purpose"].clone();
+
+    let mut patches = IndexMap::new();
+    patches.insert(
+        "identity".to_string(),
+        vec![crate::ops::PatchArg {
+            old: " ## ".to_string(),
+            new: "## ".to_string(),
+            all: false,
+        }],
+    );
+    let err = engine
+        .update_entity(
+            UpdateEntityArgs {
+                patch_sections: patches,
+                ..unset_args(seeded.id.clone(), staged.content_hash.clone(), &[])
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+        .unwrap_err();
+    assert_eq!(err.code(), "SECTION_CONTENT_INVALID", "{err:?}");
+    let after = engine.store().get(&seeded.id).unwrap();
+    assert_eq!(after.content_hash, staged.content_hash);
+    assert_eq!(after.sections["purpose"], purpose_before);
+}
