@@ -1769,6 +1769,20 @@ fn validate_type(
     available_rels: &[String],
     errors: &mut Vec<SchemaLoadError>,
 ) {
+    validate_sections(td, errors);
+    validate_relationship_references(td, rel_names, available_rels, errors);
+    validate_must_reach(td, rel_names, available_rels, errors);
+    validate_signals(td, rel_names, available_rels, errors);
+    validate_constraints(td, rel_names, errors);
+    validate_due(td, rel_names, available_rels, errors);
+    validate_resolution(td, errors);
+    validate_catch_all(td, errors);
+    validate_field_references(td, errors);
+    validate_metadata_defaults(td, errors);
+}
+
+/// The reserved-section rule.
+fn validate_sections(td: &TypeDefinition, errors: &mut Vec<SchemaLoadError>) {
     // Reserved-section check. Section key `relationships` collides
     // with the parser's auto-managed `## Relationships` section.
     // Domain conventions (`identity`, `purpose`, ...) are NOT reserved.
@@ -1789,7 +1803,15 @@ fn validate_type(
             });
         }
     }
+}
 
+/// Every relationship name the type references is declared.
+fn validate_relationship_references(
+    td: &TypeDefinition,
+    rel_names: &HashSet<String>,
+    available_rels: &[String],
+    errors: &mut Vec<SchemaLoadError>,
+) {
     if let Err(e) = check_rel(
         &td.name,
         "hierarchy_relationship",
@@ -1888,7 +1910,15 @@ fn validate_type(
             },
         }
     }
+}
 
+/// Reachability obligations, per type.
+fn validate_must_reach(
+    td: &TypeDefinition,
+    rel_names: &HashSet<String>,
+    available_rels: &[String],
+    errors: &mut Vec<SchemaLoadError>,
+) {
     // Reachability obligations. Per-type checks here; `terminal_types`
     // needs every type loaded and is checked in the schema-level pass.
     for ob in &td.must_reach {
@@ -1937,7 +1967,15 @@ fn validate_type(
             });
         }
     }
+}
 
+/// Aggregate signals, per type.
+fn validate_signals(
+    td: &TypeDefinition,
+    rel_names: &HashSet<String>,
+    available_rels: &[String],
+    errors: &mut Vec<SchemaLoadError>,
+) {
     // Aggregate signals. Per-type checks here; the neighbour pair's
     // cross-type validation needs every type loaded and runs in the
     // schema-level pass.
@@ -2020,7 +2058,49 @@ fn validate_type(
             }
         }
     }
+}
 
+/// A constraint that names a metadata field and one of its values: the
+/// field must exist on the type, and where it declares `enum_values` the
+/// value must be one of them. `field` and `value` pair the declaration's
+/// key with its value, so a refusal names the key the author wrote.
+fn check_constraint_field_value(
+    td: &TypeDefinition,
+    kind: &'static str,
+    (field_key, field): (&str, &String),
+    (value_key, value): (&str, &String),
+    errors: &mut Vec<SchemaLoadError>,
+) {
+    let Some(field_def) = td.metadata_fields.iter().find(|f| f.key == *field) else {
+        errors.push(SchemaLoadError::InvalidConstraint {
+            type_name: td.name.clone(),
+            kind,
+            offender: field.clone(),
+            reason: format!("`{field_key}` names no metadata field of this type"),
+        });
+        return;
+    };
+    if let Some(allowed) = &field_def.enum_values
+        && !allowed.contains(value)
+    {
+        errors.push(SchemaLoadError::InvalidConstraint {
+            type_name: td.name.clone(),
+            kind,
+            offender: value.clone(),
+            reason: format!(
+                "`{value_key}` is not in `{field}`'s enum_values [{}]",
+                allowed.join(", ")
+            ),
+        });
+    }
+}
+
+/// The constraint vocabulary.
+fn validate_constraints(
+    td: &TypeDefinition,
+    rel_names: &HashSet<String>,
+    errors: &mut Vec<SchemaLoadError>,
+) {
     // Constraint vocabulary (loader honesty: a malformed declaration
     // refuses with a typed error naming the offender — never
     // load-and-ignore).
@@ -2045,29 +2125,13 @@ fn validate_type(
                             .to_string(),
                     });
                 }
-                let Some(when_def) = td.metadata_fields.iter().find(|f| f.key == *when_field)
-                else {
-                    errors.push(SchemaLoadError::InvalidConstraint {
-                        type_name: td.name.clone(),
-                        kind: "requires_when",
-                        offender: when_field.clone(),
-                        reason: "`when_field` names no metadata field of this type".to_string(),
-                    });
-                    continue;
-                };
-                if let Some(allowed) = &when_def.enum_values
-                    && !allowed.contains(when_value)
-                {
-                    errors.push(SchemaLoadError::InvalidConstraint {
-                        type_name: td.name.clone(),
-                        kind: "requires_when",
-                        offender: when_value.clone(),
-                        reason: format!(
-                            "`when_value` is not in `{when_field}`'s enum_values [{}]",
-                            allowed.join(", ")
-                        ),
-                    });
-                }
+                check_constraint_field_value(
+                    td,
+                    "requires_when",
+                    ("when_field", when_field),
+                    ("when_value", when_value),
+                    errors,
+                );
             }
             crate::types::ConstraintDef::Unique { fields, .. } => {
                 if fields.is_empty() {
@@ -2120,31 +2184,13 @@ fn validate_type(
                 relationships,
                 ..
             } => {
-                match td.metadata_fields.iter().find(|f| f.key == *field) {
-                    None => {
-                        errors.push(SchemaLoadError::InvalidConstraint {
-                            type_name: td.name.clone(),
-                            kind: "transition_requires_checks",
-                            offender: field.clone(),
-                            reason: "`field` names no metadata field of this type".to_string(),
-                        });
-                    }
-                    Some(field_def) => {
-                        if let Some(allowed) = &field_def.enum_values
-                            && !allowed.contains(to_value)
-                        {
-                            errors.push(SchemaLoadError::InvalidConstraint {
-                                type_name: td.name.clone(),
-                                kind: "transition_requires_checks",
-                                offender: to_value.clone(),
-                                reason: format!(
-                                    "`to_value` is not in `{field}`'s enum_values [{}]",
-                                    allowed.join(", ")
-                                ),
-                            });
-                        }
-                    }
-                }
+                check_constraint_field_value(
+                    td,
+                    "transition_requires_checks",
+                    ("field", field),
+                    ("to_value", to_value),
+                    errors,
+                );
                 if relationships.is_empty() {
                     errors.push(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
@@ -2173,31 +2219,13 @@ fn validate_type(
                 check_kind,
                 ..
             } => {
-                match td.metadata_fields.iter().find(|f| f.key == *field) {
-                    None => {
-                        errors.push(SchemaLoadError::InvalidConstraint {
-                            type_name: td.name.clone(),
-                            kind: "transition_requires_self_check",
-                            offender: field.clone(),
-                            reason: "`field` names no metadata field of this type".to_string(),
-                        });
-                    }
-                    Some(field_def) => {
-                        if let Some(allowed) = &field_def.enum_values
-                            && !allowed.contains(to_value)
-                        {
-                            errors.push(SchemaLoadError::InvalidConstraint {
-                                type_name: td.name.clone(),
-                                kind: "transition_requires_self_check",
-                                offender: to_value.clone(),
-                                reason: format!(
-                                    "`to_value` is not in `{field}`'s enum_values [{}]",
-                                    allowed.join(", ")
-                                ),
-                            });
-                        }
-                    }
-                }
+                check_constraint_field_value(
+                    td,
+                    "transition_requires_self_check",
+                    ("field", field),
+                    ("to_value", to_value),
+                    errors,
+                );
                 if !crate::types::check_kind_wire_is_well_formed(check_kind) {
                     errors.push(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
@@ -2219,31 +2247,13 @@ fn validate_type(
                 severity,
                 ..
             } => {
-                match td.metadata_fields.iter().find(|f| f.key == *field) {
-                    None => {
-                        errors.push(SchemaLoadError::InvalidConstraint {
-                            type_name: td.name.clone(),
-                            kind: "status_propagation",
-                            offender: field.clone(),
-                            reason: "`field` names no metadata field of this type".to_string(),
-                        });
-                    }
-                    Some(field_def) => {
-                        if let Some(allowed) = &field_def.enum_values
-                            && !allowed.contains(value)
-                        {
-                            errors.push(SchemaLoadError::InvalidConstraint {
-                                type_name: td.name.clone(),
-                                kind: "status_propagation",
-                                offender: value.clone(),
-                                reason: format!(
-                                    "`value` is not in `{field}`'s enum_values [{}]",
-                                    allowed.join(", ")
-                                ),
-                            });
-                        }
-                    }
-                }
+                check_constraint_field_value(
+                    td,
+                    "status_propagation",
+                    ("field", field),
+                    ("value", value),
+                    errors,
+                );
                 // Exactly one of `rel_type` / `rel_types`; every named
                 // member must be declared; an empty set is a defect.
                 match (rel_type, rel_types) {
@@ -2317,7 +2327,15 @@ fn validate_type(
             }
         }
     }
+}
 
+/// The due axis.
+fn validate_due(
+    td: &TypeDefinition,
+    rel_names: &HashSet<String>,
+    available_rels: &[String],
+    errors: &mut Vec<SchemaLoadError>,
+) {
     // Due axis: the declaration's
     // references must exist on this type in the declared shapes.
     if let Some(due) = &td.due {
@@ -2435,8 +2453,10 @@ fn validate_type(
             });
         }
     }
+}
 
-    // Exactly one catch_all section
+/// The resolution axis.
+fn validate_resolution(td: &TypeDefinition, errors: &mut Vec<SchemaLoadError>) {
     if let Some(res) = &td.resolution {
         if !td.sections.iter().any(|s| s.key == res.condition_section) {
             errors.push(SchemaLoadError::InvalidResolutionAxis {
@@ -2515,7 +2535,10 @@ fn validate_type(
             }
         }
     }
+}
 
+/// Exactly one catch_all section.
+fn validate_catch_all(td: &TypeDefinition, errors: &mut Vec<SchemaLoadError>) {
     let catch_all_count = td.sections.iter().filter(|s| s.catch_all).count();
     if catch_all_count != 1 {
         errors.push(SchemaLoadError::CatchAllViolation {
@@ -2523,7 +2546,10 @@ fn validate_type(
             count: catch_all_count,
         });
     }
+}
 
+/// Field-reference integrity.
+fn validate_field_references(td: &TypeDefinition, errors: &mut Vec<SchemaLoadError>) {
     // Field-reference integrity
     let section_keys: HashSet<&str> = td.sections.iter().map(|s| s.key.as_str()).collect();
     let meta_keys: HashSet<&str> = td.metadata_fields.iter().map(|m| m.key.as_str()).collect();
@@ -2560,7 +2586,10 @@ fn validate_type(
             });
         }
     }
+}
 
+/// Metadata default values are members of their enum_values.
+fn validate_metadata_defaults(td: &TypeDefinition, errors: &mut Vec<SchemaLoadError>) {
     // Metadata default_value must be a member of enum_values when both present.
     for m in &td.metadata_fields {
         if let (Some(default), Some(allowed)) = (m.default_value.as_ref(), m.enum_values.as_ref())
