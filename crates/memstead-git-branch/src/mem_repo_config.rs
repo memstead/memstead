@@ -90,6 +90,16 @@ pub fn resolve_full_path_at_gitdir(
         ));
     }
     let repo = gix::open(gitdir).map_err(|e| MemRepoConfigError::GixOpen(e.to_string()))?;
+    // A branch whose full name is the given name is that mem, whatever
+    // other branch ends in the same segment: the leaf match below is only
+    // for a caller that holds a hierarchical mem's bare leaf.
+    if repo
+        .try_find_reference(format!("refs/heads/{leaf}").as_str())
+        .map_err(|e| MemRepoConfigError::GitTree(e.to_string()))?
+        .is_some()
+    {
+        return Ok(Some(leaf.to_string()));
+    }
     let refs = repo
         .references()
         .map_err(|e| MemRepoConfigError::GitTree(e.to_string()))?;

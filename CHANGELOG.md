@@ -135,6 +135,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   delete.** The branch deletion is pinned to the tip the delete started
   from, where it deleted whatever the branch pointed at.
 
+- **A git-branch mem's config never lands in a namesake's.** A mem named
+  like the last segment of another mem's hierarchical branch (`alpha`
+  beside `aaa/alpha`) writes and reads its own config, where the write
+  could resolve to the other mem's branch and replace its config.
+
 - **An engine error carries one payload, the same on MCP and the CLI.**
   Every error the engine defines now builds its recovery payload once, in
   the engine (`EngineError::details`, with no catch-all arm), and both

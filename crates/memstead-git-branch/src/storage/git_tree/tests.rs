@@ -1681,3 +1681,42 @@ fn an_unreadable_ref_is_an_error_not_an_absence() {
     assert!(gone.current_head().is_err());
     assert!(gone.read_mem_config().is_err());
 }
+
+/// A mem whose name is also the last segment of another mem's
+/// hierarchical branch writes and reads its own config: the exact branch
+/// wins over a leaf match, so neither mem's config lands in the other's.
+#[test]
+fn a_flat_mem_and_a_hierarchical_namesake_keep_their_own_configs() {
+    let tmp = TempDir::new().unwrap();
+    let gitdir = fresh_repo_dir(tmp.path());
+    let nested = GitTreeBackend::new(gitdir.clone(), "refs/heads/aaa/alpha".to_string());
+    nested.write_entity(Path::new("n.md"), b"# N").unwrap();
+    nested.commit("nested seed", &ctx_for_test()).unwrap();
+    let flat = GitTreeBackend::new(gitdir.clone(), "refs/heads/alpha".to_string());
+    flat.write_entity(Path::new("f.md"), b"# F").unwrap();
+    flat.commit("flat seed", &ctx_for_test()).unwrap();
+
+    nested
+        .write_mem_config(b"{\"who\":\"nested\"}", &ctx_for_test())
+        .unwrap();
+    flat.write_mem_config(b"{\"who\":\"flat\"}", &ctx_for_test())
+        .unwrap();
+
+    assert_eq!(
+        flat.read_mem_config().unwrap().unwrap(),
+        b"{\"who\":\"flat\"}"
+    );
+    assert_eq!(
+        read_blob(
+            &gitdir,
+            "refs/heads/__MEMSTEAD",
+            "mems/aaa/alpha/config.json"
+        )
+        .unwrap(),
+        b"{\"who\":\"nested\"}"
+    );
+    assert_eq!(
+        read_blob(&gitdir, "refs/heads/__MEMSTEAD", "mems/alpha/config.json").unwrap(),
+        b"{\"who\":\"flat\"}"
+    );
+}
