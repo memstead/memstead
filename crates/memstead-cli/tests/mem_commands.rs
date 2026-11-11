@@ -2965,7 +2965,7 @@ fn check_observed_at_is_stored_beside_the_write_time() {
 }
 
 /// `memstead checks --mem <name>` lists the ledger rows of one mem as
-/// stored (every kind, oldest first, the full record shape including
+/// read (every kind, in standing order, the full record shape including
 /// `observed_at`), narrowed by kind, verdict, identity, entity and a
 /// time window judged on `observed_at` where stated and `ts` otherwise.
 /// A consumer reads this instead of parsing `checks.jsonl`. A bad
@@ -3030,7 +3030,7 @@ fn checks_lists_a_mems_ledger_rows_with_filters() {
     let rows = all["checks"].as_array().unwrap();
     assert_eq!(
         rows[0]["kind"], "x-review",
-        "ledger order, oldest first: {all}"
+        "standing order, earliest act first: {all}"
     );
     assert_eq!(rows[0]["method"], "step 3 overreaches", "{all}");
     assert_eq!(rows[0]["observed_at"], 1_792_314_000, "{all}");

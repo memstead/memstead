@@ -350,8 +350,9 @@ pub enum Command {
     /// `memstead entity <id> --provenance`.
     Check(commands::check::Args),
 
-    /// List a mem's check records as the ledger stores them — every
-    /// row, every kind, oldest first — with filters by kind, verdict,
+    /// List a mem's check records, every row, every kind, in standing
+    /// order (by time of the act; a carried line after the records it
+    /// stands over; ties by the rows' bytes), with filters by kind, verdict,
     /// identity, entity and time window. Read-only; the read to take
     /// instead of parsing `.memstead/state/checks/checks.jsonl`.
     Checks(commands::check::ListArgs),

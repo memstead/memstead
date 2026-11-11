@@ -95,8 +95,9 @@ pub struct Args {
     pub from: Option<std::path::PathBuf>,
 }
 
-/// `memstead checks` — list check records as the ledger stores them:
-/// every row, every kind, oldest first, with optional filters; one mem's
+/// `memstead checks`: list check records, every row, every kind, in
+/// standing order (the order the newest record is read from), with
+/// optional filters; one mem's
 /// rows with `--mem`, the whole workspace ledger without. Read-only; the
 /// read a consumer takes instead of parsing
 /// `.memstead/state/checks/checks.jsonl` itself, so the line shape can
