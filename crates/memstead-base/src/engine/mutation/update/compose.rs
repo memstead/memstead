@@ -117,7 +117,7 @@ impl Engine {
             // Patches for one section apply in order against the evolving
             // body, so a batched multi-edit lands in one call (the old
             // one-patch-per-section-per-call shape cost one refused call
-            // per extra edit; two campaigns hit it).
+            // per extra edit).
             for patch in patches {
                 let existing = next
                     .sections

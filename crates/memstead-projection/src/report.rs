@@ -97,7 +97,7 @@ pub enum DenominatorBasis {
     /// not compile, so its share of the population never entered the walk.
     /// The surviving set is reported as a count and never as a percentage:
     /// a ratio over a denominator that is not the population is the
-    /// unexamined answer this campaign exists to remove.
+    /// unexamined answer, which the report never gives.
     Partial {
         /// How many artifacts the surviving patterns did enumerate.
         count: usize,
@@ -150,8 +150,8 @@ pub struct GrainCoverage {
     /// `S(D)` files with no anchor at all (the heavy artifact list).
     pub uncovered: Vec<String>,
     /// In-scope artifacts carrying no anchor that a `projection exclude`
-    /// declared out of intent, and which are therefore NOT in `uncovered`
-    /// (C7). Dropped rather than marked: a reader counts the array and a gate
+    /// declared out of intent, and which are therefore NOT in `uncovered`.
+    /// Dropped rather than marked: a reader counts the array and a gate
     /// reads it, so an entry left in it stays owed however it is annotated.
     /// The rationales ride `disposed_excluded_rationales` on the report.
     pub excluded: usize,
@@ -1136,7 +1136,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
     // red verdict caused solely by pre-binding history.
     match report.coverage_semantics {
         CoverageSemantics::Exhaustive if report.adopt => {
-            // `uncovered` is already net of the declared exclusions (C7), so
+            // `uncovered` is already net of the declared exclusions, so
             // its length IS the backlog; subtracting again would double-count.
             let backlog = report.coverage.uncovered.len();
             md.push_str(&format!(
@@ -1148,7 +1148,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
             ));
         }
         CoverageSemantics::Exhaustive => {
-            // `uncovered` is already net of the declared exclusions (C7).
+            // `uncovered` is already net of the declared exclusions.
             let findings = report.coverage.uncovered.len();
             md.push_str(&format!(
                 "**Exhaustive coverage:** {findings} unaccounted artifact(s) — not anchored, not \
@@ -1454,10 +1454,10 @@ fn heavy_sections(report: &FidelityReport) -> Vec<(&'static str, String)> {
 }
 
 /// The clause that tells a reader the disposed-excluded artifacts are already
-/// out of the headline count (C7). Empty when there are none: a binding with
-/// no exclusions must render byte-identical to its pre-C7 output, which the
-/// plan states as a constraint and which an ungated clause quietly broke for
-/// every exhaustive binding in the workspace.
+/// out of the headline count. Empty when there are none: a binding with no
+/// exclusions must render byte-identical to its output before exclusions
+/// existed, a constraint an ungated clause once quietly broke for every
+/// exhaustive binding in the workspace.
 fn already_out_clause(disposed_excluded: usize) -> &'static str {
     if disposed_excluded > 0 {
         ", already out of that count"
@@ -1808,7 +1808,7 @@ pub fn compute_fidelity_report(
         })
         .collect();
 
-    // --- Durable authored-exclusion ledger (B4), applied to coverage (C7) ---
+    // --- Durable authored-exclusion ledger, applied to coverage ---
     // The advance store's `exclusions` map survives advance completion (unlike
     // its transient `dispositions`), and holds each artifact under the
     // canonical workspace-relative id `record_exclusions` resolved it to, which

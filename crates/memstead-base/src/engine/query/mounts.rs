@@ -621,7 +621,7 @@ impl Engine {
     /// [`EngineError::EntityIdMissingMem`] naming every candidate.
     /// Before this rule a bare slug reached the verbs as an id whose
     /// mem was the empty string, and the caller was told a mem called
-    /// "" did not exist (B7 grader finding, 2026-09-02).
+    /// "" did not exist.
     pub fn resolve_entity_id(
         &mut self,
         id: &EntityId,

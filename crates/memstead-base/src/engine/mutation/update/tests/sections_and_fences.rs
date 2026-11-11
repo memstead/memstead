@@ -153,8 +153,7 @@ fn update_entity_sections_unset_conflicts_and_relationships_refuse() {
 
 /// Several patches for ONE section apply in order against the
 /// evolving body — the batched multi-edit the one-patch-per-section
-/// map shape refused (backlog: `duplicate patch` per extra edit,
-/// reconfirmed by two campaigns).
+/// map shape refused (one `duplicate patch` refusal per extra edit).
 #[test]
 fn update_entity_applies_multiple_patches_per_section_in_order() {
     let tmp = TempDir::new().unwrap();
@@ -537,11 +536,11 @@ fn an_entity_with_no_open_fence_updates_exactly_as_before() {
         .expect("an ordinary update is untouched by the fence gate");
 }
 
-/// Item 02: `memstead_update` against a stub must surface a typed
+/// `memstead_update` against a stub must surface a typed
 /// `StubNotUpdatable` envelope rather than the pre-fix
 /// `UnknownType { name: "" }` cascade. Mirrors the
 /// `StubCannotRelate` guard that `memstead_relate` already runs;
-/// before Item 02 the docstring list advertised the
+/// before this guard the docstring list advertised the
 /// `STUB_NOT_UPDATABLE` code but no engine path emitted it.
 #[test]
 fn update_entity_against_stub_surfaces_typed_stub_not_updatable() {

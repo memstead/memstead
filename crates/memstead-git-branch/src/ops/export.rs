@@ -138,7 +138,7 @@ pub fn export_entity(
 // Mem (.mem) archive export
 // ---------------------------------------------------------------------------
 
-// Stage 1.7-2: MemExportError and the folder-shaped `export_mem`
+// MemExportError and the folder-shaped `export_mem`
 // live in `memstead-base::ops::export`. Re-export here so downstream
 // callers that imported via the workspace path keep working. The
 // gix-bound `export_mem_from_branch` (below) stays here.

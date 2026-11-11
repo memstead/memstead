@@ -839,8 +839,8 @@ fn allow_prefix_pruning_helpers() {
 }
 
 /// Graph enumeration is real: a graph source's `S(D)` is the source mem's
-/// in-scope entity set, selected by the entity vocabulary. This is the
-/// bail the S1b pilot hit — enumeration returned empty for every graph
+/// in-scope entity set, selected by the entity vocabulary. This pins an
+/// earlier bail: enumeration returned empty for every graph
 /// source, so coverage was vacuously 0/0 and `--full` passed over a
 /// measurement that never happened.
 #[test]
@@ -976,7 +976,7 @@ fn graph_enumeration_selects_the_source_mems_entities() {
     );
 }
 
-/// The S1b pilot's headline failure, encoded as a permanent regression
+/// A headline failure of graph sources, encoded as a permanent regression
 /// test: a stale-pinned entity anchor over a source entity that changed
 /// since it was pinned must be flagged `drifted`. It used to go unflagged
 /// — anchor resolution was 0/0 for every graph source, so drift was
@@ -1087,7 +1087,7 @@ fn a_stale_entity_anchor_over_a_changed_entity_is_drifted() {
     )
     .unwrap();
 
-    // Now change ONE source entity — the pilot's move.
+    // Now change ONE source entity, the decisive move.
     std::fs::write(
         mem_dir.join("pinned.md"),
         "---\ntype: decision\n---\n\n# Pinned\n\n## Decision\n\nBody rewritten.\n",

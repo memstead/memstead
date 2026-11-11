@@ -217,7 +217,7 @@ fn validate_and_derive_slug_admits_and_reports_dropped_chars() {
     }
 }
 
-/// F8: control characters (newline, tab,
+/// Control characters (newline, tab,
 /// carriage return, other C0 controls) are refused with
 /// `TitleHasControlChars` rather than silently folded to hyphens —
 /// they would otherwise split the stored `# H1` and truncate every

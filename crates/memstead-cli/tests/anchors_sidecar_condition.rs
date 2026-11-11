@@ -136,7 +136,7 @@ fn valid_sidecar_carries_no_condition() {
             .all(|f| f["code"] != "ANCHORS_SIDECAR_UNREADABLE"),
         "{v}"
     );
-    // Rendering the axis does NOT examine it (C10, 2026-09-03). `anchors`
+    // Rendering the axis does NOT examine it. `anchors`
     // used to be promoted into `examined` for any pass that included it,
     // while `--strict` never folds anchor drift into its exit and its help
     // says so. The line now renders the registry declaration: `anchors` is

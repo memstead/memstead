@@ -151,8 +151,7 @@ impl AxisCoverage {
     /// it moves into the examined set when the pass included it (the
     /// report walked it and its findings fail `--strict`). Advisory
     /// axes stay advisory whatever was included: rendering an axis
-    /// beside the verdict is not folding it in (the C10 rule on
-    /// `anchors`, 2026-09-03).
+    /// beside the verdict is not folding it in.
     pub fn wire_line_for_includes(&self, included: &[&str]) -> String {
         let promoted: Vec<&str> = self
             .not_examined

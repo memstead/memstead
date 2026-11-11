@@ -165,7 +165,7 @@ impl Engine {
             // the mem now sits on. Without this the marker kept naming
             // the old pin until the next entity write, and an agent
             // reading it after the migration re-derived from a stale
-            // generation (B5 grader finding, 2026-09-02). The stamp
+            // generation. The stamp
             // writer's equality guard keeps a no-move write from
             // happening; its warnings ride entity mutations and have no
             // channel on this outcome, the same standing as the sweep.

@@ -1987,7 +1987,7 @@ pattern = \"ephemeral\"\n\
     let _ = assert_success_envelope(&recreate);
 }
 
-/// Item 01 pin: `memstead-mcp --operator-mode` plumbs the bypass through
+/// `memstead-mcp --operator-mode` plumbs the bypass through
 /// the MCP boundary. With zero `[[mem_management.create]]` /
 /// `[[mem_management.delete]]` rules, an operator-mode server can
 /// still `memstead_mem_create` and `memstead_mem_delete` a fresh mem;
@@ -2069,7 +2069,7 @@ name = \"file-two-layer\"\n\
     }
 }
 
-/// Item 01 pin: `memstead_overview` surfaces the operator-mode posture so
+/// `memstead_overview` surfaces the operator-mode posture so
 /// anyone reading the engine's output can confirm the bypass is in
 /// force. The disclosure lives under `## Lifecycle Namespaces`, where
 /// the allowlist policy itself is rendered — colocating the policy

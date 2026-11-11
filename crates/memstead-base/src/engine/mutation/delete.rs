@@ -486,7 +486,7 @@ mod tests {
         }
     }
 
-    /// Item 04 — a stub delete with a non-empty `expected_hash` used to
+    /// A stub delete with a non-empty `expected_hash` used to
     /// trip the hash-mismatch path with `(current: )` empty paren,
     /// misdirecting the agent toward `memstead_entity`-based hash recovery.
     /// The recovery is `expected_hash: ""` — stubs have no content

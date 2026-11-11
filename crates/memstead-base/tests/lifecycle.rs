@@ -1077,7 +1077,7 @@ fn delete_mem_with_delete_files_removes_directory() {
 }
 
 // ---------------------------------------------------------------------------
-// Item 01 — operator-mode bypass for mem-lifecycle gates
+// Operator-mode bypass for mem-lifecycle gates
 // ---------------------------------------------------------------------------
 
 /// `operator_mode = true` on `create_mem` admits a path/name

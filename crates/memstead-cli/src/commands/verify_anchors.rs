@@ -268,7 +268,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         // Stated both ways: a dangling count of
         // zero means "reconciled, none found" only when the reconciliation
         // ran, and four clean counts over a mem whose entity end was never
-        // examined are the silent-clean this campaign exists to remove.
+        // examined are a silent clean, which no surface may report.
         if let Some(why) = &report.unreconciled {
             out.push_str(&format!(
                 "\n> **Entity end not reconciled** — {why}. Dangling rows would not have been \

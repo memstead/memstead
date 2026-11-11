@@ -520,7 +520,7 @@ impl Engine {
         // The provenance layer's own consistency: a sidecar the engine cannot
         // read is a finding on the mem, beside the entity-level ones. Without
         // it every anchor surface reads zero rows over this mem and calls
-        // that clean (backlog, found by the evidence-engine grader 2026-09-02).
+        // that clean.
         if let Some(why) = self.anchors_sidecar_error(mem) {
             findings.push(crate::ops::integrity::IntegrityFinding {
                 id: mem.to_string(),

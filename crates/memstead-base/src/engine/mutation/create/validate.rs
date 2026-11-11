@@ -294,7 +294,7 @@ impl Engine {
         let type_guidance = build_type_guidance(&warnings, type_def.as_ref());
 
         // 6b. Validate inline relationship inputs through the same
-        //     gates `memstead_relate` runs (Item 02): target-id grammar,
+        //     gates `memstead_relate` runs: target-id grammar,
         //     rel-type vocabulary, schema shape. Pre-fix the create
         //     path ran only the rel-type check, so an agent could
         //     sneak a malformed target id (auto-stub at

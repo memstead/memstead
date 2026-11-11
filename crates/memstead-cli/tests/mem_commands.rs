@@ -1609,8 +1609,7 @@ fn mem_rename_read_only_mount_refuses() {
 }
 
 // ---------------------------------------------------------------------------
-// Rename pins for grader-verified-but-untested behaviours
-// (grader advisory 2026-08-06)
+// Rename pins for verified-but-untested behaviours
 // ---------------------------------------------------------------------------
 
 /// Pin 1 — KEY-side `[cross_mem_links]` grant rewrite: renaming the
@@ -4430,7 +4429,7 @@ fn a_state_write_still_removes_what_the_writer_unregistered() {
 /// `check --from` records a batch of checks in one engine boot, and any
 /// invalid entry refuses the WHOLE batch naming every failing entry —
 /// the batch family's all-or-nothing contract (the need is measured:
-/// one campaign run paid 242 boots for 242 verdicts).
+/// one run paid 242 boots for 242 verdicts).
 #[test]
 fn cli_check_from_records_batch_and_refuses_atomically() {
     let tmp = TempDir::new().unwrap();

@@ -1203,7 +1203,7 @@ pub fn record_exclusions(
             canonical.insert(requested.clone(), requested.clone());
             continue;
         }
-        // Every source that resolves it, not the first (C8). Taking the first
+        // Every source that resolves it, not the first. Taking the first
         // meant the source listed earliest in the binding silently won, which
         // records an exclusion against an artifact the caller never named.
         // The cross-source rule itself lives beside the within-source one in

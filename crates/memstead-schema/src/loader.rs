@@ -1874,40 +1874,33 @@ fn validate_relationship_references(
                     reason: "`when_value` requires `when_field` alongside it".to_string(),
                 });
             }
-            (Some(f), Some(v)) => match td.metadata_fields.iter().find(|mf| mf.key == *f) {
-                None => {
+            (Some(f), Some(v)) => {
+                // A conditional block's field must enumerate its values:
+                // the condition is a value test.
+                if td
+                    .metadata_fields
+                    .iter()
+                    .find(|mf| mf.key == *f)
+                    .is_some_and(|d| d.enum_values.is_none())
+                {
                     errors.push(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
                         kind: "required_outgoing",
                         offender: f.clone(),
-                        reason: "`when_field` names no metadata field of this type".to_string(),
+                        reason: format!(
+                            "`when_field` must name a metadata field with `enum_values`; `{f}` declares none"
+                        ),
                     });
+                } else {
+                    check_constraint_field_value(
+                        td,
+                        "required_outgoing",
+                        ("when_field", f),
+                        ("when_value", v),
+                        errors,
+                    );
                 }
-                Some(when_def) => match &when_def.enum_values {
-                    None => {
-                        errors.push(SchemaLoadError::InvalidConstraint {
-                            type_name: td.name.clone(),
-                            kind: "required_outgoing",
-                            offender: f.clone(),
-                            reason: format!(
-                                "`when_field` must name a metadata field with `enum_values`; `{f}` declares none"
-                            ),
-                        });
-                    }
-                    Some(allowed) if !allowed.contains(v) => {
-                        errors.push(SchemaLoadError::InvalidConstraint {
-                            type_name: td.name.clone(),
-                            kind: "required_outgoing",
-                            offender: v.clone(),
-                            reason: format!(
-                                "`when_value` is not in `{f}`'s enum_values [{}]",
-                                allowed.join(", ")
-                            ),
-                        });
-                    }
-                    Some(_) => {}
-                },
-            },
+            }
         }
     }
 }

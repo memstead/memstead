@@ -1728,8 +1728,8 @@ fn overview_surfaces_configured_lifecycle_namespaces() {
 /// registered mem currently pins. The annotation was previously
 /// fired for any pin not in `engine.schemas()` or
 /// `engine.workspace_schemas()`, mis-flagging built-in schemas as
-/// non-functional and causing agents to skip working namespaces
-/// (mem-lifecycle-audit Item 03). The `(invalid)` annotation
+/// non-functional and causing agents to skip working namespaces.
+/// The `(invalid)` annotation
 /// still fires for malformed pins — that's a real operator-config
 /// bug worth flagging.
 #[test]
@@ -4416,8 +4416,8 @@ fn create_title_length_capped_in_sync_with_read_path() {
 /// End-to-end: a NUL (and other C0 control bytes) in a section
 /// body is refused on both create and update with
 /// `SECTION_CONTENT_INVALID`, and nothing is persisted — no binary
-/// blob reaches disk. Mirrors the CLI campaign that created an
-/// entity via `--from` JSON whose section content carried a raw NUL.
+/// blob reaches disk. Mirrors the CLI case of an entity created via
+/// `--from` JSON whose section content carried a raw NUL.
 #[test]
 fn section_body_nul_refused_on_create_and_update_nothing_persists() {
     let (server, _tmp) = setup_test_engine();
@@ -4863,7 +4863,7 @@ fn test_memstead_relate_via_unified_engine_path() {
 
     // Stub-creation path: relate to a non-existent target. The
     // unified engine creates the stub and surfaces it as an
-    // `AUTO_STUB_CREATED` entry in `warnings[]` (Item 03 retired
+    // `AUTO_STUB_CREATED` entry in `warnings[]` (it replaced
     // the bespoke top-level `stub_warning` field). The text body
     // must carry both the code and the stub id so an agent
     // reading the text channel can recover the recovery payload
@@ -7688,7 +7688,6 @@ fn relate_cross_mem_surfaces_typed_envelope() {
 
 /// `memstead_update` with overlapping `metadata` + `metadata_unset`
 /// keys returns the typed `SET_AND_UNSET_CONFLICT` envelope.
-/// Locks Item 02.
 #[test]
 fn update_set_and_unset_overlap_surfaces_typed_envelope() {
     let (server, _tmp) = setup_dual_test_engine();
@@ -7745,7 +7744,7 @@ fn update_set_and_unset_overlap_surfaces_typed_envelope() {
 
 /// `memstead_relate from=<stub-id>` returns the typed
 /// `STUB_CANNOT_RELATE` envelope, not the pre-fix cryptic
-/// `UnknownType { name: "" }`. Locks Item 04 of the graph-correctness contract.
+/// `UnknownType { name: "" }`.
 #[test]
 fn relate_from_stub_surfaces_typed_envelope() {
     let (server, _tmp) = setup_dual_test_engine();
@@ -7803,7 +7802,6 @@ fn relate_from_stub_surfaces_typed_envelope() {
 /// `memstead_update patch_sections` with an `old` substring that
 /// isn't in the body returns the typed `PATCH_OLD_NOT_FOUND`
 /// envelope with the truncated current-content snapshot.
-/// Locks Item 02.
 #[test]
 fn update_patch_old_not_found_surfaces_typed_envelope() {
     let (server, _tmp) = setup_dual_test_engine();
@@ -7869,8 +7867,7 @@ fn update_patch_old_not_found_surfaces_typed_envelope() {
 /// `memstead_relate` with a target id that does not match the
 /// wiki-link grammar must not seed a polluted stub — it returns
 /// `INVALID_ENTITY_ID` with `details.id` and `details.reason`,
-/// and no stub appears in subsequent searches. Locks Item 04
-/// sub-case 1 of the graph-correctness contract.
+/// and no stub appears in subsequent searches.
 #[test]
 fn relate_rejects_malformed_target_id_with_typed_envelope() {
     let (server, _tmp) = setup_dual_test_engine();
@@ -7924,7 +7921,7 @@ fn relate_rejects_malformed_target_id_with_typed_envelope() {
 /// `memstead_relate` add path with a shape-violating pair on a
 /// mem pinned to `software@0.1.0` returns the typed
 /// `INVALID_REL_SHAPE` envelope with the documented
-/// `details.*` payload. Locks Item 03 of the graph-correctness contract.
+/// `details.*` payload.
 #[test]
 fn relate_shape_violation_surfaces_typed_envelope() {
     let tmp = TempDir::new().unwrap();
@@ -8012,7 +8009,7 @@ fn relate_shape_violation_surfaces_typed_envelope() {
 
 /// `memstead_relate remove=true` skips shape validation so an edge
 /// authored before the constraint landed remains cleanable.
-/// Locks the migration path for Item 03.
+/// Locks that migration path.
 #[test]
 fn relate_remove_skips_shape_validation() {
     let tmp = TempDir::new().unwrap();
@@ -12462,7 +12459,7 @@ write_rules: []
         );
     }
 
-    /// Item 05: the schema's `_default` rel-type is the internal
+    /// The schema's `_default` rel-type is the internal
     /// weight-fallback knob (sets the edge weight every
     /// `_default`-less rel-type inherits) and is *not* a usable
     /// rel-type on `memstead_relate` (the relate path rejects it with

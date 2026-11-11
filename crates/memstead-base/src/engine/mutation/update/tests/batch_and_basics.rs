@@ -8,9 +8,8 @@ use super::*;
 /// announced as `SHORT_ID_RESOLVED`; refuses
 /// `ENTITY_ID_MISSING_MEM` naming every carrier when two do, and
 /// naming none when none does; a full id takes the path it always
-/// took (B7 grader finding, 2026-09-02: a bare slug reached the
-/// verbs as an id with an empty mem, and the caller was told a mem
-/// called "" did not exist).
+/// took (a bare slug used to reach the verbs as an id with an empty
+/// mem, and the caller was told a mem called "" did not exist).
 #[test]
 fn short_id_resolves_when_unique_and_refuses_with_candidates_otherwise() {
     let tmp_a = TempDir::new().unwrap();

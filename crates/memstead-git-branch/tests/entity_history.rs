@@ -242,9 +242,9 @@ fn goal_fixture_full_story_under_the_current_id() {
 
     // ---- Reused id: a fresh entity under the freed slug ----
     // The rename freed `specs--story`; a NEW entity created there must
-    // not absorb the previous holder's touches (found by the plan's
-    // grading gate: pre-fix, its story reported the stranger's create/
-    // batch touches as its own, presented as `Recorded`).
+    // not absorb the previous holder's touches (pre-fix, its story
+    // reported the stranger's create/batch touches as its own, presented
+    // as `Recorded`).
     let reused = create(&mut engine, "Story", "second holder");
     assert_eq!(reused, story, "the slug is reused");
     let reused_report = engine.entity_history("specs", &reused, None, None).unwrap();

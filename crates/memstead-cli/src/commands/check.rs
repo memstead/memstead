@@ -14,7 +14,7 @@
 //! (verdict and kind vocabulary, entity existence) and any invalid
 //! entry refuses the WHOLE batch naming every failing entry; nothing
 //! is recorded on a refusal. The need is measured, not hypothetical:
-//! one campaign run paid 242 engine boots for 242 verdicts.
+//! one run paid 242 engine boots for 242 verdicts.
 
 use clap::Parser;
 use memstead_base::EntityId;

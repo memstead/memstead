@@ -378,7 +378,7 @@ pub fn compose_health(
         // this report's defect statement answers for, stamped by the
         // composer itself so every consumer of the composition
         // carries the same declaration.
-        // Rendered is not examined (C10, 2026-09-03). `anchors` used to be
+        // Rendered is not examined. `anchors` used to be
         // promoted into the examined set for any pass that included it, on a
         // "rendered this pass, therefore examined" rule whose only instance
         // this was. But `--strict` fails on an unreadable anchors sidecar

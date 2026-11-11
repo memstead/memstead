@@ -240,12 +240,12 @@ pub fn render_ingest_brief(
     }
 }
 
-/// Render the **verify brief** (C1) for a binding — the measurement +
+/// Render the **verify brief** for a binding — the measurement +
 /// capped-adjudication prompt an agent consumes. The one engine entry point
 /// behind the CLI (`projection brief --verify`), mirroring
 /// [`render_ingest_brief`]. Read-only on the destination mem: it borrows
 /// `&Engine` (shared), reads the durable findings store for the backlog count,
-/// and renders. It emits **no** destination-mutation instruction (C1) — the
+/// and renders. It emits **no** destination-mutation instruction — the
 /// refusal is carried by [`render_verify_brief`] itself.
 pub fn render_verify_brief_for(
     engine: &Engine,
@@ -291,7 +291,7 @@ pub fn render_verify_brief_for(
     ))
 }
 
-/// Render the **sync brief** (C2/C3) for a binding — the *single* channel
+/// Render the **sync brief** for a binding — the *single* channel
 /// through which maintenance-writing work reaches an agent. The one engine entry
 /// point behind the CLI (`projection brief --sync`). It assembles both
 /// inputs in one render: the live cursor slice ([`compute_source_cursor`]) and

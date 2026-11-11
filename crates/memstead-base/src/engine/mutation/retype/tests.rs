@@ -475,7 +475,7 @@ fn edge_shapes_are_rechecked_in_both_directions_and_across_mems() {
 /// Two mems pinning the SAME schema: a cross-mem edge is judged by that
 /// schema's own pins, exactly as relate and the loader judge it, so a
 /// retype that would strand the referrer's edge refuses — the
-/// same-schema case the grader of 2026-09-02 found waved through.
+/// same-schema case that used to be waved through.
 #[test]
 fn same_schema_cross_mem_edges_are_rechecked() {
     let f = fixture();

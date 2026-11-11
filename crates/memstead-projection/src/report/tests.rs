@@ -278,7 +278,7 @@ fn b3_large_facet_list_truncates_then_include_forces() {
     );
 }
 
-/// B4 — exhaustive vs curated framing differs: exhaustive calls unaccounted
+/// Exhaustive vs curated framing differs: exhaustive calls unaccounted
 /// artifacts findings; curated calls them information.
 #[test]
 fn b4_curated_vs_exhaustive_framing() {
@@ -299,10 +299,10 @@ fn b4_curated_vs_exhaustive_framing() {
     );
 }
 
-/// B4 — a persisted disposition keeps an artifact out of the exhaustive
+/// A persisted disposition keeps an artifact out of the exhaustive
 /// findings count.
 ///
-/// Reworked 2026-09-03 (C7): the subtraction moved OUT of the renderer.
+/// Reworked 2026-09-03: the subtraction moved OUT of the renderer.
 /// The composer now drops declared-excluded artifacts from
 /// `coverage.uncovered` itself, so the array a gate reads is already net
 /// and the renderer must not subtract again. The fixture therefore holds
@@ -333,7 +333,7 @@ fn b4_disposition_excludes_from_exhaustive_findings() {
     );
 }
 
-/// C9 — the uncovered action sentence counts the SET IT DESCRIBES, so
+/// The uncovered action sentence counts the SET IT DESCRIBES, so
 /// the headline and the body can never disagree.
 ///
 /// Filed from a run whose headline said 17 uncovered while its body
@@ -385,9 +385,9 @@ fn c9_the_uncovered_action_counts_the_body_list_not_the_recorded_findings() {
     );
 }
 
-/// C7 — a binding with no exclusions renders BYTE-IDENTICALLY to the
-/// pre-plan output, which is the plan's constraint and its refusal
-/// complement. Both C7 additions are gated on there being an exclusion:
+/// A binding with no exclusions renders BYTE-IDENTICALLY to the output
+/// from before exclusions existed, which is the constraint and its refusal
+/// complement. Both exclusion additions are gated on there being an exclusion:
 /// the trailing clause on the uncovered figure, and the "already out of
 /// that count" clause on the exhaustive headline.
 ///
@@ -395,8 +395,8 @@ fn c9_the_uncovered_action_counts_the_body_list_not_the_recorded_findings() {
 /// and the absence of "excluded on purpose". It passed while the
 /// exhaustive headline had gained an ungated clause, so every exhaustive
 /// binding in the world rendered differently and the constraint was
-/// broken with a green test. The grader caught it by diffing two
-/// binaries; these assertions pin BOTH lines exactly so a future
+/// broken with a green test. Diffing two binaries caught it; these
+/// assertions pin BOTH lines exactly so a future
 /// addition cannot slip in the same way.
 #[test]
 fn c7_no_exclusions_renders_byte_identically_to_the_pre_plan_output() {
@@ -423,7 +423,7 @@ fn c7_no_exclusions_renders_byte_identically_to_the_pre_plan_output() {
     assert!(!md.contains("already out of that count"), "{md}");
 }
 
-/// B4 — the authored-exclusion ledger renders each excluded artifact with
+/// The authored-exclusion ledger renders each excluded artifact with
 /// its reasoning, so the editorial decision stays visible (not just counted).
 #[test]
 fn b4_authored_exclusion_rationale_is_rendered() {

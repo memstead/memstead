@@ -1881,11 +1881,11 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     // point: it is measurement machinery, not a freshness baseline. A
     // hash-less anchor that never receives its observed hash stays in
     // `recheck` forever, so drift is never adjudicated deterministically and
-    // the verdict itself changes. Gating it was tried and reverted (C6,
-    // 2026-09-03) on that evidence: seven projection tests moved from
+    // the verdict itself changes. Gating it was tried and reverted on that
+    // evidence: seven projection tests moved from
     // `drifted` to `clean` with the backfill withheld. What `--advance`
     // gates is the `#verified` token, which is the freshness claim a later
-    // run reads, and which is what the entry was filed on.
+    // run reads.
     let backfill_result = record_anchor_hash_backfill(
         engine,
         &resolved.destination_mem,

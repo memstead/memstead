@@ -57,11 +57,11 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
 /// Item cap per vital-signs list.
 pub const VITAL_SIGNS_ITEM_CAP: usize = 20;
 
-/// The `include=["vital_signs"]` axis (A6, 2026-09-02): per mem, the
-/// cheap, engine-countable model-truth signals the remodel campaign
-/// specified — each a count plus a capped list with an explicit `more`
-/// remainder, never a verdict, threshold or recommendation (the engine
-/// names what is there; the `/remodel` skill decides). Five signals:
+/// The `include=["vital_signs"]` axis: per mem, the cheap,
+/// engine-countable model-truth signals the `/remodel` skill reads — each
+/// a count plus a capped list with an explicit `more` remainder, never a
+/// verdict, threshold or recommendation (the engine names what is there;
+/// the `/remodel` skill decides). Five signals:
 ///
 /// - `type_share_by_community`: per community, how many of its entities
 ///   sit on the schema's declared last-resort type (`last_resort: true`

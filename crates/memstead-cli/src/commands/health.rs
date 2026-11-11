@@ -196,10 +196,9 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
     lines.push(String::new());
     // The line the composer stamped, never a fresh render of the static
     // declaration. A markdown that re-derived the line filed an axis
-    // differently from the JSON of the same run (C2 grader finding,
-    // 2026-09-02): one stamped value, read by both, is what keeps them
-    // equal. That still holds now that the promotion is gone (C10,
-    // 2026-09-03) — the composer stamps the registry declaration
+    // differently from the JSON of the same run: one stamped value, read
+    // by both, is what keeps them equal. That still holds now that the
+    // promotion is gone — the composer stamps the registry declaration
     // unchanged, and re-rendering here would merely be a second chance
     // to disagree.
     if let Some(cov) = v["verdict_coverage"].as_str() {

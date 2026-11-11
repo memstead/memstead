@@ -138,9 +138,9 @@ fn exercise(pointer: &str, canonical_a: &str, canonical_b: &str) {
     // Before any exclusion: both artifacts are the uncovered backfill.
     let report = verify(&root);
     assert_eq!(report["report"]["disposed_excluded"], 0, "{report}");
-    // C7 baseline: with no exclusion the coverage section is what it always
+    // Baseline: with no exclusion the coverage section is what it always
     // was — both artifacts in the array, no excluded count, no extra clause
-    // on the figure. This is the plan's refusal complement, taken on the
+    // on the figure. This is the refusal complement, taken on the
     // same fixture the assertion runs on.
     let uncovered_before = report["report"]["coverage"]["uncovered"].to_string();
     assert!(
@@ -186,7 +186,7 @@ fn exercise(pointer: &str, canonical_a: &str, canonical_b: &str) {
     assert!(rationales.contains(canonical_a), "{rationales}");
     assert!(!rationales.contains(canonical_b), "{rationales}");
 
-    // C7: and it LEAVES the uncovered set rather than being annotated inside
+    // And it LEAVES the uncovered set rather than being annotated inside
     // it. A reader counts that array and a gate reads it, so an excluded
     // entry left in it stays owed however it is marked. The count rides
     // beside the figures instead, and the two renderings agree.

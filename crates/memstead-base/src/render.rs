@@ -2661,8 +2661,7 @@ fn lite_types_projection(types_full: &[serde_json::Value]) -> Vec<serde_json::Va
                             // written value (`INVALID_FIELD_VALUE` on a
                             // miss): a legality flag the skeleton must
                             // carry, or an agent that plans from it is
-                            // refused on a shape it was never shown
-                            // (B6 grader finding, 2026-09-02).
+                            // refused on a shape it was never shown.
                             if let Some(p) = f.get("pattern") {
                                 o.insert("pattern".into(), p.clone());
                             }

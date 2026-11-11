@@ -318,7 +318,7 @@ impl UpdateEntityArgs {
     /// and on an anchors-only payload that token compares a value the write
     /// provably cannot move. Exempting the shape is right; exempting it four
     /// times, once per surface, is how surfaces come to disagree about whether
-    /// a write is safe, which is the drift class this campaign closes. One
+    /// a write is safe. One
     /// predicate, one answer. The engine core does not consult it: it checks
     /// the token only when a caller supplies one, and always has.
     ///

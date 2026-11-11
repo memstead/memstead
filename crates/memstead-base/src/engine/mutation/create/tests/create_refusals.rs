@@ -116,7 +116,7 @@ fn create_entity_succeeds_when_all_required_no_default_fields_supplied() {
     );
 }
 
-/// Item 02: `memstead_create.relations[]` runs the same target-id
+/// `memstead_create.relations[]` runs the same target-id
 /// grammar gate as `memstead_relate`. Pre-fix the create path
 /// admitted malformed ids (auto-stub at `bad@chars$here`) even
 /// though `memstead_relate` rejected them.
@@ -147,7 +147,7 @@ fn create_entity_rejects_inline_relation_with_malformed_target_id() {
     );
 }
 
-/// Item 02: `memstead_create.relations[]` runs the same schema-shape
+/// `memstead_create.relations[]` runs the same schema-shape
 /// gate as `memstead_relate`. The relate-path shape gate is already
 /// pinned by `memstead-mcp::tool_surface::INVALID_REL_SHAPE` and the
 /// schema-loader tests; the cross-path lock here exercises the

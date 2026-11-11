@@ -1,7 +1,6 @@
 //! `wasm-bindgen` bindings exposing the Memstead engine to browser thin
 //! clients.
 //!
-//! Phase 1 of the browser-distribution architecture.
 //! This crate is a thin wrapper over `memstead-base::Engine`: every entry
 //! point delegates to a method that already exists on the engine, and
 //! the engine itself has been cfg-gated so it

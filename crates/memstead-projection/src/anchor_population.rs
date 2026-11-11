@@ -7,7 +7,7 @@
 //! scope until it matched nothing left its anchors still scoring. Three
 //! separately filed findings were this one defect.
 //!
-//! THE POSTURE (consistency-sweep bundle 03, copied from its README): the axis
+//! THE POSTURE: the axis
 //! answers for exactly one population, the anchors the binding under
 //! verification is responsible for. Every anchor outside it is excluded AND
 //! NAMED; nothing is silently included and nothing silently dropped.
@@ -940,7 +940,7 @@ mod tests {
 
     /// A deferred mem holds no entities in the store, so a
     /// missing id proves nothing. Claiming zero dangling rows there would be
-    /// the silent-clean this campaign exists to remove: the population says
+    /// a silent clean: the population says
     /// WHY instead, and keeps the rows it can still adjudicate.
     #[test]
     fn a_mem_whose_entities_are_not_loaded_says_so_instead_of_reporting_clean() {

@@ -810,7 +810,7 @@ fn empty_cursor() -> SourceCursor {
     }
 }
 
-/// C1 — the verify brief measures + adjudicates, and carries NO
+/// The verify brief measures + adjudicates, and carries NO
 /// destination-mutation instruction of any kind. It names the sync brief as
 /// the repair home and prints its explicit no-mutation refusal.
 #[test]
@@ -822,7 +822,7 @@ fn verify_brief_measures_and_refuses_mutation() {
     assert!(out.contains("3 finding(s) are queued for adjudication"));
     assert!(out.contains("per-run adjudication cap"));
     assert!(out.contains("this is a measurement, not a repair"));
-    // C1 REFUSAL: structurally no destination-mutation instruction. The
+    // REFUSAL: structurally no destination-mutation instruction. The
     // brief never tells the agent to write into the mem — it says the
     // opposite, and hands repairs to the sync brief.
     //
@@ -835,7 +835,7 @@ fn verify_brief_measures_and_refuses_mutation() {
     // rather than deleted, and the bookkeeping asserted alongside it so the
     // correction cannot silently regress.
     //
-    // Amended 2026-09-03 (C6): the `#verified` baseline now rides
+    // Amended 2026-09-03: the `#verified` baseline now rides
     // `--advance`, so a bare run leaves the mem's CONFIG alone again. The
     // findings store and the anchor-hash backfill still happen on every
     // run, so the narrowed entity-content claim stands unchanged — it was
@@ -859,7 +859,7 @@ fn verify_brief_measures_and_refuses_mutation() {
     assert!(zero.contains("Verify writes **no entity content**"));
 }
 
-/// C2 — the sync brief carries BOTH inputs in ONE render: the cursor slice
+/// The sync brief carries BOTH inputs in ONE render: the cursor slice
 /// (the changed artifacts) AND the open findings (`current(key)`), plus the
 /// commits-nothing posture.
 #[test]
@@ -897,22 +897,22 @@ fn sync_brief_carries_both_cursor_and_findings() {
         false,
         &crate::advance::ExclusionLedger::default(),
     );
-    // Both inputs present in one brief (C2).
+    // Both inputs present in one brief.
     assert!(out.contains("## Source changes since the last sync"));
     assert!(out.contains("`moved.rs`"));
     assert!(out.contains("## Open findings to repair"));
     assert!(out.contains("`engine--e` → `src/moved.rs`"));
     assert!(out.contains("`src/new.rs`"));
-    // Sole-writer + commits-nothing posture (C3).
+    // Sole-writer + commits-nothing posture.
     assert!(out.contains("sole maintenance writer"));
     assert!(out.contains("commits each one **per-mutation**"));
     assert!(out.contains("Sync commits nothing."));
 }
 
-/// C3 — the sync brief carries the whole absorbed reconcile judgment: the
+/// The sync brief carries the whole absorbed reconcile judgment: the
 /// five conservatism rules, edge-removal conservatism, and
 /// rationale-not-changelog. Each rule is quoted verbatim so absorption is
-/// verifiable against the C4 diff artifact.
+/// verifiable rule by rule.
 #[test]
 fn sync_brief_absorbs_reconcile_conservatism() {
     let r = resolved("engine", None, vec![]);
@@ -951,7 +951,7 @@ fn sync_brief_absorbs_reconcile_conservatism() {
     assert!(out.contains("`[commit <hash>]` log-style entries"));
 }
 
-/// C3 — the first-sync/adopt framing (the brief half): a mem predating its
+/// The first-sync/adopt framing (the brief half): a mem predating its
 /// binding is onboarding, expected-0%, with the backfill path — never a
 /// failure. The changed-slice reseed carries the per-facet first-sync note.
 #[test]
@@ -1013,7 +1013,7 @@ fn sync_brief_nothing_to_sync() {
     assert!(!out.contains("## Open findings"));
 }
 
-/// C2 REFUSAL complement — the sync brief is the ONLY render carrying repair
+/// REFUSAL complement — the sync brief is the ONLY render carrying repair
 /// instructions; the verify brief carries none. The verify brief has no
 /// "## How to repair" / "## Open findings to repair" block; the sync brief
 /// has both.

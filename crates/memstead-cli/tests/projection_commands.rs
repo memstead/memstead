@@ -1793,7 +1793,7 @@ fn brief_verify_renders_measurement_only() {
         brief.contains("Verify writes **no entity content**"),
         "C1 refusal present; got:\n{brief}"
     );
-    // C1/C2 refusal: the verify brief carries NO repair block.
+    // Refusal: the verify brief carries NO repair block.
     assert!(
         !brief.contains("## How to repair"),
         "verify brief must not carry repair instructions; got:\n{brief}"
@@ -1852,7 +1852,7 @@ fn brief_sync_renders_sole_writer_with_conservatism() {
         brief.contains("## First sync — adopting `ws`"),
         "fresh mem gets adopt framing; got:\n{brief}"
     );
-    // Absorbed reconcile conservatism (C3).
+    // Absorbed reconcile conservatism.
     assert!(brief.contains("## How to repair — be conservative"));
     assert!(brief.contains("A dropped dependency FLAGS, it does not auto-remove."));
     assert!(brief.contains("`[commit <hash>]` log-style entries"));
@@ -2854,7 +2854,7 @@ fn verify_workspace() -> TempDir {
 /// after a source change a verify adjudicates `drifted` deterministically —
 /// no queued deferral, no LLM leg.
 ///
-/// Deliberately a BARE verify throughout (C6, 2026-09-03): `--advance` gates
+/// Deliberately a BARE verify throughout: `--advance` gates
 /// the `#verified` freshness token only. The backfill is measurement
 /// machinery, and this test is the evidence for that split — gating it too
 /// was tried and reverted when the anchor stayed in `recheck` and the third
@@ -2995,8 +2995,8 @@ fn a_quarantined_destination_is_refused_and_all_three_stores_are_untouched() {
     //
     // Rewriting the whole config would have dropped the `#verified` token, and
     // the comparison below would then have proved only that an absent token
-    // stayed absent — which is not what its message claims (grader finding,
-    // 2026-09-03). Preserving the token makes the assertion mean what it says.
+    // stayed absent — which is not what its message claims. Preserving the
+    // token makes the assertion mean what it says.
     let quarantined_cfg = {
         let mut cfg: Value = serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
         cfg["schema"] = Value::String("default@9.9.9".to_string());
@@ -3231,9 +3231,9 @@ fn verify_refuses_a_destination_mem_that_does_not_exist() {
 
 /// A BARE `projection verify` leaves the destination mem's config
 /// byte-identical, findings and report unaffected; the same call with
-/// `--advance` moves the `#verified` token. The entry this pins was filed on
-/// a grader that verified in order to READ and dirtied the tree it was
-/// checking, then reverted its own bump by hand.
+/// `--advance` moves the `#verified` token. This pins the case of a reader
+/// that verified in order to READ and dirtied the tree it was checking, then
+/// reverted its own bump by hand.
 ///
 /// The config is the right thing to compare: `#verified` is written through
 /// `set_mem_sync_state`, which merges into the mem's `.memstead/config.json`.
@@ -3980,9 +3980,9 @@ fn verify_json_carries_the_pinned_format_marker() {
 
 // ── graph-medium fidelity: a two-mem graph→graph binding, end to end ────────
 //
-// The S1b pilot drove a source change through a graph binding end-to-end and
-// then watched a deliberately stale anchor over the changed entity go
-// unflagged: anchor resolution 0/0, coverage 0/0, drift undetected, while the
+// A source change driven through a graph binding end-to-end once left a
+// deliberately stale anchor over the changed entity unflagged: anchor
+// resolution 0/0, coverage 0/0, drift undetected, while the
 // capability matrix claimed full parity. This fixture is that scenario,
 // re-run through the CLI as separate processes — it cannot pass silently again.
 
@@ -4137,7 +4137,7 @@ fn graph_binding_verify_enumerates_and_detects_entity_drift() {
         "the unprojected source entity surfaces as an uncovered member of S(D): {env}"
     );
 
-    // (3) The pilot's move: change ONE source entity. Its anchor must drift.
+    // (3) The decisive move: change ONE source entity. Its anchor must drift.
     std::fs::write(
         root.join("src-mem").join("alpha.md"),
         "---\ntype: decision\n---\n\n# Alpha\n\n## Decision\n\nAlpha body, rewritten.\n",
@@ -4671,9 +4671,9 @@ fn graph_binding_over_a_git_backed_source_pins_token_slice_and_baseline() {
     // (2) VERIFY: a real enumerated denominator AND a real snapshot token.
     //     The token is the half a folder-mem source can never produce.
     //     `--advance` because the leg below asserts what the `#verified`
-    //     baseline holds after a sync advances `#synced`; since C6 the
-    //     baseline moves only when asked for, so a test about the baseline
-    //     has to ask (2026-09-03).
+    //     baseline holds after a sync advances `#synced`; the baseline
+    //     moves only when asked for, so a test about the baseline has to
+    //     ask.
     let env: Value = serde_json::from_slice(&run(&[
         "--json",
         "projection",

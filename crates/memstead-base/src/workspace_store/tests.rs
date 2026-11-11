@@ -596,7 +596,7 @@ name = "file-two-layer"
     assert!(!on_disk.contains(tmp.path().to_str().unwrap()));
 }
 
-/// Item 03 round-trip: writing a `MountStorage::GitBranch` mount
+/// Round-trip: writing a `MountStorage::GitBranch` mount
 /// whose `branch` already carries the canonical `refs/heads/<leaf>`
 /// form serialises that exact string into `mounts.json` (no
 /// rewrite, no truncation), and reading the file back produces a
@@ -650,7 +650,7 @@ name = "file-two-layer"
     }
 }
 
-/// Item 03 reader tolerance: a hand-written legacy `mounts.json`
+/// Reader tolerance: a hand-written legacy `mounts.json`
 /// whose `branch` field carries the short-form leaf (no
 /// `refs/heads/` prefix) loads without error, and the in-memory
 /// `Mount` carries the input string intact. The reader does not

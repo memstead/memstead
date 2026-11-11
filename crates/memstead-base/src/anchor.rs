@@ -1770,8 +1770,7 @@ impl AnchorState {
 
 /// The positive anchor resolution figure, carried with the population it
 /// was computed over. A resolution count read on its own is read as
-/// health, and every W3 finding of the 2026-08 consistency sweep was a bare
-/// figure that meant less than it looked; this type makes the defect a
+/// health, and a bare figure routinely meant less than it looked; this type makes the defect a
 /// construction error instead of a lint finding. It cannot be built
 /// without a population statement, it prints only through [`Display`]
 /// (the count and the statement in one sentence) or [`Self::ratio`], and
@@ -2166,9 +2165,9 @@ impl AnchorSidecar {
                     // written hash-less for the next verify to backfill
                     // against the artifact as it now is, which is what a
                     // re-pin after a sync repair means. A caller who
-                    // supplies a hash sets that baseline directly. (The
-                    // 2026-08 consistency sweep carried the stored baseline
-                    // forward instead, which left every one-update repair
+                    // supplies a hash sets that baseline directly.
+                    // (Carrying the stored baseline forward instead left
+                    // every one-update repair
                     // reading `drifted` against the content it had just
                     // repaired; the re-pin is itself recorded, so nothing is
                     // lost by re-baselining.)

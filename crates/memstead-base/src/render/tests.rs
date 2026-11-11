@@ -89,7 +89,7 @@ fn test_entity() -> Entity {
 /// declaration: both are legality-relevant facts the server
 /// instructions promise the skeleton shows, and an agent that
 /// planned a write from a skeleton without them was refused on a
-/// shape it never saw (B6 grader finding, 2026-09-02). A type
+/// shape it never saw. A type
 /// declaring neither renders without either key, so schemas that
 /// do not use them keep their bytes.
 #[test]

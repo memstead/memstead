@@ -90,8 +90,8 @@ pub fn render_cli_error(
         // The human path carries the SAME structured recovery payload the
         // JSON envelope does — the engine computed it either way, and
         // dropping it here is what sent an agent probing five rel-types in
-        // sequence when `details.allowed_source_types` had the answer
-        // (backlog, model-truth campaign). Rendered as an indented pretty
+        // sequence when `details.allowed_source_types` had the answer.
+        // Rendered as an indented pretty
         // block after the one-line header, so the first line stays the
         // documented `memstead: ERROR [<CODE>]: <message>` shape.
         let mut line = format!("memstead: ERROR [{code}]: {message}");

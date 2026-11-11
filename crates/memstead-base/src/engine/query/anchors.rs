@@ -301,7 +301,7 @@ impl Engine {
         // An `entity`-grain anchor points into a mem's graph, not a file
         // tree. It has always returned `None` here — "unobserved this pass" —
         // which meant it could never be drifted, never be orphaned, and always
-        // blocked prune. That is the bail the S1b pilot demonstrated: a
+        // blocked prune. That bail showed in practice: a
         // deliberately stale anchor over a changed source entity went unflagged
         // while the capability matrix claimed full parity.
         if anchor.grain == crate::anchor::AnchorGrain::Entity {
@@ -979,7 +979,7 @@ impl MemAnchorVerification {
     /// what the figures cover,
     /// and how much of it the pass could not adjudicate.
     ///
-    /// A resolution figure alone is read as health. Every W3 finding made that
+    /// A resolution figure alone is read as health. Every such finding made that
     /// figure mean less than a reader assumes, and none of them made it wrong
     /// in a way anyone could see. The figure type renders the number and its
     /// population as ONE unit, so a surface cannot show the number and omit

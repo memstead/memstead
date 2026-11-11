@@ -382,7 +382,7 @@ pub fn allow_could_match_under(prefixes: &[Vec<String>], dir_rel: &str) -> bool 
 /// What an enumeration of a source's scope selected, and what it could not
 /// speak for.
 ///
-/// The campaign rule this serves: a surface does not report a figure over
+/// The rule this serves: a surface does not report a figure over
 /// state it did not examine. A coverage percentage computed over a denominator
 /// that silently lost patterns is exactly that figure, so the partiality
 /// travels with the set rather than being discarded at the seam.
@@ -442,8 +442,8 @@ impl ScopeEnumeration {
 /// One scope pattern still written in the retired workspace-relative dialect.
 ///
 /// Emitted by [`scope_migration_notes`] so a binding author is told BEFORE a
-/// pattern's meaning changes, never after. The campaign rule this serves is
-/// the plain one: a surface does not quietly begin covering a different set.
+/// pattern's meaning changes, never after. The rule this serves is the
+/// plain one: a surface does not quietly begin covering a different set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopePatternNote {
     /// The pattern as written in the binding record.

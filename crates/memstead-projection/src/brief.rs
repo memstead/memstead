@@ -1175,11 +1175,9 @@ pub fn assemble_one_shot_brief(
 
 // ---------------------------------------------------------------------------
 // Verify + sync briefs — the measure/repair surface beside the build
-// briefs. Verify MEASURES (no destination mutation of any kind, C1); sync is the
+// briefs. Verify MEASURES (no destination mutation of any kind); sync is the
 // SOLE maintenance writer, carrying BOTH the cursor slice and the open findings
-// in one brief (C2) with the whole of `/reconcile`'s absorbed judgment (C3). A
-// rule-by-rule absorption map records where each retired reconcile rule now
-// lives (C4).
+// in one brief with the whole of `/reconcile`'s absorbed judgment.
 // ---------------------------------------------------------------------------
 
 use super::findings::{Finding, FindingClass, FindingTarget};
@@ -1188,10 +1186,10 @@ use super::prune::{PruneDisposition, PruneProposal};
 /// Per-class cap on the rendered open-findings list — mirrors [`SLICE_CAP`].
 const FINDINGS_CAP: usize = SLICE_CAP;
 
-/// Render the **verify brief** (C1) — the measurement + capped-adjudication
+/// Render the **verify brief** — the measurement + capped-adjudication
 /// prompt an agent consumes to *measure* a binding's fidelity.
 ///
-/// **Refusal (C1), structural:** this function emits **no destination-mutation
+/// **Refusal, structural:** this function emits **no destination-mutation
 /// instruction of any kind**. It tells the agent what to measure and adjudicate,
 /// never what to write into the destination mem — every repair is recorded as a
 /// finding for the sync brief ([`render_sync_brief`]) to act on. There is no
@@ -1303,9 +1301,9 @@ fn render_findings_group(
     lines.push(String::new());
 }
 
-/// Render the open-findings block for the sync brief (C2) — the findings
+/// Render the open-findings block for the sync brief — the findings
 /// `findings_store.current(key)` returned, grouped by class, each carrying the
-/// conservative repair guidance the reconcile rules (C3) mandate. Empty string
+/// conservative repair guidance the reconcile rules mandate. Empty string
 /// when there are no open findings. `binding_id` feeds the buildable
 /// `projection exclude` line in the uncovered group's guidance.
 fn render_open_findings(findings: &[Finding], binding_id: &str) -> String {
@@ -1364,7 +1362,7 @@ fn render_open_findings(findings: &[Finding], binding_id: &str) -> String {
     // The third disposition — deliberately not modeled — routes to `projection
     // exclude`, the verb whose gate accepts a stable artifact (`advance` gates on
     // the changed slice, so a stable uncovered artifact is undispositionable
-    // there; three campaign runs hit that wall before this line existed).
+    // there).
     let uncovered_guidance = format!(
         "An in-scope source artifact has no anchor in the mem. Create an entity for it \
          **only** if it is a clearly-new concept with no existing entity; otherwise \
@@ -1567,7 +1565,7 @@ fn artifact_list(artifacts: &[String]) -> String {
 }
 
 /// Render the sync brief's `## Situation` block — the sole-maintenance-writer
-/// mandate and the commits-nothing / engine-commits-per-mutation posture (C3).
+/// mandate and the commits-nothing / engine-commits-per-mutation posture.
 fn render_sync_situation(resolved: &ResolvedIngest) -> String {
     format!(
         "## Sync — repair the graph to match the source\n\n\
@@ -1584,8 +1582,8 @@ fn render_sync_situation(resolved: &ResolvedIngest) -> String {
     )
 }
 
-/// Render the adopt / onboarding block (C3's first-sync/adopt framing; E1's
-/// brief half): a mem that predates its binding is onboarding, expected-0%, with
+/// Render the adopt / onboarding block (the first-sync/adopt framing, brief
+/// half): a mem that predates its binding is onboarding, expected-0%, with
 /// the concrete backfill path — never a failure or red verdict.
 fn render_adopt_framing(resolved: &ResolvedIngest) -> String {
     format!(
@@ -1636,7 +1634,7 @@ fn render_stale_claim_search(resolved: &ResolvedIngest) -> String {
 }
 
 /// Render the sync brief's conservatism block — the whole of `/reconcile`'s
-/// absorbed judgment (C3): the five conservatism rules, edge-removal
+/// absorbed judgment: the five conservatism rules, edge-removal
 /// conservatism, and rationale-not-changelog.
 fn render_sync_conservatism() -> String {
     let lines: Vec<&str> = vec![
@@ -1673,25 +1671,24 @@ fn render_sync_conservatism() -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-/// Render the **sync brief** (C2/C3) — the *single* channel through which
+/// Render the **sync brief** — the *single* channel through which
 /// maintenance-writing work reaches an agent.
 ///
 /// One brief carries **both** inputs: the cursor slice (`cursor`, rendered via
 /// [`render_changed_slice`], which also carries the first-sync reseed framing and
 /// the disposition-recording step) and the open verify findings (`findings`, the
-/// store's `current(key)` slice). It absorbs the whole of `/reconcile`'s judgment
-/// (C3): the five conservatism rules, edge-removal conservatism,
+/// store's `current(key)` slice). It absorbs the whole of `/reconcile`'s judgment:
+/// the five conservatism rules, edge-removal conservatism,
 /// rationale-not-changelog, the commits-nothing / engine-commits-per-mutation
 /// posture, and — when `adopt` is set — the first-sync/adopt onboarding framing
-/// (the adopt rule's brief half). A rule-by-rule absorption map records where
-/// each retired reconcile rule now lives (C4).
+/// (the adopt rule's brief half).
 ///
 /// A slice that carries actual changed artifacts additionally renders the
 /// bounded **stale-claim search** step ([`render_stale_claim_search`]) — the
 /// beyond-the-slice fact search that catches claims falsified by the change in
 /// entities whose anchors never intersect the slice.
 ///
-/// Prune proposals (group F) ride this same brief — F3's single-writer
+/// Prune proposals ride this same brief under the single-writer
 /// invariant: every prune removal reaches the mem only via an agent acting on
 /// this sync brief. They are rendered as proposals only; nothing is auto-deleted.
 ///

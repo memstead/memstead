@@ -848,10 +848,10 @@ fn rename_changes_id() {
         .stdout(contains("# New Name"));
 }
 
-/// C5: the short-id resolution is announced on the human surface too.
+/// The short-id resolution is announced on the human surface too.
 /// `rename` and `delete` on a mem-repo workspace rendered their outcome
 /// without the warnings line, so `SHORT_ID_RESOLVED` (and `NOTE_MISSING`)
-/// reached only `--json` callers — the plan's "never silent" constraint
+/// reached only `--json` callers — the "never silent" rule
 /// read as satisfied while the default mode said nothing.
 #[test]
 fn short_id_resolution_is_announced_in_markdown_for_rename_and_delete() {
@@ -889,7 +889,7 @@ fn short_id_resolution_is_announced_in_markdown_for_rename_and_delete() {
         .stdout(contains("Warnings:").and(contains("carried no mem prefix")));
 }
 
-/// C5 constraint 1: the short-id rule holds on EVERY id-taking verb.
+/// The short-id rule holds on EVERY id-taking verb.
 /// `retype`'s hash preflight read the raw id and raised its own
 /// `ENTITY_NOT_FOUND` before the engine resolver ran, so `--auto-hash`
 /// and `--force` refused a bare slug the sibling verbs resolve. The

@@ -32,9 +32,8 @@ impl Engine {
 
         // Stub guard — stubs derive their title from the id and have
         // no `entity_type` to validate against. Recovery is
-        // `memstead_create` (stub adoption). Item 02 realised the
-        // `STUB_NOT_RENAMABLE` code the description list had
-        // advertised since the strictness work landed.
+        // `memstead_create` (stub adoption). This guard realises the
+        // `STUB_NOT_RENAMABLE` code the description list advertises.
         if entity.stub {
             return Err(EngineError::StubNotRenamable { id: id.to_string() });
         }

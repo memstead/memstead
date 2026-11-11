@@ -1208,7 +1208,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "types_summary",
             "relationships_summary",
             // Field-level and type-level legality flags the lite
-            // skeleton carries (backlog-repairs C4).
+            // skeleton carries.
             "pattern",
             "last_resort",
             "description",
@@ -1366,7 +1366,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "memstead_relate",
             // Bytes-identical no-op short-circuit — empty write_id,
             // unchanged content_hash, UPDATE_NOOP warning. Anchors the
-            // `expected_hash` caching contract probe campaigns expose.
+            // `expected_hash` caching contract.
             "UPDATE_NOOP",
             // Orphan-stub GC response field: removing a body wiki-link
             // that was a stub target's last referrer GC's the stub and
@@ -1533,7 +1533,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "details.allowed_source_types",
             "details.allowed_target_types",
             "memstead_health",
-            // Item 04 sub-case 1: relate-target id-grammar gate.
+            // Relate-target id-grammar gate.
             // Malformed targets return INVALID_ENTITY_ID with
             // `details.id` + `details.reason`; the gate prevents an
             // auto-stub from being created at the bad id.
@@ -1962,12 +1962,11 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Cross-tool reference for diff-list lookup.
             "memstead_changes_since",
             // Membership-fixed-at-boot clause cites the lifecycle tools that
-            // *do* mutate the in-memory router atomically (mem-lifecycle-audit
-            // Item 02), so an agent reading the warning knows where to go.
+            // *do* mutate the in-memory router atomically, so an agent
+            // reading the warning knows where to go.
             "memstead_mem_create",
             "memstead_mem_delete",
-            // Workspace-config-reload pairing (Item 03 of
-            // workspace-config-via-cli.md): the workspace-wide form re-reads
+            // Workspace-config-reload pairing: the workspace-wide form re-reads
             // `.memstead/workspace.toml`. The slashed-token allowlist rule
             // resolves both halves independently, so both segments are
             // listed here. The CLI surface (`memstead workspace allow-create`
@@ -2119,7 +2118,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "schema_pin",
             "migration_target",
             // The marker the skew hint reads, re-stamped by a completed
-            // switch (backlog-repairs C3).
+            // switch.
             "stamped_schema",
             "ENGINE_VERSION_SKEW",
             "relations_unset",

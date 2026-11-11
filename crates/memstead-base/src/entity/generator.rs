@@ -104,7 +104,7 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
     // map is not rendered: emitting `unwrap_or("")` here is what
     // materialised an empty heading for every declared-but-unwritten
     // optional section on the first round-trip — scaffold headings no
-    // content ever reached (one campaign counted 82 across a mem) — and
+    // content ever reached (82 across one mem) — and
     // what made `sections_unset` impossible: the removed key came back
     // as an empty heading on the next parse. A key PRESENT with empty
     // content still renders (empty-but-kept is a valid authored state);
