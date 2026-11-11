@@ -646,6 +646,7 @@ description: self-check gate fixture
 when_to_use: tests
 types:
   - plan
+  - memo
 relationships:
   mode: strict
   definitions:
@@ -706,6 +707,12 @@ write_rules: []
             ),
         )
         .unwrap();
+        // The same type without the gate, for a retype onto it.
+        let plan_yaml = std::fs::read_to_string(pkg.join("types").join("plan.yaml")).unwrap();
+        let cut = plan_yaml.find("constraints:").unwrap();
+        let memo_yaml =
+            plan_yaml[..cut].replacen("name: plan", "name: memo", 1) + "write_rules: []\n";
+        std::fs::write(pkg.join("types").join("memo.yaml"), memo_yaml).unwrap();
         let mem_dir = tmp.path().join("bundles");
         std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         std::fs::write(
@@ -1543,6 +1550,174 @@ write_rules: []
             crate::engine::independence::Independence::Unconfirmable,
             "no write at or before the line's ts"
         );
+    }
+
+    fn create_args(title: &str, ty: &str, status: Option<&str>) -> crate::engine::CreateEntityArgs {
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("body".to_string(), "the plan body.".to_string());
+        let mut metadata = indexmap::IndexMap::new();
+        if let Some(v) = status {
+            metadata.insert("status".to_string(), v.to_string());
+        }
+        crate::engine::CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: "bundles".to_string(),
+            title: title.to_string(),
+            entity_type: ty.to_string(),
+            sections,
+            metadata,
+            relations: Vec::new(),
+            dry_run: false,
+        }
+    }
+
+    fn update_args(
+        engine: &crate::Engine,
+        id: &crate::entity::EntityId,
+        status: Option<&str>,
+        body: Option<&str>,
+    ) -> crate::engine::UpdateEntityArgs {
+        let mut metadata = indexmap::IndexMap::new();
+        if let Some(v) = status {
+            metadata.insert("status".to_string(), v.to_string());
+        }
+        let mut sections = indexmap::IndexMap::new();
+        if let Some(b) = body {
+            sections.insert("body".to_string(), b.to_string());
+        }
+        crate::engine::UpdateEntityArgs {
+            anchors: Vec::new(),
+            id: id.clone(),
+            expected_hash: crate::ExpectedHash::Current(
+                engine.get_entity(id).unwrap().content_hash.clone(),
+            ),
+            sections,
+            append_sections: indexmap::IndexMap::new(),
+            patch_sections: indexmap::IndexMap::new(),
+            sections_unset: Vec::new(),
+            metadata,
+            metadata_unset: Vec::new(),
+            declare_relations: vec![],
+            dry_run: false,
+            relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
+        }
+    }
+
+    /// The self-check column of the verb table, per verb, storage and
+    /// ledger unchanged on each refusal: create and batch create refuse a
+    /// gated value (no record can name content that did not exist); batch
+    /// update lands a transition that changes nothing else, carrying the
+    /// record, and refuses one that also changes a section; a retype onto
+    /// the gated type refuses (the write changes the type). Proposal merge
+    /// composes through the same prepare steps as create and update.
+    #[test]
+    fn the_self_check_column_of_the_verb_table() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine = self_check_gated_engine(&tmp, "x-projection");
+        engine.set_identity(Some("author-a".to_string()));
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        let (actor, client) = crate::engine::test_helpers::cli_actor();
+        let files = |tmp: &tempfile::TempDir| {
+            let mut v: Vec<_> = std::fs::read_dir(tmp.path().join("bundles"))
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .collect();
+            v.sort();
+            v
+        };
+        let before = files(&tmp);
+
+        let err = engine
+            .create_entity(
+                create_args("Born Done", "plan", Some("complete")),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("create");
+        assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED");
+        let batch = engine.batch_create(
+            vec![(create_args("Born Done Too", "plan", Some("complete")), None)],
+            actor,
+            Some(&client),
+            false,
+        );
+        assert!(
+            batch.as_ref().is_err() || !batch.as_ref().unwrap().applied,
+            "batch create must not land the gated value: {batch:?}"
+        );
+        assert_eq!(files(&tmp), before);
+        assert!(ledger.in_standing_order().is_empty());
+
+        let id = create_plan(&mut engine, "The Bundle");
+        check_plan(&mut engine, "checker-c", &id, "x-projection");
+        engine.set_identity(Some("author-a".to_string()));
+        let stored = engine.get_entity(&id).unwrap().content_hash.clone();
+        let lines = ledger.in_standing_order().len();
+        let refused = engine.batch_update(
+            vec![(
+                update_args(&engine, &id, Some("complete"), Some("rewritten.")),
+                None,
+            )],
+            actor,
+            Some(&client),
+            false,
+        );
+        assert!(
+            refused.as_ref().is_err() || !refused.as_ref().unwrap().applied,
+            "{refused:?}"
+        );
+        assert_eq!(engine.get_entity(&id).unwrap().content_hash, stored);
+        assert_eq!(ledger.in_standing_order().len(), lines);
+        engine
+            .batch_update(
+                vec![(update_args(&engine, &id, Some("complete"), None), None)],
+                actor,
+                Some(&client),
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            engine.get_entity(&id).unwrap().metadata["status"].to_frontmatter_string(),
+            "complete"
+        );
+        assert_eq!(
+            ledger.in_standing_order().len(),
+            lines + 1,
+            "the record is carried"
+        );
+
+        // Retype: a memo at `complete`, checked, retyped onto the gated plan.
+        let memo = engine
+            .create_entity(
+                create_args("The Memo", "memo", Some("complete")),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap()
+            .id;
+        check_plan(&mut engine, "checker-c", &memo, "x-projection");
+        engine.set_identity(Some("author-a".to_string()));
+        let stored = engine.get_entity(&memo).unwrap().content_hash.clone();
+        let err = engine
+            .retype_entity(
+                crate::engine::RetypeEntityArgs {
+                    id: memo.clone(),
+                    expected_hash: crate::ExpectedHash::Current(stored.clone()),
+                    target_type: "plan".to_string(),
+                    section_map: indexmap::IndexMap::new(),
+                    drop_metadata: Vec::new(),
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("a retype onto the gate changes the type");
+        assert!(err.to_string().contains("block-tier constraint"), "{err}");
+        assert_eq!(engine.get_entity(&memo).unwrap().content_hash, stored);
     }
 
     #[test]

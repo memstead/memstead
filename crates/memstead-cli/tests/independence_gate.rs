@@ -96,7 +96,15 @@ community:
         body("criterion", " []", ""),
     )
     .unwrap();
-    fs::write(dir.join("types").join("note.yaml"), body("note", " []", "")).unwrap();
+    fs::write(
+        dir.join("types").join("note.yaml"),
+        body(
+            "note",
+            "\n  - key: status\n    description: s\n    field_type: string\n    required: false\n    enum_values: [draft, complete]",
+            "",
+        ),
+    )
+    .unwrap();
     memstead()
         .current_dir(ws.path())
         .args(["mem", "set-schema", "plans", "gated@0.1.0", "--quiet"])
@@ -520,4 +528,105 @@ fn independence_counts_every_writer_on_git_branch() {
             "pause {pause}: {health}"
         );
     }
+}
+
+/// The checks column of the verb table on a git-branch mem: a create
+/// that promotes a placeholder with confirmed incoming criteria lands the
+/// gated value; the same create with an unconfirmed criterion refuses,
+/// nothing written; a retype onto the gated type commits when the gate is
+/// met and refuses when it is not.
+#[test]
+fn the_checks_column_of_the_verb_table() {
+    let ws = seed();
+    let root = ws.path();
+    // The criterion names a plan that does not exist yet: a placeholder.
+    create(
+        root,
+        "identity-a",
+        "criterion",
+        "The Criterion",
+        Some("VERIFIES:plans--the-plan"),
+    );
+    let born = |status: &str| {
+        cli(
+            root,
+            &[
+                "create",
+                "--type",
+                "plan",
+                "--title",
+                "The Plan",
+                "--section",
+                "body=x",
+                "--metadata",
+                &format!("status={status}"),
+                "--identity",
+                "identity-a",
+                "--json",
+                "--quiet",
+            ],
+        )
+    };
+    let out = born("complete");
+    assert!(!out.status.success(), "unconfirmed criterion");
+    let env: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(env["code"], "CONSTRAINT_UNSATISFIED", "{env}");
+    check(root, Some("identity-c"), "plans--the-criterion");
+    let out = born("complete");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // Retype a note at `complete` onto the gated plan type.
+    create(root, "identity-a", "note", "The Note", None);
+    edit_note(root, &["--metadata", "status=complete"]);
+    create(
+        root,
+        "identity-a",
+        "criterion",
+        "Note Criterion",
+        Some("VERIFIES:plans--the-note"),
+    );
+    let retype = || {
+        cli(
+            root,
+            &[
+                "retype",
+                "plans--the-note",
+                "--type",
+                "plan",
+                "--auto-hash",
+                "--identity",
+                "identity-a",
+                "--json",
+                "--quiet",
+            ],
+        )
+    };
+    let out = retype();
+    assert!(
+        !out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    check(root, Some("identity-c"), "plans--note-criterion");
+    let out = retype();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+fn edit_note(ws: &Path, args: &[&str]) {
+    let mut all = vec!["update", "plans--the-note", "--auto-hash", "--quiet"];
+    all.extend_from_slice(args);
+    let out = cli(ws, &all);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
 }
