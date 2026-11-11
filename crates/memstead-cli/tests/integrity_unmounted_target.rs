@@ -165,7 +165,7 @@ fn codes(v: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// B8 AC1: after the unmount the edge is reported exactly once, as the
+/// After the unmount the edge is reported exactly once, as the
 /// dangling finding, with no grant finding beside it; CLI and MCP agree.
 #[test]
 fn an_unmounted_target_yields_one_dangling_finding_and_no_grant_finding() {
@@ -199,7 +199,7 @@ fn an_unmounted_target_yields_one_dangling_finding_and_no_grant_finding() {
     );
 }
 
-/// B8 AC1 refusal complement: with the target mounted and the grant
+/// Refusal complement: with the target mounted and the grant
 /// revoked, the edge yields `CROSS_MEM_EDGE_UNGRANTED` with its cause and
 /// repair hint exactly as before the plan.
 #[test]

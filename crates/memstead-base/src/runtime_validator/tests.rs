@@ -767,7 +767,7 @@ fn section_content_allows_tab_and_newline() {
     .expect("tab and newline must stay legal in section bodies");
 }
 
-/// Criterion 6 (consistency-sweep 04/01): the engine must accept back a
+/// The engine must accept back a
 /// value it emitted. The catch-all re-emits absorbed content under its
 /// original heading line, so an agent that read an entity and wrote that
 /// section back in replace mode was refused its own value.
@@ -818,14 +818,14 @@ fn the_catch_all_exemption_does_not_weaken_the_guard() {
     assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
 }
 
-/// Criterion 7 (consistency-sweep 04/01): caller-supplied content carrying
+/// Caller-supplied content carrying
 /// an undeclared heading with NO body refuses, naming what was rejected.
 /// This is the exact complement of the criterion-6 exemption: the catch-all
 /// keeps absorbed content but SKIPS empty content, so accepting this write
 /// would drop the heading and tell the caller nothing.
 #[test]
 fn content_that_would_hide_a_delimiter_is_refused() {
-    // Criterion 1. An open fence's range runs to end of text, so every
+    // An open fence's range runs to end of text, so every
     // heading the generator writes after this section would be masked and
     // absorbed into it.
     let err = validate_section_content([("body", "```rust\nfn main() {}")].into_iter(), None)
@@ -844,7 +844,7 @@ fn content_that_would_hide_a_delimiter_is_refused() {
 
 #[test]
 fn a_closed_fence_around_headings_is_admitted_unchanged() {
-    // Criterion 2, both halves. A guard that refuses every fenced `##`
+    // Both halves. A guard that refuses every fenced `##`
     // fails, and so does one that refuses content whose fence closes
     // later in the same body.
     validate_section_content(
@@ -866,7 +866,7 @@ fn a_closed_fence_around_headings_is_admitted_unchanged() {
 
 #[test]
 fn an_ordinary_body_is_untouched_by_the_fence_guard() {
-    // Criterion 7 at this tier: no fence characters, no new refusal.
+    // At this tier: no fence characters, no new refusal.
     validate_section_content(
         [("body", "plain prose\nwith lines\n\nand a paragraph")].into_iter(),
         None,

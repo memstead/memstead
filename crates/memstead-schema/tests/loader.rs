@@ -2815,7 +2815,7 @@ fn constraint_status_propagation_block_severity_rejected() {
 }
 
 // ---------------------------------------------------------------------------
-// Section-format declarations (plan 08)
+// Section-format declarations
 // ---------------------------------------------------------------------------
 
 /// A full declaration (content + item_pattern + example + severity)
@@ -2994,7 +2994,7 @@ fn builtin_planning_bump_declares_bullet_lists() {
     }
 }
 
-/// Gap fixes after the plan-08 grading round: a lone
+/// Gap fixes: a lone
 /// `format_severity: warn` (no `content`) is a declaration and must
 /// not load silently ignored; and the install refusal aggregates
 /// EVERY defective section across types, not the first only.
@@ -3023,7 +3023,7 @@ fn section_format_lone_severity_and_cross_section_aggregation_refuse() {
     );
 }
 
-/// Agent-trust plan 06: the retired `propagating_relationships` key
+/// The retired `propagating_relationships` key
 /// refuses at AUTHORING load (directory context) with the typed rename
 /// error naming the new key; sealed content (in-memory: built-ins,
 /// installed refs) loads with the old key translated so shipped
@@ -3399,7 +3399,7 @@ fn accumulated_order_is_deterministic_from_dir() {
 }
 
 // ---------------------------------------------------------------------------
-// Metadata-required polarity (first-author-path plan 07)
+// Metadata-required polarity
 // ---------------------------------------------------------------------------
 
 /// Old-format sealed fixture — written in the retired language, loaded
@@ -3573,7 +3573,7 @@ fn absence_means_optional_for_fields_and_sections_on_authoring_path() {
 }
 
 // ---------------------------------------------------------------------------
-// Due-axis declaration validation (first-author-path plan 08)
+// Due-axis declaration validation
 // ---------------------------------------------------------------------------
 
 fn due_type(due_block: &str) -> String {

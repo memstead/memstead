@@ -109,8 +109,7 @@ pub enum SchemaLoadError {
     ExemplarRelationIncomplete { type_name: String },
 
     /// The retired `optional:` metadata-field key was used in an
-    /// authoring context. The polarity flipped (first-author-path
-    /// plan 07): a field is optional unless it declares
+    /// authoring context. The polarity flipped: a field is optional unless it declares
     /// `required: true` — the same rule sections follow. Sealed
     /// content keeps loading with the old key inverted; only
     /// authoring refuses, so the fix is one mechanical edit.
@@ -1143,8 +1142,7 @@ fn load_with_context(
             });
         }
 
-        // Exemplar relation spelling (consistency-sweep 05-front-door/08
-        // rider): entries are authored in the mutation vocabulary
+        // Exemplar relation spelling: entries are authored in the mutation vocabulary
         // (`target:` / `rel_type:`) so the served exemplar round-trips
         // into `memstead_create` unchanged. Authoring contexts refuse
         // the retired `to:` / `type:` spelling with the rename pointer;
@@ -1185,7 +1183,7 @@ fn load_with_context(
             }
         }
 
-        // Metadata-required polarity (first-author-path plan 07):
+        // Metadata-required polarity:
         // authoring refuses the retired `optional:` key naming the
         // inversion; sealed content inverts it. An absent key resolves
         // by the package's format generation — legacy sealed content
@@ -1424,8 +1422,8 @@ fn name_shape(name: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Validate and compile the section-format declarations of a type
-/// (plan 08). LENIENT at load: problems are recorded on the section
+/// Validate and compile the section-format declarations of a type.
+/// LENIENT at load: problems are recorded on the section
 /// (`format_problems`) instead of refusing, so a sealed schema
 /// carrying a bad declaration keeps loading — install and strict
 /// validation refuse via [`check_section_formats`], and a defective
@@ -2320,7 +2318,7 @@ fn validate_type(
         }
     }
 
-    // Due axis (first-author-path plan 08): the declaration's
+    // Due axis: the declaration's
     // references must exist on this type in the declared shapes.
     if let Some(due) = &td.due {
         // The engine stamps `created_date` and `last_modified` on every

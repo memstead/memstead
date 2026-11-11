@@ -1769,7 +1769,7 @@ impl OriginClass {
 /// prose `description`, `default_writing_guidance`) reach a consuming
 /// agent as instructions. A `full`-verbosity request on a third-party
 /// schema therefore still omits them — the override is one-directional.
-/// Append a section's format declaration (plan 08) to its rendered
+/// Append a section's format declaration to its rendered
 /// object — only the declared keys, so undeclared sections keep their
 /// exact pre-plan shape. `format_severity` renders whenever a
 /// `content` declaration exists (the default `block` is a legality
@@ -2012,7 +2012,7 @@ pub fn build_schema_payload_scoped(
                         "required": s.required,
                         "write_rules": s.write_rules,
                     });
-                    // Section-format declarations (plan 08) — a
+                    // Section-format declarations — a
                     // legality condition, so it must never be
                     // invisible in the schema response (rendered at
                     // BOTH verbosity levels via the lite projection

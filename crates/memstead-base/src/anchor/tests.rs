@@ -206,7 +206,7 @@ fn span_input(artifact: &str) -> AnchorInput {
     }
 }
 
-/// Criterion 1 (consistency-sweep 03/03): a locator that can never
+/// A locator that can never
 /// address anything is refused at the moment of writing. Each of these
 /// used to write successfully and could then never be adjudicated.
 #[test]
@@ -232,7 +232,7 @@ fn a_span_locator_that_addresses_nothing_is_refused() {
     }
 }
 
-/// Criterion 4's first half: a span that names something real still
+/// First half: a span that names something real still
 /// writes. `Lx` forms within the artifact, a preparation's unit key, and
 /// a bare path (which addresses the whole file, and is what a span's hash
 /// covers anyway) are all legal.
@@ -250,7 +250,7 @@ fn a_usable_span_locator_still_writes() {
     }
 }
 
-/// Criterion 2: where the content is already in hand, a range beyond the
+/// Where the content is already in hand, a range beyond the
 /// artifact's end is refused rather than stored as an anchor pointing at
 /// lines the file does not have.
 #[test]
@@ -284,7 +284,7 @@ three
     );
 }
 
-/// Criterion 3: where the write path holds no content, the span cannot be
+/// Where the write path holds no content, the span cannot be
 /// checked without a read it deliberately does not perform. The anchor is
 /// accepted and the row says the span is unverified, so no later surface
 /// reports it as adjudicated.
@@ -307,7 +307,7 @@ fn an_uncheckable_span_is_accepted_and_recorded_as_unchecked() {
     assert!(!file_grain.span_unvalidated, "never set off the span grain");
 }
 
-/// Criterion 8: a hash the writer supplied is recorded as theirs, so a
+/// A hash the writer supplied is recorded as theirs, so a
 /// reader can later tell it from one the backfill inferred.
 #[test]
 fn an_authored_hash_records_that_the_author_pinned_it() {
@@ -320,7 +320,7 @@ fn an_authored_hash_records_that_the_author_pinned_it() {
     assert_eq!(b.hash_source, None, "no baseline, no origin to record");
 }
 
-/// Criteria 5 and 6: a re-pin that says nothing about the hash keeps the
+/// A re-pin that says nothing about the hash keeps the
 /// baseline it did not mention, one that supplies a hash replaces it, and
 /// unsetting the row first is the explicit way to clear it.
 #[test]
@@ -1327,7 +1327,7 @@ fn days_between_ages_by_civil_date() {
     assert_eq!(iso_days_since_epoch("2000-03-01"), Some(11017));
 }
 
-// --- quoted spans on the anchor element (quoted-span anchors, AC1 and AC4) ---
+// --- quoted spans on the anchor element (quoted-span anchors) ---
 
 fn url_span_input(span: &str, content: Option<&str>) -> AnchorInput {
     AnchorInput {
@@ -1340,7 +1340,7 @@ fn url_span_input(span: &str, content: Option<&str>) -> AnchorInput {
     }
 }
 
-/// AC1 assertion: a span that occurs in the supplied content (canonical
+/// Assertion: a span that occurs in the supplied content (canonical
 /// form) is accepted on the url, span and file grains; the row carries the
 /// span, the hash over its canonical form and the document's prepared hash,
 /// with the author as the hash source.
@@ -1373,7 +1373,7 @@ fn a_span_inside_the_supplied_content_writes_with_both_hashes() {
     }
 }
 
-/// AC1 assertion: the same element refuses, typed and naming the span, when
+/// Assertion: the same element refuses, typed and naming the span, when
 /// the canonical span does not occur in the canonical content; and a span
 /// beside a supplied hash refuses.
 #[test]
@@ -1397,7 +1397,7 @@ fn a_span_absent_from_the_content_and_a_span_beside_a_hash_refuse() {
     assert_eq!(err.detail()["field"], "span");
 }
 
-/// AC1 refusal complement: a span without content is accepted and recorded
+/// Refusal complement: a span without content is accepted and recorded
 /// as unverified (never verified), on the entity or tree grains it refuses,
 /// a whitespace-only span refuses, and a span on a class without hash
 /// semantics refuses like a hash would.
@@ -1445,7 +1445,7 @@ fn a_span_without_content_is_unverified_and_the_unfit_shapes_refuse() {
     );
 }
 
-/// AC1 assertion: a span rides the CLI `--anchor <JSON>` wire shape (the
+/// Assertion: a span rides the CLI `--anchor <JSON>` wire shape (the
 /// same `AnchorInput` the MCP element lowers into) with no new field
 /// grammar: `"span"` beside `"content"` deserialises and validates.
 #[test]
@@ -1471,7 +1471,7 @@ fn span_row(span: &str) -> Anchor {
         .unwrap()
 }
 
-/// AC4 assertion: two spans on one artifact, grain and class are two rows;
+/// Assertion: two spans on one artifact, grain and class are two rows;
 /// unsetting by artifact and span removes that one row and leaves the
 /// other; a re-pin that omits the span never touches a span row; a bare
 /// unset removes every row, spans included.
@@ -1543,7 +1543,7 @@ fn the_span_is_part_of_the_row_identity() {
     assert!(sc.is_empty());
 }
 
-/// AC4 assertion: the sidecar carries version 3 only once a span row (or a
+/// Assertion: the sidecar carries version 3 only once a span row (or a
 /// pinned hash source) exists; a version-2 document loads, resolves and
 /// re-saves with every row unchanged in meaning and the version it had; a
 /// version-3 document loads on this engine.
@@ -1600,7 +1600,7 @@ fn the_sidecar_version_moves_only_with_a_span_row() {
     assert_eq!(pinned.required_version(), ANCHOR_SIDECAR_SPAN_VERSION);
 }
 
-/// AC2's model half: a span row resolves on the span's presence in the
+/// Model half: a span row resolves on the span's presence in the
 /// observed text whatever the hash did, reads `span_absent` once the
 /// words are gone, and never `drifted`; a present observation without
 /// text cannot adjudicate it (recheck); an absent artifact is orphaned as

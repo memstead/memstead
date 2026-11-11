@@ -901,7 +901,7 @@ fn export_json(root: &Path, extra: &[&str]) -> serde_json::Value {
     serde_json::from_slice(&out).expect("--format json must emit one valid JSON document")
 }
 
-/// Criterion 1 (git-branch leg): one invocation, one document, every
+/// Git-branch leg: one invocation, one document, every
 /// non-stub entity with id / type / title / metadata / sections /
 /// relationships / `_hash` — section bodies byte-identical to what the
 /// fixture wrote, the cross-mem edge present with its full target id.
@@ -950,7 +950,7 @@ fn export_json_git_branch_round_trips_values() {
     assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
 }
 
-/// Criterion 2: the workspace-wide form (no `--mem`) contains every
+/// The workspace-wide form (no `--mem`) contains every
 /// writable mem, grouped, from one invocation. The cross-mem target's
 /// stub in `sender-mem`'s namespace must NOT surface as an entity
 /// anywhere (non-stub contract).
@@ -983,7 +983,7 @@ fn export_json_workspace_wide_groups_every_writable_mem() {
     }
 }
 
-/// Criterion 3: a read-only mount is included when named via `--mem`
+/// A read-only mount is included when named via `--mem`
 /// (with `read_only: true`) and absent from the workspace-wide default.
 #[test]
 fn export_json_read_only_mount_named_vs_default() {
@@ -1054,7 +1054,7 @@ fn export_json_read_only_mount_named_vs_default() {
     );
 }
 
-/// Criterion 4 (git-branch leg): the mem-repo's refs are identical
+/// Git-branch leg: the mem-repo's refs are identical
 /// before and after the export — the command is observably read-only.
 #[test]
 fn export_json_leaves_mem_repo_refs_untouched() {
@@ -1082,7 +1082,7 @@ fn export_json_leaves_mem_repo_refs_untouched() {
     assert_eq!(before, after, "export must not move any mem-repo ref");
 }
 
-/// Criteria 1 + 4 (folder-mem legs): the same invocation shape serves a
+/// Folder-mem legs: the same invocation shape serves a
 /// folder-backed mount — backend-uniform, byte-faithful — and no
 /// mem-content file changes on disk.
 #[test]
@@ -1163,7 +1163,7 @@ fn walk_files(dir: &Path) -> Vec<std::path::PathBuf> {
     out
 }
 
-/// Criterion 5: unknown mem refuses with the existing typed not-found
+/// Unknown mem refuses with the existing typed not-found
 /// code; `-o` (a `--format mem`-only flag) combined with `--format json`
 /// refuses rather than silently ignoring; neither leaf is INTERNAL.
 #[test]
@@ -1258,7 +1258,7 @@ fn make_rename_workspace(root: &Path) {
     ]);
 }
 
-/// Criteria 1 + 2: the rename is complete across entity ids, cross-mem
+/// The rename is complete across entity ids, cross-mem
 /// edges, wiki-links, grants, anchors, and sync-state keys; commit
 /// history is preserved (a branch move, not a fresh seed); and
 /// `memstead health --strict` stays clean.
@@ -1364,7 +1364,7 @@ fn mem_rename_git_branch_full_surface() {
         "sync-state keys must carry the new mem name; got:\n{config}"
     );
 
-    // Criterion 2: health --strict is clean after the rename.
+    // Health --strict is clean after the rename.
     memstead()
         .current_dir(root)
         .args(["health", "--strict"])
@@ -1372,7 +1372,7 @@ fn mem_rename_git_branch_full_surface() {
         .success();
 }
 
-/// Criteria 3 + 4 + 7: every refusal fires with its typed code, never
+/// Every refusal fires with its typed code, never
 /// `INTERNAL`, and leaves the workspace byte-identical (refs,
 /// workspace.toml, mounts.json all unchanged).
 #[test]
@@ -1450,7 +1450,7 @@ fn mem_rename_refusals_are_typed_and_effect_free() {
     );
 }
 
-/// Criterion 5: a half-applied rename — the peer mem already rewritten
+/// A half-applied rename — the peer mem already rewritten
 /// to the new prefix, the identity flip not yet done — is (a) visible
 /// to `health --strict` as findings, and (b) completed by re-issuing
 /// the same `mem rename`.
@@ -1498,7 +1498,7 @@ fn mem_rename_interrupted_half_state_detectable_and_completable() {
         .stdout(contains("Stubs: 0"));
 }
 
-/// Criterion 1 (folder leg): a folder-backed mount renames — the mount
+/// Folder leg: a folder-backed mount renames — the mount
 /// identity flips, entities re-id, the folder's on-disk location stays.
 #[test]
 fn mem_rename_folder_mount() {
@@ -1832,7 +1832,7 @@ fn export_sender_archive(sender_root: &Path, sender_mem: &Path) -> std::path::Pa
     archive
 }
 
-/// Criterion 1: install produces a workspace-level read-only mount —
+/// Install produces a workspace-level read-only mount —
 /// `mem list` shows it with `read_only`, `mounts.json` carries the
 /// archive mount, and no writable mem's config gains a `readMems` key.
 #[test]
@@ -2159,7 +2159,7 @@ fn legacy_read_mems_config_migrates_at_boot() {
         .stdout(contains("[[sender-mem--alpha]]"));
 }
 
-/// Criterion 4 remainder: uninstalling an unknown name and a writable
+/// Remainder: uninstalling an unknown name and a writable
 /// mem refuse typed and side-effect-free; no INTERNAL on any refusal.
 #[test]
 fn uninstall_refusals_are_typed_and_effect_free() {
@@ -2280,7 +2280,7 @@ fn make_anchor_workspace(root: &Path) {
     fs::remove_file(root.join("src-d.txt")).unwrap();
 }
 
-/// Anchor dialect (an earlier plana, decisions 26+29): an anchor
+/// Anchor dialect: an anchor
 /// written SOURCE-relative — the dialect every other binding surface
 /// speaks — resolves via the pointer-join; the workspace-relative form
 /// keeps resolving as the fallback; a path existing under BOTH joins
@@ -2497,8 +2497,8 @@ fn source_dialect_anchors_join_fallback_collide_and_refuse() {
         .success();
 }
 
-/// Criterion 1: all four states on a hand-authored mem with no binding,
-/// in one run. Criterion 5's read-only complement rides the same test.
+/// All four states on a hand-authored mem with no binding,
+/// in one run. The read-only complement rides the same test.
 #[test]
 fn verify_anchors_reports_four_states_without_binding() {
     let tmp = TempDir::new().unwrap();
@@ -2554,7 +2554,7 @@ fn verify_anchors_reports_four_states_without_binding() {
     );
 }
 
-/// Url anchors observable (evidence-engine plan 2): a mem with exactly one
+/// Url anchors observable: a mem with exactly one
 /// path-shaped binding accepts url anchors (a URL never enters a path
 /// namespace) and still refuses a path-shaped grain naming a URL;
 /// `verify-anchors --observations` adjudicates url rows from supplied
@@ -2576,7 +2576,7 @@ fn verify_anchors_observations_adjudicate_and_age_url_rows() {
     )
     .unwrap();
 
-    // AC2 refusal: a span grain whose artifact is a URL, named by the rule.
+    // Refusal: a span grain whose artifact is a URL, named by the rule.
     let refused = memstead()
         .current_dir(root)
         .env("MEMSTEAD_OPERATOR_MODE", "1")
@@ -2604,7 +2604,7 @@ fn verify_anchors_observations_adjudicate_and_age_url_rows() {
         "{e}"
     );
 
-    // AC2 assertion: url anchors beside the single path source, on update.
+    // Assertion: url anchors beside the single path source, on update.
     let h = |content: &str| memstead_base::anchor::prepared_content_hash(content.as_bytes());
     memstead()
         .current_dir(root)
@@ -2674,7 +2674,7 @@ fn verify_anchors_observations_adjudicate_and_age_url_rows() {
     let e: serde_json::Value = serde_json::from_slice(&refused).unwrap();
     assert_eq!(e["code"], "INVALID_OBSERVATION", "{e}");
 
-    // AC1: three observations (equal hash, differing content on an unstable
+    // Three observations (equal hash, differing content on an unstable
     // row, absent), the fourth url row gets none.
     fs::write(
         root.join("obs.json"),
@@ -3128,7 +3128,7 @@ fn checks_lists_a_mems_ledger_rows_with_filters() {
     );
 }
 
-/// Check findings and open kinds (evidence-engine plan 5): a batch entry
+/// Check findings and open kinds: a batch entry
 /// with a `finding` persists it on the ledger line, the health checks
 /// axis renders it under the entity's latest verdict, an `x-` kind is
 /// recorded verbatim and listed by count without moving the state, a
@@ -3326,7 +3326,7 @@ fn check_findings_persist_and_open_kinds_are_recorded_not_interpreted() {
     assert_eq!(lines(), 3);
 }
 
-/// Criterion 3: a mem whose bindings span multiple media no longer
+/// A mem whose bindings span multiple media no longer
 /// nulls — path anchors resolve against their own recorded paths, and a
 /// grain the mechanism does not reach reports `unobserved` (the pass could
 /// not measure it), distinct from `unresolvable` (the artifact is gone).
@@ -3575,7 +3575,7 @@ fn verify_anchors_persists_standalone_findings_across_passes() {
     assert_eq!(v["findings"]["new"], 0, "{v}");
 }
 
-/// Criterion 4 + 5 remainders: the health anchors axis is include-gated
+/// Remainders: the health anchors axis is include-gated
 /// (absent by default), an anchor-less mem reports empty, and an
 /// unknown mem refuses typed.
 #[test]
@@ -4073,7 +4073,7 @@ fn assert_linked(root: &Path, cache: &Path) {
         .stdout(contains("sender-mem"));
 }
 
-/// Criteria 1, 2 and 3: `install` resolves the mem through the engine on
+/// `install` resolves the mem through the engine on
 /// every layout the project's own tools produce — the collapsed folder
 /// workspace `init` makes, the repo-overlapping one `quickstart --repo`
 /// makes, a multi-mem folder workspace, and a mem-repo workspace. No
@@ -4201,7 +4201,7 @@ fn install_attaches_the_registry_mem_on_every_layout() {
     assert_linked(multi.path(), cache.path());
 }
 
-/// Criterion 5's refusal complement: with no workspace anywhere up the
+/// Refusal complement: with no workspace anywhere up the
 /// tree, `install` still refuses, typed, naming what was looked for.
 #[test]
 fn install_without_a_workspace_refuses_typed() {
@@ -4318,7 +4318,7 @@ fn login_uses_the_client_id_the_registry_serves() {
     );
 }
 
-/// Criterion 7: a declaration written by one process is not silently
+/// A declaration written by one process is not silently
 /// reverted by the next engine-mediated state write of a long-lived
 /// server. The in-process engine here stands in for the MCP server: it
 /// boots (taking its cached roster), a genuinely separate `memstead

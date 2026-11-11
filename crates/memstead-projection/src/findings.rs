@@ -4,7 +4,7 @@
 //! Verify **measures** fidelity and records durable findings; it mutates no
 //! entity in the destination mem (though a completed run does write this
 //! store, backfill observed anchor hashes, and record a `#verified`
-//! baseline). The store is the real home behind plan 03's findings
+//! baseline). The store is the real home behind the findings
 //! schema stub ([`memstead_base::binding`]'s removed `FindingKey` / `FindingRecord`).
 //!
 //! ## Keying: `hash(D)` alone — findings survive head movement
@@ -102,7 +102,7 @@ const FINDINGS_DIR: &str = "findings";
 /// head does NOT invalidate a finding (findings survive head movement; see
 /// the module docs).
 ///
-/// The real key behind plan 03's schema stub (which lived, IO-less, in
+/// The real key behind the findings schema stub (which lived, IO-less, in
 /// [`memstead_base::binding`]).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FindingKey {
@@ -403,7 +403,7 @@ pub fn record_standalone_findings(
         .anchors
         .iter()
         .filter_map(|a| {
-            // `unobserved` is deliberately absent (consistency-sweep 03/05).
+            // `unobserved` is deliberately absent.
             // A finding asserts a MEASURED condition, and an unobserved row is
             // the absence of a measurement: recording it as
             // `UnresolvableAnchor` claimed the artifact was gone when nobody
@@ -1702,7 +1702,7 @@ fn run_verify(
     // targets exist, and which of them this pass actually resolved.
     let mut anchors_existing: BTreeSet<String> = BTreeSet::new();
     let mut anchors_observed: BTreeSet<String> = BTreeSet::new();
-    // Scoped to this binding's population (consistency-sweep 03/01). An
+    // Scoped to this binding's population. An
     // excluded anchor must never raise a finding against a binding that did
     // not write it or has disclaimed the file; the report names the exclusions.
     let population = crate::anchor_population::population_for(
@@ -1864,7 +1864,7 @@ fn run_verify(
     // line and the findings store kept counting exclusions as uncovered
     // (three of them on plugin/graph) while the rationales rendered right
     // beside the count.
-    // Reconciled first (A3 AC3): an exclusion whose source left the
+    // Reconciled first: an exclusion whose source left the
     // declaration is dropped here as well, not only when a brief renders.
     let excluded: BTreeSet<String> =
         crate::advance::reconcile_exclusions(engine, workspace_root, resolved)

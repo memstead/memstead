@@ -628,7 +628,7 @@ fn a_legacy_dialect_pattern_makes_the_enumeration_partial() {
     );
 }
 
-/// Criterion 7's complement, allow half: a malformed allow no longer takes
+/// Complement, allow half: a malformed allow no longer takes
 /// the whole enumeration with it. The valid patterns still select, and the
 /// bad one comes back by name so the caller can state the partiality.
 #[test]
@@ -653,7 +653,7 @@ fn a_malformed_allow_does_not_empty_the_enumeration() {
     assert!(got.is_partial(), "a skipped pattern makes the set partial");
 }
 
-/// Criterion 7's complement, deny half: a malformed deny no longer
+/// Complement, deny half: a malformed deny no longer
 /// disables the other denies and inflates the denominator.
 #[test]
 fn a_malformed_deny_does_not_disable_the_other_denies() {
@@ -2195,7 +2195,7 @@ fn code_map_anchors_drift_on_interface_changes_only() {
     );
 }
 
-/// Criterion 6's regression pin: the graph change-detection half is
+/// Regression pin: the graph change-detection half is
 /// untouched except for the deliberate unscoped gate. A SCOPED graph
 /// facet still routes to the graph strategy and reports the same
 /// no-signal reason it always did when the source mem exposes no
@@ -2566,7 +2566,7 @@ fn mtime_token(source: &Source, deny: &[String], root: &Path) -> String {
     serialize_digest_token(&digest_stat_map(&compute_stat_map(&files, root)))
 }
 
-/// AC1 (deny invariance): a file matching an ingest `deny_paths` entry
+/// Deny invariance: a file matching an ingest `deny_paths` entry
 /// appears in **no** changed slice (git, mtime), **no** refinement batch,
 /// and does **not** influence the mtime digest / `source_moved` token —
 /// exercising the *same* denied file across every strategy that reads a
@@ -2687,9 +2687,9 @@ fn deny_paths_excluded_from_every_strategy_and_token() {
     );
 }
 
-/// AC2 (one empty-scope semantic): an **unscoped** facet (no allow
+/// One empty-scope semantic: an **unscoped** facet (no allow
 /// patterns) is the same typed refusal — `NoSignal { Unscoped }` — on git
-/// AND mtime, never a silent empty slice. AC2 complement: an empty
+/// AND mtime, never a silent empty slice. Complement: an empty
 /// `deny_paths` list does NOT trip that refusal — a *scoped* facet still
 /// classifies normally (empty scope and empty deny_paths are different
 /// fields with different semantics).
@@ -2758,7 +2758,7 @@ fn unscoped_facet_refuses_uniformly_and_empty_deny_is_distinct() {
     );
 }
 
-/// AC2 refinement leg: an ingest whose only source is unscoped emits no
+/// Refinement leg: an ingest whose only source is unscoped emits no
 /// refinement batch — the refusal, not a silent empty batch.
 #[test]
 fn unscoped_facet_emits_no_refinement_batch() {
@@ -2800,7 +2800,7 @@ fn unscoped_facet_emits_no_refinement_batch() {
     );
 }
 
-/// AC3 (visible NoSignal) end-to-end through the cursor: a `signal:none`
+/// Visible NoSignal end-to-end through the cursor: a `signal:none`
 /// source and an unscoped source each contribute a distinct no-signal note;
 /// a first-seen (reseed) source does NOT — only no-signal reasons are
 /// noted. The rendered preface names `signal:none` explicitly and the

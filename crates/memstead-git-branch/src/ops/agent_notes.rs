@@ -441,7 +441,7 @@ mod tests {
         );
     }
 
-    /// Agent-trust plan 15: the `Identity:` trailer round-trips
+    /// The `Identity:` trailer round-trips
     /// through `format_commit_message` → `parse_commit_message`, and
     /// an identity-less context emits no trailer at all — absence
     /// recorded as absence.

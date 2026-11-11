@@ -80,7 +80,7 @@ fn json_of(out: &std::process::Output) -> serde_json::Value {
     })
 }
 
-/// A2 AC1, refusal complement first: a valid version-2 sidecar carries no
+/// Refusal complement first: a valid version-2 sidecar carries no
 /// condition anywhere and `verify-anchors` exits 0.
 #[test]
 fn valid_sidecar_carries_no_condition() {
@@ -169,7 +169,7 @@ fn valid_sidecar_carries_no_condition() {
     assert!(!text.contains("\"resolved\""), "{text}");
 }
 
-/// A2 AC1, assertion: with the sidecar declaring version 4 every surface
+/// Assertion: with the sidecar declaring version 4 every surface
 /// carries `ANCHORS_SIDECAR_UNREADABLE` with the mem and the reason, the
 /// integrity axis lists it as a finding, `verify-anchors` reports
 /// `fully_adjudicated: false` and exits non-zero, and no surface reports
@@ -298,7 +298,7 @@ fn unreadable_sidecar_is_a_typed_condition_on_every_surface() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("ANCHORS_SIDECAR_UNREADABLE"));
 }
 
-/// A2 AC2, refusal complement: the retired name `resolved` where a state
+/// Refusal complement: the retired name `resolved` where a state
 /// is read as input (a sidecar row's `last_observed.state`) refuses with
 /// the vocabulary named, on every surface, as the same condition.
 #[test]

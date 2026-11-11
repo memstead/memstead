@@ -23,8 +23,7 @@ use crate::runtime_validator::{MissingRequiredField, ValidationError};
 /// to a constant prefix plus a count.
 pub const INLINE_LIST_CAP: usize = 3;
 
-/// Every payload key an update recognises as mutation content, in one place
-/// (consistency-sweep 03/04).
+/// Every payload key an update recognises as mutation content, in one place.
 ///
 /// WHY a constant: four surfaces hand-copied this list and all four disagreed.
 /// The `EMPTY_UPDATE` message named seven keys, its own `details` payload
@@ -3338,9 +3337,9 @@ impl From<BackendError> for EngineError {
 }
 
 #[cfg(test)]
-mod inline_list_tests;
+mod details_payload_tests;
 #[cfg(test)]
-mod plan05_subsystem_tests;
+mod inline_list_tests;
 /// One value of every error, for the surface-parity tests.
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]

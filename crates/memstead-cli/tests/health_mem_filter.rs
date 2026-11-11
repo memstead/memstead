@@ -1,5 +1,5 @@
-//! The health mem filter applies to every section and warning
-//!: on two mounted mems that each carry one
+//! The health mem filter applies to every section and warning:
+//! on two mounted mems that each carry one
 //! anchor row and one warning of their own, `health --mem alpha` lists
 //! only alpha's anchor row, only alpha's config entry and only alpha's
 //! warning, and no section names beta except the mem rosters; CLI JSON and
@@ -159,7 +159,7 @@ fn keys(v: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// B9 AC1: every section and every warning scoped to alpha; CLI and MCP
+/// Every section and every warning scoped to alpha; CLI and MCP
 /// agree byte for byte.
 #[test]
 fn a_mem_filtered_health_read_carries_only_that_mem() {
@@ -200,7 +200,7 @@ fn a_mem_filtered_health_read_carries_only_that_mem() {
     );
 }
 
-/// B9 AC1 refusal complement (the in-test half): without a filter every
+/// Refusal complement (the in-test half): without a filter every
 /// section still carries both mems in the historical shape.
 #[test]
 fn an_unfiltered_read_carries_every_mem() {

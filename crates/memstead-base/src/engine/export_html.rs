@@ -1,4 +1,4 @@
-//! `export --format html` (first-author-path plan 11): one
+//! `export --format html`: one
 //! self-contained HTML file per mem — the read surface for
 //! non-operators. A file you hand to a person: no server, no account,
 //! no installed anything.
@@ -705,7 +705,7 @@ mod tests {
         assert_eq!(html, again, "export must be byte-deterministic");
     }
 
-    /// Criteria 1–4 over one fixture: rendering, sanitisation,
+    /// Over one fixture: rendering, sanitisation,
     /// resource degradation, anchors, determinism, localized change.
     #[test]
     fn html_export_renders_sanitises_and_stays_self_contained() {
@@ -844,8 +844,8 @@ mod tests {
         assert!(after.contains("Geändert."), "edited content present");
     }
 
-    /// Criterion 5: a read-only mount exports with its trust class in
-    /// the identity block. Criterion 6's refusal parity: unknown mem
+    /// A read-only mount exports with its trust class in
+    /// the identity block. Refusal parity: unknown mem
     /// refuses UNKNOWN_MEM like the other formats.
     #[test]
     fn read_only_origin_stated_and_unknown_mem_refuses() {

@@ -34,9 +34,10 @@
 //! call against the buffered line. POSIX guarantees `O_APPEND` writes
 //! ≤ `PIPE_BUF` (4 KiB on Linux/macOS) appear atomically; the line
 //! shape stays well under that. Concurrent writers from a single
-//! process are serialised by the file's append-mode kernel lock.
-//! Cross-process concurrency is out of scope (filesystem mems are single-writer
-//! per the plan).
+//! process are serialised by the file's append-mode kernel lock. Writers
+//! in different processes are serialised by the engine's per-mem write
+//! lock (`engine::write_lock`), held around every mutation that appends
+//! here.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -509,7 +510,7 @@ mod tests {
         assert!(value.get("identity").is_none());
     }
 
-    /// Agent-trust plan 15: a declared identity lands as the
+    /// A declared identity lands as the
     /// `identity` field of the JSONL line, verbatim.
     #[test]
     fn appends_the_declared_identity() {
@@ -798,7 +799,7 @@ mod tests {
 }
 
 /// A folder mem's ledger set against its file set, reported and never
-/// repaired (consistency-sweep 04/04, criteria 1 and 2).
+/// repaired.
 ///
 /// The ledger is the change record AND the drift cursor, and it is written
 /// only by the engine. A hand-edited, hand-added or hand-deleted markdown
@@ -927,7 +928,7 @@ mod reconcile_tests {
         assert!(!r.is_clean());
     }
 
-    /// Criterion 2: the check reads. A reconciliation that tidied the ledger
+    /// The check reads. A reconciliation that tidied the ledger
     /// would be fabricating provenance for changes the engine cannot
     /// attribute, so nothing it touches may move.
     #[test]

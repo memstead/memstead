@@ -463,8 +463,8 @@ pub struct RetypeParams {
     pub identity: Option<String>,
 }
 
-/// Parameters for `memstead_check` — the check operation
-///. Deliberately minimal: entity, verdict,
+/// Parameters for `memstead_check` — the check operation.
+/// Deliberately minimal: entity, verdict,
 /// optional method note, optional role, optional kind.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CheckParams {

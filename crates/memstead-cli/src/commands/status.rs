@@ -102,8 +102,7 @@ fn quarantine_roster(engine: &memstead_base::Engine) -> Vec<QuarantineLine> {
 }
 
 /// One mem's durability line: what the engine can say about whether that
-/// mem's writes are recorded anywhere, and what it cannot (04/04, criterion
-/// 6).
+/// mem's writes are recorded anywhere, and what it cannot.
 #[derive(Serialize)]
 struct MemDurability {
     mem: String,
@@ -167,7 +166,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 }
                 let status = engine.status();
                 let store: &Store = engine.store();
-                // One per-binding pass for both projections (A3 AC2).
+                // One per-binding pass for both projections.
                 let (projections, rollup) = root
                     .as_deref()
                     .map(|r| {
@@ -194,7 +193,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 }
                 let status = engine.status();
                 let store: &Store = engine.store();
-                // One per-binding pass for both projections (A3 AC2).
+                // One per-binding pass for both projections.
                 let (projections, rollup) = root
                     .as_deref()
                     .map(|r| {
@@ -218,7 +217,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         };
     let stubs = total - real;
 
-    // Name order (A7 AC3): both lists are byte-stable across runs, and the
+    // Name order: both lists are byte-stable across runs, and the
     // health composer and the ui-api carry them in the same order.
     let edge_pairs: Vec<(&String, &usize)> = status.edge_types.iter().collect();
     let schema_pairs: Vec<(String, usize)> = schema_counts.into_iter().collect();
@@ -440,7 +439,7 @@ fn count_by_type(store: &Store) -> BTreeMap<String, usize> {
 mod tests {
     use super::*;
 
-    /// A7 AC3: the JSON lists are rendered from name-ordered maps, so the
+    /// The JSON lists are rendered from name-ordered maps, so the
     /// order is pinned at the type (a `BTreeMap`, never a hash map) and
     /// checked at the render seam.
     #[test]

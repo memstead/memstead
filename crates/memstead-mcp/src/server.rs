@@ -99,7 +99,7 @@ pub struct McpServer {
     /// in `memstead_overview`'s `## Lifecycle Namespaces` section so the
     /// posture is observable to anyone reading the engine's outputs.
     operator_mode: bool,
-    // SAFETY: single-client assumption — valid under stdio (one `memstead-mcp`
+    // Single-client assumption, valid under stdio (one `memstead-mcp`
     // process per client). A future HTTP transport with concurrent clients
     // would require threading `RequestContext` through every handler
     // instead. `OnceLock` encodes write-once + lock-free reads; a second

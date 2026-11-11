@@ -62,7 +62,7 @@ pub struct HealthIssue {
 
 /// One quarantine-roster entry on [`HealthSummary`]: the mem, the
 /// typed reason code, and the full reason message (repair command
-/// included — plan-01 material).
+/// included).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuarantinedMemReport {
     pub mem: String,

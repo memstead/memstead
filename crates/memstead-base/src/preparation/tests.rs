@@ -1065,7 +1065,7 @@ fn quoted_phrase_on_an_entity_reads_the_canonical_markdown() {
     assert!(entity_prepared_hash(&e, None, Some("pdf-to-markdown")).is_none());
 }
 
-// --- the canonical span form (quoted-span anchors, AC3) ---
+// --- the canonical span form (quoted-span anchors) ---
 
 /// Every pair the canonical form is fixed on: each left-hand text carries
 /// the right-hand span after canonicalisation, and the two hash alike.

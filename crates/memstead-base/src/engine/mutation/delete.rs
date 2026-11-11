@@ -367,7 +367,7 @@ mod tests {
         assert!(engine.anchors_referencing_artifact("src/lib.rs").is_empty());
     }
 
-    /// Criterion 7 (consistency-sweep 03/02): the engine's own delete path
+    /// The engine's own delete path
     /// already stages the anchor removal, so the dangling detector must find
     /// nothing afterwards. A fix that turned correct engine behaviour into a
     /// finding would make every delete noisy.
@@ -395,7 +395,7 @@ mod tests {
         );
     }
 
-    /// Criteria 1 and 3 on the standalone surface. The artifact is present and
+    /// On the standalone surface. The artifact is present and
     /// its hash matches, which is exactly the case that used to count as
     /// `resolved` for an entity that no longer exists.
     #[test]

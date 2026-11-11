@@ -199,7 +199,7 @@ fn ids(axis: &serde_json::Value, kind: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// B5 AC1: missing, unchecked, and checked read apart; the closed entity
+/// Missing, unchecked, and checked read apart; the closed entity
 /// is absent; CLI and MCP agree byte for byte.
 #[test]
 fn the_axis_reads_missing_unchecked_and_checked_apart() {
@@ -238,7 +238,7 @@ fn the_axis_reads_missing_unchecked_and_checked_apart() {
     );
 }
 
-/// B5 AC1 refusal complement, second half: an `x-` check of a kind other
+/// Refusal complement, second half: an `x-` check of a kind other
 /// than the declared one does not count as checked; the declared `x-`
 /// kind does.
 #[test]
@@ -261,7 +261,7 @@ fn a_foreign_check_counts_only_under_the_declared_kind() {
     );
 }
 
-/// B5 AC1 refusal complement, first half: a declaration naming a section
+/// Refusal complement, first half: a declaration naming a section
 /// the type does not declare refuses at install, naming it.
 #[test]
 fn a_declaration_naming_an_undeclared_section_refuses_at_install() {

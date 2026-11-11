@@ -2,7 +2,7 @@
 //!
 //! `record_check` is the engine-recorded act of verification: it
 //! appends one [`crate::check::CheckRecord`] — verdict, method note,
-//! the entity's `content_hash` at check time, and plan-13 provenance
+//! the entity's `content_hash` at check time, and provenance
 //! (actor, client, declared role) — to the workspace check ledger.
 //! Checking mutates nothing: no entity write, no mem commit, no
 //! `content_hash` change. That non-mutation is load-bearing — it is
@@ -177,7 +177,7 @@ impl Engine {
                 .to_string(),
             // The caller-declared identity rides engine session state
             // ([`Engine::set_identity`]), same as the role — absence
-            // records as absence (plan 15).
+            // records as absence.
             identity: self.current_identity().map(str::to_string),
             // Verification records omit the kind entirely, so a
             // kind-omitted caller's ledger lines stay byte-identical
@@ -1009,7 +1009,7 @@ write_rules: []
         );
     }
 
-    /// Criterion 5 complement: a read-only mount refuses a check
+    /// Complement: a read-only mount refuses a check
     /// typed (`READ_ONLY_MOUNT`) — capability gating runs before the
     /// entity lookup, same as every mutation-shaped guard.
     #[test]

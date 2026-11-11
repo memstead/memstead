@@ -1,6 +1,5 @@
 //! The markdown form of `memstead health` must serve what the include
-//! gathered. Found 2026-08-27 (consistency-sweep 04/02's closing grade):
-//! on a folder workspace, `--json health --include conformance` returned
+//! gathered. On a folder workspace, `--json health --include conformance` returned
 //! a populated `findings` array while the default markdown form printed
 //! only the summary — the flag was accepted, documented, and had no
 //! effect on the rendering, so an operator diagnosing a mem by eye was

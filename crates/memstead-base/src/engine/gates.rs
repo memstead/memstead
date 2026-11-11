@@ -1,6 +1,5 @@
 //! The gates brief — the engine-rendered standing of every declared
-//! `transition_requires_checks` gate (graph-plans plan 03, the yes
-//! branch of the gated-transition spike).
+//! `transition_requires_checks` gate.
 //!
 //! For each mounted mem whose schema declares the constraint on at
 //! least one type, the brief lists every non-stub entity of a gated

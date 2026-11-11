@@ -49,8 +49,8 @@ pub struct CommitNote {
     /// Caller-declared role from the `Role:` trailer; absent = unspecified.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
-    /// Caller-declared identity from the `Identity:` trailer
-    ///; absent = undeclared.
+    /// Caller-declared identity from the `Identity:` trailer;
+    /// absent = undeclared.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<String>,
     /// Ids a multi-entity commit touched (notably `batch_update`),

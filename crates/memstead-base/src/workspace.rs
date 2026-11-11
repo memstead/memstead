@@ -230,8 +230,7 @@ impl MountStorage {
             // commit, so keying only on "a head exists" reported `established`
             // for every folder mem that had ever been written — strictly
             // stronger than the mount-kind answer this field was added to
-            // qualify, which is the misreading it exists to prevent (04/04,
-            // criteria 6 and 7, found by the plan's grade).
+            // qualify, which is the misreading it exists to prevent.
             MountStorage::GitBranch { .. } if head.is_some_and(|h| !h.is_empty()) => {
                 DurabilityBasis::Established
             }

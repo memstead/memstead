@@ -155,7 +155,7 @@ fn cli_refusals_append_successes_do_not_and_health_serves_the_axis() {
     assert_eq!(fs::read_to_string(gitignore).unwrap(), "*\n");
 }
 
-/// Criterion 3: an unwritable ledger location degrades to
+/// An unwritable ledger location degrades to
 /// not-recording WITHOUT changing the refusal returned — the same
 /// typed envelope with and without a writable ledger.
 #[test]

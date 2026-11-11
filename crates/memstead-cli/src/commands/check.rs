@@ -2,7 +2,7 @@
 //!
 //! Mirrors the MCP `memstead_check` tool 1:1. A check is the
 //! engine-recorded act of verification: verdict from the closed
-//! vocabulary (`ok` | `failed`), optional method note, plan-13
+//! vocabulary (`ok` | `failed`), optional method note,
 //! provenance (actor, client, the session's `--role`), and the
 //! entity's `content_hash` at check time — appended to the
 //! workspace's append-only check ledger. Checking mutates nothing:

@@ -803,7 +803,7 @@ mod tests {
     }
 
     /// A hierarchical mem name publishes under its leaf — the archive
-    /// slug grammar admits no `/` (graph-plans plan 02, 2026-08-28).
+    /// slug grammar admits no `/`.
     #[test]
     fn archive_identity_is_the_leaf_segment() {
         assert_eq!(
@@ -1117,7 +1117,7 @@ mod tests {
             assert!(entries_without.anchors_bytes.is_none());
         }
 
-        /// AC1, git-branch path: the engine reads the workspace ledger and
+        /// Git-branch path: the engine reads the workspace ledger and
         /// hands the sealed check records here; the assembler places the
         /// recognised `.memstead/checks.json` member, and a `None` embeds
         /// no member (byte-identical to before the member existed).

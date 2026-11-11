@@ -393,11 +393,11 @@ fn update_anchors_unset_bare_narrowed_idempotent_and_unset_first() {
     assert_eq!(anchors[1].hash.as_deref(), Some("h-a-fresh"));
 }
 
-/// Criterion 9 (consistency-sweep 03/03): one payload naming the same
+/// One payload naming the same
 /// `(artifact, grain, class)` triple twice is refused. That triple is the
 /// sidecar's merge identity, so the repeats used to collapse to the last
 /// occurrence and the caller was never told an anchor it sent had gone.
-/// Criterion 10's complement rides along: the same artifact at two grains
+/// Complement rides along: the same artifact at two grains
 /// is two rows and still writes.
 #[test]
 fn a_payload_naming_one_triple_twice_is_refused() {
@@ -433,7 +433,7 @@ fn a_payload_naming_one_triple_twice_is_refused() {
     assert_eq!(engine.entity_anchors(&id).len(), 3);
 }
 
-/// Criterion 5 through the real write surface: a later call carrying the
+/// Through the real write surface: a later call carrying the
 /// same triple with no hash keeps the stored baseline, rather than
 /// dropping it for the next verify to silently re-establish.
 #[test]

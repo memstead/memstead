@@ -72,7 +72,7 @@ fn clean_report() -> FidelityReport {
         }
 }
 
-/// Criterion 4 (consistency-sweep 03/05): rows the axis could not
+/// Rows the axis could not
 /// adjudicate make it inconclusive, not clean. And the complement that
 /// gives the criterion its teeth: EXCLUSIONS do not, because an
 /// out-of-scope or other-binding anchor is a complete, correct answer
@@ -120,10 +120,10 @@ fn unadjudicated_rows_block_clean_but_exclusions_do_not() {
     assert_eq!(ent.rollup().verdict, RollupVerdict::Inconclusive);
 }
 
-/// Criterion 7: each condition plans 01, 02 and 03 introduce is REACHABLE
+/// Each anchor-axis condition is REACHABLE
 /// in the rendered report. Reachable means expressible and rendered, not
-/// failing: none of the five is a finding, which is exactly why criterion
-/// 4 has the axis report honestly over them rather than cleanly.
+/// failing: none of the five is a finding, which is exactly why the axis
+/// must report honestly over them rather than cleanly.
 #[test]
 fn all_five_conditions_are_reachable_in_the_report() {
     let mut r = clean_report();
@@ -172,7 +172,7 @@ fn clean_requires_a_substantive_pass_and_no_findings() {
     );
 }
 
-/// Criterion 4's complement: a vacuous measurement is never summarized as
+/// Complement: a vacuous measurement is never summarized as
 /// clean. The graph medium's `0/0` case reports `enumerable: true` and
 /// enumerates nothing, which is exactly how a "0 findings" run could look
 /// green while having observed no source at all.
@@ -473,7 +473,7 @@ fn a3_binding(
     }
 }
 
-/// A3 AC4: coverage counts describing entities per artifact — an artifact
+/// Coverage counts describing entities per artifact — an artifact
 /// with three anchors from one entity counts once, one with an anchor from
 /// each of two entities counts once; the report states the unit.
 #[test]

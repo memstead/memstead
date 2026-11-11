@@ -74,8 +74,8 @@
 //!
 //! Load-bearing invariant: the new baseline `token` is only *collected* here
 //! (into `write_commands` / `reseed`); it is recorded by the engine's
-//! `set_mem_sync_state` writer when `projection advance` completes a full pass
-//!. The driver never writes it.
+//! `set_mem_sync_state` writer when `projection advance` completes a full pass.
+//! The driver never writes it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -645,7 +645,7 @@ fn walk_tree_bounded(base: &Path, workspace_root: &Path, cap: usize) -> Option<V
 }
 
 /// The ingest `deny_paths` entries that select **no file** in the project tree
-/// — surfaced as a rendered brief warning (AC 6 refusal leg) so a zero-matching
+/// — surfaced as a rendered brief warning so a zero-matching
 /// deny is never a silent no-op. Resolution base is the medium's git project
 /// root (so a cross-medium workspace-relative deny like `../dev/**`, whose
 /// target lives outside a sub-medium, still resolves against real files),

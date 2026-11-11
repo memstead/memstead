@@ -467,8 +467,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             )?;
             // Resolved AFTER the args are assembled, because whether the
             // compare-and-swap token is required depends on the payload's own
-            // shape and the engine owns that predicate
-            // (consistency-sweep 03/04).
+            // shape and the engine owns that predicate.
             let explicit_hash = payload.expected_hash.take();
 
             let patch_sections = payload
@@ -697,8 +696,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         .map(|i| i.to_string())
                         .collect::<Vec<_>>(),
                 });
-                // Present only when the update carried anchors or unsets
-                //.
+                // Present only when the update carried anchors or unsets.
                 if let Some(changed) = outcome.anchors_changed {
                     payload["anchors_changed"] = serde_json::json!(changed);
                 }

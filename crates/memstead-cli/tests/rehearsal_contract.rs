@@ -119,7 +119,7 @@ fn refusal_envelope(ws: &Path, args: &[&str]) -> Value {
 }
 
 // ---------------------------------------------------------------------------
-// Criterion 3 — the PRE-EXISTING dry-run surfaces, asserted against
+// The PRE-EXISTING dry-run surfaces, asserted against
 // the contract: paired refusals, byte-identical workspace.
 // ---------------------------------------------------------------------------
 
@@ -341,7 +341,7 @@ fn update_rehearsal_refuses_identically_and_leaves_workspace_byte_identical() {
 }
 
 // ---------------------------------------------------------------------------
-// Criterion 1 — relate gains the same contract.
+// Relate gains the same contract.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -450,7 +450,7 @@ fn relate_rehearsal_reports_would_be_stub_and_leaves_workspace_byte_identical() 
 }
 
 // ---------------------------------------------------------------------------
-// Criterion 2 — the batch family's reversed contract.
+// The batch family's reversed contract.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -801,7 +801,7 @@ fn batch_relate_rehearsal_refuses_identically_to_real() {
 }
 
 // ---------------------------------------------------------------------------
-// Criterion 5 complement — rehearsal against a quarantined mem refuses
+// Complement — rehearsal against a quarantined mem refuses
 // exactly as the real call would.
 // ---------------------------------------------------------------------------
 

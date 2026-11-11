@@ -1,5 +1,4 @@
-//! Check records — the engine-recorded act of verification
-//!.
+//! Check records — the engine-recorded act of verification.
 //!
 //! A check is an agent recording "entity E checked, verdict ok |
 //! failed, via method M". It is engine state, never entity content:
@@ -18,7 +17,7 @@
 //! is the substrate process state derives from, not disposable
 //! telemetry.
 //!
-//! Each record carries plan-13 provenance (actor, client, declared
+//! Each record carries provenance (actor, client, declared
 //! role) plus the entity's `content_hash` at check time. State
 //! derivation compares that hash against the current one:
 //!
@@ -356,7 +355,7 @@ pub struct CheckRecord {
     /// The entity's `content_hash` at check time — the staleness
     /// baseline.
     pub entity_hash: String,
-    /// Recorded actor identity (plan-13 provenance).
+    /// Recorded actor identity (provenance).
     pub actor: String,
     /// Recorded client identity (`name@version`), when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1435,7 +1434,7 @@ mod tests {
         assert!(CheckKind::from_wire("Conformance").is_none());
     }
 
-    /// Criterion 5: a pre-kind ledger line (no `kind` field) parses
+    /// A pre-kind ledger line (no `kind` field) parses
     /// and derives as a `verification` record, byte-for-byte the old
     /// shape on the write side too.
     #[test]
@@ -1450,12 +1449,12 @@ mod tests {
         assert!(!line.contains("kind"));
         assert!(!line.contains("schema_ref"));
         // An identity-less record carries no identity key either —
-        // pre-plan-15 lines and identity-less callers stay
+        // pre-identity lines and identity-less callers stay
         // byte-identical.
         assert!(!line.contains("identity"));
     }
 
-    /// Criterion 3: state derives per (entity, kind) — a later check
+    /// State derives per (entity, kind) — a later check
     /// of the other kind does not supersede.
     #[test]
     fn latest_is_per_kind() {
@@ -1476,7 +1475,7 @@ mod tests {
         assert_eq!(c.schema_ref.as_deref(), Some("planning@1.0.0"));
     }
 
-    /// Criterion 4: a conformance verdict is stale on a content move
+    /// A conformance verdict is stale on a content move
     /// AND on a pin move; a verification verdict ignores pin moves.
     #[test]
     fn conformance_stales_on_pin_move_verification_does_not() {

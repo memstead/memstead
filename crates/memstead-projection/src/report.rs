@@ -5,8 +5,8 @@
 //! measurement over them plus the live anchor / capability / freshness state.
 //! It performs **no LLM call** and **no destination-mem mutation** — it reads
 //! the engine, the findings store, the advance store, and the capability
-//! matrix, and formats a report. Any repair instruction is the sync brief's job
-//!, never this report's.
+//! matrix, and formats a report. Any repair instruction is the sync brief's job,
+//! never this report's.
 //!
 //! ## What the report states honestly (B1–B5)
 //!
@@ -119,7 +119,7 @@ pub struct TreeFanout {
     pub fanout: usize,
 }
 
-/// The coverage unit, stated on every fidelity report (A3 AC4).
+/// The coverage unit, stated on every fidelity report.
 pub const COVERAGE_UNIT: &str = "describing entities per artifact — an artifact counts once \
      when at least one entity anchors it, however many anchor rows it carries; anchor rows \
      are counted on the resolution axis, never here";
@@ -194,7 +194,7 @@ pub struct UnanchoredMention {
 pub struct AnchorComposition {
     /// Count per provenance-class wire string across **this binding's
     /// population** (the full transparency breakdown, including `authored`).
-    /// Mem-wide until consistency-sweep 03/01 scoped the axis.
+    /// Scoped to the binding's population, not the whole mem.
     pub by_class: BTreeMap<String, usize>,
     /// Count per grain wire string across this binding's population.
     pub by_grain: BTreeMap<String, usize>,
@@ -246,7 +246,7 @@ pub struct AnchorComposition {
     /// pre-provenance fallback. Stated so a reader can tell a population
     /// established by provenance from one resting on the fallback.
     pub counted_without_provenance: usize,
-    /// Sidecar rows whose ENTITY is gone (consistency-sweep 03/02). In no
+    /// Sidecar rows whose ENTITY is gone. In no
     /// binding's population and in none of the state buckets above: they used
     /// to resolve against their artifact alone and raise the numerator for an
     /// entity that does not exist.
@@ -260,7 +260,7 @@ pub struct AnchorComposition {
     /// otherwise it means "not looked for", and the report says which.
     pub unreconciled: Option<String>,
     /// Counted `span`-grain rows whose locator was never checked against the
-    /// artifact (consistency-sweep 03/03). The write path reads no source, so
+    /// artifact. The write path reads no source, so
     /// a span written without content in hand is unverified; stating it here
     /// stops the axis reporting such a row as adjudicated.
     pub span_unvalidated: usize,
@@ -1077,7 +1077,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
                 .to_string()
         }
     ));
-    // The unit, stated beside the figures (A3 AC4): the count is over
+    // The unit, stated beside the figures: the count is over
     // artifacts described, never over anchor rows.
     md.push_str(&format!(
         "- coverage unit: {} — {} describing entit{} over {} covered artifact(s)\n\n",
@@ -1210,8 +1210,8 @@ fn render_hard_required(report: &FidelityReport) -> String {
         "- `authored` bucket (excluded from coverage/accuracy denominators): {}\n",
         report.anchors.authored
     ));
-    // The figure and the population it was computed over render as ONE unit
-    // (consistency-sweep 03/05, criteria 1 and 3). Separate bullets were the
+    // The figure and the population it was computed over render as ONE unit.
+    // Separate bullets were the
     // defect: a budget-reduced or excerpted rendering could carry the
     // percentage and drop the caveat, and a percentage alone is read as
     // health. `scripts/check-anchor-figure-sites.py` fails on a rendering that
@@ -1310,8 +1310,8 @@ fn render_hard_required(report: &FidelityReport) -> String {
             }
         }
     }
-    // What the axis could not adjudicate, and whose baseline it is
-    // (consistency-sweep 03/03). Both are always-ships aggregates: a
+    // What the axis could not adjudicate, and whose baseline it is.
+    // Both are always-ships aggregates: a
     // resolution figure resting on unverified spans or on baselines the
     // engine inferred means less than a reader assumes, and the difference
     // was invisible until it was counted.
@@ -1904,7 +1904,7 @@ pub fn compute_fidelity_report(
     };
 
     // --- Anchor composition + resolution over THIS BINDING'S anchors ---
-    // Scoped rather than mem-wide (consistency-sweep 03/01): the axis answers
+    // Scoped rather than mem-wide: the axis answers
     // for the population this binding is responsible for, and names the rest.
     let population =
         crate::anchor_population::population_for(engine, resolved, Some(key.binding_hash.as_str()));

@@ -440,7 +440,7 @@ fn include_keys() -> Vec<&'static str> {
     memstead_base::ops::health::HEALTH_INCLUDE_KEYS.to_vec()
 }
 
-/// A7 AC1 (JSON half): for no include, every include key on its own, all
+/// JSON half: for no include, every include key on its own, all
 /// keys at once, and a `--mem` filter, the CLI's `--json` bytes equal the
 /// MCP tool's `structuredContent` bytes.
 #[test]
@@ -480,7 +480,7 @@ fn cli_json_is_byte_identical_to_the_mcp_structured_content() {
     }
 }
 
-/// A7 AC1 (markdown half): the CLI's markdown for every include key is
+/// Markdown half: the CLI's markdown for every include key is
 /// unchanged against the fixtures recorded before the refactor.
 #[test]
 fn cli_markdown_matches_the_recorded_fixtures() {
@@ -517,7 +517,7 @@ fn cli_markdown_matches_the_recorded_fixtures() {
     }
 }
 
-/// A7 AC1 refusal complement: `--mem` naming no mounted mem refuses with
+/// Refusal complement: `--mem` naming no mounted mem refuses with
 /// `UNKNOWN_MEM` and names the writable roster.
 #[test]
 fn unknown_mem_refuses_and_names_the_roster() {
@@ -535,7 +535,7 @@ fn unknown_mem_refuses_and_names_the_roster() {
     assert!(text.contains("notes") && text.contains("side"), "{env}");
 }
 
-/// A7 AC1 source scan: the CLI crate composes no health axis itself.
+/// Source scan: the CLI crate composes no health axis itself.
 #[test]
 fn cli_health_command_calls_no_per_axis_composer() {
     let src = fs::read_to_string(

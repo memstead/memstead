@@ -167,7 +167,7 @@ fn ids(rows: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// B7 AC1: resolving absent and fresh by the anchor clock, drifted listed
+/// Resolving absent and fresh by the anchor clock, drifted listed
 /// under the anchor clock, the anchor-less entity by the day threshold as
 /// before; CLI and MCP agree byte for byte.
 #[test]
@@ -216,7 +216,7 @@ fn a_drifted_anchor_lists_the_entity_regardless_of_age() {
     assert!(cli.get("anchor_fresh").is_none(), "{cli}");
 }
 
-/// B7 AC1 refusal complement: an anchor-less workspace renders the
+/// Refusal complement: an anchor-less workspace renders the
 /// historical shape and nothing else, pinned or not.
 #[test]
 fn an_anchorless_workspace_renders_as_before() {

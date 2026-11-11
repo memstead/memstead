@@ -527,7 +527,7 @@ fn compute_report_end_to_end() {
     end_to_end_body(&report, &outcome, &md);
 }
 
-/// Criterion 5 (consistency-sweep 03/02): the same workspace with only the
+/// The same workspace with only the
 /// tree entity present. `src/present.rs` was directly covered by the two
 /// file anchors those two entities held, and a row no entity stands behind
 /// is not evidence that an artifact is covered.
@@ -628,7 +628,7 @@ fn end_to_end_report(
         last_observed: None,
     };
     // The entity the sidecar is keyed to. Written, because it exists:
-    // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+    // a row whose entity does not is DANGLING
     // and leaves the population before any figure counts it.
     for slug in entity_slugs {
         std::fs::write(

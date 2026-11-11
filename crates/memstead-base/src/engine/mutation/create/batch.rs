@@ -291,7 +291,7 @@ impl Engine {
             let count = entity_ids.len();
             let subject = format!("memstead: batch-create ({count} entities)");
             // Per-entry notes ride the ONE batch commit's note record as
-            // `<id>: <note>` lines (decision 3, an earlier plan):
+            // `<id>: <note>` lines:
             // `append_provenance` below is a documented no-op on the
             // git-branch backend, so without this the notes survived
             // nowhere exactly where most writes happen. A batch with no

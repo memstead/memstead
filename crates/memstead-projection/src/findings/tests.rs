@@ -641,7 +641,7 @@ fn verify_persists_findings_readable_fresh() {
         last_observed: None,
     };
     // The entity the sidecar is keyed to. Written, because it exists:
-    // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+    // a row whose entity does not is DANGLING
     // and leaves the population before any figure counts it.
     std::fs::write(
         mem_dir.join("e.md"),
@@ -1435,7 +1435,7 @@ fn finding_recorded_at_old_head_presents_in_brief_at_new_head() {
         last_observed: None,
     };
     // The entity the sidecar is keyed to. Written, because it exists:
-    // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+    // a row whose entity does not is DANGLING
     // and leaves the population before any figure counts it.
     std::fs::write(
         mem_dir.join("e.md"),
@@ -1657,7 +1657,7 @@ fn hashless_anchor_backfills_once_then_drift_adjudicates_deterministically() {
     };
     use AnchorHashStability::{Stable, Unstable};
     // The entity the sidecar is keyed to. Written, because it exists:
-    // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+    // a row whose entity does not is DANGLING
     // and leaves the population before any figure counts it.
     std::fs::write(
         mem_dir.join("e.md"),
@@ -2161,7 +2161,7 @@ fn backfill_writer_refuses_non_hash_classes_and_never_overwrites() {
         last_observed: None,
     };
     // The entity the sidecar is keyed to. Written, because it exists:
-    // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+    // a row whose entity does not is DANGLING
     // and leaves the population before any figure counts it.
     std::fs::write(
         mem_dir.join("e.md"),
@@ -3167,7 +3167,7 @@ fn full_verify_uncaps_adjudication_and_walks_whole_source() {
         last_observed: None,
     };
     // The entity the sidecar is keyed to. Written, because it exists:
-    // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+    // a row whose entity does not is DANGLING
     // and leaves the population before any figure counts it.
     std::fs::write(
         mem_dir.join("e.md"),
@@ -3615,7 +3615,7 @@ fn a3_binding(
     }
 }
 
-/// A3 AC1: after `projection edit` adds a deny, every sampled verify
+/// After `projection edit` adds a deny, every sampled verify
 /// records zero `uncovered` findings naming a denied file across five
 /// rotation windows while `S(D)` reads thirty; lifting the deny makes the
 /// denied files present again (the filter follows the binding, not the

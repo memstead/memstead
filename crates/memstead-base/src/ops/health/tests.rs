@@ -644,7 +644,7 @@ fn health_warns_on_undeclared_relationship_in_existing_entity() {
     let mut store = Store::new();
     let mut entity = make_entity("with-bad-rel", true);
     // Author an edge using a name that does not exist in the default
-    // schema's vocabulary. The load-side contract per decision 3 is
+    // schema's vocabulary. The load-side contract is
     // about unknown *types*; unknown *relationships* on an already-
     // loaded entity land in the soft health surface instead so an
     // agent running `memstead_health` after a schema edit sees the drift.

@@ -51,7 +51,7 @@ fn conflicts_list_and_resolve_roundtrip() {
     assert_eq!(listed["conflicts"][0]["id"], "ws--torn");
     assert_eq!(listed["conflicts"][0]["file_path"], "torn.md");
 
-    // Criterion 3, agent-facing: the failure mode names the remedy on
+    // Agent-facing: the failure mode names the remedy on
     // a surface an agent actually reads — the CLI health report
     // carries the per-file load error whose message names the resolve
     // operation.

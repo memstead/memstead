@@ -1488,7 +1488,7 @@ fn build_entity_envelope_unfiltered_body_token_field_name() {
 }
 
 // ------------------------------------------------------------------
-// Schema verbosity (lite vs. full) — Plan 01.
+// Schema verbosity (lite vs. full).
 // ------------------------------------------------------------------
 
 /// Load the embedded `software` schema (~42 rel-types, 9 entity
@@ -1813,7 +1813,7 @@ write_rules: []
     assert_eq!(ts["required_outgoing"][0]["severity"], "block");
 
     // Section-format declarations render at BOTH verbosity
-    // levels (plan 08 shares plan 07's no-hidden-legality rule).
+    // levels (the no-hidden-legality rule).
     let fmt_manifest = r#"name: formatted
 version: 1.0.0
 description: format render fixture
@@ -2717,7 +2717,7 @@ fn lite_full_carry_the_same_type_and_rel_names() {
     );
 }
 
-/// Criterion 4 of 04/02, on the surface an agent actually reads. The
+/// On the surface an agent actually reads. The
 /// conformance axis knew, but it is opt-in; a plain `memstead_entity` /
 /// `memstead entity --json` returned the swallowed sections as `""` with
 /// nothing to distinguish them from sections the author left blank.

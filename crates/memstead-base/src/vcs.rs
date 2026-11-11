@@ -163,13 +163,13 @@ pub struct CommitContext<'a> {
     /// (`NOTE_MAX_LEN`, 280 chars) before the mutation touches disk;
     /// callers must not feed unbounded input to this field.
     pub note: Option<String>,
-    /// The caller-declared role this mutation is performed in
-    ///. `Unspecified` (the default) emits no
+    /// The caller-declared role this mutation is performed in.
+    /// `Unspecified` (the default) emits no
     /// trailer — absence recorded as absence; declared roles emit
     /// `Role: <value>` in the trailer block.
     pub role: Role,
-    /// The caller-declared identity performing this mutation
-    ///: an opaque caller-chosen string — an
+    /// The caller-declared identity performing this mutation:
+    /// an opaque caller-chosen string — an
     /// agent name, a session handle, a person's tag. Same trust model
     /// as the role: caller-declared, unverified, tamper-evident
     /// (bound into append-only history). `None` emits no trailer —
@@ -367,12 +367,12 @@ pub fn format_commit_message(prose: &str, ctx: &CommitContext<'_>) -> String {
     if let Some(c) = ctx.client.as_ref() {
         trailers.push(format!("Client: {}@{}", c.name, c.version));
     }
-    // `Role:` records the caller-declared role (plan 13); omitted for
+    // `Role:` records the caller-declared role; omitted for
     // `Unspecified` — the absent trailer IS the record of absence.
     if let Some(role) = ctx.role.as_trailer() {
         trailers.push(format!("Role: {role}"));
     }
-    // `Identity:` records the caller-declared identity (plan 15);
+    // `Identity:` records the caller-declared identity;
     // omitted when absent — the absent trailer IS the record of
     // absence, same posture as `Role:`.
     if let Some(identity) = ctx.identity.as_deref() {

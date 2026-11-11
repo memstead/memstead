@@ -393,8 +393,8 @@ impl Engine {
         ))
     }
 
-    /// What `mem`'s entity BODIES carry that their types do not declare
-    /// (consistency-sweep 04/01): headings absorbed into the catch-all,
+    /// What `mem`'s entity BODIES carry that their types do not declare:
+    /// headings absorbed into the catch-all,
     /// headings repeated so that later bodies were not kept, and frontmatter
     /// keys the next write will drop.
     ///

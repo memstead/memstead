@@ -509,7 +509,7 @@ mod tests {
         );
     }
 
-    /// AC2: `memstead install` of an archive carrying the sealed
+    /// `memstead install` of an archive carrying the sealed
     /// check-records member succeeds and caches the member; an archive
     /// without it installs as today under a content key that does not
     /// depend on the member's existence in the engine.

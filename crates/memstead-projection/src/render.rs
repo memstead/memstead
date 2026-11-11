@@ -39,7 +39,7 @@ pub enum RenderBriefError {
     #[error(transparent)]
     Resolve(#[from] ResolveError),
     /// The binding declares no `build` operation, so the build path (brief) is
-    /// refused (D6/AC4). The message carries the one-command remedy
+    /// refused. The message carries the one-command remedy
     /// `memstead projection enable build <binding>`, which — run verbatim —
     /// makes the same brief succeed.
     #[error(
@@ -187,8 +187,7 @@ fn find_binding<'a>(
 /// The single engine entry point behind every consuming surface. `ingest_name` is
 /// the canonical binding id (or a legacy flat-ingest stem — see [`find_binding`]).
 ///
-/// `consume` mirrors the scheduler's peek/consume split (decision 12,
-/// an earlier plan) onto derived caches: a peek (`false`) is a
+/// `consume` mirrors the scheduler's peek/consume split onto derived caches: a peek (`false`) is a
 /// pure read that leaves every cache byte-identical, while a consuming
 /// render (`true`) additionally publishes this binding as the ACTIVE
 /// one for deny enforcement (`projection check-path`). Without this, a
@@ -204,7 +203,7 @@ pub fn render_ingest_brief(
         .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
     let (binding_id, binding) = find_binding(&configs, ingest_name)?;
 
-    // D6/AC4: the build path (brief) refuses when the binding declares no build
+    // The build path (brief) refuses when the binding declares no build
     // operation, carrying the one-command `projection enable build` remedy —
     // rather than fabricating a default build the operator never declared.
     if binding.operations.build.is_none() {
@@ -397,7 +396,7 @@ pub fn render_sync_brief_budgeted(
 /// framing and the no-red-verdict-from-pre-binding-history refusal stay in lockstep
 /// across every surface.
 /// DELIBERATELY MEM-WIDE, unlike the three reporting consumers that
-/// consistency-sweep 03/01 scoped to one binding's population. This predicate
+/// Scoped to one binding's population. This predicate
 /// gates whether a verdict may be red at all, so narrowing it would change a
 /// REFUSAL rather than a figure: a mem carrying another binding's anchors would
 /// begin counting as pre-binding for this one, and a red verdict it should

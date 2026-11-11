@@ -927,7 +927,7 @@ write_rules: []
         std::fs::read(f.main_dir.join(format!("{}.md", id.name()))).unwrap()
     }
 
-    /// AC1: the type changes in place with the mapped section; id, path and
+    /// The type changes in place with the mapped section; id, path and
     /// incoming edges stay; the response says checks are stale; a fresh
     /// boot loads the result with no shape drops and the same edge count.
     #[test]
@@ -1003,7 +1003,7 @@ write_rules: []
         );
     }
 
-    /// AC1 refusal complement: a map naming a key the target does not
+    /// Refusal complement: a map naming a key the target does not
     /// declare refuses UNKNOWN_SECTION with the target's declared sections
     /// and a proposed map, and the file is byte-identical afterwards.
     #[test]
@@ -1060,7 +1060,7 @@ write_rules: []
         ));
     }
 
-    /// AC2: an incoming edge whose rel-type pins its target to the current
+    /// An incoming edge whose rel-type pins its target to the current
     /// type refuses; so does an outgoing one and a cross-mem one; two
     /// violations at once arrive in one envelope; every refusal leaves the
     /// file byte-identical.

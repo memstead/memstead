@@ -351,7 +351,7 @@ propagating_relationships: []
     );
 }
 
-/// 04/07, criteria 3, 5 and 6: cross-mem links are gated on write and
+/// Cross-mem links are gated on write and
 /// default-deny, so an edge whose grant was revoked is a state the engine
 /// would refuse to create today. Before this plan it stayed where it was,
 /// loaded without comment and exited zero under `--strict`; the workspace's
@@ -422,7 +422,7 @@ fn revoking_a_grant_names_the_edges_it_orphans_and_strict_then_refuses() {
     let (code, _, envelope) = strict_health(tmp.path(), &["integrity"]);
     assert_eq!(code, 0, "a permitted edge must not fail strict: {envelope}");
 
-    // Criterion 6: the revocation is not refused and needs no force flag.
+    // The revocation is not refused and needs no force flag.
     let out = memstead()
         .current_dir(tmp.path())
         .args(["workspace", "revoke-cross-link", "alpha", "beta"])
@@ -431,13 +431,13 @@ fn revoking_a_grant_names_the_edges_it_orphans_and_strict_then_refuses() {
     let text = String::from_utf8_lossy(&out.stdout).to_string();
     assert!(out.status.success(), "revocation is never refused: {text}");
 
-    // Criterion 5: it NAMES the orphaned edge, not just a count.
+    // It NAMES the orphaned edge, not just a count.
     assert!(
         text.contains("alpha--source") && text.contains("beta--target"),
         "the revocation must name the edges it orphaned: {text}"
     );
 
-    // Criterion 3: strict now refuses.
+    // Strict now refuses.
     let (code, json, envelope) = strict_health(tmp.path(), &["integrity"]);
     assert_eq!(code, 1, "{envelope}");
     assert!(
@@ -452,7 +452,7 @@ fn revoking_a_grant_names_the_edges_it_orphans_and_strict_then_refuses() {
         .collect();
     assert!(codes.contains(&"CROSS_MEM_EDGE_UNGRANTED"), "{codes:?}");
 
-    // Criterion 5, the precision half: a SECOND, unrelated revocation must not
+    // The precision half: a SECOND, unrelated revocation must not
     // re-report the edge the first one orphaned. Reporting the whole standing
     // set would blame every later edit for what an earlier one left behind.
     memstead()
@@ -473,7 +473,7 @@ fn revoking_a_grant_names_the_edges_it_orphans_and_strict_then_refuses() {
          orphaned nothing and must say so: {second}"
     );
 
-    // Criterion 4, at the CLI: the mem still serves. Reading the referrer is
+    // At the CLI: the mem still serves. Reading the referrer is
     // not blocked by the condition its own edge raises.
     memstead()
         .current_dir(tmp.path())
@@ -481,7 +481,7 @@ fn revoking_a_grant_names_the_edges_it_orphans_and_strict_then_refuses() {
         .assert()
         .success();
 
-    // Criterion 9, at the CLI: the remedy needs no grant.
+    // At the CLI: the remedy needs no grant.
     memstead()
         .current_dir(tmp.path())
         .args([
@@ -497,7 +497,7 @@ fn revoking_a_grant_names_the_edges_it_orphans_and_strict_then_refuses() {
     assert_eq!(code, 0, "removing the edge resolves it: {envelope}");
 }
 
-/// 04/06, criteria 2 and 4: the CLI's own rendered surfaces name the
+/// The CLI's own rendered surfaces name the
 /// condition. The markdown block used to print `section: (none)` and
 /// leave the reader to work out which of three problems they had, and
 /// the open-questions worklist carried a parallel `dangling_link`

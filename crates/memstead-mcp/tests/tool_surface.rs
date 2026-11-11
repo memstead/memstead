@@ -299,7 +299,7 @@ fn memstead_search_schema_exposes_query_and_expand_fields() {
     );
 }
 
-/// Plan 03, Part A: the `dry_run` param docs tell the truth about what a
+/// The `dry_run` param docs tell the truth about what a
 /// dry_run on an INVALID entity does — it refuses with the same typed
 /// envelope a real call returns, NOT a warnings-list preview. Pins the
 /// corrected wording against regression to the pre-refactor overpromise
@@ -325,7 +325,7 @@ fn dry_run_docs_describe_refusal_not_a_warnings_preview() {
     );
 }
 
-/// Plan 02, Part B: the overview surface documents that community
+/// The overview surface documents that community
 /// detection is workspace-global — `mem=` scopes which clusters are
 /// *reported*, not detection, and a sparse / disconnected subgraph may
 /// form no cluster at all. Pins the docs so the expectation-gap fix
@@ -1301,8 +1301,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "details.enum_values",
             "details.type_write_rules",
             "details.stubs",
-            // Cross-gate pre-announcement block on MISSING_REQUIRED_SECTION
-            //: still-unset required metadata rides the
+            // Cross-gate pre-announcement block on MISSING_REQUIRED_SECTION:
+            // still-unset required metadata rides the
             // section refusal so one retry clears both gates.
             "details.pre_announced",
             "details.pre_announced.required_field_unset.missing[]",
@@ -1350,8 +1350,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "details.enum_values",
             "details.type_write_rules",
             "details.stubs",
-            // Cross-gate pre-announcement block on MISSING_REQUIRED_SECTION
-            //: still-unset required metadata rides the
+            // Cross-gate pre-announcement block on MISSING_REQUIRED_SECTION:
+            // still-unset required metadata rides the
             // section refusal so one retry clears both gates.
             "details.pre_announced",
             "details.pre_announced.required_field_unset.missing[]",
@@ -1372,8 +1372,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // that was a stub target's last referrer GC's the stub and
             // lists it here (shared shape with relate / delete).
             "orphan_stubs_removed",
-            // Whether an update that carried anchors changed the sidecar
-            //; absent without anchors.
+            // Whether an update that carried anchors changed the sidecar;
+            // absent without anchors.
             "anchors_changed",
             // Read-only field list: error code + the engine-stamped
             // metadata fields named alongside mem/id/type.
@@ -1649,13 +1649,13 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "drifted",
             "recheck",
             "unresolvable",
-            // The entity end of an anchor (consistency-sweep 03/02): a row
+            // The entity end of an anchor: a row
             // naming an entity the mem no longer holds, and the statement of
             // why that check could not run when it could not.
             "dangling",
             "entity_end_unreconciled",
-            // The measured failure and the absent measurement, split
-            // (consistency-sweep 03/05), and the statement every figure
+            // The measured failure and the absent measurement, split,
+            // and the statement every figure
             // travels with.
             "unobserved",
             "population",
@@ -1945,7 +1945,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "head_after",
             "entities_loaded",
             "changed_entity_ids",
-            // Full-refresh mode (plan 12): the additive re-scan block on
+            // Full-refresh mode: the additive re-scan block on
             // the response and its fields.
             "refresh",
             "schemas_added",
@@ -2965,7 +2965,7 @@ fn full_instructions_roster_matches_registry_bidirectionally() {
     );
 }
 
-/// Criterion 2: the instructions carry the crate version and the
+/// The instructions carry the crate version and the
 /// CLI-companion note naming the batch, export, and distribution
 /// families. (Integration tests compile inside the memstead-mcp
 /// package, so `CARGO_PKG_VERSION` here IS the crate version.)
@@ -2992,7 +2992,7 @@ fn instructions_carry_crate_version_and_cli_companion_note() {
     }
 }
 
-/// Criterion 2: the MCP serverInfo version equals the engine's FULL
+/// The MCP serverInfo version equals the engine's FULL
 /// build version (crate semver plus git build sha for dev builds) —
 /// the historical hardcoded `"0.1.0"` cannot recur, and two dev builds
 /// between releases stay distinguishable. Asserted against the LIVE
@@ -3033,9 +3033,9 @@ fn server_info_version_equals_full_build_version() {
     }
 }
 
-/// Criterion 4: instruction length stays within a stated budget — a
-/// tripwire against unbounded growth, not a magic number. Budgets set
-/// at plan-05 landing: ~10.1kB current + ~24% headroom.
+/// Instruction length stays within a stated budget — a
+/// tripwire against unbounded growth, not a magic number. Budgets first
+/// set at ~10.1kB current + ~24% headroom.
 /// Raised consciously on 2026-09-02 (12.5kB → 12.8kB) for the
 /// `MEM_ROSTER_CHANGED` membership marker, the sibling of
 /// `MEM_RELOADED`: a protocol every consumer must know, not decoration.

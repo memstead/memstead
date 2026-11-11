@@ -193,7 +193,7 @@ fn mcp_axis(ws: &Path) -> serde_json::Value {
     reply["result"]["structuredContent"]["vital_signs"].clone()
 }
 
-/// A6 AC1: each signal once on a fixture; CLI JSON and MCP
+/// Each signal once on a fixture; CLI JSON and MCP
 /// `structured_content` byte-identical.
 #[test]
 fn axis_reports_the_five_signals_from_a_fixture() {
@@ -338,7 +338,7 @@ fn axis_reports_the_five_signals_from_a_fixture() {
     );
 }
 
-/// A6 AC1, refusal complement: a fixture with none of the signals reports
+/// Refusal complement: a fixture with none of the signals reports
 /// every count as zero and no list items.
 #[test]
 fn quiet_fixture_reports_zero_counts_and_no_lists() {
@@ -389,7 +389,7 @@ fn quiet_fixture_reports_zero_counts_and_no_lists() {
     );
 }
 
-/// A6 AC2: no declaration, no guess — `not_declared`; and two
+/// No declaration, no guess — `not_declared`; and two
 /// declarations refuse at load with the shape named.
 #[test]
 fn last_resort_is_read_from_the_declaration_and_two_are_refused() {

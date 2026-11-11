@@ -41,7 +41,7 @@
 //!   write referencing an artifact outside the presented slice fabricates no
 //!   slice entry.
 //!
-//! AC9's non-stalling property still rests on the persisted dispositions + slice
+//! The non-stalling property still rests on the persisted dispositions + slice
 //! subtraction; auto-`worked` only removes the explicit-disposition burden for
 //! artifacts anchored during the same pass.
 

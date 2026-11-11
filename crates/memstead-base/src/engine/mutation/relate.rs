@@ -911,7 +911,7 @@ impl Engine {
             stub_target = Some(args.target.clone());
             if target_verified_in_storage {
                 // The target EXISTS — storage said so. The in-store
-                // stub is only plan 01's until-load representation of
+                // stub is only the until-load representation of
                 // a cross-mem link into a deferred mem (it resolves
                 // when the mem loads), so it carries the load-time
                 // kind and no AUTO_STUB_CREATED warning: that warning
@@ -1240,7 +1240,7 @@ impl Engine {
                         self.discard_all_pending();
                         return Err(e);
                     }
-                    // Derivation baseline (plan 12) — same predicate
+                    // Derivation baseline — same predicate
                     // and staging as the single-item path; rides the
                     // batch commit, rolls back with a refusal. (Batch
                     // no-op entries do NOT re-baseline — the explicit
@@ -1349,7 +1349,7 @@ impl Engine {
             }
             let subject = format!("memstead: batch-relate ({edge_count} edges)");
             // Per-entry notes ride the batch commit's note record as
-            // `<id>: <note>` lines (decision 3), keyed by the edge's
+            // `<id>: <note>` lines, keyed by the edge's
             // source entity — `append_provenance` is a no-op on the
             // git-branch backend. No notes → no note record.
             let note_lines: Vec<String> = prepared

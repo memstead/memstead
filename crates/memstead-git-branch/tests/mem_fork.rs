@@ -1,13 +1,13 @@
 //! `fork_mem` on the git-branch backend: a mem forks from another
 //! mem's branch at a recorded ancestor.
 //!
-//! AC1 (local form): the branch starts at the source's tip or at a
+//! Local form: the branch starts at the source's tip or at a
 //! given sha the source reaches, the config is the source's with
 //! `forkedFrom` written in and the source's cursors left behind, the
 //! entities read identical, the source's cross-link grants are
 //! inherited, and every refusal lands nothing.
 //!
-//! AC2 (remote form): the source branch and config come from a second
+//! Remote form: the source branch and config come from a second
 //! bare mem-repo declared as a remote, the fetched tree is validated
 //! before the mount exists, no grant is inherited, the local
 //! `__MEMSTEAD` is never fetched over, and an unresolvable pin refuses
@@ -267,7 +267,7 @@ fn code_of(err: &FullEngineError) -> &'static str {
 }
 
 // ---------------------------------------------------------------------
-// AC1: the local form
+// The local form
 // ---------------------------------------------------------------------
 
 /// A source with two entities, a cross-mem edge under a grant, a
@@ -1175,7 +1175,7 @@ fn a_fork_recorded_without_a_base_reads_as_based_on_its_ancestor() {
 }
 
 // ---------------------------------------------------------------------
-// AC2: the remote form, with a second bare mem-repo as the remote
+// The remote form, with a second bare mem-repo as the remote
 // ---------------------------------------------------------------------
 
 /// Workspace A with mem `specs` (two entities, a description and a
@@ -1535,7 +1535,7 @@ fn fork_refuses_a_folder_only_workspace() {
 }
 
 // ---------------------------------------------------------------------
-// AC3: the adopt form
+// The adopt form
 // ---------------------------------------------------------------------
 
 /// A source with two entities and a self-link, pushed to a PLAIN bare

@@ -340,8 +340,8 @@ fn init_filesystem_scaffolds_full_operations() {
     );
 }
 
-/// A `web` source scaffolds build-only, with the deferral named in `warnings[]`
-/// (operator decision 7). The binding on disk carries no sync/verify block.
+/// A `web` source scaffolds build-only, with the deferral named in `warnings[]`.
+/// The binding on disk carries no sync/verify block.
 #[test]
 fn init_web_source_scaffolds_build_only_with_warning() {
     let tmp = bare_workspace();
@@ -1861,7 +1861,7 @@ fn brief_sync_renders_sole_writer_with_conservatism() {
 /// `projection brief <binding> --sync` against a binding whose sync operation
 /// is not enabled refuses typed with the enable remedy in details — a loop
 /// must not spend a work slot rendering a brief the engine will refuse to
-/// apply (an earlier plan, decision 13). Complement: `projection
+/// apply. Complement: `projection
 /// enable sync` makes the identical call succeed.
 #[test]
 fn brief_sync_refuses_sync_disabled_binding_with_remedy() {
@@ -2410,9 +2410,9 @@ fn absent_sync_names_the_enable_remedy_only_where_the_medium_can_carry_it() {
         .success();
 }
 
-// ── AC4: absent-operation-block refusal + `projection enable` remedy ─────────
+// ── Absent-operation-block refusal + `projection enable` remedy ─────────────
 
-/// D6/AC4: `projection brief` on a binding with **no build block** refuses with
+/// `projection brief` on a binding with **no build block** refuses with
 /// the `projection enable build <binding>` remedy, and that command — run
 /// verbatim — makes the same brief succeed.
 #[test]
@@ -2462,7 +2462,7 @@ fn brief_refuses_absent_build_then_enable_build_remedy_succeeds() {
         .success();
 }
 
-/// D6/AC4: `projection advance` on a binding with **no sync block** refuses with
+/// `projection advance` on a binding with **no sync block** refuses with
 /// the `projection enable sync <binding>` remedy, and that command — run
 /// verbatim — makes the same advance succeed.
 #[test]
@@ -2832,7 +2832,7 @@ fn verify_workspace() -> TempDir {
         r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
     );
     // The entity the sidecar row is keyed to. A row whose entity the mem does
-    // not hold is DANGLING (consistency-sweep 03/02) and leaves the population
+    // not hold is DANGLING and leaves the population
     // before any figure counts it, so a fixture without the entity would be
     // measuring the wrong thing.
     std::fs::write(
@@ -2935,7 +2935,7 @@ fn verify_backfills_hashless_anchor_then_adjudicates_drift() {
     );
 }
 
-/// C9 AC1: a quarantined DESTINATION mem is refused by both verify and
+/// A quarantined DESTINATION mem is refused by both verify and
 /// brief, and the run leaves all three stores byte-identical.
 ///
 /// Filed 2026-09-02: a tick under a binary missing a schema version loaded
@@ -3229,7 +3229,7 @@ fn verify_refuses_a_destination_mem_that_does_not_exist() {
     );
 }
 
-/// C6 AC1: a BARE `projection verify` leaves the destination mem's config
+/// A BARE `projection verify` leaves the destination mem's config
 /// byte-identical, findings and report unaffected; the same call with
 /// `--advance` moves the `#verified` token. The entry this pins was filed on
 /// a grader that verified in order to READ and dirtied the tree it was
@@ -3541,7 +3541,7 @@ fn gate_exits_zero_clean_six_on_findings_and_typed_code_on_error() {
         .assert()
         .code(3);
 
-    // Criterion 2: the report is emitted before the findings exit fires. In
+    // The report is emitted before the findings exit fires. In
     // `--json` mode stdout carries both the report envelope and the typed
     // error envelope, so a pipeline consumer can read either.
     assert!(
@@ -3866,8 +3866,7 @@ fn human_report_opens_with_verdict_and_actions() {
         text.contains("**Do next:**"),
         "the rollup carries top concrete actions: {text}"
     );
-    // The coverage rule (consistency-sweep 04/08, found by the plan's
-    // grade): human mode must carry the stamp the JSON envelope
+    // The coverage rule: human mode must carry the stamp the JSON envelope
     // carries, or the human reader gets a verdict with no coverage.
     assert!(
         text.contains(
@@ -4082,7 +4081,7 @@ fn graph_binding_workspace() -> TempDir {
     tmp
 }
 
-/// Criterion 1 + 2, positively, through the CLI: a graph binding's verify
+/// Positively, through the CLI: a graph binding's verify
 /// reports a REAL enumerated denominator (the source mem's in-scope entities),
 /// surfaces the unprojected source entity as uncovered, backfills its entity
 /// anchors, and — after one source entity changes — adjudicates that anchor
@@ -4165,7 +4164,7 @@ fn graph_binding_verify_enumerates_and_detects_entity_drift() {
     );
 }
 
-/// Criterion 1's exclude clause: `projection exclude` gates on S(D)
+/// Exclude clause: `projection exclude` gates on S(D)
 /// membership, so a genuine entity of the source mem is accepted and a
 /// non-member is refused. Before graph enumeration, S(D) was empty and the
 /// gate refused *every* id — the command was unusable over a graph binding.
@@ -4202,7 +4201,7 @@ fn graph_binding_exclude_accepts_a_real_source_entity() {
         .failure();
 }
 
-/// Criterion 2's complement, at its sharpest: an **unmounted source mem** must
+/// Complement, at its sharpest: an **unmounted source mem** must
 /// refuse, not resolve as a mem full of deleted entities.
 ///
 /// Every entity anchor into an absent mem misses the store and observes as
@@ -4276,7 +4275,7 @@ fn an_unmounted_graph_source_refuses_instead_of_reporting_deletions() {
     );
 }
 
-/// Criterion 5's complement, on the path that matters: a graph facet carrying
+/// Complement, on the path that matters: a graph facet carrying
 /// a scope pattern nothing interprets must be REFUSED WHEN IT RUNS, not only
 /// when it is edited.
 ///
@@ -4332,7 +4331,7 @@ fn a_graph_scope_nothing_interprets_is_refused_on_the_run_path() {
     }
 }
 
-/// Criterion 3's complement, second clause: a capability the matrix CLAIMS but
+/// Complement, second clause: a capability the matrix CLAIMS but
 /// the pass could not deliver renders as a degradation, never as silence. The
 /// degradation block only ever spoke for media already marked non-enumerable,
 /// so an enumerable medium whose walk came back empty printed
@@ -4376,7 +4375,7 @@ fn an_empty_walk_on_an_enumerable_medium_renders_a_degradation() {
     );
 }
 
-/// Criteria 1 and 3's complements, in the shape that hid them: a MIXED
+/// Complements, in the shape that hid them: a MIXED
 /// binding, where one facet walks and another does not.
 ///
 /// Both guards were binding-level — the `--full` refusal tested the union of
@@ -4445,7 +4444,7 @@ fn an_empty_facet_is_not_excused_by_a_sibling_that_walked() {
     );
 }
 
-/// Criterion 4's complement, on the path a grade found: the brief must never
+/// Complement, on the path a grade found: the brief must never
 /// instruct an agent to write a scope the engine then refuses.
 ///
 /// An unscoped facet's remedy was medium-agnostic — "write `**/*` in the facet
@@ -4505,7 +4504,7 @@ fn the_unscoped_remedy_is_one_the_medium_accepts() {
         .success();
 }
 
-/// Criterion 5's complement, second clause, for the medium it was left on. A
+/// Complement, second clause, for the medium it was left on. A
 /// `web` facet has no scope vocabulary at all, so any rule is uninterpretable —
 /// yet the declaration gate checked graph alone and the brief printed
 /// `Paths: **/*` at the agent as selection. Fixing the medium where a defect
@@ -4537,7 +4536,7 @@ fn a_web_facet_cannot_carry_scope_either() {
     );
 }
 
-/// Criterion 6 proper: build→sync→verify over a graph binding whose source mem
+/// Build→sync→verify over a graph binding whose source mem
 /// is **git-branch backed**, so a real snapshot token and a real changed slice
 /// exist. The folder-mem fixture above cannot reach this — a folder mount
 /// tracks no head, so its graph source can only ever report "snapshot missing",

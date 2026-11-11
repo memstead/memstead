@@ -1599,7 +1599,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
 /// it was, loaded without comment and passed strict health. The workspace's
 /// own policy file stopped describing its graph and no surface noticed.
 ///
-/// Covers criteria 1, 2 and 4: the edge is reported with its cause once the
+/// Covers three claims: the edge is reported with its cause once the
 /// grant is gone, an edge the resolution still permits is NOT reported
 /// (including one permitted only through the create-rule default union, and
 /// one inside a single mem), and the mem carrying the ungranted edge keeps
@@ -1704,7 +1704,7 @@ fn a_revoked_grant_surfaces_its_edges_and_a_live_grant_surfaces_none() {
         }],
     );
 
-    // Criterion 2: while the grant stands, nothing is reported — and the
+    // While the grant stands, nothing is reported — and the
     // same-mem edge is not reported either.
     assert!(
         engine.ungranted_cross_mem_edges().is_empty(),
@@ -1720,7 +1720,7 @@ fn a_revoked_grant_surfaces_its_edges_and_a_live_grant_surfaces_none() {
         ..Default::default()
     });
 
-    // Criterion 1: reported, naming referrer, target, and the cause.
+    // Reported, naming referrer, target, and the cause.
     let found = engine.ungranted_cross_mem_edges();
     assert_eq!(found.len(), 1, "{found:?}");
     let f = &found[0];
@@ -1747,7 +1747,7 @@ fn a_revoked_grant_surfaces_its_edges_and_a_live_grant_surfaces_none() {
         "the target of an ungranted edge is a real entity"
     );
 
-    // Criterion 4: never a load refusal, never a quarantine. Both mems keep
+    // Never a load refusal, never a quarantine. Both mems keep
     // serving, and the entity carrying the ungranted edge still reads.
     assert!(
         engine
@@ -1757,7 +1757,7 @@ fn a_revoked_grant_surfaces_its_edges_and_a_live_grant_surfaces_none() {
         "the mem whose only defect is an ungranted edge continues to serve"
     );
 
-    // Criterion 2, the harder half: an edge permitted ONLY through the
+    // The harder half: an edge permitted ONLY through the
     // create-rule default union is not reported. A check that consulted the
     // explicit table alone would report this one.
     engine.set_settings(WorkspaceSettings {

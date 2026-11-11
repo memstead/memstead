@@ -1,6 +1,6 @@
 //! Rotation / batch-order scheduling — the deterministic substrate the verify
 //! sampler reuses. The refinement-as-writer *brief* (the scout/writer
-//! two-phase flow and its temp findings file) is **deleted** (D1/D9/AC10):
+//! two-phase flow and its temp findings file) is **deleted**:
 //! `refinement` mode is gone from the vocabulary and no renderer remains. What
 //! survives, unrendered, is the rotation machinery — a `batch_size`-at-a-time
 //! walk over a source facet's files in a reproducibly-shuffled order that
@@ -314,7 +314,7 @@ mod tests {
         }
     }
 
-    /// A3 AC1, the scheduler half: an item that leaves the set mid-rotation
+    /// The scheduler half: an item that leaves the set mid-rotation
     /// is never served again, an item that joins is served before the
     /// rotation ends, and the rotation still completes once over the set.
     #[test]

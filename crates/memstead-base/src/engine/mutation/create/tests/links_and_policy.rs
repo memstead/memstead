@@ -149,8 +149,7 @@ community:
 /// legitimately declines the edge — but the author must be TOLD.
 /// default@1.3.0 declares REFERENCES only toward `software`, so a
 /// default-mem entity citing a planning-mem entity got inert prose
-/// where the author expects a citation edge, silently (graph-plans
-/// 02 grading, 2026-08-28). The write knows it dropped the link, so
+/// where the author expects a citation edge, silently. The write knows it dropped the link, so
 /// it warns, typed, naming the target and the declaration gap.
 #[test]
 fn undeclared_cross_schema_body_link_warns_instead_of_vanishing() {

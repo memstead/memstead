@@ -213,8 +213,8 @@ fn resolve_builtin_read_ref_defaults_bare_names_to_newest() {
 /// `name@version` is accepted; an unknown name refuses typed.
 #[test]
 fn resolve_builtin_ref_handles_name_pin_and_unknown() {
-    // Every built-in ships multiple versions since the plan-06
-    // vocabulary bump, so bare names are ambiguous by design and
+    // Every built-in ships multiple versions since a vocabulary
+    // bump, so bare names are ambiguous by design and
     // pins resolve explicitly.
     let bare = resolve_builtin_ref("software@0.2.0").expect("software pin resolves");
     assert_eq!(bare.name, "software");

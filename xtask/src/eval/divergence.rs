@@ -1,6 +1,6 @@
 //! The divergence mode's view of the pre-registration package.
 //!
-//! The divergence campaign (plan 02 of the divergence-eval bundle) consumes the
+//! The divergence campaign consumes the
 //! committed package at `docs/proof/divergence/prereg/` as its *only*
 //! configuration. Two things make the pre-registration real rather than
 //! decorative and both live here:
@@ -410,8 +410,8 @@ pub fn load_queries(dir: &Path) -> Result<Vec<super::TaskSpec>> {
 /// commits (`first_commit`..`last_commit`, author-date-pinned in `slices.json`):
 /// the `git log --oneline` commit subjects, the `git diff --stat` diffstat, the
 /// `CHANGELOG.md` delta, and the bug-ledger delta. The same string feeds Arm A
-/// and Arm B, so the digest is never an arm-distinguishing variable (criterion
-/// 5's parity contract is preserved at the call site, structurally).
+/// and Arm B, so the digest is never an arm-distinguishing variable (the
+/// parity contract is preserved at the call site, structurally).
 ///
 /// Range convention: changes are taken from the commit *before* `first_commit`
 /// (`first_commit^`) through `last_commit`, so the slice's own first commit is
@@ -814,8 +814,8 @@ pub struct JudgeOutcome {
 
 /// What one integrity-auditor trial produced: the two defect counts
 /// under the package's counting rubric, the tokens it spent (charged to
-/// [`Role::Auditor`]), and the model it ran on. `executed_model` carries criterion
-/// 3's refusal complement onto the auditor session too — an auditor that ran on an
+/// [`Role::Auditor`]), and the model it ran on. `executed_model` carries the
+/// model-honor refusal complement onto the auditor session too — an auditor that ran on an
 /// ambient model invalidates its trial ([`ensure_model_honored`]) rather than
 /// contributing a silent count.
 #[derive(Clone, Debug, Default)]
@@ -1151,7 +1151,7 @@ pub trait DivergenceAuditor {
     fn audit(&self, model: &str, auditor_prompt: &str) -> Result<AuditOutcome>;
 }
 
-/// Criterion 3's refusal complement: a session that ran on a model other than
+/// Refusal complement: a session that ran on a model other than
 /// its pinned `requested` id invalidates its round rather than silently
 /// contributing an ambient-model result. Applied to every writer, reader, and
 /// judge session after it returns, comparing the model it reported running on
@@ -1165,7 +1165,7 @@ fn ensure_model_honored(role: &str, requested: &str, executed: &str) -> Result<(
     Ok(())
 }
 
-/// Criterion 5: a writer session for Arm B must show at least one `memstead_*`
+/// A writer session for Arm B must show at least one `memstead_*`
 /// mutation call — proof its write crossed the engine's gate rather than touching
 /// disk directly. A round where Arm B wrote without any mutation call is invalid.
 /// Arm A (the tolerant directory) carries no such requirement.
@@ -1287,8 +1287,7 @@ impl CampaignResult {
         }
     }
 
-    /// Serialise the result to pretty JSON — the campaign artifact plan 03
-    /// publishes.
+    /// Serialise the result to pretty JSON — the campaign artifact.
     pub fn to_json(&self) -> Result<String> {
         Ok(serde_json::to_string_pretty(&self.report())?)
     }
@@ -1602,7 +1601,7 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
             .save(path)?;
         }
     }
-    // Criterion 10's refusal complement: every audit checkpoint executed this run
+    // Refusal complement: every audit checkpoint executed this run
     // must have produced an integrity result. Integrity checkpoints are only ever
     // created by the real auditor sessions above (which record `Role::Auditor`
     // tokens), so a count mismatch means a scheduled audit silently produced
@@ -1634,7 +1633,7 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
 }
 
 // ===========================================================================
-// The real subprocess glue (plan 03): concrete runner / judge / auditor that
+// The real subprocess glue: concrete runner / judge / auditor that
 // shell to `claude -p`, plus the mechanical slice extractor. The whole harness
 // above is trait-driven and stub-tested; these are the thin production impls the
 // CLI wires into `run_campaign`.
@@ -2245,7 +2244,7 @@ mod tests {
         let a = build_writer_args(Arm::A, "claude-opus-4-8", None, None);
         let b = build_writer_args(Arm::B, "claude-opus-4-8", None, Some(cfg));
 
-        // Criterion 3: both sessions are invoked with the pinned model.
+        // Both sessions are invoked with the pinned model.
         assert_eq!(arg_pairs(&a).get("--model").unwrap(), "claude-opus-4-8");
         assert_eq!(arg_pairs(&b).get("--model").unwrap(), "claude-opus-4-8");
         // The prompt is never an argv entry (it goes over stdin) — no ARG_MAX risk.
@@ -3144,7 +3143,7 @@ not-json-skip-me
 
     #[test]
     fn judge_is_invoked_with_the_pinned_model() {
-        // Criterion 3's refusal complement, judge half: every judge session is
+        // Refusal complement, judge half: every judge session is
         // invoked with the package's pinned model id explicitly.
         let dir = tmp();
         write_fixture_package(&dir);
@@ -3172,7 +3171,7 @@ not-json-skip-me
 
     #[test]
     fn a_writer_on_the_wrong_model_invalidates_the_round() {
-        // Criterion 3's refusal complement: a session that ran on an ambient model
+        // Refusal complement: a session that ran on an ambient model
         // instead of the pin invalidates its round rather than contributing silently.
         let dir = tmp();
         write_fixture_package(&dir);
@@ -3241,7 +3240,7 @@ not-json-skip-me
 
     #[test]
     fn reader_answers_are_blinded_before_the_judge() {
-        // Criterion 4: an answer embedding either arm's substrate vocabulary is
+        // An answer embedding either arm's substrate vocabulary is
         // stripped before it reaches the judge — it never arrives raw.
         let dir = tmp();
         write_fixture_package(&dir);
@@ -3521,7 +3520,7 @@ not-json-skip-me
 
     #[test]
     fn integrity_audit_produces_an_a_minus_b_delta_and_bills_the_auditor() {
-        // Criterion 10: at each audit checkpoint, per arm, n-trial auditor sessions
+        // At each audit checkpoint, per arm, n-trial auditor sessions
         // score the corpus; the campaign result carries the per-checkpoint integrity
         // delta (A − B). The stub substrate is dirtier on Arm A (identical notes,
         // all duplicates) than Arm B (distinct typed entities), so A − B is positive.
@@ -3584,7 +3583,7 @@ not-json-skip-me
 
     #[test]
     fn auditor_input_is_blinded_before_the_auditor() {
-        // Criterion 10's blinding complement: the auditor's input is tell-stripped
+        // Blinding complement: the auditor's input is tell-stripped
         // exactly like the judge path — arm identity never reaches it. The writer
         // plants both arms' substrate vocabulary into the corpus; none survives.
         let dir = tmp();
@@ -3632,7 +3631,7 @@ not-json-skip-me
 
     #[test]
     fn an_auditor_on_the_wrong_model_invalidates_the_trial() {
-        // Criterion 10's pin-honor complement: an auditor session that ran on an
+        // Pin-honor complement: an auditor session that ran on an
         // ambient model instead of the pin invalidates its trial rather than
         // contributing a silent count.
         let dir = tmp();

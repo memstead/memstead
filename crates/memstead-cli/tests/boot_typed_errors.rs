@@ -102,7 +102,7 @@ fn unresolvable_pin_quarantines_typed_with_repair_command_for_both_trails() {
 }
 
 /// Successful `--json health` output for a workspace (boot succeeds
-/// under the plan-04 quarantine posture even when a mem is broken).
+/// under the quarantine posture even when a mem is broken).
 fn health_json(ws: &std::path::Path) -> serde_json::Value {
     let out = memstead()
         .current_dir(ws)
@@ -226,7 +226,7 @@ fn duplicate_mem_name_refuses_typed() {
 }
 
 /// A mount with no schema pin anywhere (no mount pin, no backend
-/// config) quarantines typed (plan-04 re-routing) — whatever the
+/// config) quarantines typed, whatever the
 /// class resolves to, it is not `INTERNAL`.
 #[test]
 fn missing_pin_quarantines_typed() {

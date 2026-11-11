@@ -98,7 +98,7 @@ fn subtract_disposed_removes_disposed_from_every_class() {
     assert_eq!(out, slice(&[], &[], &["b.rs"]));
 }
 
-// ── AC9 — full engine advance over a moving HEAD ─────────────────────
+// ── Full engine advance over a moving HEAD ───────────────────────────────
 
 fn git(repo: &Path, args: &[&str]) {
     let out = std::process::Command::new("git")
@@ -199,7 +199,7 @@ fn synced_key() -> &'static str {
     "engine/graph/source-tree#synced"
 }
 
-/// AC9 — `projection advance` is non-stalling under a moving HEAD, and its
+/// `projection advance` is non-stalling under a moving HEAD, and its
 /// gate + resumability hold:
 ///
 /// 1. freeze a slice, dispose part → the remainder is the rest;
@@ -698,9 +698,9 @@ fn disposition_input_parses_bare_and_reasoned_forms() {
     assert_eq!(map["b.rs"].rationale(), Some("generated"));
 }
 
-/// Criterion 4 (an earlier plana): the auto-`worked` matching
+/// The auto-`worked` matching
 /// understands the SOURCE dialect — an anchor written source-relative
-/// (`f.rs` + `source` name, decision 26) marks the pointer-joined slice
+/// (`f.rs` + `source` name) marks the pointer-joined slice
 /// artifact (`srcdir/f.rs`) worked, exactly as a workspace-relative
 /// anchor would. Requires a workspace root + pipeline store so the
 /// source name resolves to its pointer.
@@ -1157,7 +1157,7 @@ fn a3_binding(
     }
 }
 
-/// A3 AC3: an exclusion survives a binding edit that changes an unrelated
+/// An exclusion survives a binding edit that changes an unrelated
 /// field, still carrying its source and rationale; removing its source
 /// from the declaration drops it, reported once with the source named.
 #[test]

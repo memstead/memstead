@@ -125,7 +125,7 @@ pub fn prune_proposals(
         return Vec::new();
     }
 
-    // Group THIS BINDING'S anchors by entity (consistency-sweep 03/01).
+    // Group THIS BINDING'S anchors by entity.
     // Proposing deletion over another binding's anchors, or over artifacts
     // this binding's scope excludes, would act on a population it does not
     // answer for, and prune acts rather than merely reports.
@@ -341,7 +341,7 @@ mod tests {
         for (eid, anchors) in entity_anchors {
             // The entity each row is keyed to. Written, because it exists: a
             // row whose entity does not is DANGLING and is partitioned out of
-            // the population before prune sees it (consistency-sweep 03/02),
+            // the population before prune sees it,
             // which is exactly the phantom-entity proposal prune bans.
             // A `!` prefix on the id means "seed the row but NOT the entity",
             // which is the phantom-entity condition the ban is about.
@@ -414,7 +414,7 @@ mod tests {
         (engine, root, binding, resolved)
     }
 
-    /// Criterion 6 (consistency-sweep 03/02): prune must not propose deleting
+    /// Prune must not propose deleting
     /// an entity that is already gone. Its anchor is orphaned, which is
     /// precisely the shape that made a phantom entity a candidate: prune
     /// walked the sidecar by key and never asked whether the key still names

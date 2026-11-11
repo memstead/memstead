@@ -115,8 +115,8 @@ impl Engine {
         self.mutation_clock = clock;
     }
 
-    /// Set the caller-declared role for subsequent mutations
-    ///. The surface calls this before every
+    /// Set the caller-declared role for subsequent mutations.
+    /// The surface calls this before every
     /// mutation with the per-call parameter resolved against its
     /// session default (per-call wins); `Role::Unspecified` records
     /// as absence.

@@ -1,5 +1,4 @@
-//! Derivation baselines — "my source changed" computed, never stamped
-//!.
+//! Derivation baselines — "my source changed" computed, never stamped.
 //!
 //! When a schema declares a rel-type `derivation: true`, explicitly
 //! writing such an edge records the TARGET's content hash at write

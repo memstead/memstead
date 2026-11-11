@@ -456,8 +456,8 @@ fn revoke_cross_link(ctx: &CliContext, args: CrossLinkArgs) -> anyhow::Result<()
     // and the cleanup is easier once the policy states the intent. But it is
     // also the one moment the operator can act cheaply — the store is loaded
     // and they remember what they changed — so the edges the revocation just
-    // orphaned are named here rather than discovered on a later gate run
-    // (04/07, criteria 5 and 6). Named, not counted: a count says something is
+    // orphaned are named here rather than discovered on a later gate run.
+    // Named, not counted: a count says something is
     // wrong without saying what to look at.
     //
     // Booted AFTER the edit, so the scan answers against the policy as it now
@@ -725,7 +725,7 @@ fn set_mutations(ctx: &CliContext, args: SetMutationsArgs) -> anyhow::Result<()>
 /// the consumer's gate must be widened to accept the new value as part of the
 /// same change set.
 ///
-/// **v0 → v1 (2026-08-27, consistency-sweep 04/05).** The `mems` array is
+/// **v0 → v1.** The `mems` array is
 /// driven off the MOUNT list rather than the config-keyed query, so it now
 /// enumerates mounts a consumer never saw before: one whose config could not
 /// be read appears with its config-derived fields absent instead of being
@@ -871,8 +871,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
     let mut mems: Vec<DumpMem> = Vec::new();
     let mut schemas: Map<String, Value> = Map::new();
 
-    // Driven off the MOUNT list, not the config-keyed query (04/05, criteria
-    // 1 and 2). A folder mount whose directory is gone yields no config, and
+    // Driven off the MOUNT list, not the config-keyed query. A folder mount whose directory is gone yields no config, and
     // the dump used to lose the mount entirely rather than showing it with its
     // config-derived fields absent. A mount missing from this dump is now
     // missing from the workspace configuration, and nothing else.

@@ -91,8 +91,8 @@ pub enum ComposeOverviewError {
     },
 
     /// `args.mem` names a QUARANTINED mem — scoping refuses with the
-    /// typed quarantine reason rather than reporting the mem unknown
-    ///. Carries the ready-made engine error so
+    /// typed quarantine reason rather than reporting the mem unknown.
+    /// Carries the ready-made engine error so
     /// both surfaces map it through their ordinary engine-error path.
     #[error("mem \"{0}\" is quarantined")]
     MemQuarantined(String),

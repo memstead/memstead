@@ -1000,7 +1000,7 @@ mod tests {
         assert!(err.to_string().contains("UNKNOWN_REMOTE:nowhere"), "{err}");
     }
 
-    /// A1 AC1: `push_all` moves exactly the lagging refs — two mem
+    /// `push_all` moves exactly the lagging refs — two mem
     /// branches and `__MEMSTEAD` ahead, one branch in sync — reports
     /// the synced one as such, and a second run moves nothing. With
     /// one branch made non-fast-forward on the remote the run
@@ -1111,7 +1111,7 @@ mod tests {
         );
     }
 
-    /// Criterion 4 (05/04): a mem whose declared branch is not its
+    /// A mem whose declared branch is not its
     /// name under the standard prefix pushes and pulls — both refs
     /// derive from the declared branch, never from the mem name.
     #[test]
@@ -1139,7 +1139,7 @@ mod tests {
         assert_eq!(resolve_ref(&second, "refs/heads/team/specs").unwrap(), sha);
     }
 
-    /// Criterion 8 (05/04): when the ref genuinely cannot be
+    /// When the ref genuinely cannot be
     /// resolved, the message names the mount's declared branch — what
     /// was looked for, not a name the engine invented.
     #[test]
@@ -1160,7 +1160,7 @@ mod tests {
         }
     }
 
-    /// Criterion 1 + 4 (05/04) at the engine layer: push and pull on
+    /// At the engine layer: push and pull on
     /// a mount whose declared branch is namespaced act on that branch
     /// end to end (validation ref included).
     #[test]
@@ -1216,7 +1216,7 @@ mod tests {
         );
     }
 
-    /// Criterion 6 (05/04): the pre-push schema gate no longer passes
+    /// The pre-push schema gate no longer passes
     /// when it could not run. A mount whose declared branch does not
     /// resolve refuses naming that branch — previously the gate's
     /// error was silently discarded and execution continued.

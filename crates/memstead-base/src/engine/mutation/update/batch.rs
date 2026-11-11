@@ -300,7 +300,7 @@ impl Engine {
             let count = entity_ids.len();
             let subject = format!("memstead: batch-update ({count} entities)");
             // Per-entry notes ride the batch commit's note record as
-            // `<id>: <note>` lines (decision 3) — `append_provenance` is a
+            // `<id>: <note>` lines — `append_provenance` is a
             // no-op on the git-branch backend, so this record is where
             // they survive. No notes → no note record.
             let note_lines: Vec<String> = prepared

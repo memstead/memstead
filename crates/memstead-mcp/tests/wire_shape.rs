@@ -3316,7 +3316,7 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
     assert!(p["created_by"]["timestamp"].as_i64().unwrap() > 0);
 }
 
-/// Agent-trust plan 15, criteria 1-4 across live surfaces: a declared
+/// Across the live surfaces: a declared
 /// identity records immutably on mutations and checks (per-call wins
 /// over the session default), serves through the provenance block and
 /// the raw trailer/ledger on BOTH backends, over-length refuses typed
@@ -3837,7 +3837,7 @@ fn kinded_checks_wire_contract() {
     assert_eq!(prov2["conformance_state"], "check_stale", "{ent2}");
 }
 
-/// Criterion-5 pin (consistency-sweep 05-front-door/08): the retired
+/// Pin: the retired
 /// spellings are REFUSED, not accepted as synonyms.
 ///
 /// An alias is the cheapest migration and it makes the defect permanent:

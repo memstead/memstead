@@ -136,7 +136,7 @@ impl BindingResolution {
 }
 
 // Test-only instrumentation: how many per-binding scans ran on this thread.
-// A3 AC2 pins one scan per binding for a call that yields both the status
+// Pins one scan per binding for a call that yields both the status
 // list and the rollup.
 #[cfg(test)]
 thread_local! {
@@ -458,7 +458,7 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
 }
 
 /// Derive the rollup from the per-binding resolutions the status pass
-/// computed — the SAME scan, consumed once (A3 AC2). A binding whose sources
+/// computed — the SAME scan, consumed once. A binding whose sources
 /// did not resolve carries `None` and contributes nothing here, exactly as
 /// the former standalone rollup skipped it.
 fn rollup_from_scans(total: usize, scans: &[(String, Option<BindingResolution>)]) -> Rollup {
@@ -971,7 +971,7 @@ mod tests {
         assert!(rollup.headline.contains("No projection bindings"));
     }
 
-    /// A3 AC2: one scan per binding yields both projections. Uses the same
+    /// One scan per binding yields both projections. Uses the same
     /// fixture as the verdict test above; the counter is thread-local, so
     /// the delta is this call's alone.
     #[test]

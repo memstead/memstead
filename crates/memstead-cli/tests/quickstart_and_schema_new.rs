@@ -2609,7 +2609,7 @@ fn quickstart_repo_receipt_discloses_the_shape_and_the_mem_folder() {
     );
 }
 
-/// Criterion 1's other half: `--format llms-txt` is backend-uniform, so it
+/// Other half: `--format llms-txt` is backend-uniform, so it
 /// produces the same document shape on a **filesystem** mem as on a mem-repo
 /// one. `quickstart` is the shortest route to a real filesystem workspace.
 ///

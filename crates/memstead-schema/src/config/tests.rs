@@ -1011,7 +1011,7 @@ fn forked_from_refuses_unknown_members() {
     assert!(err.to_string().contains("branch"), "{err}");
 }
 
-/// Older-engine tolerance (AC3): the previous engine's `MemConfig`
+/// Older-engine tolerance: the previous engine's `MemConfig`
 /// had no `forked_from` field but the same flattened `extra` map. A
 /// config written by this engine, read through that prior shape, keeps
 /// the key in `extra` and writes it back byte-for-byte, so this engine

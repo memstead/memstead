@@ -978,7 +978,7 @@ community:
     /// malformed auto-stub; the engine refuses with the typed
     /// `InvalidWikiLinkTarget` envelope and the
     /// `title_to_slug`-derived suggestion the agent lifts
-    /// directly into a retry. Covers F1 of the 2026-05-18 CLI probe.
+    /// directly into a retry.
     #[test]
     fn natural_form_body_wiki_link_refuses_with_typed_envelope() {
         let manifest = r#"name: aliased

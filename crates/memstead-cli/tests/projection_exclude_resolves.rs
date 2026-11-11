@@ -1,5 +1,5 @@
-//! `projection exclude` resolves the artifact id and refuses an unknown one
-//!: on a bound fixture whose source pointer is
+//! `projection exclude` resolves the artifact id and refuses an unknown one:
+//! on a bound fixture whose source pointer is
 //! a sub-tree (and a second whose pointer lies outside the workspace root,
 //! the flagship's shape), the source-relative id and the workspace-relative
 //! one resolve to the same canonical id, the ledger holds that one form, the
@@ -291,7 +291,7 @@ fn two_source_workspace(tmp: &TempDir) -> std::path::PathBuf {
     root
 }
 
-/// C8 AC1: a source-relative id carried by two sources is REFUSED naming both
+/// A source-relative id carried by two sources is REFUSED naming both
 /// canonical ids, and records nothing; either canonical id succeeds.
 ///
 /// The entry was filed on the opposite behaviour: the fold took the first
@@ -346,19 +346,19 @@ fn an_ambiguous_source_relative_id_is_refused_naming_both_canonical_ids() {
     );
 }
 
-/// B11 AC1 on a sub-tree pointer inside the workspace.
+/// On a sub-tree pointer inside the workspace.
 #[test]
 fn a_source_relative_exclude_takes_effect_and_an_unknown_id_is_refused() {
     exercise("src", "src/docs/a.md", "src/docs/b.md");
 }
 
-/// B11 AC1 on a pointer outside the workspace root, the flagship's shape.
+/// On a pointer outside the workspace root, the flagship's shape.
 #[test]
 fn the_same_holds_for_a_pointer_outside_the_workspace_root() {
     exercise("../ext", "../ext/docs/a.md", "../ext/docs/b.md");
 }
 
-/// B11 AC1 refusal complement: a ledger written before the plan, holding
+/// Refusal complement: a ledger written before the plan, holding
 /// the canonical form, still filters the same artifact.
 #[test]
 fn a_pre_existing_canonical_ledger_still_filters() {

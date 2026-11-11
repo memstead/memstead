@@ -582,7 +582,7 @@ pub fn health_checks_axis(
             if state != crate::check::CheckState::CheckedOk {
                 continue;
             }
-            // Identity-only comparison (plan 15, comparator widened
+            // Identity-only comparison (comparator widened
             // 2026-09-02): the newest ok-check's identity against every
             // identity that mutated the verified plan, its criteria or
             // its session-log notes since this criterion was written
@@ -725,8 +725,8 @@ pub fn health_open_questions_axis(
         serde_json::Value::Object(o)
     };
 
-    // Bindings by destination mem — the pairing plan 14 will make
-    // declarative; until then the ingest-name convention (process mem
+    // Bindings by destination mem. The pairing is not declarative yet;
+    // until it is, the ingest-name convention (process mem
     // named after the binding) is the resolution mechanism.
     let bindings: Vec<(String, String)> = engine
         .workspace_root()
@@ -762,7 +762,7 @@ pub fn health_open_questions_axis(
 
         // Anchors — same per-anchor mechanism as the anchors axis;
         // only the never-confirmed and unreachable states are holes.
-        // A dangling sidecar row is a hole too (consistency-sweep 03/02), and
+        // A dangling sidecar row is a hole too, and
         // it gets its OWN bucket. `unresolvable` is the wire form of the
         // orphaned state, whose repair is the opposite one: an orphaned anchor
         // asks whether its entity should be re-anchored or pruned, a dangling
@@ -2261,7 +2261,7 @@ pub struct ConstraintFindingReport {
     pub mem: String,
     pub violations: Vec<UnsatisfiedConstraint>,
     /// Standing violations of the entity's declared section formats
-    /// (plan 08) — additive: consumers of the pre-format shape see an
+    /// (additive: consumers of the pre-format shape see an
     /// absent key, never an empty list.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub format_violations: Vec<crate::section_format::SectionFormatViolation>,
@@ -2321,7 +2321,7 @@ pub fn collect_constraint_findings(
             continue;
         };
 
-        // Section-format sweep (plan 08) — standing violations of a
+        // Section-format sweep — standing violations of a
         // declared markdown shape, every severity (block-tier
         // pre-existing violations are health findings too; the next
         // write of the section is the sanctioned repair point).

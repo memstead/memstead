@@ -547,7 +547,7 @@ fn health_over_budget_text_is_chunked_markdown() {
     assert!(serde_json::from_str::<serde_json::Value>(&text).is_err());
 }
 
-/// Durability honesty (Plan 02, Part A) refusal complement: a
+/// Durability honesty refusal complement: a
 /// folder-backed (durable on disk) mem reports `durable: true` /
 /// `storage: folder` in the `include_config` mem detail — the marker
 /// reflects the real backend, so a durable mem never reads ephemeral.
@@ -2667,7 +2667,7 @@ fn test_memstead_mem_create_via_unified_engine_path() {
     // Schema priming payload is folded in.
     assert!(text.contains("\"schema\""));
 
-    // Surface parity (Plan 01): the include_schema inline path honours
+    // Surface parity: the include_schema inline path honours
     // `schema_verbosity: "lite"` — a first-mem create can prime on the
     // cheap skeleton instead of the ~25 KB full body.
     let lite_create = server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
@@ -4019,7 +4019,7 @@ fn text_channel_carries_typed_error_code_inline() {
     assert_text_carries_code(&dup, "ENTITY_ALREADY_EXISTS");
 }
 
-/// Criteria 1, 3 and 5 (consistency-sweep 03/04) on the full MCP surface.
+/// On the full MCP surface.
 /// An anchors-only update needs no compare-and-swap token, because the
 /// token would compare a value the write provably cannot move; an update
 /// that also changes content still needs one; and a payload with neither
@@ -4054,7 +4054,7 @@ fn an_anchors_only_update_needs_no_expected_hash_but_a_content_change_does() {
         out.structured_content
     );
 
-    // Criterion 2: the content hash did not move. Compared, not merely
+    // The content hash did not move. Compared, not merely
     // present: a first version captured `before` and threw it away, which
     // asserted nothing about the property the criterion is about.
     let hash_of = |t: &str| {
@@ -4071,7 +4071,7 @@ fn an_anchors_only_update_needs_no_expected_hash_but_a_content_change_does() {
         "an anchors-only update cannot move the content hash"
     );
 
-    // Criterion 4: an EMPTY token is no token, not a token that can never
+    // An EMPTY token is no token, not a token that can never
     // match. Accepting it here while the CLI discards it made one surface
     // refuse what the other wrote.
     let empty_token: UpdateParams = serde_json::from_value(serde_json::json!({
@@ -4090,7 +4090,7 @@ fn an_anchors_only_update_needs_no_expected_hash_but_a_content_change_does() {
         out_empty.structured_content
     );
 
-    // Criterion 3: content plus anchors still demands the token.
+    // Content plus anchors still demands the token.
     let with_content: UpdateParams = serde_json::from_value(serde_json::json!({
         "id": "specs--hash-gate",
         "sections": { "purpose": "changed" },
@@ -4111,7 +4111,7 @@ fn an_anchors_only_update_needs_no_expected_hash_but_a_content_change_does() {
         extract_text(&refused)
     );
 
-    // Criterion 5: neither anchors nor content is still an empty update.
+    // Neither anchors nor content is still an empty update.
     let empty: UpdateParams =
         serde_json::from_value(serde_json::json!({ "id": "specs--hash-gate" })).unwrap();
     let empty_out = server.memstead_update(Parameters(empty));

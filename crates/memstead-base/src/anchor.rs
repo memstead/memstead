@@ -368,7 +368,7 @@ pub struct Anchor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub span_hash: Option<String>,
     /// A row whose locator or quoted span could NOT be checked against the
-    /// artifact at write time (consistency-sweep 03/03). The write path
+    /// artifact at write time. The write path
     /// deliberately reads no source content, so the check is possible only
     /// where the caller supplied `content`; elsewhere the anchor is accepted
     /// and this records that its span is unverified, rather than letting a
@@ -845,7 +845,7 @@ pub enum AnchorValidationError {
     SourceNotDeclared { got: String, declared: Vec<String> },
     /// A path-grain artifact reference that resolves under NO candidate
     /// join — neither source-relative (joined onto the declaring source's
-    /// pointer, decision 26) nor workspace-relative. Refused at write time
+    /// pointer) nor workspace-relative. Refused at write time
     /// so the mutation never stores a silently dead (orphaned-at-birth)
     /// reference; the payload names every candidate tried so the agent can
     /// fix the dialect.
@@ -1193,7 +1193,7 @@ impl AnchorInput {
             }
         };
 
-        // The span-grain locator (consistency-sweep 03/03). A locator that
+        // The span-grain locator. A locator that
         // can never address anything is refused here, context-free, because
         // no medium context can rescue it. Where the caller supplied content,
         // a line range is checked against it; where they did not, the row

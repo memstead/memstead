@@ -151,7 +151,7 @@ pub(crate) struct MountedBackend {
 
 /// One quarantined mem: the mem-level boot failure that took it out of
 /// service, and the retained mount record `reload` uses to re-attempt
-/// the attach after a repair. The reason code/message are plan-01
+/// the attach after a repair. The reason code/message are
 /// typed material — the message's final clause names the repair
 /// command, so the roster entry is actionable as-is.
 #[derive(Debug, Clone)]
@@ -451,8 +451,8 @@ pub struct Engine {
     /// format (second-granularity RFC 3339, see
     /// `mutation::iso_from_system_time`) is unchanged.
     mutation_clock: MutationClock,
-    /// The caller-declared role for mutations in this session
-    ///. Set by the surface before each mutation
+    /// The caller-declared role for mutations in this session.
+    /// Set by the surface before each mutation
     /// (per-call parameter wins over the surface's session default);
     /// `Unspecified` records as absence. Session state on the engine
     /// — the `mutation_clock` precedent — so the role travels into

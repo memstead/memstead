@@ -183,7 +183,7 @@ fn search_direction_narrows_related_to_and_expansion() {
     assert_eq!(expanded_in, ["x"], "in-expansion reaches ancestors only");
 }
 
-/// Plan 08 (metadata searchability): a value that exists only in an
+/// Metadata searchability: a value that exists only in an
 /// entity's metadata — declared filterable or not, declared at all
 /// or not — is returned by a free-text search; a metadata KEY finds
 /// its carriers; the hit is identifiable as a metadata match; a
@@ -266,7 +266,7 @@ fn search_finds_metadata_values_and_keys() {
 /// exists solely in an entity's metadata must NOT drop that entity
 /// from a prose query's results — exclusion consults prose fields
 /// only, so the pre-metadata-field result set never shrinks.
-/// (Grader counterexample from the plan-08 gate.)
+/// (A grader's counterexample.)
 #[test]
 fn search_exclude_ignores_metadata_only_tokens() {
     let mut store = Store::new();

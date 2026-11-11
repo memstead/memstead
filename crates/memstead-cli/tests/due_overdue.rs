@@ -108,7 +108,7 @@ fn due_json(ws: &Path) -> serde_json::Value {
     serde_json::from_slice(&out.stdout).unwrap()
 }
 
-/// B4 AC1: overdue with days past, due_soon with days until, closed absent.
+/// Overdue with days past, due_soon with days until, closed absent.
 #[test]
 fn overdue_and_due_soon_read_from_the_declaration_with_the_clock_pinned() {
     let ws = workspace();
@@ -139,7 +139,7 @@ fn overdue_and_due_soon_read_from_the_declaration_with_the_clock_pinned() {
     assert!(brief.contains("(in 8 days)"), "{brief}");
 }
 
-/// B4 AC1 refusal complement, first half: a mem whose schema declares no
+/// Refusal complement, first half: a mem whose schema declares no
 /// `due` yields no reading and no error.
 #[test]
 fn a_schema_without_a_due_declaration_yields_no_reading_and_no_error() {
@@ -169,7 +169,7 @@ fn a_schema_without_a_due_declaration_yields_no_reading_and_no_error() {
     );
 }
 
-/// B4 AC1 refusal complement, second half: the stale axis does not read
+/// Refusal complement, second half: the stale axis does not read
 /// the due date. An overdue but freshly edited entity is not stale.
 #[test]
 fn the_stale_axis_ignores_the_due_date() {

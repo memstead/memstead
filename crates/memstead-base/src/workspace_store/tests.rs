@@ -888,7 +888,7 @@ fn instantiate_local_backend_handles_folder_archive_and_in_memory() {
     let _: Box<dyn MemBackend> = instantiate_local_backend(&in_memory).unwrap();
 }
 
-/// AC3 (plan 01): the in-memory storage variant round-trips through
+/// The in-memory storage variant round-trips through
 /// `mounts.json` and its wire shape is unambiguous — it serialises
 /// as the bare `{"type":"in-memory"}` tag and never parses as one
 /// of the path-carrying variants, nor they as it.

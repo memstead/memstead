@@ -65,8 +65,8 @@ pub enum ComposeHealthError {
         writable_mems: Vec<String>,
     },
     /// `args.mem` names a QUARANTINED mem — the scope refuses with the
-    /// typed quarantine reason rather than reporting the mem unknown
-    ///. The wrapper maps it through its ordinary
+    /// typed quarantine reason rather than reporting the mem unknown.
+    /// The wrapper maps it through its ordinary
     /// engine-error path via `Engine::unknown_mem_error`.
     #[error("mem \"{0}\" is quarantined")]
     MemQuarantined(String),
@@ -238,7 +238,7 @@ pub fn compose_health(
                     total += 1;
                 }
             }
-            // Name order (A7 AC3): the lists are byte-stable across runs.
+            // Name order: the lists are byte-stable across runs.
             let mut pairs: Vec<_> = counts.into_iter().collect();
             pairs.sort_by(|a, b| a.0.cmp(&b.0));
             let arr: Vec<serde_json::Value> = pairs
@@ -453,8 +453,8 @@ pub fn compose_health(
     if let Some(diag) = &health.boot_diagnosis {
         obj.insert("boot_diagnosis".into(), diag.clone());
     }
-    // Leaf populations — visible beside the orphan axis they exempt
-    //; omitted when no type declares leaf.
+    // Leaf populations — visible beside the orphan axis they exempt;
+    // omitted when no type declares leaf.
     if !health.leaf_entities_by_type.is_empty() {
         obj.insert(
             "leaf_entities_by_type".into(),
@@ -789,8 +789,8 @@ pub fn compose_health(
         );
     }
 
-    // `include=["ledger"]` — a folder mem's ledger set against its file set
-    // (04/04, criteria 1 and 2). Reads only: no ledger line is written,
+    // `include=["ledger"]` — a folder mem's ledger set against its file set.
+    // Reads only: no ledger line is written,
     // rewritten or removed and no file is touched, because writing lines for
     // edits the engine did not author would fabricate provenance for a change
     // it cannot attribute. Git-branch mems are absent from the map rather than
@@ -984,7 +984,7 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
 
     // Anchors axis — an object (mem → counts plus the population they cover),
     // not an array, so it renders its own compact section. The figure and the
-    // population render together (consistency-sweep 03/05, criteria 1 and 3):
+    // population render together:
     // this is the MCP text channel, so it is what a cold agent reads, and it
     // used to print four numbers and stop.
     if let Some(obj) = v.get("anchors").and_then(|x| x.as_object()) {
@@ -1222,8 +1222,8 @@ fn render_count_map(s: &mut String, val: Option<&serde_json::Value>, title: &str
 /// what an agent reads once the JSON exceeds `token_budget`, or whenever
 /// it passes `chunk`. Without it the three dangling conditions, which
 /// have three different repairs, render as one identical line shape and
-/// the reader is back to the fused report the codes were split to end
-/// (04/06, criteria 2 and 4). Mirrors `overview.rs`'s rendered section
+/// the reader is back to the fused report the codes were split to end.
+/// Mirrors `overview.rs`'s rendered section
 /// and the CLI's markdown block.
 fn summarize_health_item(item: &serde_json::Value) -> String {
     if let Some(id) = item.get("id").and_then(|x| x.as_str()) {
@@ -1372,7 +1372,7 @@ mod tests {
         assert!(!render_health_markdown(&base_payload()).contains("Body observations"));
     }
 
-    /// 04/06, criteria 2 and 4: the text channel names the condition.
+    /// The text channel names the condition.
     /// This is the surface an agent gets once the JSON exceeds
     /// `token_budget`, and it rendered all three dangling conditions as
     /// one indistinguishable `from → target` line while every other

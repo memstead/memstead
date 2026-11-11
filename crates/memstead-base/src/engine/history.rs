@@ -87,8 +87,8 @@ pub struct EntityTouch {
     /// defaulted to a real role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
-    /// Caller-declared identity this touch was performed under
-    ///. Absent = undeclared — recorded as
+    /// Caller-declared identity this touch was performed under.
+    /// Absent = undeclared — recorded as
     /// absence, never inferred from actor or client.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<String>,
@@ -753,7 +753,7 @@ fn parse_cursor(c: &str) -> Option<(String, usize)> {
 /// belonged to a previous holder of a reused slug (renamed away or
 /// deleted before this entity existed) — absorbing it would attribute
 /// a stranger's touches to this entity and present the polluted story
-/// as `Recorded` (found by plan 03/02's grading gate).
+/// as `Recorded`.
 pub(crate) fn filter_notes_for_entity(
     entity_id: &str,
     notes: &[crate::ops::agent_notes::CommitNote],
@@ -1160,8 +1160,7 @@ mod tests {
         // Rename an entity away, then create a NEW entity under the
         // freed slug: the newcomer's story must start at ITS create —
         // pre-fix it absorbed the previous holder's touches and
-        // presented the polluted story as `Recorded` (grading-gate
-        // finding, plan 03/02).
+        // presented the polluted story as `Recorded`.
         let tmp = tempfile::TempDir::new().unwrap();
         let mut engine = folder_engine(&tmp);
         let id = create(&mut engine, "Slot", "first holder");

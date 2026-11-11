@@ -64,7 +64,7 @@ fn empty_update(id: EntityId, expected_hash: Option<String>) -> UpdateEntityArgs
     }
 }
 
-/// AC1 + AC2: one engine, one in-memory mount, the full entity
+/// One engine, one in-memory mount, the full entity
 /// lifecycle round-trips entirely in RAM with the same engine-level
 /// outcomes the folder backend produces — created entity reads back, an
 /// update bumps the hash, a relate adds an edge, a rename rewrites
@@ -145,7 +145,7 @@ fn full_lifecycle_round_trips_in_memory() {
         "an update must bump the content hash"
     );
 
-    // --- optimistic-lock refusal (AC1 complement): the now-stale
+    // --- optimistic-lock refusal (complement): the now-stale
     //     pre-update hash trips HASH_MISMATCH, exactly as on the folder
     //     backend — the guard is enforced above the backend, so the
     //     in-memory backend can neither skip nor weaken it. ---

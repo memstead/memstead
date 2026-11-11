@@ -10,8 +10,8 @@
 //! - **No panic**: no input panics any entry point — for the tolerant
 //!   parser, whose only refusal branch is I/O, crash and invariant break
 //!   are the only observable failures, so this is the load-bearing check.
-//! - **Wrapper contracts**: there is ONE frontmatter implementation since
-//!   consistency-sweep 02/01, so the three-way boundary agreement this module
+//! - **Wrapper contracts**: there is ONE frontmatter implementation, so
+//!   the three-way boundary agreement this module
 //!   used to assert retired with the duplication it held in step. What the
 //!   wrappers still owe is checked instead: the peek returns a suffix slice of
 //!   the caller's own buffer (two callers recover the frontmatter prefix by
@@ -194,8 +194,8 @@ fn exercise(input: &str) {
     let (_meta, body) = split_frontmatter(input).expect("tolerant split refused a string input");
 
     // No comparison between frontmatter implementations remains here. The
-    // three-way agreement retired with the duplication it held in step
-    // (consistency-sweep 02/01), and a two-way comparison over one core would
+    // three-way agreement retired with the duplication it held in step,
+    // and a two-way comparison over one core would
     // test the wrappers rather than the arithmetic. What is left is a property
     // of the core itself.
     //

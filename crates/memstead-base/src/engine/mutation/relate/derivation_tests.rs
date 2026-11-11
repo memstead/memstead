@@ -118,7 +118,7 @@ fn relate_args(from: &crate::EntityId, rel: &str, to: &crate::EntityId) -> Relat
     }
 }
 
-/// Criterion 1's fixture, one flow: write → edit target → report
+/// One fixture, one flow: write → edit target → report
 /// stale → re-assert → clear, with the refresh STATED. Plus the
 /// undeclared-rel-type no-op complement and the
 /// source-edit / markdown-invisibility complements.

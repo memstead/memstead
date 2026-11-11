@@ -19,8 +19,8 @@ fn parse_envelope(stdout_bytes: &[u8]) -> serde_json::Value {
 
 /// A mem-repo workspace with one folder-mount mem `sample-mem` pinned
 /// (via the mount record — the mem is config-absent, so the mount pin
-/// is settled) to a schema no source holds. Under the plan-04
-/// quarantine posture the workspace BOOTS with `sample-mem` quarantined
+/// is settled) to a schema no source holds. Under the quarantine
+/// posture the workspace BOOTS with `sample-mem` quarantined
 /// (`SCHEMA_NOT_FOUND` reason) — the fixture asserts that state.
 fn quarantined_workspace(tmp: &TempDir) -> std::path::PathBuf {
     let ws = tmp.path().join("ws");
@@ -42,7 +42,7 @@ fn quarantined_workspace(tmp: &TempDir) -> std::path::PathBuf {
     )
     .unwrap();
     // Confirm the fixture really quarantines `sample-mem` for the reason
-    // this plan repairs (the workspace itself boots — plan 04).
+    // `set-schema` repairs (the workspace itself boots).
     let health = health_json(&ws);
     assert_eq!(
         health["quarantined"][0]["reason_code"], "SCHEMA_NOT_FOUND",
@@ -70,7 +70,7 @@ fn example_package_dir() -> String {
         .to_string()
 }
 
-/// Criterion 1 (plan 03), re-shaped by plan 04's quarantine posture:
+/// Under the quarantine posture:
 /// on a workspace whose broken-pin mem is quarantined, `mem
 /// set-schema` to a resolvable ref succeeds — the booted engine's
 /// quarantine-repair branch repins the retained mount and re-attaches
@@ -105,7 +105,7 @@ fn set_schema_repairs_quarantined_mem() {
         .success();
 }
 
-/// Criterion 2 + the criterion-4 fork-catcher: on the
+/// With the fork-catcher: on the
 /// quarantined-mem workspace, `schema install <package>` seals the
 /// package onto the `__MEMSTEAD:schemas/` ref (never booting), and a
 /// subsequent `set-schema` to the installed ref returns the mem to
@@ -149,7 +149,7 @@ fn install_then_set_schema_recovers_end_to_end() {
         .success();
 }
 
-/// Criterion 3: typed refusals below boot — a corrupt store, an
+/// Typed refusals below boot — a corrupt store, an
 /// invalid package, and an unresolvable target ref; repair never
 /// force-writes a pin that resolves nowhere.
 #[test]
@@ -225,7 +225,7 @@ fn repair_refuses_typed_on_corrupt_store_bad_package_and_bad_ref() {
     }
 }
 
-/// Criteria 1 and 4: a workspace whose only mem is quarantined no longer
+/// A workspace whose only mem is quarantined no longer
 /// gets the built-in default's catalogue presented as its own. The command
 /// names the quarantine and carries the engine's own reason and repair
 /// rather than restating them in different words.
@@ -264,7 +264,7 @@ fn type_names_the_quarantine_instead_of_printing_a_default_over_it() {
     );
 }
 
-/// Criterion 3, the arm the first attempt missed: the REFUSAL path needs
+/// The arm the first attempt missed: the REFUSAL path needs
 /// the condition more than the success paths do. Without it a user whose
 /// own schema declares the type is told it does not exist, attributed to a
 /// schema that is not theirs, with the quarantine unmentioned on both
@@ -322,7 +322,7 @@ fn type_refusal_over_a_quarantine_states_the_condition_too() {
     );
 }
 
-/// Criterion 2's refusal complement: the genuine cold-start probe, run
+/// Refusal complement: the genuine cold-start probe, run
 /// where there is no workspace at all, still answers from the built-in
 /// default with no warning. Here the default IS the answer, not a
 /// stand-in, and a warning on the healthy path teaches readers to ignore
@@ -352,7 +352,7 @@ fn type_outside_a_workspace_stays_a_silent_cold_start_probe() {
     );
 }
 
-/// Criterion 5's refusal complement: a workspace with a healthy writable
+/// Refusal complement: a workspace with a healthy writable
 /// mem is untouched — its own schema, and no notice.
 #[test]
 fn type_on_a_healthy_workspace_reports_its_own_schema_silently() {
@@ -386,8 +386,7 @@ fn type_on_a_healthy_workspace_reports_its_own_schema_silently() {
     assert_eq!(body["schema"], "default@1.0.0");
 }
 
-/// The `--mem` arm of the same command, one path over (the backlog
-/// residual plan 06's closing grade named): a user who explicitly names
+/// The `--mem` arm of the same command, one path over: a user who explicitly names
 /// the mem they know about must be told it is quarantined — with the
 /// engine's reason and repair — not `UNKNOWN_MEM` in the exact phrasing
 /// an empty workspace produces.

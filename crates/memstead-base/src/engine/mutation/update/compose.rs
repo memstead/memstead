@@ -421,7 +421,7 @@ impl Engine {
         // alias-synthesis run), evaluated through the same function
         // the health sweep uses (one implementation; the two surfaces
         // cannot disagree). A warning, never a refusal.
-        // Section-format evaluation (plan 08), composed-body rule: a
+        // Section-format evaluation, composed-body rule: a
         // section touched by this update (replace, append, or patch)
         // is judged on its COMPOSED final body — the delta-only
         // byte-class guard keeps its scope, shape needs the

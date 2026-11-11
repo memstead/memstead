@@ -543,7 +543,7 @@ mod tests {
         assert!(entries.anchors_bytes.is_some());
     }
 
-    /// Plan-proposal 03 (AC3): the proposal record (`.memstead/proposals.json`)
+    /// The proposal record (`.memstead/proposals.json`)
     /// is a recognised strict meta member: surfaced verbatim, never an
     /// entity, refused naming the member when it does not parse, and
     /// carried through the canonical re-pack. An engine older than the
@@ -610,7 +610,7 @@ mod tests {
         .into_bytes()
     }
 
-    /// AC2: the sealed check-records member (`.memstead/checks.json`) is a
+    /// The sealed check-records member (`.memstead/checks.json`) is a
     /// recognised strict meta member: surfaced verbatim, not an entity.
     #[test]
     fn recognises_valid_checks_member() {
@@ -641,7 +641,7 @@ mod tests {
         }
     }
 
-    /// AC2 complement: a malformed member refuses with the typed code
+    /// Complement: a malformed member refuses with the typed code
     /// naming the member and the first offending record: not the
     /// declared shape, an unknown kind spelling, an unknown verdict, a
     /// record naming an entity the archive does not carry, a version

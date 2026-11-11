@@ -547,7 +547,7 @@ fn unrelated_concurrent_write_proceeds_with_mem_changed() {
     }
 }
 
-/// D13 / AC11 — `sync_state` is **mem-scoped** state: an out-of-band
+/// `sync_state` is **mem-scoped** state: an out-of-band
 /// `sync_state` write by a sibling engine (here A's `set_mem_sync_state`) is
 /// picked up by the second engine's per-mem reload, and the reload surfaces the
 /// `mem_changed` drift notice like any other mem-branch change.
@@ -595,7 +595,7 @@ fn sync_state_write_surfaces_via_per_mem_reload() {
     );
 }
 
-/// D13 / AC11 — the advance/disposition store is **workspace-store** state read
+/// The advance/disposition store is **workspace-store** state read
 /// fresh from disk per call, so it is reload-independent: an out-of-band write
 /// to `.memstead/state/advance/` is visible via `read_advance_store` with no
 /// engine reload, and a re-write is picked up on the next read (per-call fresh),
@@ -656,8 +656,8 @@ fn advance_store_is_reload_independent() {
     assert_eq!(read3, state2, "per-call fresh read reflects the rewrite");
 }
 
-/// Batch per-entry notes survive on the git-branch backend
-/// (an earlier plan, decision 3): each batch family's ONE commit
+/// Batch per-entry notes survive on the git-branch backend:
+/// each batch family's ONE commit
 /// carries the notes as `<id>: <note>` lines in its note record,
 /// retrievable via `changes_since(...).notes` — where they previously
 /// survived nowhere (the per-entry `append_provenance` route is a
@@ -822,7 +822,7 @@ fn batch_per_entry_notes_survive_on_git_branch() {
     );
 }
 
-/// Rot axis for UNSTAMPED seals (an earlier plan, decision 19):
+/// Rot axis for UNSTAMPED seals:
 /// a schema sealed under an older engine — retired
 /// `propagating_relationships` key, no install-provenance stamp —
 /// keeps its mem running on the tolerant seal, and health surfaces a
@@ -936,7 +936,7 @@ write_rules: []
     );
 }
 
-/// Plan 07 complement: the git-branch backend's mem-repo is
+/// Complement: the git-branch backend's mem-repo is
 /// engine-managed and cannot acquire merge conflicts through supported
 /// use — `conflicts` operations refuse typed there instead of
 /// pretending applicability.

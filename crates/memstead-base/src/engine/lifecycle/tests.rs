@@ -2663,7 +2663,7 @@ fn every_lifecycle_setter_refuses_on_read_only_mount() {
     }
 }
 
-/// 04/03, criteria 1 and 2, on the folder backend. Every one of the
+/// On the folder backend. Every one of the
 /// lifecycle setters, each against a config a sibling moved after boot.
 /// The loop is the point: the criterion is the whole set behind one
 /// implementation, so a test that exercised one setter would pass while
@@ -2748,7 +2748,7 @@ fn no_config_setter_reverts_a_siblings_write() {
     }
 }
 
-/// Criterion 3, and its complement 4: the intervention is reported on the
+/// With its complement: the intervention is reported on the
 /// operation's own response, and only when there was one.
 #[test]
 fn intervention_is_reported_on_the_response_and_only_when_real() {

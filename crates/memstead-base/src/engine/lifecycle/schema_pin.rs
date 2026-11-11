@@ -234,8 +234,7 @@ impl Engine {
     /// `Mount.schema` as their settled pin, so there is nothing to update
     /// — a clean no-op.
     /// **The one way this engine writes a mem config.** Every config-writing
-    /// operation goes through it; none serializes its cached struct
-    /// (consistency-sweep 04/03, criteria 1 and 2).
+    /// operation goes through it; none serializes its cached struct.
     ///
     /// The defect it removes: a long-lived MCP server reads each mem's config
     /// once at boot and holds it for days. Eight operations used to clone that

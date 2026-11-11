@@ -1449,7 +1449,7 @@ fn state_of_report(report: &crate::engine::query::MemAnchorVerification, artifac
         .unwrap()
 }
 
-/// Live per-anchor state (criteria 1, 9 — path-medium subset): a
+/// Live per-anchor state (path-medium subset): a
 /// single-medium `path` mem observes working-tree existence at the current
 /// HEAD. Absent artifact ⇒ `orphaned`; present + non-hash class ⇒
 /// `resolves`; present + hash-bearing class ⇒ the prepared-content hash
@@ -1756,7 +1756,7 @@ community:
     assert_eq!(engine.mem_names(), vec!["specs"]);
 }
 
-/// Authoring-drift health axis (plan 10): a STAMPED sealed schema
+/// Authoring-drift health axis: a STAMPED sealed schema
 /// reports a missing authoring package and (separately) a diverged
 /// one; an unmodified package, a cosmetic-only difference (editor
 /// header comment lines), and an unstamped seal produce NO
@@ -2187,11 +2187,11 @@ fn from_mounts_quarantines_unknown_schema_pin() {
     assert_eq!(health.quarantined[0].reason_code, "SCHEMA_NOT_FOUND");
 }
 
-/// Criterion 5: quarantine → repair →
+/// Quarantine → repair →
 /// reload returns the mem to service in the same engine instance;
 /// the roster entry disappears. The repair here is the same
 /// value-level config-pin rewrite `memstead mem set-schema`
-/// performs below boot (plan 03).
+/// performs below boot.
 #[test]
 fn reload_returns_repaired_mem_from_quarantine() {
     let tmp = TempDir::new().unwrap();
@@ -2249,7 +2249,7 @@ fn reload_returns_repaired_mem_from_quarantine() {
         .expect("reattached mem serves writes");
 }
 
-/// Criterion 2 complement: a healthy mem
+/// Complement: a healthy mem
 /// whose entity body wiki-links INTO a quarantined mem loads
 /// normally — the link degrades like any dangling cross-mem link
 /// (stub target), no cascade failure.
@@ -3034,8 +3034,7 @@ write_rules: []
 /// `UNKNOWN_MEM` — matching every other mem-naming surface — while a
 /// quarantined mem keeps its established typed refusal and a VALID
 /// mem with no matches still returns success with 0 hits. Absence of
-/// mem and absence of matches are never the same answer
-/// (an earlier plan, decision 4).
+/// mem and absence of matches are never the same answer.
 #[test]
 fn search_mem_filter_gates_against_visible_roster() {
     use crate::vcs::Actor;
@@ -3310,8 +3309,7 @@ fn quarantine_entry_invalidates_both_memos() {
     let _ = engine.search_indexes();
 }
 
-/// Quarantine-reattach regression pin (flywheel W8/01, criterion
-/// 2's complement): the reattach path routes through the one-mem
+/// Quarantine-reattach regression pin (complement): the reattach path routes through the one-mem
 /// reload, which invalidates BOTH derived memos — pinned so
 /// incremental maintenance can never silently degrade it.
 #[test]
@@ -4049,7 +4047,7 @@ fn roster_file_that_appears_after_boot_mounts_its_mems() {
     );
 }
 
-/// A4 AC1 (engine half): a mem that leaves the roster is gone on the
+/// Engine half: a mem that leaves the roster is gone on the
 /// next operation with `MEM_ROSTER_CHANGED` naming it, its entities are
 /// not searchable, an operation naming it refuses `MEM_UNMOUNTED`; a mem
 /// that returns is served again with its entities.
@@ -4112,7 +4110,7 @@ fn roster_membership_follows_reload_before_operation() {
     );
 }
 
-/// A4 AC1, refusal complement: a roster entry whose storage does not
+/// Refusal complement: a roster entry whose storage does not
 /// exist quarantines on reconciliation exactly as boot would, with the
 /// boot's reason code, and the other mems keep serving.
 #[test]
@@ -4186,7 +4184,7 @@ fn roster_entry_with_missing_storage_quarantines_like_boot() {
     assert_eq!(engine.unknown_mem_error("ghost").code(), "MEM_QUARANTINED");
 }
 
-/// A4 AC2: after the unmount, the cross-mem edge from beta into alpha
+/// After the unmount, the cross-mem edge from beta into alpha
 /// reads dangling on the integrity axis, search has no hit from the
 /// removed mem, and the community partition and search indexes carry no
 /// reference to it; the probe cost over one hundred operations stays in
@@ -4246,7 +4244,7 @@ fn unmount_is_atomic_and_cross_mem_edges_go_dangling() {
     );
 }
 
-/// A4 AC2, refusal complement: an unmount that fails mid-way leaves the
+/// Refusal complement: an unmount that fails mid-way leaves the
 /// roster unapplied and the mem fully served, and the response names
 /// the failure.
 #[test]
@@ -4296,7 +4294,7 @@ fn failed_unmount_leaves_the_roster_unapplied_and_the_mem_served() {
     assert_eq!(engine.mem_names(), vec!["alpha"]);
 }
 
-// --- quoted-span anchors (AC2, AC5) ---
+// --- quoted-span anchors ---
 
 /// A folder workspace with one `specs` mem and one path-shaped binding
 /// source (`src`), the shape the url tests use; the engine's clock pinned.
@@ -4370,7 +4368,7 @@ fn spec_with_anchors(
         .id
 }
 
-/// AC2: `verify-anchors --observations` resolves a url span row while its
+/// `verify-anchors --observations` resolves a url span row while its
 /// span occurs in the supplied text, whatever else on the page changed
 /// (the document hash differs from the one recorded at write, and the new
 /// one is recorded as the row's last observation); a row whose span is gone
@@ -4603,7 +4601,7 @@ fn url_span_rows_adjudicate_on_the_spans_presence_through_every_read_surface() {
     );
 }
 
-/// AC2 on the path grains: a span row on a file is observed live; the file
+/// On the path grains: a span row on a file is observed live; the file
 /// rewritten around the words keeps resolving, the words removed reads
 /// `span_absent`, the file gone reads `orphaned` (counted unresolvable).
 /// The whole-file row beside it drifts on the rewrite, as before.
@@ -4705,7 +4703,7 @@ fn file_span_rows_resolve_live_while_the_words_stand() {
     assert_eq!(engine.verify_mem_anchors("specs").unwrap().unresolvable, 3);
 }
 
-/// AC5: a `derived` (or `anchored`) entity-grain anchor written without a
+/// A `derived` (or `anchored`) entity-grain anchor written without a
 /// hash while its target is loaded is pinned to the target's prepared hash
 /// at write (`hash_source: pinned`), so the next verify reads it against
 /// the target as it was: resolves until the target changes, then drifted,
@@ -4893,7 +4891,7 @@ fn a_derived_entity_anchor_is_pinned_to_its_target_at_write() {
     assert_eq!(r[0].state, Some(crate::anchor::AnchorState::Resolves));
 }
 
-/// AC2 and AC4 at the record seam: one entity, two span rows and one
+/// At the record seam: one entity, two span rows and one
 /// span-less row on one url artifact. A mixed content observation lands
 /// on each row by its identity (A resolves, B span_absent, the span-less
 /// row by the whole-document rule), and a hash-only observation updates

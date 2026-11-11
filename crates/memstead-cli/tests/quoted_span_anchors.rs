@@ -109,7 +109,7 @@ fn row<'a>(v: &'a serde_json::Value, entity: &str) -> &'a serde_json::Value {
         .unwrap_or_else(|| panic!("no row for {entity} in {v}"))
 }
 
-/// AC1 through the CLI element: the write refuses, typed and naming the
+/// Through the CLI element: the write refuses, typed and naming the
 /// span, when the words are not in the supplied content; a span beside a
 /// hash refuses; a span on the entity grain refuses.
 #[test]
@@ -157,7 +157,7 @@ fn the_write_refuses_a_span_the_content_does_not_carry() {
     assert_eq!(v["count"], 2, "{v}");
 }
 
-/// AC2 and AC4 through the CLI: one observation of a third extraction
+/// Through the CLI: one observation of a third extraction
 /// resolves both span rows (each entity pinned a different document hash),
 /// the words of one claim leaving the page reads `span_absent` on that row
 /// alone (never `drifted`), the roster and the health axis show it, and
@@ -271,7 +271,7 @@ fn two_extractions_resolve_from_one_observation_and_a_lost_span_reads_span_absen
     assert_eq!(row(&v, COMMITTEE)["span"], "committee did not approve it");
 }
 
-/// AC2 refusal complement through the CLI: an `absent` observation reads
+/// Refusal complement through the CLI: an `absent` observation reads
 /// `recheck`, a `hash` observation cannot adjudicate a span row and leaves
 /// it as it was (unobserved here, and reported as not applied).
 #[test]

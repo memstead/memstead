@@ -176,7 +176,7 @@ impl Engine {
         // (one implementation; the two surfaces cannot disagree). A
         // warning, never a refusal: entities are legitimately built up
         // over several calls.
-        // Section-format evaluation (plan 08): each written section
+        // Section-format evaluation: each written section
         // body against its declared markdown shape, judged by the
         // real CommonMark reduction. Block-tier refuses with the
         // first violation, pre-commit; warn-tier surfaces via the

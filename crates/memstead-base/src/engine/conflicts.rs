@@ -1,5 +1,4 @@
-//! Merge-conflict resolution for folder mems (an earlier plan,
-//! decision 20).
+//! Merge-conflict resolution for folder mems.
 //!
 //! A hand-committed folder mem lives inside the user's own git
 //! repository, so an ordinary merge can write conflict markers into
@@ -438,7 +437,7 @@ mod tests {
 
     const CLEAN: &str = "---\ntype: spec\n---\n# Fine\n\n## Identity\n\nis\n\n## Purpose\n\nok\n";
 
-    /// Plan 07 criteria 1/3/4 on a live folder workspace: the load
+    /// On a live folder workspace: the load
     /// refusal names the resolve remedy, the conflicted entity lists,
     /// resolving to theirs makes the mem load clean with the entity
     /// valid, and the resolution lands in the provenance ledger with

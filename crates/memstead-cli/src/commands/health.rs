@@ -1,8 +1,8 @@
 //! `memstead health` — the workspace health report, composed by the
 //! engine's shared `compose_health` (the same builder behind the MCP
 //! `memstead_health` tool) so the `--json` bytes equal the tool's
-//! `structured_content` for every include key and under a `--mem` filter
-//!. This file owns only the CLI's concerns: the
+//! `structured_content` for every include key and under a `--mem` filter.
+//! This file owns only the CLI's concerns: the
 //! argument shape, the `--strict` exit policy read off the composed report,
 //! and the markdown rendering.
 

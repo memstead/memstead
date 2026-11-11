@@ -82,7 +82,7 @@ fn explicit_folder_create_lands_beside_git_branch_mems() {
         "heuristic git-branch create produces a real 40-hex sha, got {:?}",
         plans.seed_write_id
     );
-    // Refusal complement (plan 10): a git-backed mem has real
+    // Refusal complement: a git-backed mem has real
     // commits — creating it carries NO folder-provenance notice.
     assert!(
         !plans
@@ -132,7 +132,7 @@ fn explicit_folder_create_lands_beside_git_branch_mems() {
     );
 
     // The folder create — storage without version control — carries
-    // the provenance notice (plan 10), and was not blocked by it.
+    // the provenance notice, and was not blocked by it.
     assert!(
         response
             .warnings

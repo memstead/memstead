@@ -1,6 +1,5 @@
 //! `memstead proposal merge` and `memstead proposal list`: the CLI face
-//! of `Engine::proposal_merge` and `Engine::proposal_list` (plan-proposal
-//! 03). One fork end to end: the brief written to a file, the file
+//! of `Engine::proposal_merge` and `Engine::proposal_list`. One fork end to end: the brief written to a file, the file
 //! filled, the merge under two identities, the record listed, the
 //! provenance read naming the proposal; the refusals a caller meets
 //! first (no identity, a stale file, no file); the help texts.

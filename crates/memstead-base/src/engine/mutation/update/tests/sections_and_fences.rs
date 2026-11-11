@@ -293,7 +293,7 @@ fn update_entity_appends_to_existing_section_with_newline_separator() {
     );
 }
 
-/// Criteria 5 and 6. The state is reproduced the way it actually arrives:
+/// The state is reproduced the way it actually arrives:
 /// a hand-edited file on disk, reloaded. The engine cannot author it, so a
 /// fixture that went through `update_entity` would prove nothing.
 fn engine_with_open_fence(tmp: &TempDir) -> (Engine, crate::EntityId) {
@@ -393,7 +393,7 @@ fn a_write_that_does_not_resolve_an_open_fence_is_refused() {
 
 #[test]
 fn replacing_the_absorbing_section_is_the_way_out() {
-    // Criterion 6. The refusal above strands nothing: the caller lifts the
+    // The refusal above strands nothing: the caller lifts the
     // swallowed content back out in the same call, and editing the file
     // directly is forbidden by the workspace rule, so this route has to
     // exist through the engine.
@@ -505,7 +505,7 @@ fn every_verb_that_regenerates_the_file_is_gated_not_only_update() {
 
 #[test]
 fn an_entity_with_no_open_fence_updates_exactly_as_before() {
-    // Criterion 7 at the write tier: the new gate is invisible to every
+    // At the write tier: the new gate is invisible to every
     // entity that does not carry the condition.
     let tmp = TempDir::new().unwrap();
     let (mut engine, seeded) = engine_with_seed(&tmp, "Ordinary");

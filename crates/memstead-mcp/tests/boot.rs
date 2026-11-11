@@ -138,7 +138,7 @@ fn full_binary_boots_against_new_layout_workspace() {
 /// `BootError::surface_message` string the CLI ships for the
 /// identical fixture (`memstead-cli/tests/boot_typed_errors.rs` pins
 /// the CLI side to the same renderer). Fixture: a corrupt workspace
-/// store — under the plan-04 quarantine posture, the only class that
+/// store — under the quarantine posture, the only class that
 /// still fails the whole boot (mem-level failures quarantine; legacy
 /// projection configs quarantine their binding). The server no longer
 /// exits — it prints the typed line, then serves the diagnostic
@@ -336,7 +336,7 @@ fn tools_call_request(id: i64, name: &str) -> String {
     .unwrap()
 }
 
-/// Criterion 4, partial half: a workspace with a
+/// Partial half: a workspace with a
 /// broken-pin mem STARTS the server (the mem quarantines inside the
 /// engine) instead of dying into `-32000 Connection closed`.
 #[test]
@@ -372,7 +372,7 @@ fn full_binary_serves_partially_broken_workspace() {
     let _ = child.wait();
 }
 
-/// Criterion 4, wholly-unbootable half: a corrupt workspace store no
+/// Wholly-unbootable half: a corrupt workspace store no
 /// longer kills the server — it starts as a diagnostic shell and
 /// `memstead_health` answers with the typed boot diagnosis, so a
 /// session can always ask why the graph is gone.

@@ -202,7 +202,7 @@ fn assert_redacted(ws: &Path) {
     );
 }
 
-/// B1 AC1 on a folder mem.
+/// On a folder mem.
 #[test]
 fn folder_export_redacts_reports_and_scans_clean() {
     let ws = folder_workspace();
@@ -210,7 +210,7 @@ fn folder_export_redacts_reports_and_scans_clean() {
     assert_redacted(ws.path());
 }
 
-/// B1 AC1 on a git-branch mem: the same builder, the same bytes.
+/// On a git-branch mem: the same builder, the same bytes.
 #[test]
 fn branch_export_redacts_reports_and_scans_clean() {
     let ws = branch_workspace();
@@ -238,7 +238,7 @@ fn branch_export_redacts_reports_and_scans_clean() {
     );
 }
 
-/// B1 AC1 refusal complement, second half: entity bodies are not
+/// Refusal complement, second half: entity bodies are not
 /// rewritten, so the leak scan still flags them on the unpacked archive.
 #[test]
 fn entity_bodies_are_not_rewritten_and_still_fail_the_leak_scan() {

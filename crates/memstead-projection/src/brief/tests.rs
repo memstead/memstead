@@ -1161,7 +1161,7 @@ fn sync_brief_caps_large_findings_group() {
     assert!(!out.contains(&format!("src/f{}.rs", FINDINGS_CAP + 3)));
 }
 
-/// Criterion 8 (loop economics) — the default loop path's sync brief is
+/// Loop economics: the default loop path's sync brief is
 /// **locked block-by-block** for a representative changed-slice pass: the
 /// heading sequence below is the whole brief, in this order, and nothing
 /// else. The only blocks this plan added to the loop path are the
@@ -1233,7 +1233,7 @@ fn sync_brief_block_sequence_locked_for_changed_slice() {
     assert!(out.ends_with("`[commit <hash>]` log-style entries.\n\n"));
 }
 
-/// Criterion 8 REFUSAL — no brief on the default (non-inventory) path
+/// Refusal: no brief on the default (non-inventory) path
 /// carries any inventory machinery: not the build briefs (discovery /
 /// one-shot), not the verify brief, not the sync brief in any of its
 /// shapes (changed slice, findings-only, nothing-to-sync, adopt). The

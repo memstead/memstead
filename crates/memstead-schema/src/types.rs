@@ -96,10 +96,10 @@ pub struct TypeDefinition {
     /// Each entry names a list of relationship names plus a cardinality
     /// constraint. The engine evaluates these on every `memstead_create` /
     /// `memstead_update` (post-application of inline `relations:` / patches)
-    /// and surfaces unsatisfied blocks as a single
-    /// `MISSING_REQUIRED_OUTGOING` warning per entity. Tier-2 (warn,
-    /// never block). Empty default — types without `required_outgoing`
-    /// keep current behaviour.
+    /// and, per entry's `severity`, surfaces an unsatisfied entry as a
+    /// `MISSING_REQUIRED_OUTGOING` warning (`warn`, the default) or
+    /// refuses the write (`block`). Empty default: a type without
+    /// `required_outgoing` asserts no outgoing edge.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_outgoing: Vec<RequiredOutgoing>,
     /// Declared reachability obligations (see [`MustReach`]): entities
@@ -764,7 +764,7 @@ pub struct SectionDef {
     pub write_rules: Vec<String>,
     #[serde(default)]
     pub description: Option<String>,
-    /// Declared markdown shape (section-format vocabulary, plan 08):
+    /// Declared markdown shape (section-format vocabulary):
     /// a flat content expression over the mdast block vocabulary —
     /// see [`crate::content_expr::ContentExpr`]. Absent = free-form,
     /// exactly the pre-declaration behavior. Validated and compiled
@@ -786,7 +786,7 @@ pub struct SectionDef {
     /// grammar string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub example: Option<String>,
-    /// Severity of format violations (plan 07's uniform model).
+    /// Severity of format violations (the uniform severity model).
     /// Default `block`: a shape violation is deterministic and
     /// one-round-trip repairable (the enum-value analogy) — `warn`
     /// stays available per section.
@@ -831,7 +831,7 @@ pub struct TableFormat {
     pub column_patterns: IndexMap<String, String>,
 }
 
-/// A type's declared **due axis** (first-author-path plan 08): which
+/// A type's declared **due axis**: which
 /// of its fields carry deadline semantics, so the engine's due-brief
 /// (`memstead due`) can render "what is due next" without knowing any
 /// domain vocabulary. Validated at schema load: `date_field` must be

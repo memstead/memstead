@@ -429,8 +429,7 @@ impl Engine {
     /// folder mount whose directory is gone returns no config rather than an
     /// error, boot stores none, and the mount became invisible to every one of
     /// them. Nine call sites shared that blind spot, and the omission was a
-    /// side effect of config readability rather than anything about the mount
-    /// (04/05, criteria 1 and 8).
+    /// side effect of config readability rather than anything about the mount.
     ///
     /// Callers that genuinely want only configured mems keep using the other
     /// one; drivers that want every mount ask for every mount.
@@ -528,7 +527,7 @@ impl Engine {
     ///
     /// WHY this is a question and not an assumption: an anchor sidecar is
     /// keyed by entity id, and a key with no entity behind it is a dangling
-    /// row (consistency-sweep 03/02). Detecting one means reading a NEGATIVE
+    /// row. Detecting one means reading a NEGATIVE
     /// from the store, and a negative is only evidence when the store is known
     /// to hold everything the mem has. Four states break that, and each of
     /// them would otherwise turn every anchor in the mem into a false dangling

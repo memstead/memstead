@@ -684,7 +684,7 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
                 ),
             )
         })?;
-        // D6/AC4 (an earlier plan, decision 13): the sync brief is the
+        // The sync brief is the
         // maintenance-writer prompt — rendering it for a binding whose sync
         // operation is not enabled spends a loop's work slot on work the
         // engine will refuse to apply. Gate render exactly like `projection
@@ -763,7 +763,7 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
                 }
                 return Ok(());
             }
-            // Criterion 4's --all half: the rotation
+            // --all half: the rotation
             // drops pairs the binding never loop-declared — by design
             // (consent lives in the declaration), but never silently. Say
             // which (binding, op) pairs the requested filter can never
@@ -1096,7 +1096,7 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
         .map_err(|e| crate::setup::boot_error_to_cli(&root, memstead_base::BootError::Store(e)))?;
 
     // Already present? Refuse without a partial write. Every operation block is
-    // optional now (D1/AC4), so `build` is enableable too (the remedy a
+    // optional now, so `build` is enableable too (the remedy a
     // build-less binding's brief refusal cites).
     let already = match op {
         EnableOperationArg::Build => binding.operations.build.is_some(),
@@ -1481,7 +1481,7 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
         .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
         .ok_or_else(|| binding_miss_error(&configs, &binding_id))?;
 
-    // D6/AC4: advance is the sync (maintenance-write) path — refuse when the
+    // Advance is the sync (maintenance-write) path — refuse when the
     // binding declares no `sync` operation, carrying the one-command remedy
     // `projection enable sync <binding>` (which, run verbatim, makes it
     // succeed) — except over a medium whose capability row refuses sync
@@ -1721,8 +1721,8 @@ fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Render a one-block human note for the full-enumeration scheduling decision
-///, prepended to the verify report so the typed signal is never silent: a
+/// Render a one-block human note for the full-enumeration scheduling decision,
+/// prepended to the verify report so the typed signal is never silent: a
 /// scheduled full walk that fired, a not-yet-due countdown, disabled scheduling,
 /// and — critically — any non-enumerable refusal. Empty for the quiet cases
 /// keeps a rotating-sample run byte-clean.
@@ -1771,8 +1771,8 @@ fn render_full_resync_note(decision: &FullResyncDecision) -> String {
     }
 }
 
-/// `projection verify <binding>` — measure fidelity and record durable findings
-///. Read-only on the destination mem's *entities*. A completed run
+/// `projection verify <binding>` — measure fidelity and record durable findings.
+/// Read-only on the destination mem's *entities*. A completed run
 /// always records two things: the findings store, which is the verify surface's
 /// own state outside the mem, and the prepared-hash backfill onto hash-less
 /// anchors, which is measurement machinery (withhold it and an anchor never

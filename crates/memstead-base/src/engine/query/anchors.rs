@@ -437,8 +437,8 @@ impl Engine {
     }
 
     /// The `source name → join` map for `mem`'s bindings: the filesystem
-    /// roots that anchors written in the source dialect join onto (decision
-    /// 26: anchor artifact paths are source-relative first) and the
+    /// roots that anchors written in the source dialect join onto (anchor
+    /// artifact paths are source-relative first) and the
     /// preparation each source declares (touchpoint A: what the registry
     /// prepares the artifact as before hashing). Empty when the workspace
     /// has no root, the pipeline store does not load, or `mem` has no
@@ -491,7 +491,7 @@ impl Engine {
             let Ok(sc) = crate::anchor::AnchorSidecar::from_bytes(&bytes) else {
                 continue;
             };
-            // Source-dialect anchors (decision 26) reference the same
+            // Source-dialect anchors reference the same
             // artifact under its pointer-joined workspace form — match both.
             let source_roots = self.anchor_source_roots(&mount.mount.mem);
             for (eid, anchors) in &sc.entities {
@@ -897,7 +897,7 @@ pub struct MemAnchorVerification {
     /// absent measurement, which is the one distinction that surface exists to
     /// make.
     pub unobserved: usize,
-    /// Rows whose ENTITY is gone (consistency-sweep 03/02). Its own class,
+    /// Rows whose ENTITY is gone. Its own class,
     /// counted apart from the states above: those describe the artifact end,
     /// and a vanished entity says nothing about the source. Folding it into
     /// `unresolvable` would name the wrong repair.
@@ -975,8 +975,8 @@ impl Observed {
 
 impl MemAnchorVerification {
     /// The figure this report's counts yield for `resolves` resolving rows:
-    /// the count with the population statement it was computed over
-    /// (consistency-sweep 03/05, criteria 1 and 3): what the figures cover,
+    /// the count with the population statement it was computed over:
+    /// what the figures cover,
     /// and how much of it the pass could not adjudicate.
     ///
     /// A resolution figure alone is read as health. Every W3 finding made that
@@ -1100,7 +1100,7 @@ pub struct ResolvedAnchor {
 
 /// What an anchor's `source` name resolves to in its mem's bindings: the
 /// declared pointer (the filesystem root a source-dialect artifact path
-/// joins onto, decision 26) and the declared preparation (what the
+/// joins onto) and the declared preparation (what the
 /// preparation registry prepares the artifact as before hashing —
 /// touchpoint A of [`crate::preparation`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1340,7 +1340,7 @@ pub fn join_pointer(pointer: &str, base: &str) -> String {
 ///
 /// The two questions are genuinely different and only this one can be
 /// ambiguous. `artifact_candidates` settles which reading wins under a single
-/// pointer (decision 29: source-join first, workspace-relative fallback). It
+/// pointer (source-join first, workspace-relative fallback). It
 /// takes one pointer and has no opinion on two sources both carrying
 /// `docs/a.md`. That case has exactly one home, the exclude fold, and used to
 /// take the first source that matched — so the source listed first in the
@@ -1388,8 +1388,7 @@ where
 }
 
 /// The candidate workspace-relative forms an anchor artifact could denote
-/// under its declaring source's pointer, in the ratified priority (bundle
-/// decision 29): the source-join first, the workspace-relative form as the
+/// under its declaring source's pointer, in the ratified priority: the source-join first, the workspace-relative form as the
 /// fallback. **The single implementation of that rule** — resolution, the
 /// write-time gate, and the population scope matcher all construct their
 /// candidate set here, so one artifact cannot read differently across the

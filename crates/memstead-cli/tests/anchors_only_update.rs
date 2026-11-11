@@ -169,7 +169,7 @@ fn exercise(root: &Path, id: &str, repair_section: &str) {
     assert!(stored_row(root, id)["hash"].is_null(), "re-baselined");
 }
 
-/// B10 AC1 on a folder mem, sidecar bytes compared around the no-op.
+/// On a folder mem, sidecar bytes compared around the no-op.
 #[test]
 fn an_anchors_only_update_replaces_the_row_on_a_folder_mem() {
     let (ws, id) = folder_workspace();
@@ -185,7 +185,7 @@ fn an_anchors_only_update_replaces_the_row_on_a_folder_mem() {
     );
 }
 
-/// B10 AC1 on a git-branch mem: the same behaviour, and a restated row
+/// On a git-branch mem: the same behaviour, and a restated row
 /// leaves no commit behind.
 #[test]
 fn an_anchors_only_update_replaces_the_row_on_a_git_branch_mem() {

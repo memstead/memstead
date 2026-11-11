@@ -385,7 +385,7 @@ fn staged() -> (TempDir, memstead_base::Engine) {
 }
 
 // ---------------------------------------------------------------------
-// AC1: the brief renders the staged fork's changes three ways
+// The brief renders the staged fork's changes three ways
 // ---------------------------------------------------------------------
 
 /// The four shas, one block per touched entity and none for the

@@ -27,9 +27,9 @@ use crate::setup::CliContext;
 /// `unresolvable` (the source artifact is GONE: a measured failure), or
 /// `unobserved` (the pass could not observe the anchor at all, so
 /// nothing about it was measured) — honestly, never fabricating a
-/// state. The last two shared one bucket until consistency-sweep 03/05,
-/// which is why this surface, the one you reach without a binding,
-/// could not tell a measured failure from an absent measurement. Works
+/// state. The last two are kept apart so this surface, the one you reach
+/// without a binding, tells a measured failure from an absent
+/// measurement. Works
 /// on a hand-authored mem with no binding at all; on a binding-backed
 /// mem it reports the same states the binding verify sees (one shared
 /// resolution mechanism). No entity changes; findings are recorded for
@@ -244,7 +244,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         print_json(&payload)?;
     } else {
         // The figure and the population it was computed over render as ONE
-        // sentence (consistency-sweep 03/05, criteria 1 and 3): the figure
+        // sentence: the figure
         // type prints the count only with its statement, so a count shown
         // without what it could not adjudicate cannot be written here.
         let mut out = format!(
@@ -265,7 +265,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         if let Some(cov) = crate::coverage::VERIFY_ANCHORS.axis_coverage() {
             out.push_str(&format!("- Verdict coverage: {}\n", cov.wire_line()));
         }
-        // Stated both ways (consistency-sweep 03/02): a dangling count of
+        // Stated both ways: a dangling count of
         // zero means "reconciled, none found" only when the reconciliation
         // ran, and four clean counts over a mem whose entity end was never
         // examined are the silent-clean this campaign exists to remove.

@@ -291,7 +291,7 @@ impl super::Engine {
             }
         }
 
-        // Write time resolves or refuses (decision 26, plan 03a): a
+        // Write time resolves or refuses: a
         // path-grain anchor whose artifact resolves under NO candidate join
         // is a silently dead reference — refuse now, while the write moment
         // still has the binding context to say what the right dialect is.
@@ -1430,7 +1430,7 @@ pub(super) fn validate_cross_mem_add_policy(
 /// cheap [`crate::backend::MemBackend::entity_exists`] probe
 /// (tree-lookup-class on git-branch, metadata-class on folder) and
 /// never triggers the mem's load: verification must not convert into
-/// a full-load side effect (plan 01's seam).
+/// a full-load side effect.
 pub(super) enum DeferredTargetProbe {
     /// The target's mem is loaded (the store is the truth) or not
     /// mounted at all (no storage handle to ask — the
@@ -1493,7 +1493,7 @@ pub(super) fn probe_deferred_target(
 /// always had — the check never guesses).
 /// The stub kind for a target being auto-stubbed on an add path: a
 /// target that storage VERIFIES inside a deferred mem gets the
-/// load-time kind — the stub is only plan 01's until-load
+/// load-time kind — the stub is only the until-load
 /// representation of a link into an unloaded mem, not a forward
 /// reference to something that awaits creation. Everything else keeps
 /// `ForwardReference`. Kinds stay annotation-not-state either way.

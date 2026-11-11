@@ -187,8 +187,7 @@ fn scan_mcp_codes(
     // may put the code literal on the line after `tool_error(`.
     let tool_re =
         // `_with_details` is the payload-carrying form; omitting it hid
-        // every code only that form emits (consistency-sweep 03/04
-        // grading).
+        // every code only that form emits.
         Regex::new(r#"\btool_error(?:_with_payload|_with_details)?\(\s*"([A-Z][A-Z0-9_]+)"\s*,"#)
             .unwrap();
     for crate_dir in ["crates/memstead-mcp/src"] {

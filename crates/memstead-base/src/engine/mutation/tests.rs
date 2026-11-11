@@ -140,7 +140,7 @@ fn spec_create_args(title: &str) -> CreateEntityArgs {
     }
 }
 
-/// Criterion 3: a mutation stamps the mem's
+/// A mutation stamps the mem's
 /// engine-owned state with the running engine version and resolved
 /// schema; a read-only load writes nothing.
 #[test]
@@ -176,7 +176,7 @@ fn mutation_writes_version_stamp_and_read_only_load_does_not() {
     assert_eq!(again, stamp);
 }
 
-/// The reported damage, reproduced (04/03, criteria 7 and 8): a
+/// The reported damage, reproduced: a
 /// long-lived engine boots, a sibling writes the config out of band, and
 /// the engine's next ENTITY mutation stamps the version. Before the fix
 /// that stamp serialized the boot-time struct and the sibling's write was
@@ -234,7 +234,7 @@ fn a_sibling_config_write_survives_the_next_entity_mutation() {
     );
 }
 
-/// Criterion 3 for the stamp writer: the intervention reaches the ENTITY
+/// For the stamp writer: the intervention reaches the ENTITY
 /// mutation's own response. The stamp has no response of its own, and an
 /// earlier draft discarded the report with `let _`, so an operator whose
 /// config moved during an innocuous entity write was told nothing.
@@ -272,7 +272,7 @@ fn the_stamps_intervention_rides_the_entity_mutations_response() {
     );
 }
 
-/// Criterion 5: the folder backend's config write is a compare-and-set,
+/// The folder backend's config write is a compare-and-set,
 /// not check-then-write. A write whose `expected` no longer matches the
 /// file must refuse rather than overwrite.
 #[test]
@@ -333,7 +333,7 @@ fn the_folder_config_write_refuses_a_stale_expectation() {
     );
 }
 
-/// Criterion 7's complement: the stamp does not become a busy writer. With
+/// Complement: the stamp does not become a busy writer. With
 /// a stamp that already agrees, an entity mutation must not touch the
 /// config at all, so a sibling's write is untouched for the boring reason
 /// rather than the interesting one.
@@ -363,7 +363,7 @@ fn a_matching_stamp_still_writes_no_config_at_all() {
     );
 }
 
-/// 04/04, criteria 9 and 10: skew reaches the write that meets it, before
+/// Skew reaches the write that meets it, before
 /// that write's own restamp erases the evidence, and the write still
 /// lands.
 ///
@@ -408,7 +408,7 @@ fn skew_is_reported_at_the_write_and_the_write_still_lands() {
         "and say which way: {:?}",
         skew[0]
     );
-    // Criterion 10: it landed. An older engine is not prevented from
+    // It landed. An older engine is not prevented from
     // writing; a deliberate downgrade is the operator's business.
     assert!(engine.get_entity(&outcome.id).is_some());
     assert_eq!(
@@ -431,7 +431,7 @@ fn skew_is_reported_at_the_write_and_the_write_still_lands() {
     );
 }
 
-/// Criterion 8's complement at the write tier: a stamp from the same
+/// Complement at the write tier: a stamp from the same
 /// release with a different build hash is not skew, so a workspace whose
 /// binary is rebuilt from source is not told its engine disagrees on
 /// every mutation.
@@ -460,7 +460,7 @@ fn a_rebuild_of_the_same_release_is_not_skew_at_the_write() {
     );
 }
 
-/// Criterion 3/4: boot under a different
+/// Boot under a different
 /// binary version surfaces the warn-tier `ENGINE_VERSION_SKEW`
 /// naming both versions, on load warnings AND in `health()`;
 /// a stamp-less mem and a matching stamp are silent.

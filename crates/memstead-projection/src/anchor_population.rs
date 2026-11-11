@@ -12,7 +12,7 @@
 //! verification is responsible for. Every anchor outside it is excluded AND
 //! NAMED; nothing is silently included and nothing silently dropped.
 //!
-//! **The entity end comes first (consistency-sweep 03/02).** An anchor is an
+//! **The entity end comes first.** An anchor is an
 //! edge with two ends and the engine checked one of them: a mem whose entity
 //! files are gone, but whose sidecar still names them, verified clean at a
 //! hundred percent, because every row resolved against a source that was fine.
@@ -88,7 +88,7 @@ pub struct ExcludedAnchor {
     pub reason: ExclusionReason,
 }
 
-/// One sidecar row whose ENTITY is gone (consistency-sweep 03/02).
+/// One sidecar row whose ENTITY is gone.
 ///
 /// Not an exclusion and not an anchor state. The four states describe the
 /// artifact end of the edge, and a vanished entity says nothing about the
@@ -546,7 +546,7 @@ mod tests {
 
         // The entity the sidecar is keyed to. Written, because it exists: a
         // sidecar row whose entity does not is a DANGLING row, which the
-        // population partitions out on its own (consistency-sweep 03/02).
+        // population partitions out on its own.
         // Every fixture here omitted it, so every one of them was quietly a
         // mem whose sidecar had outlived its entities.
         if write_entity {
@@ -721,7 +721,7 @@ mod tests {
         );
     }
 
-    /// Criterion 1 and 3: two bindings on one mem see different populations,
+    /// Two bindings on one mem see different populations,
     /// and each names the other's anchor rather than dropping it.
     #[test]
     fn each_binding_answers_for_its_own_anchors() {
@@ -748,7 +748,7 @@ mod tests {
         assert_eq!(a.excluded[0].artifact, "src/b.rs");
     }
 
-    /// Criteria 2 and 3: an out-of-scope anchor leaves the figures and appears
+    /// An out-of-scope anchor leaves the figures and appears
     /// by name.
     #[test]
     fn an_out_of_scope_anchor_is_excluded_and_named() {
@@ -769,7 +769,7 @@ mod tests {
         assert_eq!(pop.excluded[0].reason, ExclusionReason::OutOfScope);
     }
 
-    /// Criterion 4: exclusion is a reporting decision, never a mutation.
+    /// Exclusion is a reporting decision, never a mutation.
     #[test]
     fn exclusion_never_mutates_the_sidecar() {
         let tmp = tempfile::tempdir().unwrap();
@@ -784,7 +784,7 @@ mod tests {
         assert_eq!(engine.mem_anchors_resolved("engine").len(), before);
     }
 
-    /// Criteria 5 and 6: several rows on one artifact stay several rows, and
+    /// Several rows on one artifact stay several rows, and
     /// the distinct-artifact count sits beside the row count.
     #[test]
     fn the_distinct_artifact_count_sits_beside_the_row_count() {
@@ -803,7 +803,7 @@ mod tests {
         assert_eq!(pop.distinct_artifacts(), 1, "one artifact");
     }
 
-    /// Criterion 8: an upgrade must not empty the axis, and the fallback is
+    /// An upgrade must not empty the axis, and the fallback is
     /// counted rather than left to be inferred.
     #[test]
     fn anchors_without_provenance_are_kept_and_counted() {
@@ -861,7 +861,7 @@ mod tests {
         assert_eq!(pop.excluded[0].artifact, "docs/");
     }
 
-    /// Criterion 7's asymmetry, at the population level: an anchor another
+    /// The asymmetry, at the population level: an anchor another
     /// binding wrote is not this binding's evidence of coverage either. The
     /// report's coverage filter carries the same rule; this pins the shared
     /// premise, that provenance decides membership on both axes rather than
@@ -884,7 +884,7 @@ mod tests {
         assert_eq!(pop.excluded[0].reason, ExclusionReason::OtherBinding);
     }
 
-    /// Criteria 1, 2 and 3 (03/02). The row's ENTITY is gone. It is neither
+    /// The row's ENTITY is gone. It is neither
     /// in the population nor in an exclusion bucket: the exclusions are legal
     /// authoring the binding does not answer for, and this is a sidecar the
     /// mem's entities have outlived.
@@ -911,7 +911,7 @@ mod tests {
         assert_eq!(pop.unreconciled, None);
     }
 
-    /// Criterion 4: detection reads. A reconciliation that tidied the sidecar
+    /// Detection reads. A reconciliation that tidied the sidecar
     /// would erase the only evidence that a writer went around the engine.
     #[test]
     fn detecting_a_dangling_row_never_touches_the_sidecar() {
@@ -938,7 +938,7 @@ mod tests {
         );
     }
 
-    /// Criterion 8. A deferred mem holds no entities in the store, so a
+    /// A deferred mem holds no entities in the store, so a
     /// missing id proves nothing. Claiming zero dangling rows there would be
     /// the silent-clean this campaign exists to remove: the population says
     /// WHY instead, and keeps the rows it can still adjudicate.
@@ -969,7 +969,7 @@ mod tests {
         );
     }
 
-    /// Criterion 7's complement at this layer: an entity that IS there keeps
+    /// Complement at this layer: an entity that IS there keeps
     /// its anchors, so the fix cannot turn the engine's own correct delete and
     /// rename handling into a finding.
     #[test]

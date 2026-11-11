@@ -169,7 +169,7 @@ fn complete(ws: &Path, identity: &str) -> std::process::Output {
         .unwrap()
 }
 
-/// A5 AC1: identity A authors the plan and the criterion; identity B
+/// Identity A authors the plan and the criterion; identity B
 /// mutates the plan (a note) and checks: `self_checked`, the transition
 /// refuses; identity C, which mutated nothing, checks: the criterion reads
 /// `confirmed_independent` and the transition succeeds. Refusal
@@ -262,7 +262,7 @@ fn executors_own_checks_read_self_checked_and_do_not_close_the_gate() {
     );
 }
 
-/// A5 AC2, first half: the ledger line shape is unchanged — a row written
+/// First half: the ledger line shape is unchanged — a row written
 /// before the plan (no new field) derives under the new comparator. The
 /// row is appended by hand in the exact pre-plan shape.
 #[test]

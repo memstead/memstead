@@ -679,8 +679,8 @@ fn provenance_bearing_archive_stays_within_publish_budget() {
 /// this single-mem archive) exports successfully — the archive is
 /// still produced — and the export surfaces the dangling edge so the
 /// operator sees, before sharing, exactly what `install` will reject.
-/// AC1 (export warns, archive produced) + AC2 (export's condition ==
-/// install's refusal) tested against one set of bytes.
+/// Export warns and the archive is produced, and export's condition
+/// equals install's refusal, tested against one set of bytes.
 #[test]
 fn export_warns_on_cross_mem_edge_that_install_refuses() {
     let tmp = TempDir::new().unwrap();
@@ -724,7 +724,7 @@ E
     std::fs::write(mem_dir.join("broker.md"), md).unwrap();
 
     // The path-shaped export carries the dangling edge on its result
-    // and still writes the archive (AC1).
+    // and still writes the archive.
     let out = tmp.path().join("specs.mem");
     let result = engine.export_mem("specs", &out).unwrap();
     assert!(out.is_file(), "archive must still be produced");
@@ -739,7 +739,7 @@ E
     assert_eq!(edge.target_id, "other--thing");
     assert_eq!(edge.target_mem, "other");
 
-    // AC2: the exact condition export warned on is what install
+    // The exact condition export warned on is what install
     // refuses on — the strict validator rejects these same bytes.
     let bytes = std::fs::read(&out).unwrap();
     let err = crate::validator::validate_and_normalize_archive(&bytes).unwrap_err();
@@ -1591,7 +1591,7 @@ fn sealed_checks_of(bytes: &[u8]) -> Option<crate::check::SealedChecks> {
         .map(|b| crate::check::SealedChecks::from_archive_bytes(&b).unwrap())
 }
 
-/// AC1, folder path: the archive carries, per entity, the latest ledger
+/// Folder path: the archive carries, per entity, the latest ledger
 /// record per kind (verification, conformance, a foreign `x-` kind) with
 /// the identity handles verbatim, the method note redacted by the same
 /// classes the provenance member applies, the bytes deterministic.
@@ -1760,7 +1760,7 @@ fn export_seals_latest_check_per_entity_and_kind() {
     assert_eq!(report.bytes, again);
 }
 
-/// AC1 complement: an engine with no workspace root, a workspace with no
+/// Complement: an engine with no workspace root, a workspace with no
 /// ledger, and a mem with no record in the ledger all export the same
 /// bytes with no member.
 #[test]
@@ -1799,7 +1799,7 @@ fn export_without_a_qualifying_record_embeds_no_checks_member() {
     assert_eq!(rootless, no_record, "no record for this mem: no member");
 }
 
-/// AC1, in-memory path: a session mem under a workspace root seals its
+/// In-memory path: a session mem under a workspace root seals its
 /// check records through the same builder.
 #[test]
 fn in_memory_export_seals_check_records() {
@@ -1859,7 +1859,7 @@ fn in_memory_export_seals_check_records() {
     );
 }
 
-/// AC2: the member threads verbatim through the canonical re-pack (what
+/// The member threads verbatim through the canonical re-pack (what
 /// install stores) and the installed mem exposes it; an archive without
 /// the member installs as today and exposes none.
 #[test]
@@ -1907,7 +1907,7 @@ fn checks_member_survives_canonical_repack_and_install() {
     assert!(installed.archive_checks_for("specs").is_none());
 }
 
-/// AC3: an archive mount derives `entity --provenance`'s check states
+/// An archive mount derives `entity --provenance`'s check states
 /// and the health checks axis from the sealed member with the workspace
 /// derivation (sealed hash against the sealed entity, conformance also
 /// against the pin); foreign kinds are listed; the independence reading
@@ -2198,7 +2198,7 @@ fn export_seals_the_independence_reading_the_mount_serves() {
     assert_eq!(standing.label(), "unconfirmable");
 }
 
-/// AC3 complement: a sealed record whose hash differs from the sealed
+/// Complement: a sealed record whose hash differs from the sealed
 /// entity (the entity was edited after the check) reads stale, never
 /// fresh, on the mount.
 #[test]
@@ -2256,7 +2256,7 @@ fn sealed_record_over_a_later_edit_reads_stale_never_fresh() {
     assert_eq!(axis["specs"]["checked_ok"], 0, "{axis}");
 }
 
-/// AC3 complement: an archive sealed without the member reads
+/// Complement: an archive sealed without the member reads
 /// `never_checked` with the reason stated, and a workspace ledger beside
 /// the mount (holding a fresh ok record for the very id) is never
 /// consulted for it.
@@ -2314,7 +2314,7 @@ fn archive_mount_never_reads_the_workspace_ledger() {
     );
 }
 
-/// AC3 complement: a writable mem never reads a sealed member. A
+/// Complement: a writable mem never reads a sealed member. A
 /// `.memstead/checks.json` file dropped into a folder mem's directory is
 /// not a source of check state; only the workspace ledger is.
 #[test]

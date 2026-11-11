@@ -92,7 +92,7 @@
       }
     },
     "required_outgoing": {
-      "description": "Outgoing-edge invariants the schema asserts for this type.\nEach entry names a list of relationship names plus a cardinality\nconstraint. The engine evaluates these on every `memstead_create` /\n`memstead_update` (post-application of inline `relations:` / patches)\nand surfaces unsatisfied blocks as a single\n`MISSING_REQUIRED_OUTGOING` warning per entity. Tier-2 (warn,\nnever block). Empty default — types without `required_outgoing`\nkeep current behaviour.",
+      "description": "Outgoing-edge invariants the schema asserts for this type.\nEach entry names a list of relationship names plus a cardinality\nconstraint. The engine evaluates these on every `memstead_create` /\n`memstead_update` (post-application of inline `relations:` / patches)\nand, per entry's `severity`, surfaces an unsatisfied entry as a\n`MISSING_REQUIRED_OUTGOING` warning (`warn`, the default) or\nrefuses the write (`block`). Empty default: a type without\n`required_outgoing` asserts no outgoing edge.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/RequiredOutgoing"
@@ -762,7 +762,7 @@
       ]
     },
     "ResolutionAxis": {
-      "description": "A type's declared **due axis** (first-author-path plan 08): which\nof its fields carry deadline semantics, so the engine's due-brief\n(`memstead due`) can render \"what is due next\" without knowing any\ndomain vocabulary. Validated at schema load: `date_field` must be\na date-typed metadata field of the type, `status_field` an\nenum-typed one, every `open_values` entry a member of that enum,\nand `lead_section` (optional — rendered as \"what must happen\nfirst\") a declared section key. The axis is rendering-only: it\nnever enforces anything (constraints own enforcement) and the\nengine never advances a date (the agent loop is the runtime).\nA type's declared **resolution condition**: the section in which an open entity states\nwhat would resolve it, and the check kind under which that condition\ncounts as checked. With it the `open_questions` health axis answers\ntwo questions without reading prose: which open entities have no\ncondition written (`resolution_missing`), and which have one nobody\nhas checked (`resolution_unchecked`, from the check ledger). The\ndeclaration is a reading, not a rule: the write path refuses nothing\nnew, the section's own `required` flag stays the author's choice, and\nthe engine never judges whether a condition is well-formed. Validated\nat schema load: `condition_section` must name a declared section;\n`status_field` (optional) an enum-typed metadata field with every\n`open_values` entry in its enum, and without it every entity of the\ntype counts as open; `check_kind` (optional, default `verification`)\nan engine kind or a well-formed `x-` kind.",
+      "description": "A type's declared **due axis**: which\nof its fields carry deadline semantics, so the engine's due-brief\n(`memstead due`) can render \"what is due next\" without knowing any\ndomain vocabulary. Validated at schema load: `date_field` must be\na date-typed metadata field of the type, `status_field` an\nenum-typed one, every `open_values` entry a member of that enum,\nand `lead_section` (optional — rendered as \"what must happen\nfirst\") a declared section key. The axis is rendering-only: it\nnever enforces anything (constraints own enforcement) and the\nengine never advances a date (the agent loop is the runtime).\nA type's declared **resolution condition**: the section in which an open entity states\nwhat would resolve it, and the check kind under which that condition\ncounts as checked. With it the `open_questions` health axis answers\ntwo questions without reading prose: which open entities have no\ncondition written (`resolution_missing`), and which have one nobody\nhas checked (`resolution_unchecked`, from the check ledger). The\ndeclaration is a reading, not a rule: the write path refuses nothing\nnew, the section's own `required` flag stays the author's choice, and\nthe engine never judges whether a condition is well-formed. Validated\nat schema load: `condition_section` must name a declared section;\n`status_field` (optional) an enum-typed metadata field with every\n`open_values` entry in its enum, and without it every entity of the\ntype counts as open; `check_kind` (optional, default `verification`)\nan engine kind or a well-formed `x-` kind.",
       "type": "object",
       "properties": {
         "check_kind": {
@@ -805,7 +805,7 @@
           "default": false
         },
         "content": {
-          "description": "Declared markdown shape (section-format vocabulary, plan 08):\na flat content expression over the mdast block vocabulary —\nsee [`crate::content_expr::ContentExpr`]. Absent = free-form,\nexactly the pre-declaration behavior. Validated and compiled\nat schema load ([`SectionDef::compiled_content`]).",
+          "description": "Declared markdown shape (section-format vocabulary):\na flat content expression over the mdast block vocabulary —\nsee [`crate::content_expr::ContentExpr`]. Absent = free-form,\nexactly the pre-declaration behavior. Validated and compiled\nat schema load ([`SectionDef::compiled_content`]).",
           "type": [
             "string",
             "null"
@@ -826,7 +826,7 @@
           ]
         },
         "format_severity": {
-          "description": "Severity of format violations (plan 07's uniform model).\nDefault `block`: a shape violation is deterministic and\none-round-trip repairable (the enum-value analogy) — `warn`\nstays available per section.",
+          "description": "Severity of format violations (the uniform severity model).\nDefault `block`: a shape violation is deterministic and\none-round-trip repairable (the enum-value analogy) — `warn`\nstays available per section.",
           "$ref": "#/$defs/ConstraintSeverity"
         },
         "heading": {

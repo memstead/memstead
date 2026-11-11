@@ -992,7 +992,7 @@ fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
             // AS-GIVEN: the resolver decided the generation — an authored
             // directory source arrives stamped; a legacy builtin arrives
             // unmarked, and stamping it here would flip every bare
-            // field's meaning in later seals (the plan-05 defect).
+            // field's meaning in later seals.
             let pkg_dir = root
                 .join(".memstead")
                 .join("schemas")

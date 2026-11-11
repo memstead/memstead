@@ -300,7 +300,7 @@ fn update_requires_hash_by_default() {
         .stderr(contains("EXPECTED_HASH_REQUIRED"));
 }
 
-/// Criteria 1, 3, 4 and 5 (consistency-sweep 03/04) on the CLI surface, which
+/// On the CLI surface, which
 /// must answer exactly as MCP does: an anchors-only update needs no
 /// `--expected-hash`, a content change still does, and a payload naming
 /// neither is still an empty update rather than a hash complaint.

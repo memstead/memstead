@@ -1331,7 +1331,7 @@ fn search_direction_and_expand_via_flags() {
         );
 }
 
-/// Plan 08 duplicate check (CLI leg): an identifier-shaped metadata
+/// Duplicate check (CLI leg): an identifier-shaped metadata
 /// value is findable by plain free-text search — the silent-zero
 /// failure that produced duplicate entities is gone.
 #[test]
@@ -1370,7 +1370,7 @@ Shows that search reaches metadata values.
         .stdout(contains("cli-test--record").and(contains("\"metadata\"")));
 }
 
-/// `memstead due` (first-author-path plan 08): the CLI wiring — a
+/// `memstead due`: the CLI wiring — a
 /// workspace whose schema declares no due axis renders the honest
 /// empty brief; a bad window refuses typed naming the accepted forms;
 /// the default window is stated in `--help`; `--today` makes the
@@ -1664,7 +1664,7 @@ Exercises link resolution.
     );
 }
 
-/// Criterion 2's substance, end to end on a real workspace: the foreign-slug
+/// End to end on a real workspace: the foreign-slug
 /// passes must actually run.
 ///
 /// They were unreachable once, and invisibly: engine-authored bare wiki-links
@@ -1758,7 +1758,7 @@ fn llms_txt_foreign_slug_passes_resolve_and_never_guess() {
     );
 }
 
-/// `memstead export --format html` (first-author-path plan 11): the
+/// `memstead export --format html`: the
 /// CLI wiring — the format appears in help, a fixture workspace
 /// exports one self-contained file, and an unknown mem refuses with
 /// the same typed code the other formats use.

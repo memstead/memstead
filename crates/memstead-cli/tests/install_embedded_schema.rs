@@ -511,7 +511,7 @@ fn staged_schemas(root: &Path) -> Vec<std::sync::Arc<memstead_schema::Schema>> {
     }
 }
 
-/// AC1 — a mem published under a schema the installing workspace has
+/// A mem published under a schema the installing workspace has
 /// never seen installs, mounts, and its entities are readable. No
 /// network, no prior `schema install` in the receiver.
 #[test]
@@ -552,7 +552,7 @@ fn archive_under_an_unknown_schema_installs_mounts_and_reads() {
     );
 }
 
-/// AC2 — an archive whose embedded schema uses the retired
+/// An archive whose embedded schema uses the retired
 /// `propagating_relationships` key installs, and the key's written
 /// meaning survives into the loaded schema.
 #[test]
@@ -601,7 +601,7 @@ fn archive_with_a_retired_selfloop_key_installs_and_keeps_its_meaning() {
     assert_eq!(entity["entity_type"], "note", "got: {entity}");
 }
 
-/// AC2, other retired key — a pre-flip archive writes `optional:`
+/// Other retired key — a pre-flip archive writes `optional:`
 /// where the current language writes `required:`. Such a package
 /// carries no format marker (the marker and the polarity flip landed
 /// together), so it reads under the generation it was sealed in.
@@ -656,7 +656,7 @@ fn archive_with_a_retired_polarity_key_installs_and_keeps_its_meaning() {
     }
 }
 
-/// AC3 — both polarities, one package, both retired keys. Authoring
+/// Both polarities, one package, both retired keys. Authoring
 /// refuses each retired key by name so the author can fix it; the same
 /// content sealed in an archive installs. If the two tiers were ever
 /// collapsed, one half of this test would fail.
@@ -739,7 +739,7 @@ fn authoring_refuses_what_a_sealed_archive_still_admits() {
     }
 }
 
-/// AC4 — an archive whose embedded schema genuinely cannot be loaded
+/// An archive whose embedded schema genuinely cannot be loaded
 /// refuses under its own code, quotes the loader, does not send the
 /// user off to obtain a package the archive contains, and leaves
 /// neither a mount nor a staged schema behind.
@@ -802,7 +802,7 @@ fn unloadable_embedded_schema_refuses_and_leaves_nothing_behind() {
     );
 }
 
-/// AC5 — installing the same mem twice is a no-op on the second run,
+/// Installing the same mem twice is a no-op on the second run,
 /// and two mems pinning the same schema install in either order.
 #[test]
 fn reinstall_is_a_noop_and_a_shared_schema_installs_in_either_order() {
@@ -923,7 +923,7 @@ fn reinstall_is_a_noop_and_a_shared_schema_installs_in_either_order() {
 }
 
 /// The seal carries the SOURCE package's generation and never invents
-/// one (an earlier plan, decision 1). `schema install` of a
+/// one. `schema install` of a
 /// legacy builtin used to stamp the sealed copy with the
 /// current-language marker, silently flipping every bare field from
 /// required to optional the moment the sealed copy was read. Now: a

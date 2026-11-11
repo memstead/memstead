@@ -1,8 +1,8 @@
 //! `Engine::proposal_merge` and `Engine::proposal_list` on the git-branch
-//! backend (plan-proposal 03).
+//! backend.
 //!
-//! The fixture is plan 02's six-shape fork, now written under identities
-//! (`author-owner` on the source, `proposer-p1` on the fork), with one
+//! The fixture is the proposal-brief tests' six-shape fork, now written
+//! under identities (`author-owner` on the source, `proposer-p1` on the fork), with one
 //! more fork entity a sibling writer committed under an identity but
 //! with a body the gate refuses. The merge is exercised end to end:
 //! what lands, under which identities and trailers, the checks it
@@ -231,7 +231,7 @@ fn record_on(gitdir: &Path, branch: &str) -> Option<ProposalRecord> {
         .map(|b| ProposalRecord::from_bytes(&b).expect("the record parses"))
 }
 
-/// The staged fixture of plan 02 under identities, plus `lambda`: a
+/// The staged six-shape fixture under identities, plus `lambda`: a
 /// fork entity a sibling writer committed under `proposer-p1` with an
 /// engine-shaped subject and a body the gate refuses (`level: M9`).
 fn staged() -> (TempDir, memstead_base::Engine) {
@@ -474,7 +474,7 @@ fn filled(engine: &mut memstead_base::Engine) -> ProposalBrief {
 }
 
 // ---------------------------------------------------------------------
-// AC1: a filled brief lands under two identities with a check per entity
+// A filled brief lands under two identities with a check per entity
 // ---------------------------------------------------------------------
 
 #[test]
@@ -868,7 +868,7 @@ fn merge_commits_once_per_proposer_identity_in_slug_order() {
     assert!(outcome.validation.is_clean());
 }
 
-/// AC1's refusal complement: no merger identity (`INVALID_INPUT`), an
+/// Refusal complement: no merger identity (`INVALID_INPUT`), an
 /// adopted entity whose last fork commit carries no identity
 /// (`PROPOSAL_UNATTRIBUTED`, named), an adopted body the gate refuses
 /// (the gate's own code, with `details.entity` naming the slug and
@@ -960,7 +960,7 @@ fn merge_refuses_without_identity_unattributed_and_gate_failures_landing_nothing
 }
 
 // ---------------------------------------------------------------------
-// AC2: incomplete, stale or conflicting files refuse and land nothing
+// Incomplete, stale or conflicting files refuse and land nothing
 // ---------------------------------------------------------------------
 
 #[test]
@@ -1102,7 +1102,7 @@ fn merge_refuses_incomplete_stale_and_conflicting_files_and_lands_nothing() {
     assert_eq!(err.details()["current"], moved);
 }
 
-/// AC2's refusal complement: a complete, valid file whose tips match is
+/// Refusal complement: a complete, valid file whose tips match is
 /// never refused; a `reject` of a conflict entity is admitted; the same
 /// file merged twice refuses the second time as stale, never applying
 /// twice.
@@ -1201,7 +1201,7 @@ fn a_valid_file_merges_once_and_refuses_the_second_time_as_stale() {
 }
 
 // ---------------------------------------------------------------------
-// AC3: the record rides the target branch and every surface reads it
+// The record rides the target branch and every surface reads it
 // ---------------------------------------------------------------------
 
 /// Two successive proposals against one target: the first rejects eta,
@@ -1216,7 +1216,7 @@ fn the_record_marks_re_proposals_travels_into_archives_and_is_read_everywhere() 
     let (tmp, mut engine) = staged();
     let gitdir = gitdir_of(tmp.path());
 
-    // First proposal: eta rejected, the rest as in AC1; the file
+    // First proposal: eta rejected, the rest as in the first test; the file
     // describes the proposal in the owner's words (untrimmed, so the
     // record shows the trim) and gives beta's adoption a reason. The
     // merge's note is given too: the file's description wins.

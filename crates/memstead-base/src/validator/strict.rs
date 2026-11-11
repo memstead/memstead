@@ -233,7 +233,7 @@ fn check_unknown_sections(
 
 /// The engine-side format declaration for the auto-managed
 /// `## Relationships` section — the first consumer of the shared
-/// section-format mechanism (plan 08). The Relationships section is
+/// section-format mechanism. The Relationships section is
 /// engine-managed, not a schema `SectionDef`, so the declaration
 /// lives here: an optional bullet list (empty sections are legal)
 /// whose items carry the canonical relation-line shape. Replaces the

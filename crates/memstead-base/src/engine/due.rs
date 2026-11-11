@@ -1,4 +1,4 @@
-//! The due-brief (first-author-path plan 08): a schema declares its
+//! The due-brief: a schema declares its
 //! deadline axis ([`memstead_schema::DueAxis`]), the engine renders
 //! "what is due next" as one deterministic markdown brief.
 //!
@@ -848,7 +848,7 @@ mod obligation_builtin_tests {
         args
     }
 
-    /// Criterion 1 + 3: a mem pinned to the shipped builtin accepts a
+    /// A mem pinned to the shipped builtin accepts a
     /// conformant obligation, refuses a nonconformant one with the
     /// standard envelope, and `render_due_brief` renders the fixture
     /// correctly under the declared axis.
@@ -916,7 +916,7 @@ mod obligation_builtin_tests {
         assert!(brief.contains("**OVERDUE**"), "{brief}");
     }
 
-    /// Criterion 4: the shipped `requires_when` pair and the
+    /// The shipped `requires_when` pair and the
     /// block-severity `required_outgoing` refuse exactly the
     /// field-schema writes.
     #[test]

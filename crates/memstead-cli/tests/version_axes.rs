@@ -65,7 +65,7 @@ fn contract(ws: &TempDir, title: &str, axes: Option<&str>) -> std::process::Outp
         .unwrap()
 }
 
-/// B6 AC2 refusal complement, first half: `engine_state` with no
+/// Refusal complement, first half: `engine_state` with no
 /// `version_axes` validates; a well-formed pair list validates too.
 #[test]
 fn an_engine_state_contract_validates_with_and_without_version_axes() {
@@ -99,7 +99,7 @@ fn an_engine_state_contract_validates_with_and_without_version_axes() {
     assert!(text.contains("ANCHOR_SIDECAR_VERSION=2"), "{text}");
 }
 
-/// B6 AC2 refusal complement, second half: a member that is not a
+/// Refusal complement, second half: a member that is not a
 /// `name=constant` pair refuses `INVALID_FIELD_VALUE` naming it.
 #[test]
 fn a_malformed_version_axis_refuses_invalid_field_value() {

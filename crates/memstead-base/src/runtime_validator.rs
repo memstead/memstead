@@ -879,7 +879,7 @@ pub fn validate_section_content<'a>(
             // space, at least one trailing char). The trailing space
             // requirement excludes bare `##` (which the parser does
             // not match either) and `###`+ headings. `^# ` joins the
-            // guard (plan 08): h1 and h2 are the entity's own levels
+            // guard: h1 and h2 are the entity's own levels
             // — the title and the section delimiters — so neither may
             // be embedded in a section body.
             let is_h2 = masked_line.starts_with("## ") && masked_line.len() > 3;
@@ -890,7 +890,7 @@ pub fn validate_section_content<'a>(
             // the round trip verbatim; one with NO body is skipped by the
             // catch-all builder and silently dropped by the write, so it
             // refuses instead. The exemption and the refusal are the same rule
-            // read from its two sides (04/01, criteria 6 and 7).
+            // read from its two sides.
             if is_h2
                 && catch_all.is_some_and(|c| {
                     c.key == key && !c.declared_headings.contains(&&masked_line[3..])

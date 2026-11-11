@@ -49,7 +49,7 @@ pub enum IntegrityAxis {
 }
 
 /// One per-entity BODY OBSERVATION — what an entity's stored body carries
-/// that its type does not declare (consistency-sweep 04/01).
+/// that its type does not declare.
 ///
 /// **Deliberately not an [`IntegrityFinding`].** A finding is a thing to fix,
 /// and most of what this reports is nothing to fix: absorbing an undeclared
@@ -932,7 +932,7 @@ community:
         findings.iter().map(|f| f.code.as_str()).collect()
     }
 
-    /// Criteria 1 and 2 (consistency-sweep 04/01). A heading the type does not
+    /// A heading the type does not
     /// declare is REPORTED, naming the entity, the heading and where the
     /// content went — and it is an observation, never a conformance finding,
     /// because absorbing it is the catch-all working as designed.
@@ -971,7 +971,7 @@ community:
         );
     }
 
-    /// Criterion 1's other half: a bare heading with no body is the one case
+    /// Other half: a bare heading with no body is the one case
     /// that really is lost, because the catch-all builder skips empty content.
     /// Appending a bare heading line is what the original repro described.
     #[test]
@@ -993,7 +993,7 @@ community:
         );
     }
 
-    /// Criterion 3: a frontmatter key the type does not declare is reported
+    /// A frontmatter key the type does not declare is reported
     /// BEFORE the write that drops it. The generator emits only declared
     /// fields, so this one is unconditional loss.
     #[test]
@@ -1015,7 +1015,7 @@ community:
         assert_eq!(obs[0].fate, ObservationFate::Dropped);
     }
 
-    /// Criterion 4: a repeated heading loses every later body, and the two
+    /// A repeated heading loses every later body, and the two
     /// cases that produce no warning anywhere today are a repeat of an
     /// UNDECLARED heading and a repeat of the CATCH-ALL's own heading.
     #[test]
@@ -1049,7 +1049,7 @@ community:
         }
     }
 
-    /// Criterion 5, the refusal complement that gives the rest its worth: the
+    /// The refusal complement that gives the rest its worth: the
     /// ordinary entity produces nothing. A check that fires on healthy content
     /// is worse than no check, because it teaches readers to ignore it.
     #[test]
@@ -1148,7 +1148,7 @@ community:
 
     #[test]
     fn an_unterminated_fence_names_the_sections_it_swallowed() {
-        // Criteria 3 and 4. The `Notes` heading was masked by the open fence,
+        // The `Notes` heading was masked by the open fence,
         // so it never became a section key: its bytes sit inside `body`. The
         // finding has to name it, because the only other signal the entity
         // gives is a `notes` key that is simply absent.
@@ -1175,14 +1175,14 @@ community:
             fence[0].detail["swallowed_sections"],
             serde_json::json!(["Notes"]),
         );
-        // Criterion 4: never clean. A finding on the conformance axis is
+        // Never clean. A finding on the conformance axis is
         // exactly what "not clean" means on this surface.
         assert!(!findings.is_empty());
     }
 
     #[test]
     fn an_entity_with_no_open_fence_gains_no_fence_finding() {
-        // Criterion 7 at the read tier. Both the no-fence and the closed-fence
+        // At the read tier. Both the no-fence and the closed-fence
         // cases, because a guard that fires on any fence character would pass
         // the first and fail the second.
         let schema = lint_schema();

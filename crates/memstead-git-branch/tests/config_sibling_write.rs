@@ -1,5 +1,5 @@
 //! A config write must not revert what a sibling process wrote, on the
-//! git-branch backend (consistency-sweep 04/03, criteria 1 and 8).
+//! git-branch backend.
 //!
 //! The folder half of this lives in `memstead-base`'s lifecycle tests, where a
 //! sibling write is a plain file write. Here it is a second engine over the
@@ -40,7 +40,7 @@ fn a_long_lived_engine_does_not_revert_a_siblings_config_write() {
         .set_mem_version("specs", semver::Version::new(2, 0, 0), None)
         .expect("version bump succeeds");
 
-    // Criterion 3: the intervention is reported on this operation's response.
+    // The intervention is reported on this operation's response.
     let hint = outcome
         .warnings
         .iter()
@@ -56,7 +56,7 @@ fn a_long_lived_engine_does_not_revert_a_siblings_config_write() {
         "the report names what the sibling changed: {hint}"
     );
 
-    // Criterion 1: and both fields are on disk, read through a fresh engine.
+    // Both fields are on disk, read through a fresh engine.
     let fresh = engine_from_workspace_root(tmp.path()).expect("re-boot");
     let config = fresh
         .mem_config_for("specs")

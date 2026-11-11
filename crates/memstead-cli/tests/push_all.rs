@@ -95,7 +95,7 @@ fn moved_refs(stdout: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// A1 AC1, assertion: exactly the lagging refs move, one line each,
+/// Assertion: exactly the lagging refs move, one line each,
 /// nothing for the synced ref, and a second run prints nothing.
 #[test]
 fn push_all_moves_exactly_the_lagging_refs_and_is_silent_when_in_sync() {
@@ -164,7 +164,7 @@ fn push_all_moves_exactly_the_lagging_refs_and_is_silent_when_in_sync() {
     assert!(out.stdout.is_empty());
 }
 
-/// A1 AC1, refusal complement: a branch made non-fast-forward on the
+/// Refusal complement: a branch made non-fast-forward on the
 /// remote is refused by name with `NON_FAST_FORWARD`, the other
 /// lagging refs still go, the exit is non-zero; `--force` on `--all`
 /// is refused at the parser.
