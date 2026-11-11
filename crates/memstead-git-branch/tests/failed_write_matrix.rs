@@ -903,6 +903,7 @@ const VERBS: &[(&str, &[Verb])] = &[
         &[Verb::Delete],
     ),
     ("engine/mutation/relate.rs::relate_entity", &[Verb::Relate]),
+    ("engine/mutation/relate.rs::commit_relate", &[Verb::Relate]),
     (
         "engine/mutation/relate.rs::stage_prepared_relate",
         &[Verb::Relate, Verb::BatchRelate],
