@@ -156,6 +156,77 @@ fn cases(engine: &memstead_base::Engine) -> Vec<Case> {
     out
 }
 
+/// What differs between the engine's rendering of one error and the two
+/// surfaces'. Codes and payloads are equal field for field; each surface
+/// message begins with the WHOLE engine message (a surface may append its
+/// own advice after it, and may not differ anywhere inside it, the
+/// second line included).
+fn differences(
+    engine_code: &str,
+    engine_message: &str,
+    engine_details: &serde_json::Value,
+    m: &Rendered,
+    c: &Rendered,
+) -> Vec<String> {
+    let mut notes = Vec::new();
+    if m.code != c.code || m.code != engine_code {
+        notes.push(format!(
+            "code engine `{engine_code}`, MCP `{}`, CLI `{}`",
+            m.code, c.code
+        ));
+    }
+    if m.details != c.details {
+        let (only_m, only_c, differ) = key_diff(&m.details, &c.details);
+        notes.push(format!(
+            "details: MCP only {only_m:?}, CLI only {only_c:?}, values differ {differ:?}"
+        ));
+    }
+    // Where both surfaces agree, they may still serve a payload the
+    // engine's own `details()` does not build: a hand-built copy.
+    let (surface_only, engine_only, values) = key_diff(&m.details, engine_details);
+    if m.details == c.details && m.details != *engine_details {
+        notes.push(format!(
+            "both surfaces serve a hand-built payload: keys not in engine details() {surface_only:?}, engine-only keys {engine_only:?}, values differ {values:?}"
+        ));
+    }
+    if !m.message.starts_with(engine_message) || !c.message.starts_with(engine_message) {
+        notes.push("message does not begin with the engine's on both surfaces".to_string());
+    }
+    notes
+}
+
+/// The gate fails on what it claims to catch: a surface message that
+/// agrees with the engine's on the first line and differs after it, and
+/// passes a surface that appends its own advice after the whole message.
+#[test]
+fn the_parity_gate_fails_on_a_message_that_differs_after_the_first_line() {
+    let engine_message = "first line of the refusal\nsecond line names the repair";
+    let rendered = |message: &str| Rendered {
+        code: "SOME_CODE".to_string(),
+        message: message.to_string(),
+        details: serde_json::json!({ "k": 1 }),
+    };
+    let details = serde_json::json!({ "k": 1 });
+    let differs_after_first_line =
+        rendered("first line of the refusal\nsecond line says something else");
+    assert!(
+        !differences(
+            "SOME_CODE",
+            engine_message,
+            &details,
+            &differs_after_first_line,
+            &rendered(engine_message)
+        )
+        .is_empty(),
+        "a message that differs after the first line must be reported"
+    );
+    let appends = rendered(&format!("{engine_message}\nsurface advice"));
+    assert!(
+        differences("SOME_CODE", engine_message, &details, &appends, &appends).is_empty(),
+        "a surface may append after the whole engine message"
+    );
+}
+
 #[test]
 fn every_engine_error_carries_the_same_code_payload_and_message_on_mcp_and_cli() {
     assert_eq!(
@@ -189,36 +260,7 @@ fn every_engine_error_carries_the_same_code_payload_and_message_on_mcp_and_cli()
                 "engine": { "code": engine_code, "message": engine_message, "details": engine_details },
             }),
         );
-        let mut notes = Vec::new();
-        if m.code != c.code || m.code != engine_code {
-            notes.push(format!(
-                "code engine `{engine_code}`, MCP `{}`, CLI `{}`",
-                m.code, c.code
-            ));
-        }
-        if m.details != c.details {
-            let (only_m, only_c, differ) = key_diff(&m.details, &c.details);
-            notes.push(format!(
-                "details: MCP only {only_m:?}, CLI only {only_c:?}, values differ {differ:?}"
-            ));
-        }
-        // Where both surfaces agree, they may still serve a payload the
-        // engine's own `details()` does not build: a hand-built copy.
-        let (surface_only, engine_only, values) = key_diff(&m.details, &engine_details);
-        if m.details == c.details && m.details != engine_details {
-            notes.push(format!(
-                "both surfaces serve a hand-built payload: keys not in engine details() {surface_only:?}, engine-only keys {engine_only:?}, values differ {values:?}"
-            ));
-        }
-        if !m
-            .message
-            .starts_with(engine_message.lines().next().unwrap_or_default())
-            || !c
-                .message
-                .starts_with(engine_message.lines().next().unwrap_or_default())
-        {
-            notes.push("message does not begin with the engine's on both surfaces".to_string());
-        }
+        let notes = differences(&engine_code, &engine_message, &engine_details, &m, &c);
         if notes.is_empty() {
             agree += 1;
         } else {

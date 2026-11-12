@@ -53,6 +53,10 @@ pub struct Occurrence {
     pub surface: Surface,
     pub source: String,
     pub line: u32,
+    /// The function the site sits in (the nearest `fn` header above it),
+    /// so a site is placed by file and function, never by a count per
+    /// file a moved site would keep.
+    pub function: String,
 }
 
 pub fn render(workspace_root: &Path) -> Result<String> {
@@ -114,6 +118,7 @@ fn scan_engine_codes(
                 Surface::Engine,
                 &rel,
                 line_of(&text, m.start()),
+                enclosing_fn(&text, m.start()),
             );
         }
         let mut in_code_fn = false;
@@ -131,7 +136,7 @@ fn scan_engine_codes(
                     .chain(bare_lit_re.captures_iter(line))
                 {
                     let code = cap.get(1).unwrap().as_str().to_string();
-                    push(codes, code, Surface::Engine, &rel, (idx + 1) as u32);
+                    push(codes, code, Surface::Engine, &rel, (idx + 1) as u32, "code");
                 }
                 if depth <= 0 {
                     in_code_fn = false;
@@ -146,68 +151,141 @@ fn scan_cli_codes(
     workspace_root: &Path,
     codes: &mut BTreeMap<String, Vec<Occurrence>>,
 ) -> Result<()> {
+    let root = workspace_root.join("crates/memstead-cli/src");
+    let mut files = Vec::new();
+    for path in rust_sources(&root)? {
+        files.push((
+            pathdiff(workspace_root, &path),
+            std::fs::read_to_string(&path)?,
+        ));
+    }
+    scan_cli_texts(&files, codes);
+    Ok(())
+}
+
+/// The CLI scan over `(path, text)` pairs: the crate's sources, or a
+/// self-test's fixture. A code is named by its literal or by a
+/// `*_CODE` constant (`crate::INTERNAL_CODE`), which is resolved through
+/// the constants the same texts declare, so a site that names the code
+/// through a constant is placed like one that spells it.
+fn scan_cli_texts(files: &[(String, String)], codes: &mut BTreeMap<String, Vec<Occurrence>>) {
     // Scanned against the whole file, not per line: rustfmt wraps call
     // arguments across lines, so the code literal often sits on its own
     // line below `CliError::new(` / `.with_code(`. `\s` and the negated
     // classes match newlines; the reported line is the literal's own.
     let const_re =
-        Regex::new(r#"pub const [A-Z_]+_CODE:\s*&str\s*=\s*"([A-Z][A-Z0-9_]+)""#).unwrap();
+        Regex::new(r#"pub const ([A-Z_]+_CODE):\s*&str\s*=\s*"([A-Z][A-Z0-9_]+)""#).unwrap();
     let with_code_re = Regex::new(r#"\.with_code\(\s*"([A-Z][A-Z0-9_]+)"\s*\)"#).unwrap();
     let new_re = Regex::new(r#"CliError::new\([^)"]*?"([A-Z][A-Z0-9_]+)""#).unwrap();
     // A `CliError { code: "...", .. }` struct literal: an unquoted `code:`
     // field (a `json!` key is quoted and never matches).
     let literal_re = Regex::new(r#"\bcode:\s*"([A-Z][A-Z0-9_]+)""#).unwrap();
-    for crate_dir in ["crates/memstead-cli/src"] {
-        let root = workspace_root.join(crate_dir);
-        for path in rust_sources(&root)? {
-            let rel = pathdiff(workspace_root, &path);
-            let text = std::fs::read_to_string(&path)?;
-            for re in [&const_re, &with_code_re, &new_re, &literal_re] {
-                for cap in re.captures_iter(&text) {
-                    let m = cap.get(1).unwrap();
+    // The same two shapes naming a constant instead of a literal.
+    let new_const_re =
+        Regex::new(r#"CliError::new\([^)"]*?\b(?:crate::)?([A-Z][A-Z0-9_]*_CODE)\b"#).unwrap();
+    let literal_const_re = Regex::new(r#"\bcode:\s*(?:crate::)?([A-Z][A-Z0-9_]*_CODE)\b"#).unwrap();
+    let consts: BTreeMap<String, String> = files
+        .iter()
+        .flat_map(|(_, text)| {
+            const_re
+                .captures_iter(text)
+                .map(|c| (c[1].to_string(), c[2].to_string()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for (rel, text) in files {
+        for cap in const_re.captures_iter(text) {
+            let m = cap.get(2).unwrap();
+            push(
+                codes,
+                m.as_str().to_string(),
+                Surface::Cli,
+                rel,
+                line_of(text, m.start()),
+                enclosing_fn(text, m.start()),
+            );
+        }
+        for re in [&with_code_re, &new_re, &literal_re] {
+            for cap in re.captures_iter(text) {
+                let m = cap.get(1).unwrap();
+                push(
+                    codes,
+                    m.as_str().to_string(),
+                    Surface::Cli,
+                    rel,
+                    line_of(text, m.start()),
+                    enclosing_fn(text, m.start()),
+                );
+            }
+        }
+        for re in [&new_const_re, &literal_const_re] {
+            for cap in re.captures_iter(text) {
+                let m = cap.get(1).unwrap();
+                if let Some(code) = consts.get(m.as_str()) {
                     push(
                         codes,
-                        m.as_str().to_string(),
+                        code.clone(),
                         Surface::Cli,
-                        &rel,
-                        line_of(&text, m.start()),
+                        rel,
+                        line_of(text, m.start()),
+                        enclosing_fn(text, m.start()),
                     );
                 }
             }
         }
     }
-    Ok(())
 }
 
 fn scan_mcp_codes(
     workspace_root: &Path,
     codes: &mut BTreeMap<String, Vec<Occurrence>>,
 ) -> Result<()> {
-    // Whole-file scan for the same reason as `scan_cli_codes`: rustfmt
-    // may put the code literal on the line after `tool_error(`.
+    let root = workspace_root.join("crates/memstead-mcp/src");
+    let mut files = Vec::new();
+    for path in rust_sources(&root)? {
+        files.push((
+            pathdiff(workspace_root, &path),
+            std::fs::read_to_string(&path)?,
+        ));
+    }
+    scan_mcp_texts(&files, codes);
+    Ok(())
+}
+
+/// The MCP scan over `(path, text)` pairs.
+fn scan_mcp_texts(files: &[(String, String)], codes: &mut BTreeMap<String, Vec<Occurrence>>) {
+    // Whole-file scan for the same reason as the CLI's: rustfmt may put
+    // the code literal on the line after `tool_error(`.
     let tool_re =
         // `_with_details` is the payload-carrying form; omitting it hid
         // every code only that form emits.
         Regex::new(r#"\btool_error(?:_with_payload|_with_details)?\(\s*"([A-Z][A-Z0-9_]+)"\s*,"#)
             .unwrap();
-    for crate_dir in ["crates/memstead-mcp/src"] {
-        let root = workspace_root.join(crate_dir);
-        for path in rust_sources(&root)? {
-            let rel = pathdiff(workspace_root, &path);
-            let text = std::fs::read_to_string(&path)?;
-            for cap in tool_re.captures_iter(&text) {
-                let m = cap.get(1).unwrap();
-                push(
-                    codes,
-                    m.as_str().to_string(),
-                    Surface::Mcp,
-                    &rel,
-                    line_of(&text, m.start()),
-                );
-            }
+    for (rel, text) in files {
+        for cap in tool_re.captures_iter(text) {
+            let m = cap.get(1).unwrap();
+            push(
+                codes,
+                m.as_str().to_string(),
+                Surface::Mcp,
+                rel,
+                line_of(text, m.start()),
+                enclosing_fn(text, m.start()),
+            );
         }
     }
-    Ok(())
+}
+
+/// The name of the function a byte offset sits in: the nearest `fn`
+/// header above it. A closure is not a function, so a site in a closure
+/// is placed by the function that holds the closure.
+fn enclosing_fn(text: &str, offset: usize) -> String {
+    let fn_re = Regex::new(r#"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*[<(]"#).unwrap();
+    fn_re
+        .captures_iter(&text[..offset])
+        .last()
+        .map(|c| c[1].to_string())
+        .unwrap_or_default()
 }
 
 /// 1-based line number of a byte offset, for whole-file regex scans.
@@ -221,11 +299,13 @@ fn push(
     surface: Surface,
     source: &str,
     line: u32,
+    function: impl Into<String>,
 ) {
     codes.entry(code).or_default().push(Occurrence {
         surface,
         source: source.to_string(),
         line,
+        function: function.into(),
     });
 }
 
@@ -584,7 +664,8 @@ mod code_vocabulary_tests {
 /// a surface, which the error-payload convergence empties.
 #[cfg(test)]
 mod surface_codes {
-    use super::{Surface, scan};
+    use super::{Occurrence, Surface, scan, scan_cli_texts, scan_mcp_texts};
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
 
     /// A defect in the syntax of the surface's own input.
@@ -635,61 +716,384 @@ mod surface_codes {
 
     /// Where a surface spells the engine's `INVALID_INPUT` for a defect in
     /// its own input syntax (a flag's shape, a `--from` file, a batch
-    /// envelope), by file and count. The code alone cannot tell syntax
-    /// from state, so each site is placed: a new site fails the test below
-    /// until it is listed here as syntax, or raises the engine's value.
-    const INVALID_INPUT_SYNTAX_SITES: &[(&str, usize)] = &[
-        ("crates/memstead-cli/src/commands/admin.rs", 3),
-        ("crates/memstead-cli/src/commands/anchors.rs", 2),
-        ("crates/memstead-cli/src/commands/batch.rs", 5),
-        ("crates/memstead-cli/src/commands/batch_create.rs", 2),
-        ("crates/memstead-cli/src/commands/batch_relate.rs", 1),
-        ("crates/memstead-cli/src/commands/batch_update.rs", 3),
-        ("crates/memstead-cli/src/commands/check.rs", 4),
-        ("crates/memstead-cli/src/commands/conflicts.rs", 1),
-        ("crates/memstead-cli/src/commands/create.rs", 9),
-        ("crates/memstead-cli/src/commands/due.rs", 3),
-        ("crates/memstead-cli/src/commands/export.rs", 6),
-        ("crates/memstead-cli/src/commands/install.rs", 1),
-        ("crates/memstead-cli/src/commands/mem.rs", 2),
-        ("crates/memstead-cli/src/commands/mem_repo.rs", 1),
-        ("crates/memstead-cli/src/commands/mod.rs", 2),
-        ("crates/memstead-cli/src/commands/projection.rs", 1),
-        ("crates/memstead-cli/src/commands/proposal.rs", 2),
-        ("crates/memstead-cli/src/commands/publish.rs", 3),
-        ("crates/memstead-cli/src/commands/quickstart.rs", 7),
-        ("crates/memstead-cli/src/commands/relate.rs", 2),
-        ("crates/memstead-cli/src/commands/retype.rs", 2),
-        ("crates/memstead-cli/src/commands/schema.rs", 3),
-        ("crates/memstead-cli/src/commands/unpublish.rs", 1),
-        ("crates/memstead-cli/src/commands/update.rs", 11),
-        ("crates/memstead-cli/src/commands/workspace.rs", 1),
-        ("crates/memstead-cli/src/main.rs", 1),
-        ("crates/memstead-mcp/src/server/mem_tools.rs", 3),
-        ("crates/memstead-mcp/src/server/read_tools.rs", 3),
-        ("crates/memstead-mcp/src/server/responses.rs", 1),
-        ("crates/memstead-mcp/src/server/write_tools.rs", 2),
+    /// envelope), by file, function and how many sites that function
+    /// holds. The code alone cannot tell syntax from state, so each site
+    /// is placed: a new site, or one moved into another function, fails
+    /// the test below until it is listed here as syntax, or raises the
+    /// engine's value.
+    const INVALID_INPUT_SYNTAX_SITES: &[(&str, &str, usize)] = &[
+        (
+            "crates/memstead-cli/src/commands/admin.rs",
+            "run_denylist",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/admin.rs",
+            "run_takedown",
+            2,
+        ),
+        ("crates/memstead-cli/src/commands/anchors.rs", "run", 2),
+        (
+            "crates/memstead-cli/src/commands/batch.rs",
+            "parse_batch_envelope",
+            5,
+        ),
+        (
+            "crates/memstead-cli/src/commands/batch_create.rs",
+            "build_create_args",
+            1,
+        ),
+        ("crates/memstead-cli/src/commands/batch_create.rs", "run", 1),
+        ("crates/memstead-cli/src/commands/batch_relate.rs", "run", 1),
+        (
+            "crates/memstead-cli/src/commands/batch_update.rs",
+            "build_entry_parse_error",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/batch_update.rs",
+            "build_update_args",
+            2,
+        ),
+        (
+            "crates/memstead-cli/src/commands/check.rs",
+            "parse_instant",
+            1,
+        ),
+        ("crates/memstead-cli/src/commands/check.rs", "run_batch", 3),
+        (
+            "crates/memstead-cli/src/commands/conflicts.rs",
+            "dispatch",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/create.rs",
+            "parse_anchor_list",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/create.rs",
+            "parse_kv_list",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/create.rs",
+            "parse_relation_list",
+            1,
+        ),
+        ("crates/memstead-cli/src/commands/create.rs", "run", 6),
+        ("crates/memstead-cli/src/commands/due.rs", "run", 3),
+        ("crates/memstead-cli/src/commands/export.rs", "run", 4),
+        ("crates/memstead-cli/src/commands/export.rs", "run_json", 2),
+        ("crates/memstead-cli/src/commands/install.rs", "run", 1),
+        (
+            "crates/memstead-cli/src/commands/mem.rs",
+            "invalid_input_error",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/mem.rs",
+            "run_set_subject",
+            1,
+        ),
+        ("crates/memstead-cli/src/commands/mem_repo.rs", "init", 1),
+        (
+            "crates/memstead-cli/src/commands/mod.rs",
+            "parse_filter_arg",
+            2,
+        ),
+        (
+            "crates/memstead-cli/src/commands/projection.rs",
+            "batch_invalid",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/proposal.rs",
+            "run_merge",
+            2,
+        ),
+        (
+            "crates/memstead-cli/src/commands/publish.rs",
+            "run_with_root",
+            3,
+        ),
+        (
+            "crates/memstead-cli/src/commands/quickstart.rs",
+            "prompt_agents",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/quickstart.rs",
+            "read_agent_config",
+            3,
+        ),
+        (
+            "crates/memstead-cli/src/commands/quickstart.rs",
+            "resolve_mem_name",
+            1,
+        ),
+        ("crates/memstead-cli/src/commands/quickstart.rs", "run", 1),
+        (
+            "crates/memstead-cli/src/commands/quickstart.rs",
+            "wire_agent",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/relate.rs",
+            "resolve_slot",
+            2,
+        ),
+        (
+            "crates/memstead-cli/src/commands/retype.rs",
+            "parse_section_map",
+            2,
+        ),
+        (
+            "crates/memstead-cli/src/commands/schema.rs",
+            "resolve_builtin_ref",
+            1,
+        ),
+        ("crates/memstead-cli/src/commands/schema.rs", "run", 1),
+        (
+            "crates/memstead-cli/src/commands/schema.rs",
+            "scaffold_new",
+            1,
+        ),
+        ("crates/memstead-cli/src/commands/unpublish.rs", "run", 1),
+        (
+            "crates/memstead-cli/src/commands/update.rs",
+            "parse_anchor_unset_list",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/update.rs",
+            "parse_declare_relations",
+            2,
+        ),
+        (
+            "crates/memstead-cli/src/commands/update.rs",
+            "parse_kv_list",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/update.rs",
+            "parse_patch_list_combined",
+            3,
+        ),
+        ("crates/memstead-cli/src/commands/update.rs", "run", 4),
+        (
+            "crates/memstead-cli/src/commands/workspace.rs",
+            "set_mutations",
+            1,
+        ),
+        ("crates/memstead-cli/src/main.rs", "run", 1),
+        (
+            "crates/memstead-mcp/src/server/mem_tools.rs",
+            "memstead_mem_configure",
+            1,
+        ),
+        (
+            "crates/memstead-mcp/src/server/mem_tools.rs",
+            "memstead_mem_create_unified",
+            1,
+        ),
+        (
+            "crates/memstead-mcp/src/server/mem_tools.rs",
+            "memstead_mem_set_version",
+            1,
+        ),
+        (
+            "crates/memstead-mcp/src/server/read_tools.rs",
+            "memstead_schema",
+            3,
+        ),
+        (
+            "crates/memstead-mcp/src/server/responses.rs",
+            "validate_note",
+            1,
+        ),
+        (
+            "crates/memstead-mcp/src/server/write_tools.rs",
+            "memstead_relate",
+            1,
+        ),
+        (
+            "crates/memstead-mcp/src/server/write_tools.rs",
+            "memstead_reload",
+            1,
+        ),
     ];
+
+    /// Where the CLI raises `INTERNAL` (spelled, or named through
+    /// `crate::INTERNAL_CODE`): a failure of its own operation (a file it
+    /// writes, a temporary file, an archive it reads), never workspace,
+    /// mem or entity state. Placed by file and function like the sites
+    /// above; a use anywhere else fails the test below.
+    const INTERNAL_SITES: &[(&str, &str, usize)] = &[
+        (
+            "crates/memstead-cli/src/commands/admin.rs",
+            "map_admin_error",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/export.rs",
+            "make_self_contained_on_disk",
+            2,
+        ),
+        (
+            "crates/memstead-cli/src/commands/export.rs",
+            "run_mem_filesystem",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/init.rs",
+            "ensure_empty",
+            2,
+        ),
+        (
+            "crates/memstead-cli/src/commands/init.rs",
+            "find_ancestor_workspace",
+            1,
+        ),
+        ("crates/memstead-cli/src/commands/init.rs", "run", 2),
+        (
+            "crates/memstead-cli/src/commands/publish.rs",
+            "find_filesystem_workspace_root",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/publish.rs",
+            "stage_bytes_to_tempfile",
+            2,
+        ),
+        (
+            "crates/memstead-cli/src/commands/quickstart.rs",
+            "default_schema_pin",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/schema.rs",
+            "scaffold_new",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/unpublish.rs",
+            "map_unpublish_error",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/commands/workspace.rs",
+            "require_workspace_root",
+            1,
+        ),
+        (
+            "crates/memstead-cli/src/outer_gitignore.rs",
+            "write_to_outer_gitignore",
+            2,
+        ),
+    ];
+
+    /// Every site a surface builds `code` at, by file and function, with
+    /// how many sites that function holds.
+    fn surface_sites(
+        codes: &BTreeMap<String, Vec<Occurrence>>,
+        code: &str,
+    ) -> BTreeMap<(String, String), usize> {
+        let mut found: BTreeMap<(String, String), usize> = BTreeMap::new();
+        for o in codes.get(code).into_iter().flatten() {
+            if o.surface != Surface::Engine && !o.function.is_empty() {
+                *found
+                    .entry((o.source.clone(), o.function.clone()))
+                    .or_default() += 1;
+            }
+        }
+        found
+    }
+
+    fn listed(sites: &[(&str, &str, usize)]) -> BTreeMap<(String, String), usize> {
+        sites
+            .iter()
+            .map(|(f, func, n)| ((f.to_string(), func.to_string()), *n))
+            .collect()
+    }
 
     #[test]
     fn invalid_input_is_built_at_a_surface_only_at_the_placed_syntax_sites() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let codes = scan(&root).unwrap();
-        let mut found: std::collections::BTreeMap<String, usize> = Default::default();
-        for o in codes.get("INVALID_INPUT").into_iter().flatten() {
-            if o.surface != Surface::Engine {
-                *found.entry(o.source.clone()).or_default() += 1;
-            }
-        }
-        let listed: std::collections::BTreeMap<String, usize> = INVALID_INPUT_SYNTAX_SITES
-            .iter()
-            .map(|(f, n)| (f.to_string(), *n))
-            .collect();
         assert_eq!(
-            found, listed,
+            surface_sites(&codes, "INVALID_INPUT"),
+            listed(INVALID_INPUT_SYNTAX_SITES),
             "an INVALID_INPUT site a surface builds is not placed: list it as input syntax, \
              or raise the engine's value if it reports workspace, mem or entity state"
         );
+    }
+
+    #[test]
+    fn internal_is_raised_at_a_surface_only_at_the_placed_sites() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let codes = scan(&root).unwrap();
+        assert_eq!(
+            surface_sites(&codes, "INTERNAL"),
+            listed(INTERNAL_SITES),
+            "an INTERNAL site is not placed: list it as the surface's own operation, or raise \
+             the engine's value if it reports workspace, mem or entity state"
+        );
+    }
+
+    /// The placement gate fails on what it claims to catch: an
+    /// `INVALID_INPUT` site moved to another function of its file, and an
+    /// `INTERNAL_CODE` use at a site no list allows; and it places a site
+    /// named through `crate::INTERNAL_CODE` as `INTERNAL`.
+    #[test]
+    fn the_placement_gate_fails_on_a_moved_site_and_an_unplaced_internal_use() {
+        let lib = (
+            "crates/memstead-cli/src/lib.rs".to_string(),
+            "pub const INTERNAL_CODE: &str = \"INTERNAL\";\n".to_string(),
+        );
+        let placed_here = (
+            "crates/memstead-cli/src/commands/probe.rs".to_string(),
+            "fn parse_flag() {\n    CliError::new(ExitKind::Validation, \"INVALID_INPUT\", m)\n}\n\
+             fn run() {\n    other();\n}\n"
+                .to_string(),
+        );
+        let allowed = &[("crates/memstead-cli/src/commands/probe.rs", "parse_flag", 1)];
+        let mut codes = BTreeMap::new();
+        scan_cli_texts(&[lib.clone(), placed_here], &mut codes);
+        assert_eq!(surface_sites(&codes, "INVALID_INPUT"), listed(allowed));
+
+        let moved = (
+            "crates/memstead-cli/src/commands/probe.rs".to_string(),
+            "fn parse_flag() {\n    other();\n}\n\
+             fn run() {\n    CliError::new(ExitKind::Validation, \"INVALID_INPUT\", m)\n}\n"
+                .to_string(),
+        );
+        let mut codes = BTreeMap::new();
+        scan_cli_texts(&[lib.clone(), moved], &mut codes);
+        assert_ne!(
+            surface_sites(&codes, "INVALID_INPUT"),
+            listed(allowed),
+            "a site moved within its file must fail the placement"
+        );
+
+        let internal = (
+            "crates/memstead-cli/src/commands/probe.rs".to_string(),
+            "fn run() {\n    CliError::new(ExitKind::Generic, crate::INTERNAL_CODE, m)\n}\n\
+             fn other() {\n    CliError { code: crate::INTERNAL_CODE, kind, message, details: None }\n}\n"
+                .to_string(),
+        );
+        let mut codes = BTreeMap::new();
+        scan_cli_texts(&[lib, internal], &mut codes);
+        let found = surface_sites(&codes, "INTERNAL");
+        assert_eq!(found.len(), 2, "both constant uses are found: {found:?}");
+        assert_ne!(
+            found,
+            listed(&[("crates/memstead-cli/src/commands/probe.rs", "run", 1)]),
+            "an INTERNAL_CODE use at a site not allowed must fail the placement"
+        );
+        let mut mcp = BTreeMap::new();
+        scan_mcp_texts(&[], &mut mcp);
+        assert!(mcp.is_empty());
     }
 
     #[test]
