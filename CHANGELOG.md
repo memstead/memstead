@@ -9,6 +9,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`pull --all` reconciles two machines that each created a mem.** When
+  the schema-and-config ref diverged and no file on it changed on both
+  sides, `pull --all` merges the two histories path by path from their
+  merge base into a commit with both parents and moves the ref
+  compare-and-set; the pin re-resolution runs as before, and `push --all`
+  then succeeds. A file changed on both sides still refuses
+  `LOCAL_DIVERGENCE`, now naming the files. Entity branches stay
+  fast-forward only. The merge is a new git-branch operation
+  (`GitBranchOps::merge_disjoint`) on git plumbing and a temporary index.
+
 - **`conflicts resolve --side merged`** settles a folder-mem conflict
   whose only collision is the engine-stamped timestamp. When every
   conflict block lies in the frontmatter and covers `last_modified`

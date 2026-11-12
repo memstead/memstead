@@ -158,9 +158,17 @@ before moving anything (`SCHEMA_VIOLATION_IN_FETCH` refuses the whole
 pull), fast-forwards the branch, and reloads the in-memory store — the
 graph reflects the pulled state immediately.
 
-Divergence (both sides committed) never merges silently: `pull` refuses
-with `LOCAL_DIVERGENCE`, and you choose — `branch-reset` to adopt the
-remote, or push from the other machine first.
+Divergence (both sides committed) on a mem's branch never merges:
+`pull` refuses with `LOCAL_DIVERGENCE`, and you choose — `branch-reset`
+to adopt the remote, or push from the other machine first.
+
+The schema-and-config ref is the one exception. When two machines each
+created a mem (or otherwise changed different files on it), `pull --all`
+merges the two histories file by file and pushes nothing for you; run
+`push --all` afterwards. The other machine's new mem then shows under
+`unmounted_on_remote`; mount it with
+`memstead mem init <name> --schema <pin> --reattach`. When both machines
+changed the same file, `pull --all` refuses `LOCAL_DIVERGENCE` naming it.
 
 ## 5. Fork a mem at a recorded ancestor
 

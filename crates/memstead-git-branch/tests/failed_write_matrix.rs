@@ -912,6 +912,7 @@ const HOOKS: &[(&str, bool)] = &[
     ("is_ancestor", false),
     ("is_empty_root", false),
     ("merge_base", false),
+    ("merge_disjoint", true),
     ("update_ref", true),
     ("remote_add", false),
     ("read_tree", false),
@@ -1272,6 +1273,10 @@ const NOT_VERBS: &[(&str, &str)] = &[
     (
         "engine/drift.rs::fast_forward_ref",
         "transport: moves a branch to a fetched commit",
+    ),
+    (
+        "engine/drift.rs::merge_config_ref",
+        "transport: merges the fetched schema-and-config ref and moves it compare-and-set",
     ),
     (
         "engine/drift.rs::branch_reset",

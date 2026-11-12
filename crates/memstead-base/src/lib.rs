@@ -71,16 +71,17 @@ pub use backend::{BackendError, MemBackend};
 pub use engine::drift::{EngineHandle, OperationScope};
 pub use engine::{
     BackendFactory, BootError, CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs,
-    DeleteEntityOutcome, DeleteReferrers, Engine, EngineError, EntityHistoryReport, EntityTouch,
-    ExpectedHash, FromArchiveBytesError, GitBranchBranchResetFn, GitBranchChangesSinceFn,
-    GitBranchCreateBranchAtFn, GitBranchDiffFn, GitBranchExportFn, GitBranchExportToBytesFn,
-    GitBranchFetchFn, GitBranchLsRemoteFn, GitBranchOps, GitBranchPullFn, GitBranchPushFn,
-    GitBranchReadConfigAtRefFn, GitBranchReadTreeFn, GitBranchResolveRefFn, HISTORY_PAGE_DEFAULT,
-    HISTORY_PAGE_MAX, HashOverride, INLINE_LIST_CAP, MutationClock, ReferrerInfo, RelateAction,
-    RelateEntityArgs, RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome, RetypeEdge,
-    RetypeEdgeDirection, RetypeEntityArgs, RetypeEntityOutcome, RetypeProblem, ReviewMarkStatus,
-    SchemaSourceDiagnostic, SchemaStaging, SetReviewMarkOutcome, StoryStart, UpdateEntityArgs,
-    UpdateEntityOutcome, format_inline_list_overflow,
+    DeleteEntityOutcome, DeleteReferrers, DisjointMerge, Engine, EngineError, EntityHistoryReport,
+    EntityTouch, ExpectedHash, FromArchiveBytesError, GitBranchBranchResetFn,
+    GitBranchChangesSinceFn, GitBranchCreateBranchAtFn, GitBranchDiffFn, GitBranchExportFn,
+    GitBranchExportToBytesFn, GitBranchFetchFn, GitBranchLsRemoteFn, GitBranchMergeDisjointFn,
+    GitBranchOps, GitBranchPullFn, GitBranchPushFn, GitBranchReadConfigAtRefFn,
+    GitBranchReadTreeFn, GitBranchResolveRefFn, HISTORY_PAGE_DEFAULT, HISTORY_PAGE_MAX,
+    HashOverride, INLINE_LIST_CAP, MutationClock, ReferrerInfo, RelateAction, RelateEntityArgs,
+    RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome, RetypeEdge, RetypeEdgeDirection,
+    RetypeEntityArgs, RetypeEntityOutcome, RetypeProblem, ReviewMarkStatus, SchemaSourceDiagnostic,
+    SchemaStaging, SetReviewMarkOutcome, StoryStart, UpdateEntityArgs, UpdateEntityOutcome,
+    format_inline_list_overflow,
 };
 pub use entity::id::{ENTITY_ID_MAX_LEN, SlugError, TITLE_GRAMMAR_RULE};
 pub use entity::parser::{

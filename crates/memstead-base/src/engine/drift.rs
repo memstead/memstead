@@ -1433,16 +1433,42 @@ impl Engine {
                     new_sha: new,
                 }),
                 FastForward::LocalAhead => outcome.local_ahead.push(local_ref),
-                FastForward::Diverged => outcome.refused.push(RefusedRef {
-                    ref_name: local_ref,
-                    mem: None,
-                    code: "LOCAL_DIVERGENCE".to_string(),
-                    message: format!(
-                        "the local schema-and-config ref has commits remote `{remote}` lacks; \
-                         it was not moved. Push them from this clone (`memstead push --all`) \
-                         or reconcile on the other clone first"
-                    ),
-                }),
+                // Both clones moved the ref (each created a mem, say).
+                // The ref holds files, one per mem and schema, so the two
+                // histories merge path by path when no file changed on
+                // both sides; a file both changed is a decision the merge
+                // does not make, and nothing moves.
+                FastForward::Diverged => {
+                    match self.merge_config_ref(&hook, gitdir, &local_ref, &remote_ref, remote)? {
+                        Ok(pulled) => outcome.pulled.push(pulled),
+                        Err(Some(paths)) => outcome.refused.push(RefusedRef {
+                            ref_name: local_ref,
+                            mem: None,
+                            code: "LOCAL_DIVERGENCE".to_string(),
+                            message: format!(
+                                "the local schema-and-config ref and remote `{remote}`'s both \
+                                 changed {}; it was not moved. Settle those files on one clone \
+                                 and push them (`memstead push --all`), then pull here",
+                                paths
+                                    .iter()
+                                    .map(|p| format!("`{p}`"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        }),
+                        Err(None) => outcome.refused.push(RefusedRef {
+                            ref_name: local_ref,
+                            mem: None,
+                            code: "LOCAL_DIVERGENCE".to_string(),
+                            message: format!(
+                                "the local schema-and-config ref and remote `{remote}`'s share \
+                                 no history, so there is nothing to merge from; it was not \
+                                 moved. Push from this clone (`memstead push --all`) or \
+                                 reconcile on the other clone first"
+                            ),
+                        }),
+                    }
+                }
             }
         }
 
@@ -1698,6 +1724,57 @@ impl Engine {
             }
         }
         gitdirs
+    }
+
+    /// Merge the remote's schema-and-config ref into the local one when
+    /// their histories diverged and no file changed on both sides: a
+    /// commit with both parents, the ref moved onto it compare-and-set
+    /// against the local tip the merge was computed on. `Err` carries
+    /// the files both sides changed; then nothing is written or moved.
+    fn merge_config_ref(
+        &self,
+        hook: &crate::engine::GitBranchOps,
+        gitdir: &std::path::Path,
+        local_ref: &str,
+        remote_ref: &str,
+        remote: &str,
+    ) -> Result<Result<crate::ops::PulledRef, Option<Vec<String>>>, EngineError> {
+        let local = (hook.resolve_ref)(gitdir, local_ref)
+            .map_err(EngineError::Backend)?
+            .ok_or_else(|| {
+                EngineError::Backend(BackendError::Other(format!("{local_ref} vanished")))
+            })?;
+        let theirs = (hook.resolve_ref)(gitdir, remote_ref)
+            .map_err(EngineError::Backend)?
+            .ok_or_else(|| {
+                EngineError::Backend(BackendError::Other(format!("{remote_ref} vanished")))
+            })?;
+        let ctx = self.commit_context(Some("pull_all"), crate::vcs::Actor::Cli, None, None);
+        let message = crate::vcs::format_commit_message(
+            &format!("memstead: merge schema-and-config ref from {remote}"),
+            &ctx,
+        );
+        match (hook.merge_disjoint)(gitdir, &local, &theirs, &message)
+            .map_err(EngineError::Backend)?
+        {
+            crate::engine::DisjointMerge::Overlap { paths } => Ok(Err(Some(paths))),
+            crate::engine::DisjointMerge::Unrelated => Ok(Err(None)),
+            crate::engine::DisjointMerge::Merged { commit } => {
+                (hook.update_ref)(
+                    gitdir,
+                    local_ref,
+                    &commit,
+                    crate::engine::RefPrevious::At(&local),
+                )
+                .map_err(EngineError::Backend)?;
+                Ok(Ok(crate::ops::PulledRef {
+                    ref_name: local_ref.to_string(),
+                    mem: None,
+                    previous_sha: local,
+                    new_sha: commit,
+                }))
+            }
+        }
     }
 
     /// Fast-forward `local_ref` to what `remote_ref` points at, the

@@ -961,3 +961,123 @@ fn a_pull_waits_for_a_write_in_another_mem() {
         assert!(list.contains("Oven"), "{args:?} moved kitchen: {list}");
     }
 }
+
+/// Two clones of one mem-repo, each of which created a mem without
+/// fetching the other's: the schema-and-config ref diverged. On the
+/// second, `pull --all` merges the ref path by path (no file changed on
+/// both sides), both mem configs are on it, and `push --all` succeeds;
+/// on the first, `pull --all` then fast-forwards. No entity branch is
+/// merged: each mem's branch exists on one side only.
+#[test]
+fn two_clones_that_each_created_a_mem_reconcile_with_pull_all() {
+    let f = workspace_a();
+    clone_b(&f);
+    ok(&f.b, &["pull", "--all"]);
+    let (a, b) = (&f.a, &f.b);
+
+    ok(a, &["mem", "init", "kettle", "--schema", "default@1.3.0"]);
+    ok(a, &["push", "--all"]);
+    ok(b, &["mem", "init", "kiln", "--schema", "default@1.3.0"]);
+
+    let pulled = run(b, &["--json", "pull", "--all"]);
+    let text = String::from_utf8_lossy(&pulled.stdout).to_string()
+        + &String::from_utf8_lossy(&pulled.stderr);
+    assert!(
+        pulled.status.success(),
+        "pull --all on the second clone: {text}"
+    );
+    let config_tree = |ws: &Path| {
+        git(
+            &ws.join("mem-repo"),
+            &["ls-tree", "-r", "--name-only", "refs/heads/__MEMSTEAD"],
+        )
+    };
+    let tree = config_tree(b);
+    assert!(tree.contains("mems/kettle/config.json"), "{tree}");
+    assert!(tree.contains("mems/kiln/config.json"), "{tree}");
+    let parents = git(
+        &b.join("mem-repo"),
+        &["rev-list", "--parents", "-n", "1", "refs/heads/__MEMSTEAD"],
+    );
+    assert_eq!(
+        parents.split_whitespace().count(),
+        3,
+        "a merge commit: {parents}"
+    );
+    // No entity branch is merged: each new mem's branch is its own clone's.
+    let branches = git(
+        &b.join("mem-repo"),
+        &["for-each-ref", "--format=%(refname)", "refs/heads"],
+    );
+    assert!(branches.contains("refs/heads/kiln"), "{branches}");
+    assert!(quarantined(b).is_empty(), "{:?}", quarantined(b));
+    ok(b, &["push", "--all"]);
+
+    let pulled = run(a, &["--json", "pull", "--all"]);
+    let text = String::from_utf8_lossy(&pulled.stdout).to_string()
+        + &String::from_utf8_lossy(&pulled.stderr);
+    assert!(
+        pulled.status.success(),
+        "pull --all on the first clone: {text}"
+    );
+    let tree = config_tree(a);
+    assert!(tree.contains("mems/kiln/config.json"), "{tree}");
+    assert!(tree.contains("mems/kettle/config.json"), "{tree}");
+    assert!(quarantined(a).is_empty(), "{:?}", quarantined(a));
+    // The other clone's mem is reported, its branch fetched; re-attaching
+    // it mounts it, and every mem loads on both clones.
+    let env: serde_json::Value = serde_json::from_slice(&pulled.stdout).unwrap();
+    assert!(
+        env["unmounted_on_remote"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["branch"] == "kiln"),
+        "{env}"
+    );
+    for (ws, other) in [(a, "kiln"), (b, "kettle")] {
+        if other == "kettle" {
+            ok(ws, &["pull", "--all"]);
+        }
+        ok(
+            ws,
+            &[
+                "mem",
+                "init",
+                other,
+                "--schema",
+                "default@1.3.0",
+                "--reattach",
+            ],
+        );
+        let list = ok(ws, &["mem", "list"]);
+        for mem in ["knowledge", "kitchen", "kettle", "kiln"] {
+            assert!(list.contains(&format!("`{mem}`")), "{mem} loads: {list}");
+        }
+        assert!(quarantined(ws).is_empty(), "{:?}", quarantined(ws));
+    }
+}
+
+/// Both clones changed the same file on the schema-and-config ref (each
+/// set the version of one mem): `pull --all` on the second refuses
+/// `LOCAL_DIVERGENCE` naming that file and moves nothing.
+#[test]
+fn a_config_file_both_clones_changed_refuses_naming_it() {
+    let f = workspace_a();
+    clone_b(&f);
+    ok(&f.b, &["pull", "--all"]);
+    let (a, b) = (&f.a, &f.b);
+    ok(a, &["mem", "set-version", "kitchen", "0.2.0"]);
+    ok(a, &["push", "--all"]);
+    ok(b, &["mem", "set-version", "kitchen", "0.3.0"]);
+    let before = git(&b.join("mem-repo"), &["rev-parse", "refs/heads/__MEMSTEAD"]);
+
+    let pulled = run(b, &["--json", "pull", "--all"]);
+    assert!(!pulled.status.success());
+    let text = String::from_utf8_lossy(&pulled.stdout).to_string()
+        + &String::from_utf8_lossy(&pulled.stderr);
+    assert!(text.contains("LOCAL_DIVERGENCE"), "{text}");
+    assert!(text.contains("mems/kitchen/config.json"), "{text}");
+    let after = git(&b.join("mem-repo"), &["rev-parse", "refs/heads/__MEMSTEAD"]);
+    assert_eq!(before, after, "the ref was not moved");
+}

@@ -323,6 +323,126 @@ pub fn is_ancestor_in_gitdir(
     }
 }
 
+/// [`memstead_base::GitBranchMergeDisjointFn`]: a path-by-path merge of
+/// `theirs` into `ours` from their merge base, through git plumbing on a
+/// temporary index (no working tree, no ref moved). Refuses nothing by
+/// content: a path both sides changed comes back as an overlap.
+pub fn merge_disjoint_in_gitdir(
+    gitdir: &Path,
+    ours: &str,
+    theirs: &str,
+    message: &str,
+) -> Result<memstead_base::DisjointMerge, BackendError> {
+    let fail = |what: &str| {
+        let what = what.to_string();
+        move |stderr: &str| format!("{what} failed: {stderr}")
+    };
+    let Some(base) = merge_base_in_gitdir(gitdir, ours, theirs)? else {
+        return Ok(memstead_base::DisjointMerge::Unrelated);
+    };
+    let changed = |side: &str| -> Result<Vec<(String, String, String, String)>, BackendError> {
+        // `:old_mode new_mode old_sha new_sha status\tpath`, one per line.
+        let raw = run_git(
+            gitdir,
+            &[
+                "diff-tree",
+                "-r",
+                "--no-renames",
+                "--raw",
+                "--full-index",
+                &base,
+                side,
+            ],
+            fail("git diff-tree"),
+        )?;
+        Ok(raw
+            .lines()
+            .filter_map(|line| {
+                let (meta, path) = line.split_once('\t')?;
+                let fields: Vec<&str> = meta.trim_start_matches(':').split(' ').collect();
+                let [_, new_mode, _, new_sha, status] = fields[..] else {
+                    return None;
+                };
+                Some((
+                    path.to_string(),
+                    new_mode.to_string(),
+                    new_sha.to_string(),
+                    status.to_string(),
+                ))
+            })
+            .collect())
+    };
+    let ours_changed: std::collections::BTreeSet<String> =
+        changed(ours)?.into_iter().map(|(p, ..)| p).collect();
+    let theirs_changed = changed(theirs)?;
+    let overlap: Vec<String> = theirs_changed
+        .iter()
+        .filter(|(p, ..)| ours_changed.contains(p))
+        .map(|(p, ..)| p.clone())
+        .collect();
+    if !overlap.is_empty() {
+        return Ok(memstead_base::DisjointMerge::Overlap { paths: overlap });
+    }
+    // A temporary index of its own, so the repository's index is never
+    // read or written; removed whatever happens.
+    let index = gitdir.join(format!("memstead-merge-{}.index", std::process::id()));
+    let result = (|| -> Result<String, BackendError> {
+        let with_index = |args: &[&str], what: &str| -> Result<String, BackendError> {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(gitdir)
+                .args(args)
+                .env("GIT_INDEX_FILE", &index)
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .env("GIT_AUTHOR_NAME", "engine")
+                .env("GIT_AUTHOR_EMAIL", "noreply@memstead.com")
+                .env("GIT_COMMITTER_NAME", "engine")
+                .env("GIT_COMMITTER_EMAIL", "noreply@memstead.com")
+                .stdin(Stdio::null())
+                .output()
+                .map_err(|e| BackendError::Other(format!("{what} failed to start: {e}")))?;
+            if !output.status.success() {
+                return Err(BackendError::Other(format!(
+                    "{what} failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                )));
+            }
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        };
+        with_index(&["read-tree", ours], "git read-tree")?;
+        for (path, mode, sha, status) in &theirs_changed {
+            if status == "D" {
+                with_index(
+                    &["update-index", "--force-remove", "--", path],
+                    "git update-index",
+                )?;
+            } else {
+                let cacheinfo = format!("{mode},{sha},{path}");
+                with_index(
+                    &["update-index", "--add", "--cacheinfo", &cacheinfo],
+                    "git update-index",
+                )?;
+            }
+        }
+        let tree = with_index(&["write-tree"], "git write-tree")?;
+        with_index(
+            &[
+                "commit-tree",
+                &tree,
+                "-p",
+                ours,
+                "-p",
+                theirs,
+                "-m",
+                message,
+            ],
+            "git commit-tree",
+        )
+    })();
+    let _ = std::fs::remove_file(&index);
+    Ok(memstead_base::DisjointMerge::Merged { commit: result? })
+}
+
 /// The nearest common ancestor of `a` and `b` (`git merge-base`):
 /// `None` when the two share no history (exit status 1), an error for
 /// anything else. Read-only.

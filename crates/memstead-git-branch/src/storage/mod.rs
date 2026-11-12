@@ -59,6 +59,7 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     is_ancestor: is_ancestor_dispatch,
     is_empty_root: is_empty_root_dispatch,
     merge_base: merge_base_dispatch,
+    merge_disjoint: crate::ops::transport::merge_disjoint_in_gitdir,
     update_ref: update_ref_dispatch,
     remote_add: remote_add_dispatch,
     read_tree: read_tree_dispatch,

@@ -744,6 +744,31 @@ pub type GitBranchIsEmptyRootFn = fn(gitdir: &Path, sha: &str) -> Result<bool, B
 pub type GitBranchMergeBaseFn =
     fn(gitdir: &Path, a: &str, b: &str) -> Result<Option<String>, BackendError>;
 
+/// Merge two commits' trees path by path from their merge base, when no
+/// path changed on both sides: the paths only `theirs` changed are
+/// applied onto `ours`'s tree, and a commit with both parents (`ours`
+/// first) is written with `message`. No ref moves; the caller moves it.
+/// A path changed on both sides is a content decision the merge does
+/// not make: the answer names every such path and writes nothing.
+pub type GitBranchMergeDisjointFn = fn(
+    gitdir: &Path,
+    ours: &str,
+    theirs: &str,
+    message: &str,
+) -> Result<DisjointMerge, BackendError>;
+
+/// What a [`GitBranchMergeDisjointFn`] came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DisjointMerge {
+    /// The merge commit, not yet on any ref.
+    Merged { commit: String },
+    /// Paths both sides changed since their merge base; nothing written.
+    Overlap { paths: Vec<String> },
+    /// The two commits share no history, so there is no base to merge
+    /// from; nothing written.
+    Unrelated,
+}
+
 /// Point `ref_name` at `sha`, under the precondition `previous` names.
 /// A move that decided on an observed tip pins it with
 /// [`RefPrevious::At`] (or [`RefPrevious::Absent`] for a ref it saw
@@ -914,6 +939,7 @@ pub struct GitBranchOps {
     pub is_ancestor: GitBranchIsAncestorFn,
     pub is_empty_root: GitBranchIsEmptyRootFn,
     pub merge_base: GitBranchMergeBaseFn,
+    pub merge_disjoint: GitBranchMergeDisjointFn,
     pub update_ref: GitBranchUpdateRefFn,
     pub remote_add: GitBranchRemoteAddFn,
     pub read_tree: GitBranchReadTreeFn,
