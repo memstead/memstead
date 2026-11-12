@@ -191,16 +191,14 @@ fn mem_repo_init_hint() -> String {
 }
 
 /// What a filesystem-mem workspace cannot do. Names the `batch-*`
-/// commands and `memstead recover`, which refuse by shape, and the
-/// `update` / `create` flags the folder path refuses with `INVALID_INPUT`
-/// (the guards in `commands/update.rs` and `commands/create.rs`). It says
+/// commands and `memstead recover`, which refuse by shape, and nothing
+/// else: `update --append` / `--patch` / `--dry-run` and `create
+/// --dry-run` run on a folder mem like any other. It says
 /// in the same breath that `memstead install` does NOT refuse (it stopped
 /// being shape-gated on 2026-08-27, and since 0.18.1 a folder workspace
 /// resolves an installed mem's sealed schema from the archive itself).
 const FILESYSTEM_CANNOT: &str = "**It cannot run the atomic `batch-*` commands or `recover`.** \
      Those are mem-repo-only and refuse here with `UNSUPPORTED_WORKSPACE_SHAPE`. \
-     The flags `update --append`, `--patch` and `--dry-run`, and `create --dry-run`, \
-     are mem-repo-only too and refuse here with `INVALID_INPUT`. \
      `memstead install <scope>/<name>` works on either shape.";
 
 impl WorkspaceShape {

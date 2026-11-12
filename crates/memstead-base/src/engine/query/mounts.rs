@@ -456,6 +456,53 @@ impl Engine {
         self.schemas.get(mem).cloned()
     }
 
+    /// The resolved schema of `mem`, or the engine's refusal naming why
+    /// there is none: an unknown mem refuses `UNKNOWN_MEM`, a mem held out
+    /// of service at boot (an unresolvable pin among the reasons) refuses
+    /// `MEM_QUARANTINED` with its reason, and a mounted mem whose pin does
+    /// not resolve refuses `SCHEMA_NOT_FOUND` with the per-source
+    /// diagnostics. The one answer every surface renders for "this mem's
+    /// schema", so none builds the refusal by hand.
+    pub fn resolved_schema(
+        &self,
+        mem: &str,
+    ) -> Result<std::sync::Arc<memstead_schema::Schema>, EngineError> {
+        if let Some(schema) = self.schemas.get(mem) {
+            return Ok(schema.clone());
+        }
+        let Some(m) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
+            return Err(self.unknown_mem_error(mem));
+        };
+        let catalogue: Vec<std::sync::Arc<memstead_schema::Schema>> = self
+            .workspace_schemas
+            .iter()
+            .cloned()
+            .chain(self.builtin_schemas.iter().cloned())
+            .collect();
+        let pin = m
+            .mem_config
+            .as_ref()
+            .and_then(|c| c.schema.clone())
+            .or_else(|| m.mount.schema.clone());
+        let (pin_display, sources) = match &pin {
+            Some(pin) => (
+                pin.as_display(),
+                crate::engine::SchemaResolver::new(&catalogue)
+                    .resolve(pin)
+                    .err()
+                    .unwrap_or_default(),
+            ),
+            None => ("<no schema pin>".to_string(), Vec::new()),
+        };
+        Err(EngineError::SchemaNotFound {
+            mem: mem.to_string(),
+            pin: pin_display,
+            sources,
+            install_hint: None,
+        }
+        .with_schema_install_probe(self.workspace_root()))
+    }
+
     /// Cached current branch-tip cursor (typically a 40-char hex
     /// SHA for git-branch backends; `None` for fresh mems or
     /// backends that don't track a head — folder / archive).

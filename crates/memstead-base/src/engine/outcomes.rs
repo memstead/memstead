@@ -155,14 +155,16 @@ pub enum HashOverride {
 }
 
 impl ExpectedHash {
-    /// The statement a surface token makes: no token is `Missing`, any
-    /// token (including an empty one) is the hash the caller holds. Empty
-    /// tokens keep their per-surface meaning; a surface that reads an empty
-    /// token as "no token" filters it before calling this.
+    /// The statement a surface token makes: a non-empty token is the hash
+    /// the caller holds; no token and an empty one both state nothing
+    /// (`Missing`). No content hash is empty, so an empty token cannot be
+    /// a hash read from storage, and every surface reads it alike: a stub
+    /// (whose `_hash` is empty) passes, a real entity refuses
+    /// `EXPECTED_HASH_REQUIRED`.
     pub fn from_token(token: Option<String>) -> Self {
         match token {
-            Some(h) => Self::Current(h),
-            None => Self::Missing,
+            Some(h) if !h.is_empty() => Self::Current(h),
+            _ => Self::Missing,
         }
     }
 

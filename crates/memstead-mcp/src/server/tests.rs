@@ -14144,3 +14144,113 @@ mod a_long_lived_server_reports_what_a_fresh_one_does {
         assert!(!target.exists(), "the refused create wrote nothing");
     }
 }
+
+/// An empty `expected_hash` states no hash on every MCP tool that takes
+/// one: on a real entity each refuses `EXPECTED_HASH_REQUIRED` and the
+/// entity is unchanged. Before the engine read it so, update and rename
+/// took `""` as a stated hash and refused `HASH_MISMATCH`.
+mod an_empty_expected_hash_is_a_missing_one {
+    use super::*;
+
+    fn assert_required(verb: &str, res: &CallToolResult) {
+        assert!(
+            res.is_error.unwrap_or(false),
+            "{verb}: {}",
+            extract_text(res)
+        );
+        let sc = res.structured_content.as_ref().expect("error envelope");
+        assert_eq!(sc["code"], "EXPECTED_HASH_REQUIRED", "{verb}: {sc}");
+    }
+
+    fn entity_hash(server: &McpServer, id: &str) -> String {
+        let r = server.memstead_entity(Parameters(EntityParams {
+            id: id.to_string(),
+            include_relations: None,
+            include_context: None,
+            sections: None,
+            token_budget: None,
+            chunk: None,
+            include_provenance: None,
+        }));
+        let text = extract_text(&r);
+        let line = text
+            .lines()
+            .find(|l| l.starts_with("_hash:"))
+            .unwrap_or_else(|| panic!("no _hash in {text}"));
+        line.trim_start_matches("_hash:").trim().to_string()
+    }
+
+    #[test]
+    fn every_tool_refuses_expected_hash_required() {
+        let (server, _tmp) = setup_test_engine();
+        let id = "specs--entity-b";
+        let before = entity_hash(&server, id);
+
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("purpose".to_string(), "edited".to_string());
+        assert_required(
+            "update",
+            &server.memstead_update(Parameters(crate::tools::mutation::UpdateParams {
+                anchors: None,
+                relations_unset: None,
+                anchors_unset: None,
+                id: id.to_string(),
+                expected_hash: Some(String::new()),
+                sections: Some(sections),
+                append_sections: None,
+                patch_sections: None,
+                sections_unset: None,
+                metadata: None,
+                metadata_unset: None,
+                dry_run: None,
+                note: None,
+                role: None,
+                identity: None,
+                declare_relations: None,
+            })),
+        );
+        assert_required(
+            "rename",
+            &server.memstead_rename(Parameters(RenameParams {
+                id: id.to_string(),
+                new_title: "Renamed".to_string(),
+                expected_hash: Some(String::new()),
+                note: None,
+                role: None,
+                identity: None,
+            })),
+        );
+        assert_required(
+            "retype",
+            &server.memstead_retype(Parameters(RetypeParams {
+                id: id.to_string(),
+                target_type: "memo".to_string(),
+                section_map: Some(
+                    [
+                        ("identity".to_string(), "claim".to_string()),
+                        ("purpose".to_string(), "context".to_string()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                ),
+                drop_metadata: Some(vec!["level".to_string(), "tags".to_string()]),
+                expected_hash: Some(String::new()),
+                dry_run: None,
+                note: None,
+                role: None,
+                identity: None,
+            })),
+        );
+        assert_required(
+            "delete",
+            &server.memstead_delete(Parameters(DeleteParams {
+                id: id.to_string(),
+                expected_hash: Some(String::new()),
+                note: None,
+                role: None,
+                identity: None,
+            })),
+        );
+        assert_eq!(entity_hash(&server, id), before, "the entity is unchanged");
+    }
+}

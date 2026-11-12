@@ -724,6 +724,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A refusal names its real cause and its repair (first part).**
+  - An empty expected hash states no hash on every surface:
+    `ExpectedHash::from_token` maps `""` to missing, so MCP
+    `memstead_update` and `memstead_rename` and a CLI `batch-update`
+    entry refuse `EXPECTED_HASH_REQUIRED` on a real entity, as every
+    other verb already did, instead of `HASH_MISMATCH`. A stub, whose
+    `_hash` is empty, is still written without one.
+  - A relative `--workspace` (or `MEMSTEAD_WORKSPACE`) is made absolute
+    once, at entry, so a refusal's `details.path` and message name the
+    path the caller meant.
+  - `mem-repo init --remote` raises the engine's error when configuring
+    the remote fails, the same code and message `mem-repo remote-add`
+    raises, instead of wrapping it in `MEM_REPO_INIT_FAILED`.
+  - `Engine::resolved_schema(mem)` returns a mem's resolved schema or the
+    engine's refusal (`UNKNOWN_MEM`, `MEM_QUARANTINED` with its reason,
+    `SCHEMA_NOT_FOUND` with the per-source diagnostics), so a surface
+    serving a mem's schema renders one engine value.
+  - The quickstart and init disclosure for a folder workspace no longer
+    says `update --append`, `--patch`, `--dry-run` and `create --dry-run`
+    refuse there; they run on a folder mem like on any other.
+
 - **A long-lived engine sees what a fresh one sees.** Six places where a
   server that had been running a while served a different view from an
   engine loaded just then:

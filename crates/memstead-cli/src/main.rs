@@ -93,6 +93,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         .clone()
         .or_else(|| std::env::var_os("MEMSTEAD_WORKSPACE").map(std::path::PathBuf::from));
     if let Some(root) = override_path {
+        // Absolute once, at entry: every refusal that names the path
+        // (`details.path` included) then names the one the caller meant,
+        // not a fragment relative to a directory the reader cannot see.
+        let root = std::path::absolute(&root).unwrap_or(root);
         if !memstead_base::is_workspace_root(&root) {
             return Err(setup::workspace_not_initialised_error_at(
                 &root,

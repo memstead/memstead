@@ -886,6 +886,90 @@ fn assert_filesystem_shape_disclosure(out: &str, ctx: &str) {
             "{ctx}: shape disclosure must name `{needle}`; got:\n{out}",
         );
     }
+    // The flags a folder mem runs like any other are never named as
+    // refused (they ran all along; see
+    // `folder_mem_runs_append_patch_and_dry_run`).
+    for flag in ["--append", "--patch", "--dry-run"] {
+        assert!(
+            !out.contains(flag),
+            "{ctx}: the disclosure names `{flag}`, which a folder mem runs; got:\n{out}",
+        );
+    }
+}
+
+/// `update --append`, `update --patch`, `update --dry-run` and `create
+/// --dry-run` each succeed on a folder mem, so no disclosure may call
+/// them refused there.
+#[test]
+fn folder_mem_runs_append_patch_and_dry_run() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("folder-flags");
+    memstead()
+        .args(["quickstart", "--agent", "claude-code"])
+        .arg(&root)
+        .assert()
+        .success();
+    let run = |args: &[&str]| {
+        let out = memstead().current_dir(&root).args(args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?} must succeed on a folder mem: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let created = memstead()
+        .current_dir(&root)
+        .args([
+            "create",
+            "--type",
+            "spec",
+            "--title",
+            "Flag Probe",
+            "--section",
+            "identity=first line",
+            "--section",
+            "purpose=probe",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        created.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&created.stdout),
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&created.stdout).unwrap();
+    let id = json["id"].as_str().unwrap().to_string();
+    run(&[
+        "create",
+        "--type",
+        "spec",
+        "--title",
+        "Dry Probe",
+        "--section",
+        "identity=x",
+        "--section",
+        "purpose=x",
+        "--dry-run",
+    ]);
+    run(&["update", &id, "--append", "purpose=appended", "--auto-hash"]);
+    run(&[
+        "update",
+        &id,
+        "--patch",
+        "identity=first line=>patched line",
+        "--auto-hash",
+    ]);
+    run(&[
+        "update",
+        &id,
+        "--section",
+        "purpose=dry",
+        "--dry-run",
+        "--auto-hash",
+    ]);
 }
 
 /// The fork `quickstart` decides silently is stated in the receipt the

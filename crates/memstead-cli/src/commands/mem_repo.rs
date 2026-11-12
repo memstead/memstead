@@ -159,7 +159,7 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
                 "origin",
                 &absolutize_local_url(url),
             )
-            .map_err(|e| generic_error(format!("configuring the remote failed: {e}")))?;
+            .map_err(|e| CliError::from_engine_op(memstead_base::EngineError::Backend(e)))?;
             if ctx.json {
                 crate::output::print_json(&serde_json::json!({
                     "mem_repo_dir": args.path.join("mem-repo").display().to_string(),
@@ -187,11 +187,9 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
                 "origin",
                 &absolutize_local_url(url),
             )
-            .map_err(|e| {
-                generic_error(format!(
-                    "the mem-repo was initialised but the remote was not configured: {e}"
-                ))
-            })?,
+            // The engine's error, as `remote-add` raises it: a remote that
+            // cannot be configured is the same refusal on both verbs.
+            .map_err(|e| CliError::from_engine_op(memstead_base::EngineError::Backend(e)))?,
         ),
         None => None,
     };

@@ -245,18 +245,6 @@ fn build_update_args(
     // engine refuses it `EXPECTED_HASH_REQUIRED` when it changes the content
     // of a real entity, and lets an anchors-only entry through, so the batch
     // and the single update answer the same payload the same way.
-    //
-    // Hand-rolled rather than `UpdateEntityArgs::changes_content()` only
-    // because the args do not exist yet at this point: the empty-token rule
-    // below needs it before they can be built.
-    // `batch_entry_content_matches_the_engine_predicate` pins the two
-    // against each other so they cannot drift.
-    let changes_content = !entry.sections.is_empty()
-        || !entry.append_sections.is_empty()
-        || !entry.patch_sections.is_empty()
-        || !entry.metadata.is_empty()
-        || !entry.metadata_unset.is_empty()
-        || !entry.declare_relations.is_empty();
     if mode_count > 1 {
         return Err(CliError::new(
             ExitKind::Validation,
@@ -294,18 +282,12 @@ fn build_update_args(
     // under its lock and announces it). An id that does not resolve reads as
     // no hash, and the engine names its own refusal for this entry
     // (`ENTITY_NOT_FOUND`, an ambiguous short id); under atomic semantics
-    // the whole batch refuses. An empty token is the hash `""` except on an
-    // anchors-only entry, where it is no token, as on every other surface.
+    // the whole batch refuses. An empty token states no hash, as on every
+    // other surface.
     let expected_hash = if entry.force || entry.auto_hash {
         super::refetched_hash(engine, &id)
     } else {
-        let anchors_only =
-            (!entry.anchors.is_empty() || !entry.anchors_unset.is_empty()) && !changes_content;
-        memstead_base::ExpectedHash::from_token(if anchors_only {
-            entry.expected_hash.filter(|h| !h.is_empty())
-        } else {
-            entry.expected_hash
-        })
+        memstead_base::ExpectedHash::from_token(entry.expected_hash)
     };
 
     let patch_sections = entry
@@ -499,39 +481,6 @@ mod tests {
                 "{mode} on {short}"
             );
         }
-    }
-
-    /// The batch entry's own content predicate must answer as the engine's
-    /// does. It is hand-rolled because the hash mode is resolved before the
-    /// engine args exist, so drift between the two is possible and this is
-    /// what catches it: an entry whose only content is a section change must
-    /// be seen as content-changing by both.
-    #[test]
-    fn batch_entry_content_matches_the_engine_predicate() {
-        use memstead_base::UpdateEntityArgs;
-        let mut args = UpdateEntityArgs {
-            id: memstead_base::EntityId("m--e".into()),
-            expected_hash: memstead_base::ExpectedHash::Missing,
-            sections: Default::default(),
-            append_sections: Default::default(),
-            patch_sections: Default::default(),
-            sections_unset: Vec::new(),
-            metadata: Default::default(),
-            metadata_unset: Vec::new(),
-            dry_run: false,
-            declare_relations: Vec::new(),
-            anchors: Vec::new(),
-            anchors_unset: Vec::new(),
-            relations_unset: Vec::new(),
-        };
-        assert!(!args.changes_content(), "nothing named changes no content");
-        args.anchors.push(Default::default());
-        assert!(
-            !args.changes_content(),
-            "anchors are outside the content hash and must stay off this side"
-        );
-        args.sections.insert("purpose".into(), "x".into());
-        assert!(args.changes_content(), "a section change is content");
     }
 
     /// The batch surface may recognise FEWER keys than the engine (its entry

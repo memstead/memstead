@@ -2116,3 +2116,172 @@ fn update_from_accepts_relations_unset_with_engine_semantics() {
         "the key must reach the engine's repair semantics, not die at parse: {env}"
     );
 }
+
+/// An empty expected hash states no hash on every CLI command that takes
+/// one (`update`, `rename`, `retype` with `--expected-hash ""`, and a
+/// `batch-update` entry with `"expected_hash": ""`): on a real entity each
+/// refuses `EXPECTED_HASH_REQUIRED` and the entity is unchanged. Before
+/// the engine read it so, the batch entry took `""` as a stated hash and
+/// refused `HASH_MISMATCH`.
+#[test]
+fn an_empty_expected_hash_refuses_expected_hash_required_on_every_command() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "create",
+            "--title",
+            "Empty Hash",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=x",
+        ])
+        .assert()
+        .success();
+    let id = "cli-write--empty-hash";
+    let before = entity_hash(tmp.path(), id);
+
+    let runs: Vec<Vec<&str>> = vec![
+        vec![
+            "update",
+            id,
+            "--section",
+            "purpose=edited",
+            "--expected-hash",
+            "",
+        ],
+        vec!["rename", id, "Renamed", "--expected-hash", ""],
+        vec![
+            "retype",
+            id,
+            "--type",
+            "concept",
+            "--section-map",
+            "identity=definition,purpose=explanation",
+            "--drop-metadata",
+            "level",
+            "--expected-hash",
+            "",
+        ],
+    ];
+    for args in runs {
+        let out = memstead()
+            .current_dir(tmp.path())
+            .args(&args)
+            .output()
+            .unwrap();
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!out.status.success(), "{args:?} must refuse: {text}");
+        assert!(
+            text.contains("EXPECTED_HASH_REQUIRED") && !text.contains("HASH_MISMATCH"),
+            "{args:?}: {text}"
+        );
+    }
+
+    let payload = tmp.path().join("empty-hash-batch.json");
+    fs::write(
+        &payload,
+        serde_json::json!({
+            "updates": [
+                { "id": id, "expected_hash": "", "sections": { "purpose": "batched" } }
+            ]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "batch-update", "--from"])
+        .arg(&payload)
+        .output()
+        .unwrap();
+    let text =
+        String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "batch-update must refuse: {text}");
+    assert!(
+        text.contains("EXPECTED_HASH_REQUIRED") && !text.contains("HASH_MISMATCH"),
+        "batch-update: {text}"
+    );
+    assert_eq!(
+        entity_hash(tmp.path(), id),
+        before,
+        "the entity is unchanged"
+    );
+}
+
+/// A relative `--workspace` that names nothing comes back absolute in the
+/// refusal's `details.path` and message: the CLI makes the override
+/// absolute once, at entry, so no refusal names a fragment relative to a
+/// directory the reader cannot see.
+#[test]
+fn a_relative_workspace_override_is_reported_absolute() {
+    let tmp = TempDir::new().unwrap();
+    let cwd = tmp.path().canonicalize().unwrap();
+    let out = memstead()
+        .current_dir(&cwd)
+        .env_remove("MEMSTEAD_WORKSPACE")
+        .args(["--json", "--workspace", "rel/missing", "status"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let text =
+        String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    let env: Value = text
+        .lines()
+        .find_map(|l| serde_json::from_str(l).ok())
+        .unwrap_or_else(|| panic!("no JSON envelope: {text}"));
+    assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED", "{env}");
+    let expected = cwd.join("rel/missing").display().to_string();
+    assert_eq!(env["details"]["path"], expected.as_str(), "{env}");
+    assert!(
+        env["message"].as_str().unwrap().contains(&expected),
+        "{env}"
+    );
+}
+
+/// `mem-repo init --remote` raises the engine's error when configuring
+/// the remote fails in the backend, as `mem-repo remote-add` does: same
+/// code, same message. Before, init wrapped it in its own
+/// `MEM_REPO_INIT_FAILED`. The fault: the mem-repo's gitdir is made
+/// read-only, so git cannot lock its config.
+#[cfg(unix)]
+#[test]
+fn mem_repo_init_remote_raises_the_engines_error_as_remote_add_does() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    memstead()
+        .current_dir(root)
+        .args(["mem-repo", "init", "."])
+        .assert()
+        .success();
+    let gitdir = root.join("mem-repo").join(".git");
+    fs::set_permissions(&gitdir, fs::Permissions::from_mode(0o555)).unwrap();
+    let envelope = |args: &[&str]| -> Value {
+        let out = memstead().current_dir(root).args(args).output().unwrap();
+        assert!(!out.status.success(), "{args:?} must refuse");
+        let text = String::from_utf8_lossy(&out.stdout).to_string()
+            + &String::from_utf8_lossy(&out.stderr);
+        text.lines()
+            .find_map(|l| serde_json::from_str(l).ok())
+            .unwrap_or_else(|| panic!("no JSON envelope: {text}"))
+    };
+    let url = "https://example.invalid/remote.git";
+    let init = envelope(&["--json", "mem-repo", "init", ".", "--remote", url]);
+    let add = envelope(&["--json", "mem-repo", "remote-add", "origin", url]);
+    fs::set_permissions(&gitdir, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_ne!(init["code"], "MEM_REPO_INIT_FAILED", "{init}");
+    assert_eq!(init["code"], add["code"], "init {init} / remote-add {add}");
+    assert_eq!(
+        init["message"], add["message"],
+        "init {init} / remote-add {add}"
+    );
+}

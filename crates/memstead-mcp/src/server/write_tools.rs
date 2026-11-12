@@ -190,7 +190,7 @@ impl McpServer {
             .into_iter()
             .map(|u| u.into_engine())
             .collect();
-        let mut args = memstead_base::UpdateEntityArgs {
+        let args = memstead_base::UpdateEntityArgs {
             anchors,
             anchors_unset,
             id: id.clone(),
@@ -213,16 +213,6 @@ impl McpServer {
                 })
                 .collect(),
         };
-        // An EMPTY token is no token on an anchors-only write, where the CLI
-        // already discards it: leaving it Some("") sent it to the engine,
-        // which compared "" against a real hash and refused HASH_MISMATCH for
-        // a write the CLI accepted. Narrowed to that shape on purpose: on a
-        // content-changing payload the empty token stays a stated hash and
-        // keeps its mismatch. Whether a missing hash is refused is the
-        // engine's decision (`ExpectedHash`), made under its lock.
-        if !args.changes_content() && args.expected_hash.as_current().is_some_and(str::is_empty) {
-            args.expected_hash = memstead_base::ExpectedHash::Missing;
-        }
         let client = self.client.get().cloned();
         match engine.update_entity(args, Actor::Agent, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
@@ -584,13 +574,11 @@ impl McpServer {
             return err;
         }
         let id = EntityId::canonical(&p.id);
-        // An empty `expected_hash` states no hash. The engine deletes a
-        // stub without one (it has no content to protect) and refuses a
-        // real entity `EXPECTED_HASH_REQUIRED`; the parameter stays a
-        // required string so the schema keeps asking for the read.
-        let expected_hash = memstead_base::ExpectedHash::from_token(
-            p.expected_hash.clone().filter(|h| !h.is_empty()),
-        );
+        // An empty `expected_hash` states no hash (the engine's reading):
+        // a stub is deleted without one, a real entity refuses
+        // `EXPECTED_HASH_REQUIRED`; the parameter stays a required string so
+        // the schema keeps asking for the read.
+        let expected_hash = memstead_base::ExpectedHash::from_token(p.expected_hash.clone());
 
         let (role, identity) =
             match self.resolve_call_provenance(p.role.as_deref(), p.identity.as_deref()) {
@@ -828,8 +816,8 @@ impl McpServer {
         engine.set_identity(identity);
         let args = memstead_base::RenameEntityArgs {
             id: id.clone(),
-            // An omitted hash is Missing and the engine refuses it; an empty one
-            // stays a stated hash and mismatches, as it always has.
+            // An omitted or empty hash states none; the engine refuses it
+            // for a real entity.
             expected_hash: memstead_base::ExpectedHash::from_token(p.expected_hash.clone()),
             new_title: p.new_title.clone(),
         };
@@ -900,13 +888,11 @@ impl McpServer {
         let mut engine = crate::lock_engine!(unified);
         engine.set_role(role);
         engine.set_identity(identity);
-        // An empty token states no hash, as it always has on retype; the
-        // engine refuses the missing hash after its existence and stub gates.
+        // An empty token states no hash; the engine refuses the missing
+        // hash after its existence and stub gates.
         let args = memstead_base::RetypeEntityArgs {
             id: id.clone(),
-            expected_hash: memstead_base::ExpectedHash::from_token(
-                p.expected_hash.clone().filter(|h| !h.is_empty()),
-            ),
+            expected_hash: memstead_base::ExpectedHash::from_token(p.expected_hash.clone()),
             target_type: p.target_type.clone(),
             section_map: p
                 .section_map

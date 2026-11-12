@@ -275,7 +275,7 @@ pub fn refetched_hash(
 /// The hash statement a single content-changing command presents to the
 /// engine. `refetch` is [`refetched_hash`], refusing an id that names
 /// nothing before the write. An explicit token is the hash the caller
-/// holds; an empty one counts as none, as it always has on the CLI.
+/// holds; an empty one counts as none, on every surface.
 /// Nothing stated is `Missing`, and whether that is refused is the engine's
 /// decision (`EXPECTED_HASH_REQUIRED` for a real entity, made after its
 /// existence and stub gates).
@@ -286,13 +286,14 @@ pub fn hash_statement(
     refetch: bool,
 ) -> anyhow::Result<memstead_base::ExpectedHash> {
     if refetch {
-        let current = refetched_hash(engine, id);
-        if current.is_missing() {
+        let exists = match engine.resolve_entity_id(id) {
+            Ok((resolved, _)) => engine.get_entity(&resolved).is_some(),
+            Err(_) => false,
+        };
+        if !exists {
             return Err(crate::CliError::from_engine_op(engine.not_found(id.as_ref())).into());
         }
-        return Ok(current);
+        return Ok(refetched_hash(engine, id));
     }
-    Ok(memstead_base::ExpectedHash::from_token(
-        explicit.filter(|h| !h.is_empty()),
-    ))
+    Ok(memstead_base::ExpectedHash::from_token(explicit))
 }
