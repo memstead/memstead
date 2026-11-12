@@ -56,7 +56,7 @@ pub mod write_lock;
 pub use archive::FromArchiveBytesError;
 pub use error::{
     BootError, EngineError, INLINE_LIST_CAP, MissingWikiLink, ReferrerInfo, SchemaSourceDiagnostic,
-    format_inline_list_overflow,
+    StaleCause, format_inline_list_overflow,
 };
 #[cfg(feature = "tokio")]
 pub use events::DEFAULT_BROADCAST_CAPACITY;
@@ -140,13 +140,41 @@ pub(crate) struct MountedBackend {
     /// whole state beats no answer), a write does not land on it
     /// ([`Engine::commit_staged`] refuses), because a write computed
     /// from a stale view overwrites what the view has not seen.
-    reload_failure: Option<String>,
+    reload_failure: Option<ViewFailure>,
     /// A discard on this mem's backend failed, so writes of a mutation
     /// that did not commit may still be staged there. Set by the write
     /// lock when it is released (it shares the flag, since it cannot
     /// reach the engine then) and cleared by the discard the engine
     /// runs before its next operation.
     strays: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Why a mem's view cannot take a write, with what failed: the record a
+/// mount keeps until the next reload or discard that succeeds, and the
+/// cause and detail of the `MEM_VIEW_STALE` a write is refused with.
+#[derive(Debug, Clone)]
+pub(crate) struct ViewFailure {
+    pub(crate) cause: StaleCause,
+    pub(crate) detail: String,
+}
+
+impl ViewFailure {
+    /// The view is behind storage: a reload, a probe or a read failed.
+    pub(crate) fn drift(detail: impl Into<String>) -> Self {
+        Self {
+            cause: StaleCause::Drift,
+            detail: detail.into(),
+        }
+    }
+
+    /// The refusal of a write on this view, naming `mem`.
+    pub(crate) fn refusal(&self, mem: &str) -> EngineError {
+        EngineError::StaleView {
+            mem: mem.to_string(),
+            cause: self.cause,
+            detail: self.detail.clone(),
+        }
+    }
 }
 
 /// One quarantined mem: the mem-level boot failure that took it out of

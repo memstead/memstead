@@ -92,12 +92,9 @@ impl Engine {
         // hash compare ran against content that may have moved on.
         // Landing it would overwrite what the view has not seen. The
         // next operation retries the reload.
-        if let Some(reason) = &state.reload_failure {
+        if let Some(failure) = &state.reload_failure {
             let _ = backend.discard_pending();
-            return Err(EngineError::StaleView {
-                mem: state.mount.mem.clone(),
-                detail: reason.clone(),
-            });
+            return Err(failure.refusal(&state.mount.mem));
         }
         let staged = records
             .iter()
@@ -116,11 +113,8 @@ impl Engine {
         record: &Provenance,
     ) -> Result<Landed, EngineError> {
         let state = &self.mounts[mount_idx];
-        if let Some(reason) = &state.reload_failure {
-            return Err(EngineError::StaleView {
-                mem: state.mount.mem.clone(),
-                detail: reason.clone(),
-            });
+        if let Some(failure) = &state.reload_failure {
+            return Err(failure.refusal(&state.mount.mem));
         }
         let appended = state
             .backend
@@ -479,10 +473,20 @@ pub(in crate::engine) fn with_a_decided_commit(
     committed
 }
 
-/// The partial-failure report's word for why a mem's part failed.
+/// The partial-failure report's word for why a mem's part failed:
+/// `drift` when another writer moved the mem's branch under the commit,
+/// `storage` for everything else. A pinned commit (rename, the sweep)
+/// loses the race as `ParentMismatch`; an unpinned one (a batch) loses
+/// it in [`Engine::settle`], which marks it as the entity-level refusal
+/// of [`Engine::lost_race_refusal`]: `HASH_MISMATCH` with the entity's
+/// hash at the new tip, or `ENTITY_NOT_FOUND` when the other writer
+/// removed it. Inside a failed commit those two arise from nothing else
+/// (the hash compare ran before the commit), so they read as `drift`.
 pub(in crate::engine) fn failure_cause_of(cause: &EngineError) -> &'static str {
     match cause {
-        EngineError::Backend(BackendError::ParentMismatch { .. }) => "drift",
+        EngineError::Backend(BackendError::ParentMismatch { .. })
+        | EngineError::HashMismatch { .. }
+        | EngineError::NotFound { .. } => "drift",
         _ => "storage",
     }
 }

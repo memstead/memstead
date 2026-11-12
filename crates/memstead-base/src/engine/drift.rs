@@ -155,9 +155,10 @@ impl Engine {
             if let Err(e) = self.discard_strays(name)
                 && let Some(state) = self.mounts.iter_mut().find(|m| &m.mount.mem == name)
             {
-                state.reload_failure = Some(format!(
-                    "writes a failed mutation left staged could not be discarded: {e}"
-                ));
+                state.reload_failure = Some(crate::engine::ViewFailure {
+                    cause: crate::engine::StaleCause::DiscardFailed,
+                    detail: e.to_string(),
+                });
             }
         }
 
@@ -190,7 +191,9 @@ impl Engine {
             .collect();
         for (name, error) in probe_failures {
             if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == name) {
-                state.reload_failure = Some(format!("the drift probe failed: {error}"));
+                state.reload_failure = Some(crate::engine::ViewFailure::drift(format!(
+                    "the drift probe failed: {error}"
+                )));
             }
         }
 
@@ -315,9 +318,9 @@ impl Engine {
                     if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == name)
                         && matches!(state.backend.storage_present(), Ok(false))
                     {
-                        state.reload_failure = Some(format!(
+                        state.reload_failure = Some(crate::engine::ViewFailure::drift(format!(
                             "the mem's storage is gone: its head was {old} and it has none now"
-                        ));
+                        )));
                     }
                 }
                 // No drift, and the view in place is known to be
@@ -386,7 +389,7 @@ impl Engine {
 
     pub(in crate::engine) fn note_reload_failure(&mut self, mem: &str, error: &EngineError) {
         if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == mem) {
-            state.reload_failure = Some(error.to_string());
+            state.reload_failure = Some(crate::engine::ViewFailure::drift(error.to_string()));
         }
     }
 

@@ -720,20 +720,21 @@ pub enum EngineError {
         "the write to mem `{mem}` is decided and not yet applied ({detail}) — do not resend it; the next operation on the mem completes it first"
     )]
     CommitNotApplied { mem: String, detail: String },
-    /// The mem changed in storage and the reload before this write
-    /// failed, so the write was computed from a view that is behind
-    /// storage. Nothing was written. No existing code says this: the
-    /// caller's hash may even match the stale view, so `HASH_MISMATCH`
-    /// would be false, and the storage failure itself belongs to the
-    /// reload, not to this write. The next operation on the mem retries
-    /// the reload; resend the write after it. The named mem is the one
-    /// that could not be reloaded: the mem being written, a mem whose
-    /// entity the write relates to, or, for a write whose guard reads
-    /// every mem, any mem.
-    #[error(
-        "mem `{mem}` changed in storage and could not be reloaded before this write ({detail}) — nothing was written; the next operation retries the reload, resend the write then"
-    )]
-    StaleView { mem: String, detail: String },
+    /// The engine's view of a mem cannot take this write, so nothing was
+    /// written. No other code says this: the caller's hash may even
+    /// match the view, so `HASH_MISMATCH` would be false, and the
+    /// failure behind it belongs to the view, not to this write. The
+    /// named mem is the one whose view cannot take it: the mem being
+    /// written, a mem whose entity the write relates to, or, for a write
+    /// whose guard reads every mem, any mem. `cause` says why, and the
+    /// message and `details.cause` name the repair for that cause
+    /// ([`StaleCause`]).
+    #[error("{}", stale_view_message(mem, *cause, detail))]
+    StaleView {
+        mem: String,
+        cause: StaleCause,
+        detail: String,
+    },
     /// `memstead_relate` source is a stub — stubs have no `entity_type`
     /// and cannot author edges. The agent must promote the stub to a
     /// real entity via `memstead_create` (stub adoption preserves any
@@ -2462,9 +2463,13 @@ impl EngineError {
                 "failure_cause": failure_cause,
                 "mems": mems,
             }),
-            EngineError::CommitNotApplied { mem, detail }
-            | EngineError::StaleView { mem, detail } => serde_json::json!({
+            EngineError::CommitNotApplied { mem, detail } => serde_json::json!({
                 "mem": mem,
+                "detail": detail,
+            }),
+            EngineError::StaleView { mem, cause, detail } => serde_json::json!({
+                "mem": mem,
+                "cause": cause.as_str(),
                 "detail": detail,
             }),
             EngineError::StubCannotRelate { id }
@@ -2895,6 +2900,54 @@ fn _required_field_unset_msg(field: &str, entity_type: &str, on_create: bool) ->
         )
     } else {
         format!("cannot unset required field '{field}' for type '{entity_type}'")
+    }
+}
+
+/// Why a mem's view cannot take a write ([`EngineError::StaleView`]).
+/// One code for one state class (the view cannot take it); the cause
+/// names the state, and with it the repair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StaleCause {
+    /// The mem changed in storage and the reload before the write
+    /// failed: the view is behind storage.
+    Drift,
+    /// The mem is out of service (it failed to attach): it is in no view.
+    OutOfService,
+    /// The mem's write lock cannot be taken here, so its content cannot
+    /// be held still for an operation that reads it.
+    LockUnavailable,
+    /// Writes a failed mutation left staged on the mem could not be
+    /// discarded: a read would serve them as content that never landed.
+    DiscardFailed,
+}
+
+impl StaleCause {
+    /// The wire word, as in `details.cause`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StaleCause::Drift => "drift",
+            StaleCause::OutOfService => "out_of_service",
+            StaleCause::LockUnavailable => "lock_unavailable",
+            StaleCause::DiscardFailed => "discard_failed",
+        }
+    }
+}
+
+fn stale_view_message(mem: &str, cause: StaleCause, detail: &str) -> String {
+    match cause {
+        StaleCause::Drift => format!(
+            "mem `{mem}` changed in storage and could not be reloaded before this write ({detail}) — nothing was written; the next operation retries the reload, resend the write then"
+        ),
+        StaleCause::OutOfService => format!(
+            "mem `{mem}` is out of service ({detail}) — it is in no view, so a write that reads it cannot be planned; nothing was written; repair the mem and reload it, or remove it, then resend the write"
+        ),
+        StaleCause::LockUnavailable => format!(
+            "mem `{mem}`'s write lock cannot be taken here ({detail}) — its content cannot be held still for a write that reads it; nothing was written; make the lock file reachable or unmount the mem, then resend the write"
+        ),
+        StaleCause::DiscardFailed => format!(
+            "writes a failed mutation left staged on mem `{mem}` could not be discarded ({detail}) — nothing was written; the next operation retries the discard, resend the write then"
+        ),
     }
 }
 

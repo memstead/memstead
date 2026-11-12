@@ -395,7 +395,7 @@ impl Engine {
             archive_checks: None,
             // Registered live and loaded in this call — never deferred.
             deferred: false,
-            reload_failure: incomplete,
+            reload_failure: incomplete.map(crate::engine::ViewFailure::drift),
             strays: Default::default(),
         });
 

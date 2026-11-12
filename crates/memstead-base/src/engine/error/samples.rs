@@ -760,6 +760,31 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
             "StaleView".into(),
             EngineError::StaleView {
                 mem: s("specs"),
+                cause: crate::engine::StaleCause::Drift,
+                detail: s("d"),
+            },
+        ),
+        (
+            "StaleView/out_of_service".into(),
+            EngineError::StaleView {
+                mem: s("specs"),
+                cause: crate::engine::StaleCause::OutOfService,
+                detail: s("SCHEMA_NOT_FOUND: d"),
+            },
+        ),
+        (
+            "StaleView/lock_unavailable".into(),
+            EngineError::StaleView {
+                mem: s("specs"),
+                cause: crate::engine::StaleCause::LockUnavailable,
+                detail: s("d"),
+            },
+        ),
+        (
+            "StaleView/discard_failed".into(),
+            EngineError::StaleView {
+                mem: s("specs"),
+                cause: crate::engine::StaleCause::DiscardFailed,
                 detail: s("d"),
             },
         ),
@@ -1385,5 +1410,50 @@ mod tests {
     #[test]
     fn every_variant_of_every_error_has_a_sample() {
         assert_eq!(super::missing_samples(), Vec::<String>::new());
+    }
+}
+
+/// Each `MEM_VIEW_STALE` cause renders its own message and its own
+/// `details.cause`; only drift says the mem changed in storage.
+#[cfg(test)]
+mod stale_view_causes {
+    use crate::engine::{EngineError, StaleCause};
+
+    #[test]
+    fn each_cause_names_its_state_and_only_drift_says_storage_changed() {
+        let cases = [
+            (StaleCause::Drift, "drift", "changed in storage"),
+            (
+                StaleCause::OutOfService,
+                "out_of_service",
+                "is out of service",
+            ),
+            (
+                StaleCause::LockUnavailable,
+                "lock_unavailable",
+                "write lock cannot be taken",
+            ),
+            (
+                StaleCause::DiscardFailed,
+                "discard_failed",
+                "could not be discarded",
+            ),
+        ];
+        for (cause, wire, phrase) in cases {
+            let e = EngineError::StaleView {
+                mem: "specs".to_string(),
+                cause,
+                detail: "d".to_string(),
+            };
+            assert_eq!(e.code(), "MEM_VIEW_STALE");
+            assert_eq!(e.details()["cause"], wire);
+            let message = e.to_string();
+            assert!(message.contains(phrase), "{wire}: {message}");
+            assert_eq!(
+                message.contains("changed in storage"),
+                cause == StaleCause::Drift,
+                "{wire}: {message}"
+            );
+        }
     }
 }

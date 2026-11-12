@@ -744,6 +744,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - The quickstart and init disclosure for a folder workspace no longer
     says `update --append`, `--patch`, `--dry-run` and `create --dry-run`
     refuse there; they run on a folder mem like on any other.
+  - `MEM_VIEW_STALE` carries a typed `details.cause` (`drift`,
+    `out_of_service`, `lock_unavailable`, `discard_failed`), and the
+    message names that state and its repair. Before, every case said the
+    mem changed in storage, also for a mem out of service, a read-only
+    mem whose lock cannot be taken, and a discard that failed.
+  - A batch that loses a race to another writer in one of its mems
+    reports `failure_cause: drift` in its partial-failure envelope, as a
+    rename does, instead of `storage`.
 
 - **A long-lived engine sees what a fresh one sees.** Six places where a
   server that had been running a while served a different view from an

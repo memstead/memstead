@@ -3729,6 +3729,21 @@ fn a_delete_is_refused_when_it_cannot_take_the_lock_of_a_mem_it_reads() {
             Err("MEM_VIEW_STALE".to_string()),
             "{context}: the delete does not run on a mem it could not lock"
         );
+        let args = delete_args(&engine, &id(LEFT, "alpha"));
+        std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let err = engine
+            .delete_entity(args, Actor::Cli, None, None)
+            .expect_err("refused again");
+        std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            err.details()["cause"],
+            "lock_unavailable",
+            "{context}: {err}"
+        );
+        assert!(
+            !err.to_string().contains("changed in storage"),
+            "{context}: a lock that cannot be taken is not drift: {err}"
+        );
         assert!(
             ws.engine()
                 .get_entity(&id(LEFT, "alpha"))
@@ -3853,5 +3868,112 @@ fn a_mount_registered_again_keeps_its_incoming_edges() {
         let (real, from) = links_to_alpha(&ws);
         assert!(real, "{context}: alpha is still there");
         assert_eq!(from.len(), 1, "{context}: and so is the reference");
+    }
+}
+
+/// A batch that loses a race to a sibling in its second mem: just
+/// before the batch commits into `right`, another writer commits there
+/// (a write that does not wait on the lock, run from the backend call
+/// itself). The batch's first mem has landed, so the call returns the
+/// partial-failure envelope, and its cause is `drift`, as a rename that
+/// loses its race says; never `storage`.
+#[test]
+fn a_batch_that_loses_a_race_in_its_second_mem_reports_drift() {
+    // The race is a branch race: a folder mem's commit lands its own files
+    // over whatever else changed, so the second mem is a git-branch one.
+    for pair in [
+        (Kind::GitBranch, Kind::GitBranch),
+        (Kind::Folder, Kind::GitBranch),
+    ] {
+        let context = format!("{pair:?}");
+        let ws = Workspace::new(pair);
+        let raced = Arc::new(AtomicBool::new(false));
+        let tap: Tap = {
+            let (raced, ws) = (Arc::clone(&raced), ws.clone());
+            Arc::new(move |mem: &str, method: &str| {
+                if matches!(method, "commit" | "commit_with_expected_parent")
+                    && mem == RIGHT
+                    && !raced.swap(true, Ordering::SeqCst)
+                {
+                    let mut sibling = ws.engine();
+                    sibling
+                        .create_entity(create_args(RIGHT, "Sibling", &[]), Actor::Cli, None, None)
+                        .expect("the sibling's write lands");
+                }
+                false
+            })
+        };
+        let mut engine = ws.tapped_engine(tap);
+        let updates = vec![
+            (
+                update_args(&engine, &id(LEFT, "alpha"), "Alpha purpose, batch"),
+                None,
+            ),
+            (
+                update_args(&engine, &id(RIGHT, "gamma"), "Gamma purpose, batch"),
+                None,
+            ),
+        ];
+        let err = engine
+            .batch_update(updates, Actor::Cli, None, false)
+            .expect_err("the batch loses the race in its second mem");
+        assert!(raced.load(Ordering::SeqCst), "{context}: the race ran");
+        let EngineError::RenamePartialFailure {
+            committed_mems,
+            failed_mem,
+            failure_cause,
+            ..
+        } = &err
+        else {
+            panic!("{context}: expected the partial-failure envelope, got {err:?}");
+        };
+        assert_eq!(committed_mems, &vec![LEFT.to_string()], "{context}");
+        assert_eq!(failed_mem, RIGHT, "{context}");
+        assert_eq!(failure_cause, "drift", "{context}");
+    }
+}
+
+/// A delete reads every mem, and `right` is out of service: its pin
+/// names a schema no source holds, so it failed to attach. The delete
+/// is refused `MEM_VIEW_STALE` with `details.cause: out_of_service`, and
+/// its message names that state and its repair, never that the mem
+/// changed in storage (it did not).
+#[test]
+fn a_write_reading_an_out_of_service_mem_names_that_cause() {
+    for pair in [
+        (Kind::Folder, Kind::Folder),
+        (Kind::GitBranch, Kind::Folder),
+    ] {
+        let context = format!("{pair:?}");
+        let ws = Workspace::new(pair);
+        let right_dir = match &ws.mounts[1].storage {
+            MountStorage::Folder { path } => path.clone(),
+            other => panic!("right is a folder mem here: {other:?}"),
+        };
+        std::fs::write(
+            right_dir.join(".memstead/config.json"),
+            r#"{"schema": "no-such-schema@9.9.9"}"#,
+        )
+        .unwrap();
+        let mut engine = ws.engine();
+        let args = delete_args(&engine, &id(LEFT, "alpha"));
+        let err = engine
+            .delete_entity(args, Actor::Cli, None, None)
+            .expect_err("a delete that reads an out-of-service mem is refused");
+        assert_eq!(err.code(), "MEM_VIEW_STALE", "{context}: {err}");
+        assert_eq!(err.details()["cause"], "out_of_service", "{context}: {err}");
+        assert_eq!(err.details()["mem"], RIGHT, "{context}: {err}");
+        let message = err.to_string();
+        assert!(message.contains("out of service"), "{context}: {message}");
+        assert!(
+            !message.contains("changed in storage"),
+            "{context}: an out-of-service mem is not drift: {message}"
+        );
+        assert!(
+            ws.engine()
+                .get_entity(&id(LEFT, "alpha"))
+                .is_some_and(|e| !e.stub),
+            "{context}: nothing was deleted"
+        );
     }
 }

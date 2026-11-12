@@ -550,7 +550,7 @@ impl Engine {
             mounted[*idx].last_known_head = mounted[*idx].backend.current_head().ok().flatten();
         }
         for (idx, reason) in incomplete {
-            mounted[idx].reload_failure = Some(reason);
+            mounted[idx].reload_failure = Some(crate::engine::ViewFailure::drift(reason));
         }
 
         // Drop quarantined mounts from the serving roster: a

@@ -257,15 +257,13 @@ impl Engine {
                 .collect()
         })?;
         warnings.extend(self.reload_if_stale_content_only(None));
-        if let Some(stale) = self
+        if let Some((stale, failure)) = self
             .mounts
             .iter()
-            .find(|m| m.reload_failure.is_some() && !tolerated.contains(&m.mount.mem.as_str()))
+            .filter(|m| !tolerated.contains(&m.mount.mem.as_str()))
+            .find_map(|m| m.reload_failure.as_ref().map(|f| (m, f)))
         {
-            return Err(EngineError::StaleView {
-                mem: stale.mount.mem.clone(),
-                detail: stale.reload_failure.clone().unwrap_or_default(),
-            });
+            return Err(failure.refusal(&stale.mount.mem));
         }
         // A mem that is out of service is in no view at all: one whose
         // deferred load just failed under this lock, or one that never
@@ -277,7 +275,8 @@ impl Engine {
         {
             return Err(EngineError::StaleView {
                 mem: out.mount.mem.clone(),
-                detail: format!("the mem is out of service: {}", out.reason_code),
+                cause: super::StaleCause::OutOfService,
+                detail: format!("{}: {}", out.reason_code, out.reason_message),
             });
         }
         Ok((guard, warnings))
@@ -583,6 +582,7 @@ impl Engine {
                     (Err(e), Some(mem)) => {
                         return Err(EngineError::StaleView {
                             mem,
+                            cause: super::StaleCause::LockUnavailable,
                             detail: format!(
                                 "the mem's write lock cannot be taken here ({e}), so its content \
                                  cannot be held still for an operation that reads it"
