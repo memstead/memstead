@@ -296,7 +296,7 @@ The engine validates every write against the schema. A refusal is not a dead end
 
 ## Recipe 4 — update under optimistic locking
 
-Every `memstead_update` carries `expected_hash` — the `_hash` from your last read of that entity. If someone else wrote in between, the engine refuses instead of silently overwriting, and hands you the current token in `details`.
+Every `memstead_update` carries `expected_hash` — the `_hash` from your last read of that entity. If someone else wrote in between, the engine refuses instead of silently overwriting, and hands you the current token in `details`. Leaving the hash out, or passing an empty string, is not a stale hash: the engine refuses `EXPECTED_HASH_REQUIRED` naming the entity, as `memstead_delete`, `memstead_rename` and `memstead_retype` do (an update that only changes anchors, and a stub, need none).
 
 **Call 1 — stale hash, refused:**
 

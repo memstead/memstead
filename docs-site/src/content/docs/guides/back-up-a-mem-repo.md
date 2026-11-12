@@ -53,6 +53,9 @@ branch, and `pull --all` restores that declared branch from
 The push refuses rather than surprises:
 
 - `UNKNOWN_REMOTE` — the remote name isn't configured (step 1).
+- `REMOTE_UNREACHABLE` — the remote is configured but did not answer at
+  its URL (shown in the message): check the address and the network, or
+  re-point it with `memstead mem-repo remote-add origin <url>`.
 - `NON_FAST_FORWARD` — the remote has commits this workspace lacks
   (another machine pushed). Run `memstead pull <mem>` first, or
   `--force` to overwrite deliberately (force-with-lease under the hood).
@@ -85,7 +88,10 @@ memstead pull --all
 
 `--remote` configures `origin` as part of the bootstrap. The output
 lists every ref that moved; `memstead status --remote` then reports
-everything in sync.
+everything in sync. Before the restore, the engine names what is
+missing: each mounted git-branch mem is quarantined with
+`MEM_REPO_MISSING`, and `memstead health` prints it with these same two
+commands as the repair.
 
 ### Nothing but the backup
 
@@ -137,7 +143,11 @@ a round trip adds nothing, and an export made on the other machine
 seals the checks recorded here. Only the rows of a mem this workspace
 mounts are ever imported, and only through its own `fetch`, `pull` and
 `push`; a fork's ref is never read, so a contributor cannot ship check
-rows that close your gates.
+rows that close your gates. Merged rows count by their own fields: the
+newest check of a kind is the one whose act is latest, not the line
+that arrived last, so both machines read the same standing. A row dated
+more than five minutes ahead of the receiving engine's clock is refused
+and named under `checks_refused`; the other rows still land.
 
 `push --all` is the whole-workspace form: it lists the remote once, skips
 every ref already in sync (a run with nothing to send prints nothing),
@@ -153,11 +163,23 @@ fetch only updates remote-tracking refs.
 `pull` validates the incoming tree against the mem's pinned schema
 before moving anything (`SCHEMA_VIOLATION_IN_FETCH` refuses the whole
 pull), fast-forwards the branch, and reloads the in-memory store — the
-graph reflects the pulled state immediately.
+graph reflects the pulled state immediately. `pull`, `pull --all` and
+`branch-reset` take the workspace write lock first, so they wait for a
+write in progress in any mem instead of moving a branch under it, and
+`branch-reset` reloads the mem it reset.
 
-Divergence (both sides committed) never merges silently: `pull` refuses
-with `LOCAL_DIVERGENCE`, and you choose — `branch-reset` to adopt the
-remote, or push from the other machine first.
+Divergence (both sides committed) on a mem's branch never merges:
+`pull` refuses with `LOCAL_DIVERGENCE`, and you choose — `branch-reset`
+to adopt the remote, or push from the other machine first.
+
+The schema-and-config ref is the one exception. When two machines each
+created a mem (or otherwise changed different files on it), `pull --all`
+merges the two histories file by file and pushes nothing for you; run
+`push --all` afterwards. The other machine's new mem then shows under
+`unmounted_on_remote`; mount it with
+`memstead mem init <name> --schema <pin> --reattach`, then run
+`pull --all` once more to bring in its branch. When both machines
+changed the same file, `pull --all` refuses `LOCAL_DIVERGENCE` naming it.
 
 ## 5. Fork a mem at a recorded ancestor
 

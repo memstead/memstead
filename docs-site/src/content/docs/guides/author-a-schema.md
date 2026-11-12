@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-A [schema](../../glossary/#schema) is what makes a mem *typed*: it declares the entity types, the sections each type must carry, the metadata fields, and the relationship vocabulary — and the engine enforces all of it on every write. The built-in `default` schema is a general-purpose starting point; the moment your domain has its own vocabulary, author your own — or fork a closer built-in. For document-and-deadline domains (contracts, compliance, permits, grants, maintenance), start from `obligation` — the first non-software built-in: dated duties with stated consequences, the agreements they arise from, the parties they bind, and the decisions taken over them, with the `due:` axis wired so `memstead due` answers "what is due next". Nothing in it names a domain; it is deliberately a fork target (`memstead schema install obligation@0.1.0`, copy, rename, extend).
+A [schema](../../glossary/#schema) is what makes a mem *typed*: it declares the entity types, the sections each type must carry, the metadata fields, and the relationship vocabulary — and the engine enforces all of it on every write. The built-in `default` schema is a general-purpose starting point; the moment your domain has its own vocabulary, author your own — or fork a closer built-in. For document-and-deadline domains (contracts, compliance, permits, grants, maintenance), start from `obligation` — the first non-software built-in: dated duties with stated consequences, the agreements they arise from, the parties they bind, and the decisions taken over them, with the `due:` axis wired so `memstead due` answers "what is due next". Nothing in it names a domain; it is deliberately a fork target. A built-in installs sealed, so a plain copy of it does not validate as a package you author: `memstead schema obligation` prints the package README followed by the steps that do (install, copy, remove the seal marker `schema-format.json`, set your own `name:` and `version:`, `memstead schema migrate --write`, validate). The same steps follow the README of every built-in.
 
 This guide takes you from a working workspace (see [Getting started](../../guides/getting-started/)) to a mem pinned to a custom schema. You never hand-copy YAML — `memstead schema new` scaffolds a valid package, and the whole remaining flow is the commands it prints.
 
@@ -35,7 +35,7 @@ The scaffold is a complete schema package — one folder, two files:
 - **`cookbook/schema.yaml`** — the manifest: name, version, description, the `types:` roster, the relationship vocabulary (`strict` mode with `PART_OF`, `RELATES_TO`, `REFERENCES`, and the required `_default` fallback), and `alias_target_rel_type: REFERENCES` so body wiki-links auto-emit edges.
 - **`cookbook/types/note.yaml`** — one commented example type: a required `summary` section, an optional catch-all `details` section, one required and one optional metadata field, search weights, and `write_rules` guidance served to agents.
 
-Every line carries a comment explaining what to change. The scaffold validates clean *unmodified* — you can run the printed follow-up first and shape the schema afterwards.
+Every line carries a comment explaining what to change. The scaffold validates clean *unmodified* — you can run the printed follow-up first and shape the schema afterwards. In the type file, a key marked `REQUIRED` must stay: `schema validate` refuses a type without it. That covers the type's own `write_rules` (it may be an empty list) and one section carrying `catch_all: true`, besides `name`, `description`, `when_to_use`, `sections`, `metadata_fields`, the search weights, `hierarchy_relationship`, `updatable_fields`, `health_required_fields` and `staleness_threshold_days`; a `REQUIRED` list's comment names the keys each of its entries needs. Everything unmarked is optional.
 
 One rule covers sections and metadata fields alike: **a declaration is optional unless it says `required: true`** — absence means optional. A required metadata field with a `default_value` is auto-filled and never refused (required-with-default means "always present", not "caller must type it"). The retired `optional:` key refuses at authoring load with the one-line inversion fix; sealed schemas that still carry it keep loading with equivalent semantics.
 
@@ -55,7 +55,7 @@ This is the same validation the engine runs at load, without touching the worksp
 
 ### Retired keys: migrate instead of hand-editing
 
-A package written under an older schema language can fail validation on nothing but retired spellings — `propagating_relationships` (now `no_self_loop_relationships`), the metadata-field `optional:` (now `required:`, opposite polarity), the `examples:` list (replaced by the validated `exemplar:`), the exemplar-relation `to:`/`type:` pair (now `target:`/`rel_type:`). `memstead schema migrate` rewrites them by exactly the translations the engine applies when it reads sealed content:
+A package written under an older schema language can fail validation on nothing but retired spellings — `propagating_relationships` (now `no_self_loop_relationships`), the metadata-field `optional:` (now `required:`, opposite polarity), the `examples:` list (replaced by the validated `exemplar:`), the exemplar-relation `to:`/`type:` pair (now `target:`/`rel_type:`), and in constraint entries the direction values `incoming` / `outgoing` on `status_propagation` and `transition_requires_checks` (now `in` / `out`) and the relation keys `rel_type` / `rel_types` on `status_propagation` and `rel_type` on `enum_from_neighbour` (now one `relationships` list: `rel_type: X` becomes `relationships: [X]`). The refusal is `SCHEMA_VALIDATION_FAILED`, naming the retired spelling and its replacement. `memstead schema migrate` rewrites them by exactly the translations the engine applies when it reads sealed content:
 
 ```bash
 memstead schema migrate cookbook            # dry run: one line per rewrite, nothing written
@@ -64,6 +64,8 @@ memstead schema validate cookbook
 ```
 
 The dry run is the review step. One thing to read carefully there: a package that carries `optional:` was written when an absent key meant *required*, and its sealed copies still read that way. The migration conserves that meaning by inserting `required: true` on every metadata field that declared neither key — delete the line where you did not mean it. The verb never bumps `version` (whether a spelling change deserves a new one is your call) and never edits a sealed copy inside a mem; those keep loading as they are.
+
+**Engine version.** The constraint spellings `in` / `out` and `relationships`, and the due axis's `check_kind` (section 8b), arrived with engine 0.26.0. A package that uses them needs 0.26.0 or later: an older engine refuses it at parse, as it refuses every key it does not know. A package migrated for 0.26.0 therefore no longer loads on 0.25.0 or earlier, while a copy installed before the migration keeps loading on both.
 
 ## 3. Install into the workspace
 
@@ -149,31 +151,53 @@ memstead: ERROR [MISSING_REQUIRED_SECTION]: missing 1 required section(s) for ty
 
 Now iterate on the package: rename `note` into your first real type (the filename stem, its `name:` field, and the manifest's `types:` entry must agree), add types one file at a time, and grow the relationship vocabulary. After each edit: `schema validate`, `schema install`, and bump `version:` when a published mem depends on it. The scaffold's comments cover each knob — sections, metadata fields, search weights, hierarchy and propagation, staleness.
 
-A metadata field can declare the shape of its values with `value_pattern`, a regular expression the engine anchors at both ends and checks on every write; on a `csv_array` field each member is checked on its own, so a list of shaped entries (`name=constant` pairs, ticket keys, quarter labels) refuses the one malformed member by name (`INVALID_FIELD_VALUE`, the pattern quoted as the expected format). A pattern that does not compile refuses at install. The schema render and the MCP skeleton show it as `pattern`.
+A metadata field can declare the shape of its values with `value_pattern`, a regular expression the engine anchors at both ends and checks on every write; on a `csv_array` field each member is checked on its own, so a list of shaped entries (`name=constant` pairs, ticket keys, quarter labels) refuses the one malformed member by name (`INVALID_FIELD_VALUE`, the pattern quoted as the expected format, the message naming the field's declared type: `number`, `date` or `string`). A pattern that does not compile refuses at install. The schema render and the MCP skeleton show it as `pattern`.
 
 For full worked schemas to read (not copy — the scaffold already gave you a valid base), see the [examples](https://github.com/memstead/memstead/tree/main/examples): `agent-program` (a single-mem, execution-flavoured schema) and the `reimpl-source`/`reimpl-target` pair (a two-mem model with cross-mem links).
 
 ## 7. Declare keep-health constraints
 
-Beyond what is *legal to write*, a type can declare what is *unhealthy to keep* — a `constraints:` list on the type definition, drawn from a closed vocabulary of six kinds, plus the same knobs on the type's `required_outgoing` blocks, all under one uniform `severity` model: `warn` (a health finding on the health report) or `block` (a write-time refusal, plus a health finding for pre-existing violations). The seven forms:
+Beyond what is *legal to write*, a type can declare what is *unhealthy to keep*: a `constraints:` list on the type definition, drawn from a closed vocabulary of six kinds, plus the same knobs on the type's `required_outgoing` blocks, all under one uniform `severity` model: `warn` (a health finding on the health report) or `block` (a write-time refusal, plus a health finding for pre-existing violations). Each form in turn:
 
 - **`requires_when`** — a field or section becomes required when another metadata field holds a declared value (`status: checked` requires `checked_by`). Defaults to `warn`.
 - **`required_outgoing` severity and condition** — each required-edge block on the type can carry `severity: block`, promoting its historical `MISSING_REQUIRED_OUTGOING` warning to a refusal, and an optional `when_field` / `when_value` pair (the same two keys `requires_when` uses): the block then applies only while that metadata field holds that enum value. The trigger field must be declared with `enum_values`; every payload naming the unsatisfied block echoes the trigger.
 - **`unique`** — a tuple of metadata fields unique among entities of this type within the mem. Defaults to `block`: the point is bouncing the duplicate at write time.
-- **`enum_from_neighbour`** — a field whose legal values are the bullet-list entries of a named section on the entity reached via a named outgoing edge; a value nothing backs is a violation. Defaults to `warn`.
-- **`status_propagation`** — a terminal value of a named status field taints every entity reaching it via a named rel-type and direction (or a relation set: `rel_types: [A, B]` walks the union, so a taint crosses rel-type boundaries; declare exactly one of `rel_type` / `rel_types`); tainted entities surface as health findings naming their tainting ancestor and the path the taint travelled (`path`: the ids from the ancestor to the tainted entity, one shortest path, so an entity with several parents says through which one the fall arrived). Always warn-tier (a parent falling *after* the child was written cannot retroactively make that write illegal). It supersedes the retired `propagating_relationships` key, whose sole self-loop-refusal behaviour now lives under the honestly named `no_self_loop_relationships` (optional; the old key refuses at authoring load with a typed rename error).
-- **`transition_requires_checks`** — a write landing `field` at `to_value` requires every entity related via the named `relationships` in `direction` (`incoming` / `outgoing`) to carry a fresh confirming check record (derived verification state `checked_ok` — stale and failed do not confirm). The graded-completion gate as data: "a plan may become `complete` only when every criterion pointing VERIFIES at it has been checked". Defaults to `block`; the refusal (and the health `constraints` finding, when a check goes stale after the transition) lists each unconfirmed entity with the state it derived. An empty related set satisfies — pair with `required_outgoing` where at least one related entity must exist. Verdicts ride the check ledger (`memstead check`), never an entity field, so the gate cannot be satisfied by editing the entity. A record confirms only when it is fresh, independent (recorded under an identity that is none of the executors) and declared in a checking capacity, role `checker` or `verifier`; a record in role `author` refuses under the label `role_author`, one with no role under `role_unspecified`. An optional `min_related` (default 0) sets a floor on how many related entities the transition needs: `min_related: 1` refuses the vacuous case, an entity nothing points at landing the gated value with nothing to check.
-- **`transition_requires_self_check`** — a write landing `field` at `to_value` requires the entity ITSELF to carry a fresh confirming check record of `check_kind` (`verification`, `conformance`, or a foreign `x-<name>` kind the engine records verbatim), recorded under an identity other than the entity's own author and declared in role `checker` or `verifier` (the same three conditions as above; `role_author` and `role_unspecified` are the labels a record fails on). The closing-contract gate as data: "a bundle may become `complete` only once someone else has recorded that its decisions were projected". The engine requires the recorded act and never judges what it asserts. Defaults to `block`; the refusal names the kind and the standing the entity derived instead (`never_checked`, `check_stale`, `self_checked`, ...). A malformed `check_kind` refuses at `schema validate`.
+- **`enum_from_neighbour`** — a field whose legal values are the bullet-list entries of a named section on an entity this one reaches over an outgoing edge of one of the named `relationships`; a value nothing backs is a violation. Defaults to `warn`.
+- **`status_propagation`** — a terminal value of a named status field taints every entity reaching it over the named `relationships` in `direction` (`in`: the entities whose edges point at the terminal entity, and their dependents; `out`: the entities it points at). The relation set walks the union, so a taint crosses rel-type boundaries. Tainted entities surface as health findings naming their tainting ancestor and the path the taint travelled (`path`: the ids from the ancestor to the tainted entity, one shortest path, so an entity with several parents says through which one the fall arrived). Always warn-tier (a parent falling *after* the child was written cannot retroactively make that write illegal). It supersedes the retired `propagating_relationships` key, whose sole self-loop-refusal behaviour now lives under the honestly named `no_self_loop_relationships` (optional; the old key refuses at authoring load with a typed rename error).
+- **`transition_requires_checks`** — a write that moves `field` onto `to_value` requires every entity related over the named `relationships` in `direction` (`in` / `out`) to carry a fresh confirming check record (derived verification state `checked_ok`; stale and failed do not confirm). The graded-completion gate as data: "a plan may become `complete` only when every criterion pointing VERIFIES at it has been checked". Defaults to `block`; the refusal lists each unconfirmed entity with the state it derived. An empty related set satisfies; pair with `required_outgoing` where at least one related entity must exist, or set `min_related` (default 0): `min_related: 1` refuses the vacuous case, an entity nothing points at landing the gated value with nothing to check. Verdicts ride the check ledger (`memstead check`), never an entity field, so the gate cannot be satisfied by editing the entity. A record confirms only when it is fresh, independent (recorded under an identity that is none of the executors) and declared in a checking capacity, role `checker` or `verifier`; a record in role `author` refuses under the label `role_author`, one with no role under `role_unspecified`.
+- **`transition_requires_self_check`** — a write that moves `field` onto `to_value` requires the entity ITSELF to carry a fresh confirming check record of `check_kind` (`verification`, `conformance`, or a foreign `x-<name>` kind the engine records verbatim), declared in role `checker` or `verifier` and recorded under an identity that wrote none of the content it checked: no identity on any write of the entity up to the write the check saw (the record names it in `checked_write`). A write in that range without an identity makes the reading `unconfirmable`. The closing-contract gate as data: "a bundle may become `complete` only once someone else has recorded that its decisions were projected". The engine requires the recorded act and never judges what it asserts. Defaults to `block`; the refusal names the kind and the standing the entity derived instead (`never_checked`, `check_stale`, `self_checked`, ...). A malformed `check_kind` refuses at `schema validate`.
+
+**Both gates guard the transition, not the state.** A write is gated when, after it, the entity holds the gated value and before it the entity did not exist, was of a type without the form, or held another value. A write that leaves an entity at the gated value is not gated. The approval stands for the content that was checked and for nothing written later: edit an approved entity and the write commits, the check stays behind with the old content, the entity reads `check_stale`, and the health `constraints` axis reports the gate as a standing violation (so `health --strict` fails) until a new check is recorded or the entity leaves the value.
+
+**On a self-check gate, write everything else first.** The check names the content it saw, so the transition write may change nothing but the gated field (the engine-stamped timestamps aside); only then does the record carry over to the new content. A transition write that changes anything else refuses `CONSTRAINT_UNSATISFIED` (unless a check already names the exact content the write produces), its `changed` list naming what else it touched. A field the schema requires at the gated value (a `requires_when` on `status: approved`, say an `approved_on` date) must therefore be written before the check, then the check recorded, then the status set in a write of its own. A `transition_requires_checks` gate carries nothing, because its checks sit on the related entities, so its transition write may change content too.
+
+**The newest check is the one made last.** Where a gate, the health report or the due axis reads "the newest record of a kind", it takes the record whose act is latest: its `observed_at` (set with `memstead check --observed-at` when a recorder transcribes a check made earlier), else its write time `ts`. The order the ledger holds its lines in never decides, so a transcribed old verdict recorded today does not overrule a later one. A line the engine carried across a transition stands over the record it carried; equal times are ordered by the rows' bytes, so two machines holding the same rows read the same newest record. A record dated more than five minutes ahead of the engine's clock refuses `INVALID_INPUT`, and `fetch`, `pull` and `pull --all` refuse such a row from another machine and name it under `checks_refused`.
 
 ```yaml
-# types/recipe.yaml
+# types/note.yaml (the scaffold's type: status is active or archived)
 constraints:
-  - kind: requires_when          # status: retired requires a replaced_by value
-    field: replaced_by
+  - kind: requires_when          # an archived note names where it came from
+    field: source
     when_field: status
-    when_value: retired
-  - kind: unique                 # one recipe per (name, cuisine)
-    fields: [name, cuisine]      # severity defaults to block for unique
+    when_value: archived
+    severity: block
+  - kind: transition_requires_self_check
+    field: status                # archiving needs someone else's x-review
+    to_value: archived           # check of exactly this content
+    check_kind: x-review
+  - kind: transition_requires_checks
+    field: status                # and every note pointing PART_OF at this
+    to_value: archived           # one checked, at least one of them
+    relationships: [PART_OF]
+    direction: in
+    min_related: 1
+  - kind: status_propagation
+    field: status                # an archived note taints the notes under it
+    value: archived
+    relationships: [PART_OF]
+    direction: in
+  - kind: unique                 # one note per source
+    fields: [source]             # severity defaults to block for unique
 ```
 
 A malformed declaration — an unknown `kind`, an undeclared field or relationship — refuses at `schema validate` / `schema install` with a typed error; nothing loads and gets silently ignored. Declared constraints render on the `memstead_schema` MCP response at both verbosity levels. The exact shape of every form is in the generated IDE-validation reference [`crates/memstead-schema/generated/type-definition.schema.json`](https://github.com/memstead/memstead/tree/main/crates/memstead-schema/generated).
@@ -182,35 +206,35 @@ A malformed declaration — an unknown `kind`, an undeclared field or relationsh
 
 Four further declarations turn chain structure into something the engine checks or reports. All are optional, additive, and served on the `memstead_schema` response at both verbosity levels; schema packages declaring any of them need engine 0.10.0 or later (older engines refuse the unknown keys at parse).
 
-**`must_reach`** (on a type) — entities of the type must reach at least one entity of a named terminal-type set, following an inline relation set in a named direction (`out` / `in`), within an optional `max_depth`. Health-sweep only, always warn-tier (the loader refuses `block`: a reachability gap is created by writes on *other* entities). The incoming direction with `max_depth: 1` covers "must have at least one incoming edge of these types".
+**`must_reach`** (on a type) — entities of the type must reach at least one entity of a named terminal-type set, following an inline relation set in a named direction (`out` / `in`), within an optional `max_depth`. Health-sweep only, always warn-tier (the loader refuses `block`: a reachability gap is created by writes on *other* entities). Direction `in` with `max_depth: 1` covers "must have at least one incoming edge of these types".
 
 ```yaml
-# types/claim.yaml
+# types/note.yaml: every note sits under some other note
 must_reach:
-  - relationships: [GROUNDS, CONCLUDES]
+  - relationships: [PART_OF]
     direction: out
-    terminal_types: [evidence]
+    terminal_types: [note]
     max_depth: 12          # optional; absent = unbounded
 ```
 
 **`acyclic_sets`** (on the manifest's `relationships:` block) — acyclicity over the *union* subgraph of a set of rel-types, for cycles no single rel-type contains (a support chain alternating two rel-types, two hierarchies that must jointly stay acyclic). A write closing a cycle in the union refuses with `RELATIONSHIP_CYCLE`; the payload echoes the set and one rel-type per hop of the existing path. Each set names two or more declared rel-types; a rel-type may appear in at most one set; the per-relationship `acyclic: true` flag keeps its exact meaning and may coexist.
 
 ```yaml
-# schema.yaml
+# schema.yaml: no cycle that alternates PART_OF and RELATES_TO
 relationships:
   mode: strict
   acyclic_sets:
-    - [GROUNDS, CONCLUDES]
+    - [PART_OF, RELATES_TO]
 ```
 
 **`signals`** (on a type) — exact, parameter-free counts with declared thresholds, served with their evidence on every read of the type. One kind in this generation, `edge_load`: count edges of an inline relation set in a named direction, optionally restricted to edges whose counterpart holds a named enum value (`neighbour_field` / `neighbour_value`). Thresholds map counts to `notice` / `warn` (its own two-member level enum, not the constraint severity; below the first threshold the level is `none`). Served as `_signals` on the entity envelope and the `signals` health axis (`warn` participates in `health --strict`); a write moving a signal across a threshold carries the out-of-band `SIGNAL_THRESHOLD_CROSSED` warning, never an error. Values are computed at read time — never stored, never part of `_hash` — and nothing multiplies, averages, or decays. A raw count is gameable by one author repeating one objection; bind your schema's prose to the numbers accordingly.
 
 ```yaml
-# types/claim.yaml
+# types/note.yaml: how many notes point at this one
 signals:
-  - name: attack_load
+  - name: link_load
     kind: edge_load
-    relationships: [REBUTS, UNDERCUTS]
+    relationships: [RELATES_TO, REFERENCES]
     direction: in
     thresholds:
       - at_least: 1
@@ -222,42 +246,77 @@ signals:
 **`labelling`** (on the manifest's `relationships:` block) — name which rel-types constitute *attack*, and the engine serves the grounded labelling of that attack graph: unattacked entities `accepted`, targets of an accepted attacker `defeated`, entities whose attackers are all defeated `accepted`, the rest `undecided` (cycles stay open). The one argumentation semantics that is parameter-free, unique, and polynomial — and the most sceptical: one unanswered attack defeats a well-supported claim, so a defeated label always names its accepted direct attackers and an undecided one the open attacker set. Served as `_labelling` on entity reads and the `labelling` health axis; computed per mem (cross-mem attack edges are excluded and counted); a label is a reported observation, never a stored value, never a write gate. The labelling is deliberately **support-blind**: a defeated supporter never flips what it supports — the optional `support` walk adds chain-shape statistics (`depth`, `branching`, `terminal_share`, `defeated_in_support`, `undecided_in_support`) so the reader sees that defeat as a number and judges.
 
 ```yaml
-# schema.yaml
+# schema.yaml: two attack rel-types added beside the scaffold's definitions
 relationships:
   mode: strict
+  definitions:
+    - name: REBUTS
+      description: The source argues that the target is false.
+      default_weight: 1.0
+    - name: UNDERCUTS
+      description: The source argues that the target's grounds do not carry it.
+      default_weight: 1.0
   labelling:
     attack: [REBUTS, UNDERCUTS]
     support:               # optional; enables the shape statistics
-      relationships: [GROUNDS]
+      relationships: [PART_OF]
       direction: out
-      terminal_types: [evidence]
+      terminal_types: [note]
 ```
 
 ## 8b. Declare what is due
 
-A type whose entities carry a deadline can declare a **due axis**, so the
-engine can say what is due next without knowing your vocabulary:
+A type whose entities fall due can declare a **due axis**, so the
+engine can say what is due next without knowing your vocabulary. The
+date comes from one of two places, and the block declares exactly one
+of them. From a date the entity carries:
 
 ```yaml
 due:
-  date_field: target_date      # a date-typed metadata field of this type
+  date_field: last_modified    # a date-typed field, or created_date / last_modified
+  offset_days: 365             # optional: days added to that date (default 0)
   status_field: status         # an enum-typed metadata field
-  open_values: [planned, active]
-  lead_section: blockers       # optional: quoted beside the entry
+  open_values: [active]
+  lead_section: details        # optional: quoted beside the entry
 ```
+
+Or from the check ledger, when "due" means "due for its next review":
+
+```yaml
+due:
+  check_kind: x-review         # verification, conformance, or an x-<name> kind
+  offset_days: 730             # a review every two years
+  status_field: status
+  open_values: [active]
+```
+
+With `check_kind`, nobody types a date. When the newest record of that
+kind (the one made last, as section 7 defines it) confirms the entity
+(verdict ok, fresh against the current content, independent, in a
+checking role), the entity is due on the UTC date of that check plus
+`offset_days`, so recording a check moves the due date. When it does not
+confirm, the entity is due now, and the brief says why instead of
+inventing a date: `never_checked`, `check_stale`, `check_failed`,
+`self_checked`, or a role label. `schema validate` refuses a block that
+declares both `date_field` and `check_kind`, or neither. The key needs
+engine 0.26.0 or later; older engines refuse it at parse.
 
 `memstead due` renders the brief across every mounted mem whose schema
 declares the axis: open entities whose date has gone by under **overdue**
 with the days past, open entities due inside the window (default 90 days,
-`--within 30d`) under **due_soon** with the days until, each quoting the
-lead section when the entity carries it. `--json` carries both lists as
-data beside the prose. The reading rides the declaration and nothing
-else: the engine names the state and never judges it (no severity, no
-recommendation), the stale axis keeps measuring edit recency, and a type
-without `due:` contributes nothing. A closed entity (its status outside
-`open_values`) never appears. The loader validates the declaration at
-install: the fields must exist with those shapes and every open value
-must be in the status enum.
+`--within 30d`) under **due_soon** with the days until, entities without
+a confirming check under **due_now** with their standing, each quoting
+the lead section when the entity carries it. `--json` carries the lists
+as data beside the prose; `memstead health --include due` reads the same
+axis. Both take today's date from `--today <YYYY-MM-DD>`, else the
+`MEMSTEAD_TODAY` environment variable, else the clock. The reading rides
+the declaration and nothing else: the engine names the state and never
+judges it (no severity, no recommendation), it refuses no write and
+never fails `health --strict`, the stale axis keeps measuring edit
+recency, and a type without `due:` contributes nothing. A closed entity
+(its status outside `open_values`) never appears. The loader validates
+the declaration at install: the fields must exist with those shapes and
+every open value must be in the status enum.
 
 ## 8c. Declare what would resolve an open entity
 
@@ -269,8 +328,8 @@ counts as checked. In the mould of the due axis:
 ```yaml
 resolution:
   status_field: status               # optional: an enum-typed metadata field
-  open_values: [open, investigating] # its values under which the entity is open
-  condition_section: answer_approach # a declared section of the type
+  open_values: [active]              # its values under which the entity is open
+  condition_section: details         # a declared section of the type
   check_kind: verification           # optional: verification (default),
                                      # conformance, or an x-<name> kind
 ```
@@ -299,7 +358,7 @@ A section declaration can also pin the markdown structure of its body — a flat
 - **`format_severity`** — reuses the constraint severity model; defaults to `block` (a shape violation is deterministic and one-round-trip repairable), `warn` stays available per section.
 
 ```yaml
-# types/recipe.yaml
+# types/note.yaml: a section added beside the scaffold's two
 sections:
   - key: ingredients
     heading: Ingredients
@@ -319,19 +378,20 @@ A section with no `content` stays free-form, exactly as before. Violations refus
 LLMs learn from examples far better than from rules. A type may carry one canonical `exemplar:` — a complete entity in the mem markdown shape — and the engine **validates it through the real create path** at `memstead schema validate` and at install: a package whose exemplar does not conform refuses with a typed error naming the type and the defect. There is no warn-and-carry mode, so an exemplar can never drift into teaching a shape the validator would refuse — the failure mode that kills every hand-maintained example in ordinary documentation.
 
 ```yaml
-# types/recipe.yaml
+# types/note.yaml
 exemplar:
   title: "Classic Bolognese"
   metadata:
-    cuisine: italian
+    status: active
+    source: "A family recipe card"
   sections:
     summary: "Slow-simmered Italian meat sauce over fresh pasta."
-    ingredients: |
-      - 500g flour
-      - 300ml water
+    details: |
+      - Brown the soffritto before the meat.
+      - Simmer for at least three hours.
   relations:
-    - target: canned-san-marzano-tomatoes
-      rel_type: CONTAINS
+    - target: fresh-egg-pasta
+      rel_type: RELATES_TO
 ```
 
 The pieces:
