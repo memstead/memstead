@@ -745,6 +745,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **`branch-reset` works on a machine with no git identity.** The reset
+  signed its ref-log entry from the ambient git config and refused with
+  `Could not update reflog` where no `user.name` / `user.email` is set,
+  a CI runner or a fresh container; it now signs with the engine's own
+  identity, as every other ref move already did.
+
 - **Archives and reports name the right entities.**
   - An exported archive's provenance gives each entity of a batch
     commit its own record: under its own id, with the note of its own

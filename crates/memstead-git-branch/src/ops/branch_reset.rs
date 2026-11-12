@@ -211,8 +211,14 @@ pub fn branch_reset_in_gitdir(
         name,
         deref: false,
     };
-    repo.edit_references([edit])
-        .map_err(|e| BackendError::Other(format!("edit_references: {e}")))?;
+    // Signed with the engine's own reflog identity, like every other ref
+    // transaction: plain `edit_references` reads the committer from the
+    // ambient git config and refuses on a machine that has none.
+    repo.edit_references_as(
+        [edit],
+        Some(crate::mem_repo_config::reflog_committer().to_ref(&mut Default::default())),
+    )
+    .map_err(|e| BackendError::Other(format!("edit_references: {e}")))?;
 
     Ok(BranchResetOutcome {
         mem: branch.to_string(),
