@@ -120,7 +120,21 @@ impl FolderIo for RealIo {
     fn sync_file(&self, path: &Path) -> io::Result<()> {
         // A sync through a second descriptor flushes what the first
         // one wrote: the flush is of the file, not of the handle.
-        std::fs::File::open(path)?.sync_all()
+        // Windows flushes only through a handle with write access
+        // (`FlushFileBuffers` refuses a read-only one with access
+        // denied), so the handle opens for writing there; it never
+        // truncates or appends.
+        #[cfg(windows)]
+        {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)?
+                .sync_all()
+        }
+        #[cfg(not(windows))]
+        {
+            std::fs::File::open(path)?.sync_all()
+        }
     }
 
     fn sync_dir(&self, path: &Path) -> io::Result<()> {
