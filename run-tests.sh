@@ -2,8 +2,8 @@
 #
 # run-tests.sh — THE definition of "green" for this repo.
 #
-# CI runs this script and nothing else (.github/workflows/ci.yml), once on
-# Linux and once on macOS, so there is exactly one answer to "does this tree
+# CI runs this script and nothing else (.github/workflows/ci.yml): on Linux
+# for every push, and on macOS too for a release commit or a manual run, so there is exactly one answer to "does this tree
 # pass?" and it is the same answer here and there. Two gates that must be kept
 # in sync always drift; one gate cannot. Anything you want CI to check belongs
 # in this file, not in a workflow.
