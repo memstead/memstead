@@ -1207,6 +1207,22 @@ pub enum EngineError {
          markers; nothing to resolve"
     )]
     NotConflicted { id: String },
+    /// `conflicts resolve --side merged` on a file with a conflict block
+    /// that covers more than the engine-stamped `last_modified` key: a
+    /// body section, or another frontmatter key (`created_date`
+    /// included). Such a block is a content judgement, made by choosing
+    /// `ours` or `theirs`. Nothing is written; the file stays in
+    /// conflict. `details` names the block's frontmatter `key` or body
+    /// `section`.
+    #[error(
+        "entity `{id}` has a conflict block on {} — only a conflict on `last_modified` alone resolves `merged`; choose `--side ours` or `--side theirs` for it",
+        conflict_location(key.as_deref(), section.as_deref())
+    )]
+    ConflictNotTimestampOnly {
+        id: String,
+        key: Option<String>,
+        section: Option<String>,
+    },
     /// `memstead_fetch` / `memstead_pull` / `memstead_push` named a remote that is
     /// not configured on the workspace's mem-repo. Typed code
     /// `UNKNOWN_REMOTE`. Recovery: configure the remote via
@@ -1792,6 +1808,7 @@ impl EngineError {
                 "CONFLICT_RESOLVE_UNSUPPORTED_BACKEND"
             }
             EngineError::NotConflicted { .. } => "NOT_CONFLICTED",
+            EngineError::ConflictNotTimestampOnly { .. } => "CONFLICT_NOT_TIMESTAMP_ONLY",
             EngineError::RenameSimilarityOutOfRange { .. } => "INVALID_INPUT",
             EngineError::InvalidChangesCursor { .. } => "INVALID_CURSOR",
             EngineError::InvalidTimestampCursor { .. } => "INVALID_CURSOR",
@@ -2494,6 +2511,16 @@ impl EngineError {
             | EngineError::StubNotUpdatable { id }
             | EngineError::StubNotRenamable { id }
             | EngineError::NotConflicted { id } => serde_json::json!({ "id": id }),
+            EngineError::ConflictNotTimestampOnly { id, key, section } => {
+                let mut d = serde_json::json!({ "id": id });
+                if let Some(k) = key {
+                    d["key"] = serde_json::json!(k);
+                }
+                if let Some(s) = section {
+                    d["section"] = serde_json::json!(s);
+                }
+                d
+            }
             EngineError::ParseAfterWrite(detail)
             | EngineError::SchemaResolverInit(detail)
             | EngineError::Mem(detail) => serde_json::json!({ "detail": detail }),
@@ -2987,6 +3014,14 @@ impl StaleCause {
             StaleCause::LockUnavailable => "lock_unavailable",
             StaleCause::DiscardFailed => "discard_failed",
         }
+    }
+}
+
+fn conflict_location(key: Option<&str>, section: Option<&str>) -> String {
+    match (key, section) {
+        (Some(k), _) => format!("the frontmatter key `{k}`"),
+        (None, Some(s)) => format!("the section `{s}`"),
+        (None, None) => "content other than `last_modified`".to_string(),
     }
 }
 

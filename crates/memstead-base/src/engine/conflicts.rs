@@ -12,11 +12,16 @@
 //! as an attributed, note-carrying mutation like any other write.
 //!
 //! Scope is deliberately narrow: per-entity, two sides (ours/theirs),
-//! folder backend only. A merged-content resolution is out of scope by
-//! design — an agent wanting a merge resolves to one side as the base
-//! and then edits through the normal mutation surface, which preserves
-//! validation and provenance; the operation's note is the designated
-//! place to record "base for a manual merge; discarded side: <which>".
+//! folder backend only, and one merged mode for what the engine itself
+//! stamped. A merged-content resolution of a body conflict is out of
+//! scope by design: that is a content judgement, made by choosing a side
+//! as the base and then editing through the normal mutation surface,
+//! which preserves validation and provenance; the operation's note is
+//! the designated place to record "base for a manual merge; discarded
+//! side: <which>". The one exception is `merged`: when every conflict
+//! block covers only the engine-stamped `last_modified` key, git's merge
+//! of the rest is kept and the later timestamp wins
+//! ([`extract_timestamp_only_merge`]).
 //! The git-branch backend's mem-repo is engine-managed and cannot
 //! acquire merge conflicts through supported use, so it refuses typed
 //! rather than pretending applicability.
@@ -36,6 +41,10 @@ use super::{Engine, EngineError};
 pub enum ConflictSide {
     Ours,
     Theirs,
+    /// Keep git's merged file, valid only when every conflict block lies
+    /// in the frontmatter and covers the engine-stamped `last_modified`
+    /// key alone; the later value wins.
+    Merged,
 }
 
 impl ConflictSide {
@@ -46,6 +55,7 @@ impl ConflictSide {
         match s {
             "ours" => Some(Self::Ours),
             "theirs" => Some(Self::Theirs),
+            "merged" => Some(Self::Merged),
             _ => None,
         }
     }
@@ -55,6 +65,7 @@ impl ConflictSide {
         match self {
             Self::Ours => "ours",
             Self::Theirs => "theirs",
+            Self::Merged => "merged",
         }
     }
 }
@@ -141,6 +152,137 @@ pub fn extract_conflict_side(content: &str, side: ConflictSide) -> Result<String
     }
     if state != State::Normal {
         return Err("unterminated conflict block (no `>>>>>>> ` end marker)".to_string());
+    }
+    let mut resolved = out.join("\n");
+    if content.ends_with('\n') && !resolved.ends_with('\n') {
+        resolved.push('\n');
+    }
+    Ok(resolved)
+}
+
+/// Why a file cannot take the `merged` resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergedRefusal {
+    /// The markers themselves are malformed.
+    Malformed(String),
+    /// A conflict block covers something other than `last_modified`:
+    /// the frontmatter key it names, or the body section it sits in.
+    NotTimestampOnly {
+        key: Option<String>,
+        section: Option<String>,
+    },
+}
+
+/// The `merged` resolution of `content`: git's merged file with each
+/// conflict block replaced by the later of its two `last_modified`
+/// values. Every block must lie inside the frontmatter, and each of its
+/// sides must be exactly one `last_modified:` line; anything else is
+/// [`MergedRefusal::NotTimestampOnly`] naming the block's key (in the
+/// frontmatter) or its section (in the body). The values are the
+/// engine's own ISO-8601 stamps, which order as strings.
+pub fn extract_timestamp_only_merge(content: &str) -> Result<String, MergedRefusal> {
+    #[derive(PartialEq)]
+    enum State {
+        Normal,
+        Ours,
+        Base,
+        Theirs,
+    }
+    let key_of = |line: &str| -> Option<String> {
+        let (key, _) = line.split_once(':')?;
+        let key = key.trim();
+        (!key.is_empty() && !key.contains(' ')).then(|| key.to_string())
+    };
+    let mut state = State::Normal;
+    let mut out: Vec<String> = Vec::new();
+    // Frontmatter: the lines between an opening `---` on line 1 and the
+    // next `---`.
+    let mut fence_count = 0usize;
+    let mut section: Option<String> = None;
+    let mut ours: Vec<&str> = Vec::new();
+    let mut theirs: Vec<&str> = Vec::new();
+    for (n, line) in content.lines().enumerate() {
+        let in_frontmatter = fence_count == 1;
+        match state {
+            State::Normal => {
+                if line.starts_with("<<<<<<< ") {
+                    state = State::Ours;
+                    ours.clear();
+                    theirs.clear();
+                    continue;
+                }
+                if line.trim_end() == "---" && (n == 0 || fence_count == 1) {
+                    fence_count += 1;
+                } else if fence_count >= 2
+                    && let Some(heading) = line.strip_prefix("## ")
+                {
+                    section = Some(heading.trim().to_string());
+                }
+                out.push(line.to_string());
+            }
+            State::Ours => {
+                if line.starts_with("|||||||") {
+                    state = State::Base;
+                } else if line.trim_end() == "=======" {
+                    state = State::Theirs;
+                } else if line.starts_with(">>>>>>> ") {
+                    return Err(MergedRefusal::Malformed(format!(
+                        "line {}: end marker before `=======` separator",
+                        n + 1
+                    )));
+                } else {
+                    ours.push(line);
+                }
+            }
+            State::Base => {
+                if line.trim_end() == "=======" {
+                    state = State::Theirs;
+                }
+            }
+            State::Theirs => {
+                if !line.starts_with(">>>>>>> ") {
+                    theirs.push(line);
+                    continue;
+                }
+                state = State::Normal;
+                let refuse = |lines: &[&str]| {
+                    let key = lines
+                        .iter()
+                        .find_map(|l| key_of(l).filter(|k| k != "last_modified"));
+                    if in_frontmatter {
+                        MergedRefusal::NotTimestampOnly {
+                            key: key.or_else(|| Some("last_modified".to_string())),
+                            section: None,
+                        }
+                    } else {
+                        MergedRefusal::NotTimestampOnly {
+                            key: None,
+                            section: section.clone().or_else(|| Some("(title)".to_string())),
+                        }
+                    }
+                };
+                let both: Vec<&str> = ours.iter().chain(theirs.iter()).copied().collect();
+                let stamp = |lines: &[&str]| -> Option<String> {
+                    match lines {
+                        [one] if key_of(one).as_deref() == Some("last_modified") => {
+                            Some(one.split_once(':')?.1.trim().to_string())
+                        }
+                        _ => None,
+                    }
+                };
+                let (Some(a), Some(b), true) = (stamp(&ours), stamp(&theirs), in_frontmatter)
+                else {
+                    return Err(refuse(&both));
+                };
+                let later = if a >= b { a } else { b };
+                out.push(format!("last_modified: {later}"));
+            }
+        }
+    }
+    if state != State::Normal {
+        return Err(MergedRefusal::Malformed(
+            "unterminated conflict block (no `>>>>>>> ` end marker)".to_string(),
+        ));
     }
     let mut resolved = out.join("\n");
     if content.ends_with('\n') && !resolved.ends_with('\n') {
@@ -264,12 +406,27 @@ impl Engine {
             return Err(EngineError::NotConflicted { id: id.to_string() });
         }
 
-        let resolved = extract_conflict_side(&entry.content, side).map_err(|m| {
+        let malformed = |m: String| {
             EngineError::InvalidInput(format!(
                 "malformed conflict markers in {}: {m}",
                 entry.relative_path
             ))
-        })?;
+        };
+        let resolved = match side {
+            ConflictSide::Merged => {
+                extract_timestamp_only_merge(&entry.content).map_err(|r| match r {
+                    MergedRefusal::Malformed(m) => malformed(m),
+                    MergedRefusal::NotTimestampOnly { key, section } => {
+                        EngineError::ConflictNotTimestampOnly {
+                            id: id.to_string(),
+                            key,
+                            section,
+                        }
+                    }
+                })?
+            }
+            _ => extract_conflict_side(&entry.content, side).map_err(malformed)?,
+        };
 
         // Validate the chosen side as an entity BEFORE any write —
         // resolution never launders an invalid entity into the mem.
@@ -779,5 +936,68 @@ mod tests {
         assert!(extract_conflict_side(unterminated, ConflictSide::Ours).is_err());
         let inverted = "a\n<<<<<<< HEAD\nours\n>>>>>>> feature\n";
         assert!(extract_conflict_side(inverted, ConflictSide::Ours).is_err());
+    }
+
+    /// A file after a rebase whose only conflict is the two stamped
+    /// `last_modified` lines, with both sides' body additions merged by
+    /// git: `merged` keeps git's file and the later stamp, and the entity
+    /// validates.
+    const STAMP_ONLY: &str = "---\ntype: spec\ncreated_date: 2026-01-01\n\
+<<<<<<< HEAD\nlast_modified: 2026-03-02T10:00:00Z\n=======\nlast_modified: 2026-03-04T09:00:00Z\n\
+>>>>>>> feature\n---\n# Torn\n\n## Identity\n\nidentity body\nours addition\n\n\
+## Purpose\n\npurpose body\ntheirs addition\n";
+
+    #[test]
+    fn a_timestamp_only_conflict_resolves_merged_with_both_additions_and_the_later_stamp() {
+        let (tmp, mut engine) = folder_workspace(&[("torn.md", STAMP_ONLY)]);
+        let id = EntityId::new("specs", "torn");
+        let outcome = engine
+            .resolve_merge_conflict(&id, ConflictSide::Merged, Actor::Cli, None, Some("stamp"))
+            .expect("a stamp-only conflict resolves merged");
+        assert_eq!(outcome.side, "merged");
+        let written = std::fs::read_to_string(tmp.path().join("specs/torn.md")).unwrap();
+        assert!(!parser::has_merge_conflict_markers(&written), "{written}");
+        assert!(written.contains("ours addition"), "{written}");
+        assert!(written.contains("theirs addition"), "{written}");
+        assert!(
+            written.contains("last_modified: 2026-03-04T09:00:00Z"),
+            "{written}"
+        );
+        assert!(!written.contains("2026-03-02T10:00:00Z"), "{written}");
+        let entity = engine.get_entity(&id).expect("the entity loads");
+        assert!(!entity.stub);
+    }
+
+    /// A conflict block on anything but `last_modified` refuses
+    /// `CONFLICT_NOT_TIMESTAMP_ONLY` naming its key or section, and the
+    /// file stays in conflict.
+    #[test]
+    fn a_conflict_beyond_the_timestamp_refuses_merged_naming_where() {
+        let body = "---\ntype: spec\nlast_modified: 2026-03-02T10:00:00Z\n---\n# Torn\n\n\
+## Identity\n\n<<<<<<< HEAD\nours line\n=======\ntheirs line\n>>>>>>> feature\n\n\
+## Purpose\n\ntail\n";
+        let created = "---\ntype: spec\n<<<<<<< HEAD\ncreated_date: 2026-01-01\n=======\n\
+created_date: 2026-01-02\n>>>>>>> feature\nlast_modified: 2026-03-02T10:00:00Z\n---\n# Torn\n\n\
+## Identity\n\nx\n";
+        let stamp_and_more = "---\ntype: spec\n<<<<<<< HEAD\nlast_modified: 2026-03-02T10:00:00Z\n\
+level: M0\n=======\nlast_modified: 2026-03-04T09:00:00Z\nlevel: M1\n>>>>>>> feature\n---\n\
+# Torn\n\n## Identity\n\nx\n";
+        for (content, key, section) in [
+            (body, None, Some("Identity")),
+            (created, Some("created_date"), None),
+            (stamp_and_more, Some("level"), None),
+        ] {
+            let (tmp, mut engine) = folder_workspace(&[("torn.md", content)]);
+            let id = EntityId::new("specs", "torn");
+            let err = engine
+                .resolve_merge_conflict(&id, ConflictSide::Merged, Actor::Cli, None, None)
+                .expect_err("not a stamp-only conflict");
+            assert_eq!(err.code(), "CONFLICT_NOT_TIMESTAMP_ONLY", "{err}");
+            let d = err.details();
+            assert_eq!(d["key"].as_str(), key, "{d}");
+            assert_eq!(d["section"].as_str(), section, "{d}");
+            let still = std::fs::read_to_string(tmp.path().join("specs/torn.md")).unwrap();
+            assert_eq!(still, content, "the file stays in conflict");
+        }
     }
 }

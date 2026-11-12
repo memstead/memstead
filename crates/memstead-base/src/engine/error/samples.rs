@@ -125,6 +125,7 @@ variant_tags!(
         InvalidTargetSchema,
         MergeConflictUnsupportedBackend,
         NotConflicted,
+        ConflictNotTimestampOnly,
         UnknownRemote,
         RemoteUnreachable,
         LocalDivergence,
@@ -1007,6 +1008,14 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
         (
             "NotConflicted".into(),
             EngineError::NotConflicted { id: id() },
+        ),
+        (
+            "ConflictNotTimestampOnly".into(),
+            EngineError::ConflictNotTimestampOnly {
+                id: id(),
+                key: None,
+                section: Some(s("Purpose")),
+            },
         ),
         (
             "UnknownRemote".into(),

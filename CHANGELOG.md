@@ -9,6 +9,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`conflicts resolve --side merged`** settles a folder-mem conflict
+  whose only collision is the engine-stamped timestamp. When every
+  conflict block lies in the frontmatter and covers `last_modified`
+  alone, the resolution keeps git's merged file and the later
+  timestamp, then validates and commits it like the other sides. Any
+  other block (a body section, `created_date`, any other key) refuses
+  with the new code `CONFLICT_NOT_TIMESTAMP_ONLY`, `details.key` or
+  `details.section` naming it, and the file stays in conflict. A body
+  conflict stays a content judgement made by choosing `ours` or
+  `theirs`.
+
 - **A due date from the check ledger.** A type's `due` block may take
   `check_kind: <kind>` (an engine kind or an `x-` kind) in place of
   `date_field`; exactly one of the two is declared, and `schema validate`

@@ -40,18 +40,22 @@ pub enum Command {
     },
     /// Resolve one conflicted entity to the chosen side. The chosen
     /// side is validated as an entity BEFORE anything is written — an
-    /// invalid side refuses with the validation error. Sides are the
-    /// standard two; there is no merged-content resolution: to merge,
-    /// resolve to the better base side, then edit the entity through
-    /// the normal mutation surface (`memstead update`), and say so in
-    /// the note (e.g. "base for a manual merge; discarded side: theirs").
+    /// invalid side refuses with the validation error. `ours` and
+    /// `theirs` keep one side of every conflict block. `merged` keeps
+    /// git's merged file and settles only what the engine stamped: it
+    /// commits when every conflict block covers the frontmatter's
+    /// `last_modified` alone (the later value wins), and refuses
+    /// `CONFLICT_NOT_TIMESTAMP_ONLY`, naming the key or section, for any
+    /// other block. To merge a body conflict, resolve to the better base
+    /// side, then edit through `memstead update` and say so in the note.
     /// A non-conflicted target refuses `NOT_CONFLICTED`.
     Resolve {
         /// Entity id (e.g. `specs--torn-entity`), as listed by
         /// `conflicts list`.
         id: String,
-        /// Which side to keep: `ours` or `theirs`.
-        #[arg(long, value_name = "ours|theirs")]
+        /// Which side to keep: `ours`, `theirs`, or `merged` (a
+        /// `last_modified`-only conflict).
+        #[arg(long, value_name = "ours|theirs|merged")]
         side: String,
         /// Agent-authored provenance note (≤280 chars) — lands in the
         /// resolution's commit and provenance record.
@@ -86,7 +90,8 @@ fn dispatch(ctx: &CliContext, mut engine: memstead_base::Engine, args: Args) -> 
                     body.push_str(&format!("\n- `{}` — {} ({})", c.id, c.file_path, c.mem));
                 }
                 body.push_str(
-                    "\n\nResolve each with: `memstead conflicts resolve <id> --side ours|theirs`",
+                    "\n\nResolve each with: `memstead conflicts resolve <id> --side ours|theirs` \
+                     (`--side merged` when the only conflict is `last_modified`)",
                 );
                 print_markdown(&body);
             }
@@ -97,7 +102,7 @@ fn dispatch(ctx: &CliContext, mut engine: memstead_base::Engine, args: Args) -> 
                 CliError::new(
                     ExitKind::Validation,
                     "INVALID_INPUT",
-                    format!("unknown side: {side:?} — expected \"ours\" or \"theirs\""),
+                    format!("unknown side: {side:?} — expected \"ours\", \"theirs\" or \"merged\""),
                 )
             })?;
             let id = EntityId::canonical(&id);
@@ -110,6 +115,12 @@ fn dispatch(ctx: &CliContext, mut engine: memstead_base::Engine, args: Args) -> 
                     "side": outcome.side,
                     "write_id": outcome.write_id,
                 }))?;
+            } else if outcome.side == "merged" {
+                print_markdown(&format!(
+                    "# Resolved `{}`\n\n- Kept: git's merged file, with the later \
+                     `last_modified`",
+                    outcome.id,
+                ));
             } else {
                 print_markdown(&format!(
                     "# Resolved `{}`\n\n- Kept side: {}\n- The discarded side is gone from the \

@@ -177,3 +177,99 @@ fn conflicts_list_and_resolve_roundtrip() {
     let err = stdout_of(assert);
     assert!(err.contains("INVALID_INPUT"), "got: {err}");
 }
+
+/// A folder mem in the user's git repository, two branches that each
+/// appended to a different section of one entity (each write stamping
+/// `last_modified`), and a rebase: git merges the body additions and
+/// leaves the two stamps in conflict. `conflicts resolve --side merged`
+/// commits git's merged file with the later stamp, and the entity loads.
+#[test]
+fn a_rebase_whose_only_conflict_is_the_stamp_resolves_merged() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("rb");
+    memstead()
+        .args(["quickstart", "--agent", "claude-code"])
+        .arg(&root)
+        .assert()
+        .success();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(["-c", "user.email=t@example.invalid", "-c", "user.name=t"])
+            .args(args)
+            .output()
+            .unwrap();
+        out.status.success()
+    };
+    let ms = |args: &[&str]| {
+        memstead().current_dir(&root).args(args).assert().success();
+    };
+    assert!(git(&["init", "-q"]));
+    assert!(git(&["add", "-A"]));
+    assert!(git(&["commit", "-qm", "base"]));
+    ms(&[
+        "create",
+        "--type",
+        "spec",
+        "--title",
+        "Torn",
+        "--section",
+        "identity=identity body",
+        "--section",
+        "purpose=purpose body",
+    ]);
+    assert!(git(&["add", "-A"]));
+    assert!(git(&["commit", "-qm", "entity"]));
+    assert!(git(&["checkout", "-qb", "other"]));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    ms(&[
+        "update",
+        "rb--torn",
+        "--append",
+        "identity=ours addition",
+        "--auto-hash",
+    ]);
+    assert!(git(&["commit", "-qam", "ours"]));
+    assert!(git(&["checkout", "-q", "-"]));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    ms(&[
+        "update",
+        "rb--torn",
+        "--append",
+        "purpose=theirs addition",
+        "--auto-hash",
+    ]);
+    assert!(git(&["commit", "-qam", "theirs"]));
+    assert!(
+        !git(&["rebase", "other"]),
+        "the rebase stops on the stamp conflict"
+    );
+    let before = std::fs::read_to_string(root.join("torn.md")).unwrap();
+    assert!(before.contains("<<<<<<< "), "{before}");
+
+    ms(&[
+        "conflicts",
+        "resolve",
+        "rb--torn",
+        "--side",
+        "merged",
+        "--note",
+        "stamps only",
+    ]);
+    let after = std::fs::read_to_string(root.join("torn.md")).unwrap();
+    assert!(!after.contains("<<<<<<< "), "{after}");
+    assert!(
+        after.contains("ours addition") && after.contains("theirs addition"),
+        "{after}"
+    );
+    let stamps: Vec<&str> = before
+        .lines()
+        .filter_map(|l| l.strip_prefix("last_modified: "))
+        .collect();
+    let later = stamps.iter().max().unwrap();
+    assert!(
+        after.contains(&format!("last_modified: {later}")),
+        "{after}"
+    );
+    ms(&["entity", "rb--torn"]);
+}

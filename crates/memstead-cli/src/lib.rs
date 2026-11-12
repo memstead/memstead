@@ -219,6 +219,7 @@ impl CliError {
             ExpectedHashRequired { .. }
             | MergeConflictUnsupportedBackend { .. }
             | NotConflicted { .. }
+            | ConflictNotTimestampOnly { .. }
             | HasIncomingRefs { .. }
             | MemHasIncomingRefs { .. }
             | WikiLinkWithoutRelation { .. }
