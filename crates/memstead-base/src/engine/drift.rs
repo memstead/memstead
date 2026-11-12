@@ -795,6 +795,10 @@ impl Engine {
         mem: &str,
         remote: &str,
     ) -> Result<crate::ops::PullOutcome, EngineError> {
+        // A ref move waits for a write in progress in any mem: a guard
+        // elsewhere may have read a reference the move takes away. The
+        // subject itself may be unreadable (a pull is how it is repaired).
+        let (_write_lock, _) = self.lock_workspace_for_mem_operation(mem)?;
         let mount_idx = self
             .mounts
             .iter()
@@ -1366,6 +1370,18 @@ impl Engine {
     /// all (`UNKNOWN_REMOTE`) fails the run as a whole.
     pub fn pull_all(&mut self, remote: &str) -> Result<crate::ops::PullAllOutcome, EngineError> {
         use crate::ops::{PullAllOutcome, PulledRef, QuarantinedAfterPull, RefusedRef};
+
+        // Every ref move waits for a write in progress; each mem is a
+        // subject here, so an unreadable one does not refuse the pull
+        // that repairs it.
+        let subjects: Vec<String> = self
+            .mounts
+            .iter()
+            .map(|m| m.mount.mem.clone())
+            .chain(self.quarantined.iter().map(|q| q.mount.mem.clone()))
+            .collect();
+        let subject_refs: Vec<&str> = subjects.iter().map(String::as_str).collect();
+        let (_write_lock, _) = self.lock_workspace_for_mems_operation(&subject_refs)?;
 
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
@@ -2038,6 +2054,11 @@ impl Engine {
         target_sha: &str,
         expected_head: Option<&str>,
     ) -> Result<crate::ops::BranchResetOutcome, EngineError> {
+        // A branch move waits for a write in progress in any mem (a
+        // delete elsewhere may have read a reference the move removes);
+        // the subject may be unreadable. Under a proposal merge's own
+        // lock this is a nested acquisition and takes nothing more.
+        let (_write_lock, _) = self.lock_workspace_for_mem_operation(mem)?;
         let mount_idx = self
             .mounts
             .iter()

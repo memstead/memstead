@@ -181,6 +181,8 @@ impl Engine {
                                 target_mem: &named_target,
                                 remove: !adds,
                             }],
+                            // relate writes declared edges only
+                            std::iter::empty(),
                         )
                 },
             )?
@@ -214,6 +216,8 @@ impl Engine {
                 target_mem: args.target.mem(),
                 remove: args.remove,
             }],
+            // relate writes declared edges only
+            std::iter::empty(),
         ) {
             self.ensure_mems_loaded(None);
         }
@@ -703,6 +707,8 @@ impl Engine {
                                 target_mem: a.target.mem(),
                                 remove: a.remove,
                             }],
+                            // relate writes declared edges only
+                            std::iter::empty(),
                         )
                 })
             })?
@@ -748,6 +754,8 @@ impl Engine {
                     target_mem: a.target.mem(),
                     remove: a.remove,
                 }],
+                // relate writes declared edges only
+                std::iter::empty(),
             )
         }) {
             self.ensure_mems_loaded(None);

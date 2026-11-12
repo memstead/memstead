@@ -98,6 +98,7 @@ impl Engine {
                                 target_mem: r.target.mem(),
                                 remove: false,
                             }),
+                        a.sections.values().map(String::as_str),
                     )
                 })
             })?
@@ -118,6 +119,7 @@ impl Engine {
                         target_mem: r.target.mem(),
                         remove: false,
                     }),
+                a.sections.values().map(String::as_str),
             )
         }) {
             self.ensure_mems_loaded(None);

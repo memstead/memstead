@@ -322,22 +322,48 @@ impl Engine {
         )?;
 
         // The chosen side is written as the engine writes any entity:
-        // a link in its body gets its relationship row. Without the row
-        // the link is no edge, and the guards that read edges (a
-        // delete's, a retype's) would not see what the resolved entity
-        // refers to. A side whose links the pass refuses is written as
-        // it stands: a resolution must stay possible.
+        // a link in its body gets its relationship row, and every row
+        // passes the checks a declared write passes (target grammar,
+        // relationship type and endpoint shape, a cycle on an acyclic
+        // relationship). The cycle walk reads every mem, so all are
+        // loaded first; the workspace lock is held. A side that fails
+        // refuses with the declared write's code and stays in conflict;
+        // the other side stays resolvable.
+        self.ensure_mems_loaded(None);
         let mut entity = parsed.entity;
         let resolved = match crate::engine::mutation::synthesise_alias_relations(
             self,
             &std::collections::HashSet::new(),
             &mut entity,
-        ) {
-            Ok(outcome) if !outcome.emitted.is_empty() => {
+        )? {
+            outcome if !outcome.emitted.is_empty() => {
                 crate::engine::mutation::render_for_write(&entity, resolved_type.as_ref())?
             }
             _ => resolved,
         };
+        for rel in &entity.relationships {
+            crate::engine::mutation::validate_relation_target_grammar(&rel.target)?;
+            let to_type = self.store.get(&rel.target).map(|t| t.entity_type.clone());
+            crate::engine::mutation::route_edge_validation(
+                self,
+                &rel.rel_type,
+                &entity.entity_type,
+                to_type.as_deref(),
+                &mem,
+                rel.target.mem(),
+                &entity.id,
+                &rel.target,
+                true,
+            )?;
+            crate::engine::mutation::validate_edge_acyclicity(
+                &self.store,
+                &schema,
+                &entity.id,
+                &entity.entity_type,
+                &rel.target,
+                &rel.rel_type,
+            )?;
+        }
 
         // A gated value lands here as on any other write: the conflicted
         // file is not in the store, so the resolved side enters every
@@ -622,6 +648,117 @@ mod tests {
             .resolve_merge_conflict(&id, ConflictSide::Ours, Actor::Cli, None, None)
             .expect("clean side resolves");
         assert!(engine.load_errors().is_empty());
+    }
+
+    /// A folder workspace mounting one mem on a fixture schema: types
+    /// `thing` and `other`; `LINKS` joins a `thing` to an `other` only;
+    /// body wiki-links are `REFERENCES` rows, and `REFERENCES` is acyclic.
+    fn edge_fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, Engine) {
+        let (tmp, engine) = folder_workspace(files);
+        drop(engine);
+        let dir = tmp
+            .path()
+            .join(".memstead")
+            .join("schemas")
+            .join("cx@0.1.0");
+        std::fs::create_dir_all(dir.join("types")).unwrap();
+        std::fs::write(
+            dir.join("schema.yaml"),
+            "name: cx\nversion: 0.1.0\ndescription: d\nwhen_to_use: t\ntypes:\n  - thing\n  - other\nrelationships:\n  mode: strict\n  definitions:\n    - name: LINKS\n      description: l\n      default_weight: 1.0\n      source_types: [thing]\n      target_types: [other]\n    - name: REFERENCES\n      description: r\n      default_weight: 1.0\n      acyclic: true\n    - name: _default\n      description: f\n      default_weight: 1.0\nalias_target_rel_type: REFERENCES\ncommunity:\n  resolution: 1.0\n  seed: 42\n",
+        )
+        .unwrap();
+        for ty in ["thing", "other"] {
+            std::fs::write(
+                dir.join("types").join(format!("{ty}.yaml")),
+                format!("name: {ty}\ndescription: t\nwhen_to_use: Here\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: _default\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n"),
+            )
+            .unwrap();
+        }
+        {
+            use crate::workspace_store::WorkspaceStoreAdapter;
+            let mount = crate::workspace::Mount {
+                mem: "specs".to_string(),
+                schema: Some(memstead_schema::SchemaRef::new(
+                    "cx",
+                    semver::Version::new(0, 1, 0),
+                )),
+                storage: MountStorage::Folder {
+                    path: tmp.path().join("specs"),
+                },
+                capability: MountCapability::Write,
+                lifecycle: crate::workspace::MountLifecycle::Eager,
+                cross_linkable: true,
+                migration_target: None,
+            };
+            crate::FileWorkspaceStore::new()
+                .save_state(
+                    tmp.path(),
+                    &crate::workspace::Workspace {
+                        mounts: vec![mount],
+                        settings: crate::workspace::WorkspaceSettings::default(),
+                    },
+                )
+                .unwrap();
+        }
+        let engine = Engine::from_workspace_root(tmp.path()).expect("workspace boots");
+        (tmp, engine)
+    }
+
+    fn conflicted(ty: &str, title: &str, theirs: &str) -> String {
+        format!(
+            "---\ntype: {ty}\n---\n# {title}\n\n## Body\n\n<<<<<<< HEAD\nkept as it was\n=======\n{theirs}\n>>>>>>> theirs\n"
+        )
+    }
+
+    /// The chosen side's rows pass the declared-edge checks: an
+    /// undeclared relationship type, an endpoint the schema forbids and
+    /// a body link closing a cycle on an acyclic relationship each
+    /// refuse with the code the declared write raises, the file stays in
+    /// conflict, and the other side resolves.
+    #[test]
+    fn a_resolution_lands_only_rows_a_declared_write_could_land() {
+        let target = "---\ntype: other\n---\n# Target\n\n## Body\n\nsee [[specs--loop]]\n\n## Relationships\n\n- **REFERENCES**: [[specs--loop]]\n";
+        let peer = "---\ntype: thing\n---\n# Peer\n\n## Body\n\nplain\n";
+        let cases = [
+            (
+                "thing",
+                "Undeclared",
+                "a\n\n## Relationships\n\n- **BOGUS**: [[specs--target]]".to_string(),
+                "INVALID_REL_TYPE",
+            ),
+            (
+                "thing",
+                "Shape",
+                "a\n\n## Relationships\n\n- **LINKS**: [[specs--peer]]".to_string(),
+                "INVALID_REL_SHAPE",
+            ),
+            (
+                "thing",
+                "Loop",
+                "closes the loop: [[specs--target]]".to_string(),
+                "RELATIONSHIP_CYCLE",
+            ),
+        ];
+        for (ty, title, theirs, code) in cases {
+            let slug = title.to_lowercase();
+            let file = format!("{slug}.md");
+            let body = conflicted(ty, title, &theirs);
+            let (tmp, mut engine) =
+                edge_fixture(&[("target.md", target), ("peer.md", peer), (&file, &body)]);
+            let id = EntityId(format!("specs--{slug}"));
+            let err = engine
+                .resolve_merge_conflict(&id, ConflictSide::Theirs, Actor::Cli, None, None)
+                .unwrap_err();
+            assert_eq!(err.code(), code, "{title}: {err}");
+            let on_disk = std::fs::read_to_string(tmp.path().join("specs").join(&file)).unwrap();
+            assert!(
+                on_disk.contains("<<<<<<< HEAD"),
+                "{title}: still in conflict"
+            );
+            engine
+                .resolve_merge_conflict(&id, ConflictSide::Ours, Actor::Cli, None, None)
+                .unwrap_or_else(|e| panic!("{title}: ours resolves: {e}"));
+        }
     }
 
     #[test]

@@ -29,6 +29,9 @@ impl Engine {
         target: &memstead_schema::SchemaRef,
     ) -> Result<crate::engine::SetSchemaOutcome, EngineError> {
         use crate::engine::{SetSchemaOutcome, SetSchemaResult};
+        // A pin switch waits for a write in progress in any mem; the
+        // subject may be unreadable (a repin is how it is repaired).
+        let (_write_lock, _) = self.lock_workspace_for_mem_operation(mem)?;
         // A quarantined mem's set-schema IS the repair path (an
         // unresolvable pin is the commonest quarantine cause): repin
         // the retained mount, then re-attempt the attach — the same

@@ -212,8 +212,19 @@ impl Engine {
         &mut self,
         subject: &str,
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
+        self.lock_workspace_for_mems_operation(&[subject])
+    }
+
+    /// [`Self::lock_workspace_for_mem_operation`] for an operation on
+    /// several mems as wholes (`pull --all` reconciles every one): each
+    /// subject may be unreadable or out of service; every other mem must
+    /// be readable.
+    pub fn lock_workspace_for_mems_operation(
+        &mut self,
+        subjects: &[&str],
+    ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
         let mut warnings = self.roster_before_locking();
-        let (guard, reloaded) = self.lock_whole_workspace_except(true, Some(subject))?;
+        let (guard, reloaded) = self.lock_whole_workspace_except(true, subjects)?;
         warnings.extend(reloaded);
         Ok((guard, warnings))
     }
@@ -222,13 +233,13 @@ impl Engine {
         &mut self,
         writes: bool,
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
-        self.lock_whole_workspace_except(writes, None)
+        self.lock_whole_workspace_except(writes, &[])
     }
 
     fn lock_whole_workspace_except(
         &mut self,
         writes: bool,
-        tolerated: Option<&str>,
+        tolerated: &[&str],
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
         // Every mount that has a write lock, the ones this engine mounts
         // read-only included: another process may mount the same
@@ -249,7 +260,7 @@ impl Engine {
         if let Some(stale) = self
             .mounts
             .iter()
-            .find(|m| m.reload_failure.is_some() && Some(m.mount.mem.as_str()) != tolerated)
+            .find(|m| m.reload_failure.is_some() && !tolerated.contains(&m.mount.mem.as_str()))
         {
             return Err(EngineError::StaleView {
                 mem: stale.mount.mem.clone(),
@@ -262,7 +273,7 @@ impl Engine {
         if let Some(out) = self
             .quarantined
             .iter()
-            .find(|q| Some(q.mount.mem.as_str()) != tolerated)
+            .find(|q| !tolerated.contains(&q.mount.mem.as_str()))
         {
             return Err(EngineError::StaleView {
                 mem: out.mount.mem.clone(),

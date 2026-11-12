@@ -157,10 +157,16 @@ impl super::Engine {
     /// edge target's. A write touching neither skips the cost. The write
     /// lock asks the same question: a write that reads every mem holds
     /// every mem's lock, so each is reloaded under it before it is read.
-    pub(crate) fn write_needs_full_load<'a>(
+    ///
+    /// `texts` is the body content the write lands. When the mem's schema
+    /// declares `alias_target_rel_type`, each body wiki-link in it is a
+    /// pointer edge of that relationship and is judged as a declared edge
+    /// is, so a cycle a body link closes is guarded on the full store.
+    pub(crate) fn write_needs_full_load<'a, 't>(
         &self,
         mem: &str,
         edges: impl IntoIterator<Item = EdgeWrite<'a>>,
+        texts: impl IntoIterator<Item = &'t str>,
     ) -> bool {
         let has_signals = |m: &str| {
             self.schemas
@@ -168,10 +174,25 @@ impl super::Engine {
                 .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
         };
         let cycle_guarded = |rel: &str| self.rel_type_is_acyclic(mem, rel);
-        has_signals(mem)
+        if has_signals(mem)
             || edges
                 .into_iter()
                 .any(|e| (!e.remove && cycle_guarded(e.rel_type)) || has_signals(e.target_mem))
+        {
+            return true;
+        }
+        let Some(pointer) = self
+            .schemas
+            .get(mem)
+            .and_then(|s| s.manifest.alias_target_rel_type.clone())
+        else {
+            return false;
+        };
+        texts
+            .into_iter()
+            .filter(|t| t.contains("[["))
+            .flat_map(|t| crate::entity::parser::extract_inline_links_lenient(t, mem))
+            .any(|target| cycle_guarded(&pointer) || has_signals(target.mem()))
     }
 }
 

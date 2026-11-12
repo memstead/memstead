@@ -46,6 +46,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Every edge and every ref move passes the write lock.** A create,
+  batch create, update or batch update whose body wiki-links land
+  pointer edges (`alias_target_rel_type`) on an acyclic relationship now
+  takes the workspace lock and loads every mem before its cycle guard
+  runs, as a declared edge does, so a body link closing a cycle through
+  another mem refuses `RELATIONSHIP_CYCLE` after waiting for a write in
+  progress there. `conflicts resolve` passes the chosen side's
+  relationship rows through the declared-edge checks (target grammar,
+  `INVALID_REL_TYPE`, `INVALID_REL_SHAPE`, `RELATIONSHIP_CYCLE`) and
+  refuses with their code, the file staying in conflict; a refused link
+  synthesis is no longer written over. `pull`, `pull --all`,
+  `branch-reset` and `mem set-schema` take the workspace write lock
+  before they plan; their own subject may be unreadable or out of
+  service, so each stays a repair path.
+
 - **The scaffold, the gates brief and three messages say what the engine
   does.** `memstead gates` now lists `transition_requires_self_check`
   gates beside `transition_requires_checks` ones, each open entity with

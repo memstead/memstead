@@ -215,15 +215,18 @@ impl Engine {
                     )
                 },
                 |engine| {
-                    short
-                        || engine.write_needs_full_load(
+                    short || {
+                        let texts = update_result_texts(engine, update);
+                        engine.write_needs_full_load(
                             &named_mem,
                             declared.iter().map(|r| crate::engine::mutation::EdgeWrite {
                                 rel_type: &r.rel_type,
                                 target_mem: r.target.mem(),
                                 remove: false,
                             }),
+                            texts.iter().map(String::as_str),
                         )
+                    }
                 },
             )?
         };
@@ -245,6 +248,7 @@ impl Engine {
         // schema or any relation target's schema need the full load
         // too: the threshold-crossing diff counts edges that can
         // originate in any mem.
+        let result_texts = update_result_texts(self, &args);
         if self.write_needs_full_load(
             args.id.mem(),
             args.declare_relations
@@ -254,6 +258,7 @@ impl Engine {
                     target_mem: r.target.mem(),
                     remove: false,
                 }),
+            result_texts.iter().map(String::as_str),
         ) {
             self.ensure_mems_loaded(None);
         }

@@ -832,6 +832,7 @@ const WRITE_HELPERS: &[&str] = &[
     "lock_whole_workspace",
     "lock_whole_workspace_except",
     "lock_workspace_for_mem_operation",
+    "lock_workspace_for_mems_operation",
     "lock_on_a_settled_roster",
     "lock_workspace_for_write_if",
     "commit_staged",
@@ -1085,6 +1086,10 @@ const NOT_VERBS: &[(&str, &str)] = &[
         "a default method of the storage trait, a backend delegating to itself",
     ),
     (
+        "engine/lifecycle/schema_pin.rs::set_mem_schema",
+        "the mem's config: the schema pin, under the workspace lock",
+    ),
+    (
         "engine/lifecycle/schema_pin.rs::bump_backend_schema_pin",
         "the mem's config: the schema pin",
     ),
@@ -1127,8 +1132,9 @@ const NOT_VERBS: &[(&str, &str)] = &[
         "the sweep after a mem is renamed, an operation over several mems",
     ),
     (
-        "engine/write_lock.rs::lock_workspace_for_mem_operation",
-        "the lock of a mem's deletion, an operation on a mem as a whole",
+        "engine/write_lock.rs::lock_workspace_for_mems_operation",
+        "the lock of an operation on mems as wholes (a deletion, a pull, a branch \
+         move, a pin switch)",
     ),
     (
         "engine/mutation/mem_sweep.rs::land_mem_sweep",
@@ -1158,6 +1164,14 @@ const NOT_VERBS: &[(&str, &str)] = &[
     (
         "engine/drift.rs::branch_reset",
         "resets a mem's branch to an earlier commit",
+    ),
+    (
+        "engine/drift.rs::pull_all",
+        "transport: brings every mounted mem's remote commits in, under the workspace lock",
+    ),
+    (
+        "engine/write_lock.rs::lock_workspace_for_mem_operation",
+        "the lock of an operation on one mem as a whole",
     ),
     (
         "engine/lifecycle/export.rs::export_markdown",

@@ -137,6 +137,9 @@ impl Engine {
                                         remove: false,
                                     }
                                 }),
+                                super::update_result_texts(engine, a)
+                                    .iter()
+                                    .map(String::as_str),
                             )
                     })
                 },
@@ -176,6 +179,7 @@ impl Engine {
         // batch_relate comment). Declared signals on any involved
         // schema need the full load too (see the single-item path).
         if updates.iter().any(|(a, _)| {
+            let texts = super::update_result_texts(self, a);
             self.write_needs_full_load(
                 a.id.mem(),
                 a.declare_relations
@@ -185,6 +189,7 @@ impl Engine {
                         target_mem: r.target.mem(),
                         remove: false,
                     }),
+                texts.iter().map(String::as_str),
             )
         }) {
             self.ensure_mems_loaded(None);

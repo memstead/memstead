@@ -92,7 +92,7 @@ impl Engine {
         // whole workspace, because its cycle guard walks edges in every
         // mem.
         let (_write_lock, drift_warnings) = {
-            let (mem, relations) = (&args.mem, &args.relations);
+            let (mem, relations, sections) = (&args.mem, &args.relations, &args.sections);
             let mut locked = crate::engine::write_lock::referred_mems(
                 mem,
                 relations.iter().map(|r| &r.target),
@@ -116,6 +116,7 @@ impl Engine {
                                 target_mem: r.target.mem(),
                                 remove: false,
                             }),
+                        sections.values().map(String::as_str),
                     )
                 },
             )?
@@ -138,6 +139,7 @@ impl Engine {
                     target_mem: r.target.mem(),
                     remove: false,
                 }),
+            args.sections.values().map(String::as_str),
         ) {
             self.ensure_mems_loaded(None);
         }
