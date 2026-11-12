@@ -628,6 +628,19 @@ impl Engine {
             merged.append(&mut summary.warnings);
             summary.warnings = merged;
         }
+        // The empty-mem reason, derived from the live store now.
+        for w in self.unbacked_mount_warnings() {
+            let empty = matches!(
+                &w,
+                crate::ops::WarningHint::MountUnbacked {
+                    reason: crate::ops::MountUnbackedReason::Empty,
+                    ..
+                }
+            );
+            if empty && mem.is_none_or(|scope| w.source_mem() == Some(scope)) {
+                summary.warnings.push(w);
+            }
+        }
         // A standing property, reported here rather than on every boot: a
         // folder mem's drift cursor is its own ledger, which only the engine
         // writes, so an edit made to its files by anything else is invisible

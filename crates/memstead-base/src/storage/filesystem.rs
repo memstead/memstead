@@ -1252,6 +1252,10 @@ fn walk_for_md(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Ba
             if name == crate::mem::MEM_META_DIR {
                 continue;
             }
+            // A subdirectory with its own mem config is another mem.
+            if crate::mem::is_nested_mem_root(&path) {
+                continue;
+            }
             walk_for_md(root, &path, out)?;
         } else if file_type.is_file()
             && crate::filesystem::changelog::is_entity_file(&path)

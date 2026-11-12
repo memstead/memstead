@@ -284,6 +284,18 @@ impl McpServer {
                 Err(resp) => return *resp,
             };
         let mut engine = crate::lock_engine!(unified);
+        // A mem is created on a mem-repo workspace only, as CLI `mem init`
+        // has it: in a folder workspace a new mem would be a folder inside
+        // another mem's root.
+        if let Some(root) = engine.workspace_root()
+            && !root.join("mem-repo").join(".git").is_dir()
+        {
+            return super::errors::engine_err(
+                memstead_base::EngineError::UnsupportedWorkspaceShape {
+                    path: root.display().to_string(),
+                },
+            );
+        }
         // The call's role and identity (or the session's) ride the seed
         // commit like every entity mutation's commit.
         engine.set_role(role);

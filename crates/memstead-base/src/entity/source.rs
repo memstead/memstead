@@ -243,6 +243,11 @@ fn find_markdown_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), LoadE
             if name.as_ref() == ".git" || name.as_ref() == crate::mem::MEM_META_DIR {
                 continue;
             }
+            // A subdirectory with its own mem config is another mem: its
+            // entities are its own, never this mem's under a second id.
+            if crate::mem::is_nested_mem_root(&path) {
+                continue;
+            }
             find_markdown_files(&path, files)?;
         } else if name.ends_with(".md") && name.as_ref() != "README.md" {
             files.push(path);

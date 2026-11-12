@@ -531,11 +531,11 @@ fn reload_if_stale_reloads_a_mem_whose_branch_appeared() {
         Engine::from_mounts(vec![(mount, Box::new(SharedHeadBackend(shared.clone())))]).unwrap();
     assert!(
         engine
-            .load_warnings()
+            .unbacked_mount_warnings()
             .iter()
             .any(|w| w.code() == "MOUNT_UNBACKED"),
-        "an entity-less mount warns at boot: {:?}",
-        engine.load_warnings()
+        "an entity-less mount reads empty: {:?}",
+        engine.unbacked_mount_warnings()
     );
     assert!(engine.reload_if_stale(Some("specs")).is_empty());
 
@@ -573,11 +573,11 @@ fn reload_if_stale_reloads_a_mem_whose_branch_appeared() {
     );
     assert!(
         !engine
-            .load_warnings()
+            .unbacked_mount_warnings()
             .iter()
             .any(|w| w.code() == "MOUNT_UNBACKED"),
-        "the boot-time probe is replaced by the reload's: {:?}",
-        engine.load_warnings()
+        "a mem holding an entity no longer reads empty: {:?}",
+        engine.unbacked_mount_warnings()
     );
     // Cached now; the next probe is quiet.
     assert!(engine.reload_if_stale(Some("specs")).is_empty());

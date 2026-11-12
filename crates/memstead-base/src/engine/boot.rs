@@ -413,7 +413,7 @@ impl Engine {
             // A lazy mount with a broken pin still quarantined above —
             // deferral never converts a metadata failure into silence.
             if m.mount.lifecycle == crate::workspace::MountLifecycle::Lazy {
-                if let Some(w) = unbacked_mount_warning(&m.mount, m.backend.as_ref(), None) {
+                if let Some(w) = unbacked_mount_warning(&m.mount, m.backend.as_ref()) {
                     load_warnings.push(w);
                 }
                 deferred_idx.insert(m_idx);
@@ -501,9 +501,10 @@ impl Engine {
             // A mount that is PRESENT but holds nothing still only warns: an
             // empty mem is a legitimate state and must never be reported as
             // unbacked or quarantined.
-            if let Some(w) =
-                unbacked_mount_warning(&m.mount, m.backend.as_ref(), Some(entries.len()))
-            {
+            // The empty reason is derived at read time from the live store
+            // (`Engine::unbacked_mount_warnings`); only missing storage is
+            // stored.
+            if let Some(w) = unbacked_mount_warning(&m.mount, m.backend.as_ref()) {
                 load_warnings.push(w);
             }
             let load_result = parse_entries(entries, read_errors, &m.mount.mem, schema.as_ref());
@@ -1115,15 +1116,14 @@ pub fn instantiate_failure_reason(
 
 /// The `MOUNT_UNBACKED` probe for one mount: `Some(warning)` when the
 /// storage the mount names does not exist (`missing_ref` /
-/// `missing_path`, from [`MemBackend::storage_present`]) or, when
-/// `entity_count` is known and zero, holds no entity (`empty`). A
-/// probe failure reads as present — best-effort, never a boot failure.
-/// Lazy mounts pass `None` for the count: their walk is deferred, so
-/// only the storage half is judged at boot.
+/// `missing_path`, from [`MemBackend::storage_present`]). A probe
+/// failure reads as present: best-effort, never a boot failure. An
+/// empty mem (`empty`) is not stored here: the engine's own writes
+/// change it, so it is derived from the live store when read
+/// ([`Engine::unbacked_mount_warnings`]).
 pub(super) fn unbacked_mount_warning(
     mount: &crate::workspace::Mount,
     backend: &dyn MemBackend,
-    entity_count: Option<usize>,
 ) -> Option<WarningHint> {
     use crate::ops::MountUnbackedReason;
     use crate::workspace::MountStorage;
@@ -1141,13 +1141,6 @@ pub(super) fn unbacked_mount_warning(
         return Some(WarningHint::MountUnbacked {
             mem: mount.mem.clone(),
             reason: missing_reason,
-            location,
-        });
-    }
-    if entity_count == Some(0) {
-        return Some(WarningHint::MountUnbacked {
-            mem: mount.mem.clone(),
-            reason: MountUnbackedReason::Empty,
             location,
         });
     }

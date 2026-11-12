@@ -148,14 +148,6 @@ impl McpServer {
         let mut engine = crate::lock_engine!(unified);
         engine.set_role(role);
         engine.set_identity(identity);
-        // The mem the anchors ride on is the resolved id's mem: a bare
-        // slug the engine resolves to one mem must not stage its
-        // anchors under the empty mem name. The verb itself receives
-        // the id as given and announces the resolution.
-        let mem_for_anchor = match engine.resolve_entity_id(&id) {
-            Ok((resolved, _)) => resolved.mem().to_string(),
-            Err(e) => return engine_err_unified(e, &engine),
-        };
         let patch_sections: indexmap::IndexMap<String, Vec<memstead_base::ops::PatchArg>> = p
             .patch_sections
             .clone()
@@ -280,7 +272,8 @@ impl McpServer {
                     body["relations_declared"] = serde_json::to_value(&outcome.relations_declared)
                         .unwrap_or(serde_json::Value::Null);
                 }
-                attach_durability(&mut body, &engine, outcome.id.mem());
+                let mem_for_anchor = outcome.id.mem().to_string();
+                attach_durability(&mut body, &engine, &mem_for_anchor);
                 let (engine, finished_notices) = engine.finish();
                 attach_mem_changed(&mut body, finished_notices);
                 let res = json_response(&body);
@@ -608,12 +601,6 @@ impl McpServer {
         let mut engine = crate::lock_engine!(unified);
         engine.set_role(role);
         engine.set_identity(identity);
-        // Capture the schema-ref BEFORE the delete — mem may
-        // drop with the last entity.
-        let mem_for_anchor = match engine.resolve_entity_id(&id) {
-            Ok((resolved, _)) => mem_schema_ref_unified(&engine, resolved.mem()),
-            Err(e) => return engine_err_unified(e, &engine),
-        };
         let args = memstead_base::DeleteEntityArgs {
             id: id.clone(),
             expected_hash,
@@ -637,11 +624,14 @@ impl McpServer {
                             .collect::<Vec<_>>()
                     );
                 }
-                attach_durability(&mut body, &engine, id.mem());
+                // The bare slug resolved inside the verb, under its lock:
+                // the outcome's id names the mem it landed in.
+                attach_durability(&mut body, &engine, outcome.id.mem());
+                let mem_schema = mem_schema_ref_unified(&engine, outcome.id.mem());
                 let (_engine, finished_notices) = engine.finish();
                 attach_mem_changed(&mut body, finished_notices);
                 let mut res = json_response(&body);
-                if let Some(s) = mem_for_anchor.as_deref() {
+                if let Some(s) = mem_schema.as_deref() {
                     res = with_mem_schema_anchor(res, s);
                 }
                 // Surface every engine-emitted warning on the outcome
@@ -836,10 +826,6 @@ impl McpServer {
         let mut engine = crate::lock_engine!(unified);
         engine.set_role(role);
         engine.set_identity(identity);
-        let mem_for_anchor = match engine.resolve_entity_id(&id) {
-            Ok((resolved, _)) => resolved.mem().to_string(),
-            Err(e) => return engine_err_unified(e, &engine),
-        };
         let args = memstead_base::RenameEntityArgs {
             id: id.clone(),
             // An omitted hash is Missing and the engine refuses it; an empty one
@@ -859,7 +845,8 @@ impl McpServer {
                     "write_id": outcome.write_id,
                     "warnings": outcome.warnings,
                 });
-                attach_durability(&mut body, &engine, id.mem());
+                let mem_for_anchor = outcome.new_id.mem().to_string();
+                attach_durability(&mut body, &engine, &mem_for_anchor);
                 let (engine, finished_notices) = engine.finish();
                 attach_mem_changed(&mut body, finished_notices);
                 let res = json_response(&body);
@@ -913,10 +900,6 @@ impl McpServer {
         let mut engine = crate::lock_engine!(unified);
         engine.set_role(role);
         engine.set_identity(identity);
-        let mem_for_anchor = match engine.resolve_entity_id(&id) {
-            Ok((resolved, _)) => resolved.mem().to_string(),
-            Err(e) => return engine_err_unified(e, &engine),
-        };
         // An empty token states no hash, as it always has on retype; the
         // engine refuses the missing hash after its existence and stub gates.
         let args = memstead_base::RetypeEntityArgs {
@@ -941,7 +924,8 @@ impl McpServer {
                 if let Some(obj) = body.as_object_mut() {
                     obj.insert("dry_run".into(), serde_json::json!(dry_run));
                 }
-                attach_durability(&mut body, &engine, id.mem());
+                let mem_for_anchor = outcome.id.mem().to_string();
+                attach_durability(&mut body, &engine, &mem_for_anchor);
                 let (engine, finished_notices) = engine.finish();
                 attach_mem_changed(&mut body, finished_notices);
                 let res = json_response(&body);

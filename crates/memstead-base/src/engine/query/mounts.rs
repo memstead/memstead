@@ -515,6 +515,42 @@ impl Engine {
         &self.load_warnings
     }
 
+    /// Every `MOUNT_UNBACKED` warning as of now: the stored ones (the
+    /// storage the mount names is missing, a fact of the mount) and an
+    /// `empty` one for each loaded mount whose mem holds no entity in the
+    /// live store. The empty reason is derived here, never stored, so a
+    /// mem written into after its mount is not called empty.
+    pub fn unbacked_mount_warnings(&self) -> Vec<WarningHint> {
+        let mut out: Vec<WarningHint> = self
+            .load_warnings
+            .iter()
+            .filter(|w| w.code() == "MOUNT_UNBACKED")
+            .cloned()
+            .collect();
+        let deferred = self.deferred_mems();
+        for m in &self.mounts {
+            let mem = m.mount.mem.as_str();
+            if deferred.contains(&mem)
+                || out.iter().any(|w| w.source_mem() == Some(mem))
+                || self.store.all_entities().any(|e| e.mem == mem && !e.stub)
+            {
+                continue;
+            }
+            let location = match &m.mount.storage {
+                crate::workspace::MountStorage::GitBranch { branch, .. } => branch.clone(),
+                crate::workspace::MountStorage::Folder { path }
+                | crate::workspace::MountStorage::Archive { path } => path.display().to_string(),
+                crate::workspace::MountStorage::InMemory => continue,
+            };
+            out.push(WarningHint::MountUnbacked {
+                mem: mem.to_string(),
+                reason: crate::ops::MountUnbackedReason::Empty,
+                location,
+            });
+        }
+        out
+    }
+
     /// The quarantine roster: mems that failed their mem-level boot
     /// step and serve nothing until repaired + reloaded. Empty on a
     /// fully healthy workspace. Surfaced on overview and health.

@@ -3392,13 +3392,10 @@ fn test_memstead_reload_via_unified_engine_path() {
     assert_eq!(envelope["code"], "INVALID_INPUT");
 }
 
-/// End to end: the EXACT sequence a user
-/// reported blocked — install a new schema out of band, create a
-/// mem pinned to it in-band, write an entity into it — completes
-/// warm, with `memstead_reload full=true` as the only extra step
-/// and no process restart. Pre-refresh, the same `mem_create`
-/// still fails with `SCHEMA_NOT_FOUND` (the refresh changes the
-/// outcome, not incidental timing).
+/// A schema installed out of band while the server runs resolves in
+/// band after `memstead_reload full=true`, with no process restart.
+/// Before the refresh the same lookup fails with `SCHEMA_NOT_FOUND`
+/// (the refresh changes the outcome, not incidental timing).
 #[test]
 fn test_memstead_reload_full_closes_the_out_of_band_schema_gap() {
     use memstead_base::workspace_store::WorkspaceStoreAdapter;
@@ -3500,30 +3497,24 @@ write_rules: []
     )
     .unwrap();
 
-    let mem_create = |name: &str| {
-        server.memstead_mem_create(Parameters(crate::lifecycle::MemCreateParams {
-            role: None,
-            identity: None,
-            title: None,
-            description: None,
-            subject: None,
-            name: name.to_string(),
-            location: name.to_string(),
-            schema: "authored@0.1.0".to_string(),
-            vcs: None,
-            note: None,
-            recovery: None,
-            include_schema: false,
-            schema_verbosity: None,
-            write_guidance: Default::default(),
+    let schema_of = |name: &str| {
+        server.memstead_schema(Parameters(crate::tools::graph::SchemaParams {
+            name: Some(name.to_string()),
+            mem: None,
+            verbosity: None,
+            types: None,
+            token_budget: None,
         }))
     };
 
-    // Refusal complement: BEFORE the refresh, the in-band create
-    // still fails with SCHEMA_NOT_FOUND — this is the reported
-    // five-round blockage.
-    let result = mem_create("notes");
-    assert!(result.is_error.unwrap_or(false));
+    // Refusal complement: BEFORE the refresh, the schema installed
+    // out of band does not resolve.
+    let result = schema_of("authored@0.1.0");
+    assert!(
+        result.is_error.unwrap_or(false),
+        "{}",
+        extract_text(&result)
+    );
     let envelope = result.structured_content.as_ref().unwrap();
     assert_eq!(envelope["code"], "SCHEMA_NOT_FOUND", "{envelope}");
 
@@ -3537,34 +3528,16 @@ write_rules: []
     assert!(text.contains("\"refresh\""), "{text}");
     assert!(text.contains("authored@0.1.0"), "{text}");
 
-    // In-band mem create pinned to the fresh schema now succeeds…
-    let result = mem_create("notes");
+    // The schema now resolves in band, no restart. (A mem is not
+    // created over MCP on a folder workspace; that refusal is its
+    // own test.)
+    let result = schema_of("authored@0.1.0");
     assert!(
         !result.is_error.unwrap_or(false),
-        "mem_create must succeed after the refresh: {result:?}"
+        "the schema must resolve after the refresh: {}",
+        extract_text(&result)
     );
-
-    // …and an entity lands in it. End-to-end closure, no restart.
-    let result = server.memstead_create(Parameters(crate::tools::mutation::CreateParams {
-        title: "First Entry".to_string(),
-        entity_type: "doc".to_string(),
-        mem: Some("notes".to_string()),
-        sections: Some(indexmap::IndexMap::from_iter([(
-            "body".to_string(),
-            "written warm".to_string(),
-        )])),
-        metadata: None,
-        relations: None,
-        anchors: None,
-        dry_run: None,
-        note: None,
-        role: None,
-        identity: None,
-    }));
-    assert!(
-        !result.is_error.unwrap_or(false),
-        "entity create into the fresh mem must succeed: {result:?}"
-    );
+    assert!(extract_text(&result).contains("doc"));
 }
 
 /// `memstead_changes_since` end-to-end with `include_notes = false`.
@@ -10403,17 +10376,17 @@ fn memstead_mem_delete_with_delete_files_true_on_mem_db_mount_prunes_branch_and_
 #[test]
 fn memstead_mem_delete_with_delete_files_true_on_folder_mount_removes_dir() {
     let tmp = TempDir::new().unwrap();
-    // Build an engine without the git-branch factory: folder backend only, no
-    // mem-repo seeded. The create orchestrator's heuristic then
-    // picks `MountStorage::Folder { path }` so `dir_for_mem`
-    // returns Some on the registered mem.
-    let mut unified = memstead_base::Engine::from_mounts(Vec::new()).unwrap();
+    // The folder mem is made on disk (a mem is not created over MCP
+    // on a folder workspace) and mounted by the server's engine.
+    let mem_dir = tmp.path().join("scratch");
+    fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+    fs::write(
+        mem_dir.join(".memstead/config.json"),
+        r#"{"version":"0.1.0","schema":"default@1.0.0"}"#,
+    )
+    .unwrap();
+    let mut unified = setup_unified_test_engine(tmp.path());
     unified.set_settings(WorkspaceSettings {
-        mem_create_rules: vec![memstead_base::CreateRuleSetting {
-            pattern: "*".to_string(),
-            schemas: vec!["default@1.0.0".to_string()],
-            default_cross_links: None,
-        }],
         mem_delete_rules: vec![memstead_base::DeleteRuleSetting {
             pattern: "*".to_string(),
         }],
@@ -10423,25 +10396,7 @@ fn memstead_mem_delete_with_delete_files_true_on_folder_mount_removes_dir() {
         std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
     unified.set_workspace_root(canonical_root);
     let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
-
-    let mem_dir = tmp.path().join("scratch");
-    let _ = server.memstead_mem_create(Parameters(TlsMemCreateParams {
-        role: None,
-        identity: None,
-        title: None,
-        description: None,
-        subject: None,
-        schema_verbosity: None,
-        write_guidance: Default::default(),
-        name: "scratch".to_string(),
-        location: mem_dir.to_string_lossy().into_owned(),
-        schema: "default@1.0.0".to_string(),
-        vcs: None,
-        note: None,
-        recovery: None,
-        include_schema: false,
-    }));
-    assert!(mem_dir.is_dir(), "create must produce the mem dir on disk");
+    assert!(mem_dir.is_dir());
 
     let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
         role: None,
@@ -13896,4 +13851,296 @@ fn a_stub_deletes_over_mcp_with_the_empty_hash() {
         "a stub deletes with the empty hash, got {code}: {}",
         extract_text(&out)
     );
+}
+
+/// A bare slug resolves against the view the verb locks, not against
+/// the server's view before the lock. Engine A (the server) boots
+/// first; engine B then creates `foo` on the same mem-repo, so A's
+/// store has never seen it. Each of update, rename, retype and delete
+/// by the bare slug `foo` must reload, resolve and commit, announcing
+/// `SHORT_ID_RESOLVED`. Before the fix the MCP layer resolved the slug
+/// before the lock and refused `ENTITY_ID_MISSING_MEM` naming no
+/// candidate. The complement: a slug no mem carries still refuses.
+mod a_bare_slug_resolves_against_the_view_the_verb_locks {
+    use super::*;
+    use memstead_base::vcs::{Actor, ClientId};
+    use memstead_git_branch::test_support::init_real_mem_repo;
+    use memstead_git_branch::workspace_store::engine_from_workspace_root;
+
+    /// A server on engine A, then `foo` created by engine B; returns
+    /// the server, the workspace and foo's hash.
+    fn server_then_sibling_creates_foo() -> (McpServer, TempDir, String) {
+        let tmp = TempDir::new().unwrap();
+        init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+        let engine_a = engine_from_workspace_root(tmp.path()).expect("engine A boots");
+        let server = McpServer::new(engine_a, crate::config::DEFAULT_TOKEN_BUDGET);
+        let mut b = engine_from_workspace_root(tmp.path()).expect("engine B boots");
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("identity".to_string(), "identity body".to_string());
+        sections.insert("purpose".to_string(), "purpose body".to_string());
+        let created = b
+            .create_entity(
+                memstead_base::CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "specs".to_string(),
+                    title: "Foo".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections,
+                    metadata: indexmap::IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                Actor::Cli,
+                Some(&ClientId {
+                    name: "sibling".to_string(),
+                    version: "0".to_string(),
+                }),
+                None,
+            )
+            .expect("sibling create commits");
+        (server, tmp, created.content_hash)
+    }
+
+    fn assert_resolved(verb: &str, res: &CallToolResult) {
+        let text = extract_text(res);
+        assert!(
+            !res.is_error.unwrap_or(false),
+            "{verb} by bare slug: {text}"
+        );
+        assert!(
+            text.contains("SHORT_ID_RESOLVED"),
+            "{verb} announces the resolution: {text}"
+        );
+    }
+
+    fn update_params(id: &str, hash: Option<String>) -> crate::tools::mutation::UpdateParams {
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("purpose".to_string(), "edited by A".to_string());
+        crate::tools::mutation::UpdateParams {
+            anchors: None,
+            relations_unset: None,
+            anchors_unset: None,
+            id: id.to_string(),
+            expected_hash: hash,
+            sections: Some(sections),
+            append_sections: None,
+            patch_sections: None,
+            sections_unset: None,
+            metadata: None,
+            metadata_unset: None,
+            dry_run: None,
+            note: None,
+            role: None,
+            identity: None,
+            declare_relations: None,
+        }
+    }
+
+    #[test]
+    fn update() {
+        let (server, _tmp, hash) = server_then_sibling_creates_foo();
+        let res = server.memstead_update(Parameters(update_params("foo", Some(hash))));
+        assert_resolved("update", &res);
+        let sc = res.structured_content.as_ref().expect("update envelope");
+        assert_eq!(sc["id"], "specs--foo", "{sc}");
+    }
+
+    #[test]
+    fn rename() {
+        let (server, _tmp, hash) = server_then_sibling_creates_foo();
+        let res = server.memstead_rename(Parameters(RenameParams {
+            id: "foo".to_string(),
+            new_title: "Bar".to_string(),
+            expected_hash: Some(hash),
+            note: None,
+            role: None,
+            identity: None,
+        }));
+        assert_resolved("rename", &res);
+        let sc = res.structured_content.as_ref().expect("rename envelope");
+        assert_eq!(sc["new_id"], "specs--bar", "{sc}");
+    }
+
+    #[test]
+    fn retype() {
+        let (server, _tmp, hash) = server_then_sibling_creates_foo();
+        let res = server.memstead_retype(Parameters(RetypeParams {
+            id: "foo".to_string(),
+            target_type: "memo".to_string(),
+            section_map: Some(
+                [
+                    ("identity".to_string(), "claim".to_string()),
+                    ("purpose".to_string(), "context".to_string()),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            drop_metadata: Some(vec!["level".to_string()]),
+            expected_hash: Some(hash),
+            dry_run: None,
+            note: None,
+            role: None,
+            identity: None,
+        }));
+        assert_resolved("retype", &res);
+    }
+
+    #[test]
+    fn delete() {
+        let (server, _tmp, hash) = server_then_sibling_creates_foo();
+        let res = server.memstead_delete(Parameters(DeleteParams {
+            id: "foo".to_string(),
+            expected_hash: Some(hash),
+            note: None,
+            role: None,
+            identity: None,
+        }));
+        assert_resolved("delete", &res);
+    }
+
+    #[test]
+    fn a_slug_no_mem_carries_still_refuses() {
+        let (server, _tmp, hash) = server_then_sibling_creates_foo();
+        let res = server.memstead_update(Parameters(update_params("nobody-has-this", Some(hash))));
+        assert!(res.is_error.unwrap_or(false), "{}", extract_text(&res));
+        let sc = res.structured_content.as_ref().expect("error envelope");
+        assert_eq!(sc["code"], "ENTITY_ID_MISSING_MEM", "{sc}");
+    }
+}
+
+/// A mem the server writes into is not reported empty, a nested mem
+/// folder is not loaded as the outer mem's content, and a folder
+/// workspace refuses a mem created over MCP.
+mod a_long_lived_server_reports_what_a_fresh_one_does {
+    use super::*;
+
+    fn health_of(server: &McpServer, mem: &str) -> String {
+        let r = server.memstead_health(Parameters(HealthParams {
+            include: None,
+            limit: None,
+            mem: Some(mem.to_string()),
+            include_config: false,
+            token_budget: None,
+            chunk: None,
+            target_schema: None,
+        }));
+        assert!(!r.is_error.unwrap_or(false), "{}", extract_text(&r));
+        let mut out = extract_text(&r);
+        if let Some(sc) = &r.structured_content {
+            out.push_str(&sc.to_string());
+        }
+        out
+    }
+
+    fn mem_create(server: &McpServer, name: &str, location: &std::path::Path) -> CallToolResult {
+        server.memstead_mem_create(Parameters(TlsMemCreateParams {
+            role: None,
+            identity: None,
+            title: None,
+            description: None,
+            subject: None,
+            schema_verbosity: None,
+            write_guidance: Default::default(),
+            name: name.to_string(),
+            location: location.to_string_lossy().into_owned(),
+            schema: "default@1.0.0".to_string(),
+            vcs: None,
+            note: None,
+            recovery: None,
+            include_schema: false,
+        }))
+    }
+
+    #[test]
+    fn a_mem_written_into_is_not_called_empty() {
+        let tmp = TempDir::new().unwrap();
+        let server = setup_lifecycle_server(&tmp);
+        let created = mem_create(&server, "fresh", &tmp.path().join("fresh"));
+        assert!(
+            !created.is_error.unwrap_or(false),
+            "{}",
+            extract_text(&created)
+        );
+        let before = health_of(&server, "fresh");
+        assert!(
+            before.contains("MOUNT_UNBACKED"),
+            "an empty mem is reported empty: {before}"
+        );
+
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("identity".to_string(), "identity body".to_string());
+        sections.insert("purpose".to_string(), "purpose body".to_string());
+        let r = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
+            title: "First".to_string(),
+            entity_type: "spec".to_string(),
+            mem: Some("fresh".to_string()),
+            sections: Some(sections),
+            metadata: None,
+            relations: None,
+            dry_run: None,
+            note: None,
+            role: None,
+            identity: None,
+        }));
+        assert!(!r.is_error.unwrap_or(false), "{}", extract_text(&r));
+        let after = health_of(&server, "fresh");
+        assert!(
+            !after.contains("MOUNT_UNBACKED"),
+            "a mem holding an entity is not reported empty: {after}"
+        );
+    }
+
+    #[test]
+    fn a_nested_mem_folder_loads_once() {
+        let tmp = TempDir::new().unwrap();
+        let outer = tmp.path().join("outer");
+        let inner = outer.join("inner");
+        for dir in [&outer, &inner] {
+            fs::create_dir_all(dir.join(".memstead")).unwrap();
+            fs::write(
+                dir.join(".memstead/config.json"),
+                r#"{"version":"0.1.0","schema":"default@1.0.0"}"#,
+            )
+            .unwrap();
+        }
+        let page = |title: &str| {
+            format!(
+                "---\ntype: spec\n---\n# {title}\n\n## Identity\n\n{title} identity.\n\n## Purpose\n\n{title} purpose.\n"
+            )
+        };
+        fs::write(outer.join("outer-page.md"), page("Outer Page")).unwrap();
+        fs::write(inner.join("inner-page.md"), page("Inner Page")).unwrap();
+
+        let engine = setup_unified_test_engine(tmp.path());
+        let ids: Vec<String> = engine
+            .store()
+            .all_entities()
+            .filter(|e| !e.stub)
+            .map(|e| e.id.to_string())
+            .collect();
+        assert_eq!(ids, vec!["outer--outer-page".to_string()], "{ids:?}");
+    }
+
+    #[test]
+    fn a_mem_cannot_be_created_over_mcp_inside_a_folder_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("notes");
+        fs::create_dir_all(root.join(".memstead")).unwrap();
+        fs::write(
+            root.join(".memstead/config.json"),
+            r#"{"version":"0.1.0","schema":"default@1.0.0"}"#,
+        )
+        .unwrap();
+        let mut engine = setup_unified_test_engine(tmp.path());
+        engine.set_workspace_root(root.canonicalize().unwrap());
+        let server = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
+
+        let target = root.join("inner");
+        let r = mem_create(&server, "inner", &target);
+        assert!(r.is_error.unwrap_or(false), "{}", extract_text(&r));
+        let sc = r.structured_content.as_ref().expect("error envelope");
+        assert_eq!(sc["code"], "UNSUPPORTED_WORKSPACE_SHAPE", "{sc}");
+        assert!(!target.exists(), "the refused create wrote nothing");
+    }
 }

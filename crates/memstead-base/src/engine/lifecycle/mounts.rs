@@ -45,7 +45,11 @@ impl Engine {
         // authoritative count; the return value (number of
         // entities removed) is informational only — the caller
         // already knows the mem and doesn't need the count.
+        let prior_targets = self.targets_of_mem(mem_name);
         let _removed = self.store.remove_entities_by_mem(mem_name);
+        // What other mems point into it stays, at stubs, as a fresh
+        // load without the mem builds it.
+        self.settle_slice(mem_name, &prior_targets);
 
         // Purge load-time warnings attributed to the removed mem.
         // `health()` merges `self.load_warnings` unconditionally, so
@@ -136,7 +140,11 @@ impl Engine {
         };
         let mount = self.mounts.remove(idx);
         self.schemas_remove(&mount.mount.mem);
+        let prior_targets = self.targets_of_mem(mem_name);
         let _removed = self.store.remove_entities_by_mem(mem_name);
+        // What other mems point into it stays, at stubs, as a fresh
+        // load without the mem builds it.
+        self.settle_slice(mem_name, &prior_targets);
         self.load_warnings
             .retain(|w| w.source_mem() != Some(mem_name));
         Arc::make_mut(&mut self.mem_router).remove_read_only(mem_name);
@@ -307,11 +315,7 @@ impl Engine {
         let read = read?;
         let incomplete = read.incomplete();
         let (entries, read_errors) = (read.entries, read.read_errors);
-        if let Some(w) = crate::engine::boot::unbacked_mount_warning(
-            &mount,
-            backend.as_ref(),
-            Some(entries.len()),
-        ) {
+        if let Some(w) = crate::engine::boot::unbacked_mount_warning(&mount, backend.as_ref()) {
             self.load_warnings.push(w);
         }
         let load_result = parse_entries(entries, read_errors, &mount.mem, schema.as_ref());
@@ -323,6 +327,7 @@ impl Engine {
             .map(|n| crate::entity::store_builder::last_segment_suffix(n).to_string())
             .collect();
         let fallback = engine_fallback_type();
+        let prior_targets = self.targets_of_mem(&mount.mem);
         push_entities_into_store(
             &mut self.store,
             load_result.entities,
@@ -334,6 +339,9 @@ impl Engine {
             }),
         );
         self.load_errors.extend(load_result.errors);
+        // The edges other mems point into it, which its unregistration
+        // or an earlier absence left at stubs or dropped.
+        self.settle_slice(&mount.mem, &prior_targets);
 
         // Step 5: insert schema (kept in lockstep with `self.mounts`).
         self.schemas_insert(mount.mem.clone(), schema);
@@ -735,4 +743,54 @@ fn merge_mount_rosters(
         }
     }
     merged
+}
+
+impl Engine {
+    /// The ids `mem`'s entities point at, read before its slice of the
+    /// store is replaced: the candidates [`Self::settle_slice`] checks
+    /// for stubs the replacement left without a referrer.
+    pub(in crate::engine) fn targets_of_mem(&self, mem: &str) -> Vec<EntityId> {
+        let mut targets: Vec<EntityId> = Vec::new();
+        for entity in self.store.all_entities().filter(|e| e.mem == mem) {
+            targets.extend(entity.relationships.iter().map(|r| r.target.clone()));
+            targets.extend(
+                self.store
+                    .outgoing(&entity.id)
+                    .iter()
+                    .map(|e| e.target.clone()),
+            );
+        }
+        targets.sort_by(|a, b| a.0.cmp(&b.0));
+        targets.dedup();
+        targets
+    }
+
+    /// Settle the cross-mem state a fresh load derives, after `mem`'s
+    /// slice of the store was replaced (a reload of that mem, its
+    /// registration, its unregistration). Two things a fresh load
+    /// would build differently otherwise:
+    ///
+    /// - the edges other mems' entities point into `mem`: removing the
+    ///   slice dropped them, and only a fresh load of every mem would
+    ///   push them again. They are rebuilt from the other mems' records
+    ///   (a target `mem` no longer holds becomes the stub a fresh load
+    ///   makes for it).
+    /// - stubs nothing points at any more: a fresh load makes a stub
+    ///   only as some edge's target. The candidates are `mem`'s own
+    ///   ids and `prior_targets`, what `mem` pointed at before
+    ///   ([`Self::targets_of_mem`]), the only stubs the replacement can
+    ///   have left without a referrer.
+    pub(in crate::engine) fn settle_slice(&mut self, mem: &str, prior_targets: &[EntityId]) {
+        crate::entity::store_builder::reconstruct_incoming_cross_mem_edges(&mut self.store, mem);
+        let own: Vec<EntityId> = self
+            .store
+            .all_entities()
+            .filter(|e| e.stub && e.mem == mem)
+            .map(|e| e.id.clone())
+            .collect();
+        crate::engine::mutation::gc_orphan_stubs_among(
+            &mut self.store,
+            own.iter().chain(prior_targets.iter()),
+        );
+    }
 }

@@ -519,7 +519,7 @@ impl Engine {
     /// takes no lock and leaves the workspace byte-identical, lock files
     /// included.
     pub fn lock_mems_for_write_if<S: AsRef<str>>(
-        &self,
+        &mut self,
         writes: bool,
         mems: &[S],
     ) -> Result<MemWriteGuard, EngineError> {
@@ -538,11 +538,18 @@ impl Engine {
     /// the mutation's own lookup reports an unknown mem with its usual
     /// error. A backend with no shared state takes no OS lock and is
     /// still covered for the staged-write discard.
+    ///
+    /// What an earlier mutation left staged on a mem when its discard
+    /// failed is discarded here, once the mem's lock is held and before
+    /// the guard covers its backend: a backend whose discard keeps
+    /// failing can be replaced by a fresh one only while no mutation
+    /// holds it, and a write sent again right after the failed one
+    /// would otherwise hold it already and be refused as stale.
     pub fn lock_mems_for_write<S: AsRef<str>>(
-        &self,
+        &mut self,
         mems: &[S],
     ) -> Result<MemWriteGuard, EngineError> {
-        let mut locks: Vec<(Held, Option<String>)> = mems
+        let mut locks: Vec<(String, Option<PathBuf>, usize, Option<String>)> = mems
             .iter()
             .filter_map(|name| {
                 let m = self.mounts.iter().find(|m| m.mount.mem == name.as_ref())?;
@@ -551,22 +558,20 @@ impl Engine {
                 let read_only = (m.mount.capability != crate::workspace::MountCapability::Write)
                     .then(|| m.mount.mem.clone());
                 Some((
-                    Held {
-                        path: m.backend.write_lock_path(),
-                        backend: Arc::clone(&m.backend),
-                        strays: Arc::clone(&m.strays),
-                    },
+                    m.mount.mem.clone(),
+                    m.backend.write_lock_path(),
+                    backend_key(&m.backend),
                     read_only,
                 ))
             })
             .collect();
         // Sorted by lock path so two multi-mem writers take their locks
         // in one order; pathless backends take no lock and sort first.
-        locks.sort_by(|a, b| a.0.path.cmp(&b.0.path));
-        locks.dedup_by(|a, b| backend_key(&a.0.backend) == backend_key(&b.0.backend));
+        locks.sort_by(|a, b| a.1.cmp(&b.1));
+        locks.dedup_by(|a, b| a.2 == b.2);
         let mut guard = MemWriteGuard::empty();
-        for (held, read_only) in locks {
-            if let Some(path) = &held.path {
+        for (mem, path, _, read_only) in locks {
+            if let Some(path) = &path {
                 match (path_lock::acquire(path), read_only) {
                     (Ok(()), _) => {}
                     // A mem mounted read-only may sit where this
@@ -587,7 +592,20 @@ impl Engine {
                     (Err(e), None) => return Err(EngineError::Backend(BackendError::Io(e))),
                 }
             }
-            guard.cover(held);
+            // A failure stays recorded on the mount, and the reload
+            // under this lock refuses the write naming the mem.
+            let _ = self.discard_strays(&mem);
+            let Some(m) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
+                if let Some(path) = &path {
+                    path_lock::release(path);
+                }
+                continue;
+            };
+            guard.cover(Held {
+                path,
+                backend: Arc::clone(&m.backend),
+                strays: Arc::clone(&m.strays),
+            });
         }
         Ok(guard)
     }

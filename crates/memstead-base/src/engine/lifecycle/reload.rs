@@ -421,11 +421,8 @@ impl Engine {
         // load-time warnings: a branch that appeared (or vanished) since
         // boot changes the answer, and the sink's per-mem replace below
         // drops the boot-time one.
-        let unbacked = crate::engine::boot::unbacked_mount_warning(
-            &self.mounts[mount_idx].mount,
-            backend,
-            Some(entries.len()),
-        );
+        let unbacked =
+            crate::engine::boot::unbacked_mount_warning(&self.mounts[mount_idx].mount, backend);
         let load_result = parse_entries(entries, read_errors, mem, schema.as_ref());
 
         // Build the LoadCollector inputs — mem roster + last-
@@ -438,6 +435,7 @@ impl Engine {
             .collect();
 
         // Failure fence above; below this point the store is mutated.
+        let prior_targets = self.targets_of_mem(mem);
         self.store.remove_entities_by_mem(mem);
         warnings_sink.extend(completed_commit);
         if let Some(w) = unbacked {
@@ -472,7 +470,8 @@ impl Engine {
         // index until a workspace-wide reload. Reconstruct from the
         // authoritative source records (in-memory only — no other mem is
         // re-read), then let the remap pass below reclassify alias sources.
-        crate::entity::store_builder::reconstruct_incoming_cross_mem_edges(&mut self.store, mem);
+        // Stubs the re-read left without a referrer go too.
+        self.settle_slice(mem, &prior_targets);
         crate::entity::store_builder::validate_loaded_relations(
             &mut self.store,
             &self.schemas,

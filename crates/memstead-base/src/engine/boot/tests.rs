@@ -13,10 +13,10 @@ use crate::storage::{ArchiveBackend, FilesystemBackend};
 use crate::vcs::CommitContext;
 use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 
-/// The unbacked-mount probe on the folder backend: a path that does
-/// not exist is `missing_path`, an existing directory with no
-/// entity is `empty`, a directory holding one entity is silent, and
-/// a lazy mount (count unknown) is judged on storage presence only.
+/// The stored unbacked-mount probe on the folder backend: a path that
+/// does not exist is `missing_path`, and an existing directory is
+/// silent whatever it holds (an empty mem is derived from the live
+/// store when read, never stored).
 #[test]
 fn unbacked_mount_probe_classes_missing_path_empty_and_present() {
     use crate::engine::boot::unbacked_mount_warning;
@@ -34,7 +34,7 @@ fn unbacked_mount_probe_classes_missing_path_empty_and_present() {
 
     let gone = tmp.path().join("gone");
     let backend = FilesystemBackend::new(gone.clone());
-    let w = unbacked_mount_warning(&mount(gone.clone()), &backend, Some(0))
+    let w = unbacked_mount_warning(&mount(gone.clone()), &backend)
         .expect("a missing folder is unbacked");
     match &w {
         WarningHint::MountUnbacked {
@@ -51,22 +51,11 @@ fn unbacked_mount_probe_classes_missing_path_empty_and_present() {
     assert_eq!(w.code(), "MOUNT_UNBACKED");
     let json = serde_json::to_value(&w).unwrap();
     assert_eq!(json["details"]["reason"], "missing_path");
-    // Lazy: storage presence alone decides, and the folder is gone.
-    assert!(unbacked_mount_warning(&mount(gone), &backend, None).is_some());
 
     let hollow = tmp.path().join("hollow");
     std::fs::create_dir_all(&hollow).unwrap();
     let backend = FilesystemBackend::new(hollow.clone());
-    let w = unbacked_mount_warning(&mount(hollow.clone()), &backend, Some(0))
-        .expect("an entity-less folder is unbacked");
-    assert_eq!(
-        serde_json::to_value(&w).unwrap()["details"]["reason"],
-        "empty"
-    );
-    // Lazy with the folder present: nothing to say at boot.
-    assert!(unbacked_mount_warning(&mount(hollow.clone()), &backend, None).is_none());
-    // One entity: silent.
-    assert!(unbacked_mount_warning(&mount(hollow), &backend, Some(1)).is_none());
+    assert!(unbacked_mount_warning(&mount(hollow), &backend).is_none());
 }
 
 /// The `SchemaResolver` resolves a pin against the catalogue and, on
@@ -4216,7 +4205,14 @@ fn unmount_is_atomic_and_cross_mem_edges_go_dangling() {
             .values()
             .all(|c| c.entities.iter().all(|e| !e.starts_with("alpha--")))
     );
-    assert!(engine.store().all_entities().all(|e| e.mem != "alpha"));
+    // What stays of alpha is the stub at the edge's target, as in a
+    // fresh load of beta alone: no entity of the removed mem.
+    assert!(
+        engine
+            .store()
+            .all_entities()
+            .all(|e| e.mem != "alpha" || e.stub)
+    );
 
     // Benchmark: one hundred reload probes with no change, roster
     // probe included, against one hundred branch-tip-only probes.

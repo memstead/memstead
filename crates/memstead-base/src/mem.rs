@@ -24,6 +24,14 @@ use crate::entity::EntityId;
 /// re-exported here as the mem-level home for the concept.
 pub use memstead_schema::MEM_META_DIR;
 
+/// Whether `dir` is the root of a mem of its own: it holds
+/// `.memstead/config.json`. A folder walker of an enclosing mem stops
+/// there, so the nested mem's entities never load a second time under
+/// the enclosing mem's id.
+pub fn is_nested_mem_root(dir: &std::path::Path) -> bool {
+    dir.join(MEM_META_DIR).join("config.json").is_file()
+}
+
 /// Provenance record attached to every writable-mem registration.
 ///
 /// `MEM_NAME_COLLISION` reads the colliding registration's

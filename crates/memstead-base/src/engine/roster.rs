@@ -267,7 +267,7 @@ impl Engine {
             // lacks, a folder that does not exist): quarantine under
             // MOUNT_UNBACKED rather than serving an empty graph.
             if let Some(crate::ops::WarningHint::MountUnbacked { reason, .. }) =
-                super::boot::unbacked_mount_warning(&mount, backend.as_ref(), None)
+                super::boot::unbacked_mount_warning(&mount, backend.as_ref())
                 && reason != crate::ops::MountUnbackedReason::Empty
             {
                 let (code, message) = super::boot::missing_storage_reason(&mount);

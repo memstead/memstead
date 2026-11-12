@@ -3737,3 +3737,121 @@ fn a_delete_is_refused_when_it_cannot_take_the_lock_of_a_mem_it_reads() {
         );
     }
 }
+
+// ---------------------------------------------------------------------
+// Per-mem slice replacements settle what a fresh load derives
+// ---------------------------------------------------------------------
+
+/// A second process renames `left--alpha`, which `right--gamma` links
+/// to, and rewrites the link. This engine then reloads `left` and
+/// `right` one at a time. Reloading `left` first leaves a stub at the
+/// old id (the not yet reloaded `right` still points there); reloading
+/// `right` must collect it, because nothing points at it any more and
+/// a fresh load builds no stub there.
+#[test]
+fn a_rename_seen_through_per_mem_reloads_leaves_no_stub() {
+    for pair in PAIRS {
+        let context = format!("{pair:?}");
+        let ws = Workspace::new(pair);
+        link_gamma_to_alpha(&ws);
+        let mut engine = ws.engine();
+
+        let renamed = ws
+            .second_writer(|second| {
+                let args = rename_args(second, &id(LEFT, "alpha"), "Alpha Renamed");
+                second
+                    .rename_entity(args, Actor::Cli, None, None)
+                    .map(|_| ())
+            })
+            .join()
+            .unwrap();
+        assert!(renamed.is_ok(), "{context}: {renamed:?}");
+
+        engine.reload_if_stale(Some(LEFT));
+        engine.reload_if_stale(Some(RIGHT));
+        assert!(
+            engine.get_entity(&id(LEFT, "alpha")).is_none(),
+            "{context}: a stub stayed at the old id"
+        );
+        assert_eq!(
+            view(&engine),
+            view(&ws.engine()),
+            "{context}: after per-mem reloads the view equals a fresh load's"
+        );
+
+        // The other order: `right` first, then `left`.
+        let mut engine = ws.engine();
+        let renamed_back = ws
+            .second_writer(|second| {
+                let args = rename_args(second, &id(LEFT, "alpha-renamed"), "Alpha");
+                second
+                    .rename_entity(args, Actor::Cli, None, None)
+                    .map(|_| ())
+            })
+            .join()
+            .unwrap();
+        assert!(renamed_back.is_ok(), "{context}: {renamed_back:?}");
+        engine.reload_if_stale(Some(RIGHT));
+        engine.reload_if_stale(Some(LEFT));
+        assert_eq!(
+            view(&engine),
+            view(&ws.engine()),
+            "{context}: reloaded the other way round, the view equals a fresh load's"
+        );
+    }
+}
+
+/// `left` holds `alpha`, which `right--gamma` links to. `left` is
+/// unregistered and registered again: the view equals a fresh load's,
+/// the incoming edge included, and deleting `alpha` is refused for the
+/// referrer. While `left` is away, `gamma`'s link points at a stub, as
+/// in a fresh load without `left`.
+#[test]
+fn a_mount_registered_again_keeps_its_incoming_edges() {
+    for pair in PAIRS {
+        let context = format!("{pair:?}");
+        let ws = Workspace::new(pair);
+        link_gamma_to_alpha(&ws);
+        let mut engine = ws.engine();
+        let mount = ws.mounts.iter().find(|m| m.mem == LEFT).unwrap().clone();
+
+        engine
+            .unregister_writable_mem(LEFT)
+            .expect("unregister")
+            .expect("left was mounted");
+        let alpha = engine
+            .get_entity(&id(LEFT, "alpha"))
+            .unwrap_or_else(|| panic!("{context}: no stub at the link's target"));
+        assert!(alpha.stub, "{context}: the link's target is a stub");
+        assert_eq!(
+            engine.store().incoming(&id(LEFT, "alpha")).len(),
+            1,
+            "{context}: the link still points there"
+        );
+
+        let backend = instantiate_full_backend(&mount).expect("backend instantiates");
+        engine
+            .register_writable_mem(mount, backend, memstead_base::mem::MemOrigin::ExplicitToml)
+            .expect("register again");
+        assert_eq!(
+            view(&engine),
+            view(&ws.engine()),
+            "{context}: registered again, the view equals a fresh load's"
+        );
+
+        let args = delete_args(&engine, &id(LEFT, "alpha"));
+        let deleted = report(
+            engine
+                .delete_entity(args, Actor::Cli, None, None)
+                .map(|o| o.warnings),
+        );
+        assert_eq!(
+            deleted,
+            Err("HAS_INCOMING_REFS".to_string()),
+            "{context}: the guard sees the referrer"
+        );
+        let (real, from) = links_to_alpha(&ws);
+        assert!(real, "{context}: alpha is still there");
+        assert_eq!(from.len(), 1, "{context}: and so is the reference");
+    }
+}

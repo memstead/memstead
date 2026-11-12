@@ -724,6 +724,37 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A long-lived engine sees what a fresh one sees.** Six places where a
+  server that had been running a while served a different view from an
+  engine loaded just then:
+  - A per-mem reload, a mem registered again and a mem unregistered now
+    settle the cross-mem state a fresh load derives: the edges other mems
+    point into the mem are rebuilt, and stubs nothing points at any more
+    are collected. Before, a rename seen through two per-mem reloads left
+    an edge-less stub at the old id, and a mem registered again lost its
+    incoming edges, so a delete of a linked entity was not refused
+    `HAS_INCOMING_REFS`.
+  - A write sent again right after a failed one whose discard kept
+    failing commits. The stray writes are discarded in the lock path,
+    before the write holds the backend, so a backend that cannot be
+    cleaned is replaced. Before, such a retry was refused
+    `MEM_VIEW_STALE` until some read without the lock came first.
+  - The MCP `memstead_update`, `memstead_rename`, `memstead_retype` and
+    `memstead_delete` tools no longer resolve a bare slug before the
+    verb's lock. The verb resolves it under its lock and reload, so an
+    entity another process just created is found (`SHORT_ID_RESOLVED`)
+    instead of refused `ENTITY_ID_MISSING_MEM`.
+  - `MOUNT_UNBACKED` with the `empty` reason is derived from the live
+    store when health or overview is read; only missing storage is
+    stored at mount time. A mem the server has since written into is no
+    longer reported empty.
+  - The folder walker skips a subdirectory holding `.memstead/config.json`,
+    so a nested mem's entities are not loaded a second time as the outer
+    mem's, under another id.
+  - MCP `memstead_mem_create` on a folder workspace refuses
+    `UNSUPPORTED_WORKSPACE_SHAPE` and writes nothing, as CLI `mem init`
+    does there.
+
 - **An entity rename with referrers in other mems loses no concurrent
   write, reaches a mem that was not loaded yet, and can be completed
   after a partial failure.** A rename locked and reloaded the renamed

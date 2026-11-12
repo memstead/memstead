@@ -338,8 +338,8 @@ pub fn compose_overview(
     // reading `Entities: 0` on the roster must not take it for an empty
     // mem when the branch behind it does not exist. The boot warning
     // rides the overview's warnings and the mem's own entry.
-    let unbacked_by_mem: BTreeMap<String, (String, String)> = engine
-        .load_warnings()
+    let unbacked = engine.unbacked_mount_warnings();
+    let unbacked_by_mem: BTreeMap<String, (String, String)> = unbacked
         .iter()
         .filter_map(|w| match w {
             crate::WarningHint::MountUnbacked {
@@ -350,13 +350,7 @@ pub fn compose_overview(
             _ => None,
         })
         .collect();
-    warnings.extend(
-        engine
-            .load_warnings()
-            .iter()
-            .filter(|w| w.code() == "MOUNT_UNBACKED")
-            .cloned(),
-    );
+    warnings.extend(unbacked);
     for key in args.include {
         if !ALLOWED_OVERVIEW_INCLUDE_KEYS.contains(&key.as_str()) {
             warnings.push(crate::WarningHint::UnknownIncludeKey {

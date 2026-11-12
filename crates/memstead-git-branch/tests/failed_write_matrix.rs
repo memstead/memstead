@@ -2299,6 +2299,72 @@ fn a_failed_discard_leaves_no_staged_write_for_the_next_operation() {
     }
 }
 
+/// The same two faults, and the call sent again at once, with no read
+/// between: the retry is the next operation, and the stray writes go
+/// before it plans. When the discard keeps failing, the retry still
+/// commits (its lock path replaces the backend before it holds it);
+/// it is not refused `MEM_VIEW_STALE` for a view nothing read stale.
+#[test]
+fn a_failed_discard_does_not_block_the_next_write() {
+    for kind in [Kind::Folder, Kind::GitBranch] {
+        let template = Workspace::template(kind);
+        let mut cells = 0;
+        for verb in all_verbs() {
+            if !verb.applies_to(kind) {
+                continue;
+            }
+            let control = control(&template, verb);
+            for method in [Method::WriteEntity, Method::CommitWithExpectedParent] {
+                if !control
+                    .log
+                    .iter()
+                    .any(|(m, landed)| *m == method && !landed)
+                {
+                    continue;
+                }
+                for discard_fails_for_good in [false, true] {
+                    let cell = format!(
+                        "{kind:?} {verb:?} {}#1 and the discard (for good: \
+                         {discard_fails_for_good}), retried with no read between",
+                        method.name()
+                    );
+                    let ws = template.copy();
+                    verb.prepare(&ws);
+                    let peer = verb.peer();
+                    let (mut engine, faults, _engine_backend) = ws.faulted_engine(peer);
+
+                    faults.arm(method, 1);
+                    faults.always_failing(Method::DiscardPending);
+                    assert!(
+                        run(verb, &mut engine).is_err(),
+                        "{cell}: the call succeeded"
+                    );
+
+                    faults.reset();
+                    if discard_fails_for_good {
+                        faults.always_failing(Method::DiscardPending);
+                    }
+                    run(verb, &mut engine)
+                        .unwrap_or_else(|e| panic!("{cell}: the retry failed: {e}"));
+                    faults.reset();
+                    assert_eq!(
+                        view(&engine, false),
+                        control.view,
+                        "{cell}: the retry's result differs from an undisturbed call"
+                    );
+                    assert_eq!(
+                        view(&engine, true),
+                        view(&ws.fresh_engine(peer), true),
+                        "{cell}: after the retry the engine's view differs from a fresh load"
+                    );
+                    cells += 1;
+                }
+            }
+        }
+        assert!(cells > 0);
+    }
+}
+
 /// A drift probe that fails is not "no drift". A sibling has written to
 /// the mem, this engine's probe before its own write fails, and the
 /// write carries the hash of the view from before the sibling's write:
