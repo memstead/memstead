@@ -27,6 +27,14 @@ pub fn instantiate_full_backend(
         MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
             memstead_base::instantiate_local_backend(mount)
         }
+        // A gitdir that is not there is a missing mem-repo, named as such
+        // with its restore, not a git error from the first read.
+        MountStorage::GitBranch { gitdir, .. } if !gitdir.is_dir() => {
+            Err(memstead_base::InstantiateError::MemRepoMissing {
+                mem: mount.mem.clone(),
+                gitdir: gitdir.display().to_string(),
+            })
+        }
         MountStorage::GitBranch { gitdir, branch } => Ok(Box::new(git_tree::GitTreeBackend::new(
             gitdir.clone(),
             memstead_base::branch_full_ref(branch),

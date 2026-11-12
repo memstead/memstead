@@ -537,6 +537,18 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
             },
         ),
         (
+            "MemQuarantined/MEM_REPO_MISSING".into(),
+            EngineError::MemQuarantined {
+                mem: s("specs"),
+                reason_code: s("MEM_REPO_MISSING"),
+                reason_message: crate::workspace_store::InstantiateError::MemRepoMissing {
+                    mem: s("specs"),
+                    gitdir: s("/ws/mem-repo/.git"),
+                }
+                .to_string(),
+            },
+        ),
+        (
             "ReadOnlyMount".into(),
             EngineError::ReadOnlyMount(s("archive")),
         ),

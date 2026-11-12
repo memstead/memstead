@@ -3412,6 +3412,14 @@ impl BootError {
             BootError::Instantiate(
                 crate::workspace_store::InstantiateError::GitBranchBackendUnavailable { mem },
             ) => serde_json::json!({ "mem": mem }),
+            BootError::Instantiate(crate::workspace_store::InstantiateError::MemRepoMissing {
+                mem,
+                gitdir,
+            }) => serde_json::json!({
+                "mem": mem,
+                "gitdir": gitdir,
+                "hint": { "recovery_command": "memstead mem-repo init --remote <url>" },
+            }),
             BootError::Engine(e) => e.details(),
         }
     }

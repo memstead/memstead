@@ -575,3 +575,73 @@ fn cli_health_command_calls_no_per_axis_composer() {
         "commands/health.rs must build its report through compose_health"
     );
 }
+
+/// A workspace whose `mem-repo/` directory is gone: its one git-branch
+/// mem is quarantined `MEM_REPO_MISSING`, and both `memstead health` and
+/// MCP `memstead_overview` name the restore (`mem-repo init --remote`,
+/// then `pull --all`), never the embedder's `cargo add` advice.
+#[test]
+fn a_missing_mem_repo_names_its_restore_on_the_cli_and_over_mcp() {
+    let ws = TempDir::new().unwrap();
+    let dir = ws.path().join("notes");
+    fs::create_dir_all(dir.join(".memstead")).unwrap();
+    fs::write(
+        dir.join(".memstead/config.json"),
+        r#"{ "schema": "default@1.0.0" }"#,
+    )
+    .unwrap();
+    memstead_git_branch::test_support::init_real_mem_repo_from_disk(ws.path(), &[(&dir, "notes")]);
+    fs::remove_dir_all(&dir).unwrap();
+    fs::remove_dir_all(ws.path().join("mem-repo")).unwrap();
+
+    let assert_names_the_restore = |surface: &str, text: &str| {
+        assert!(text.contains("MEM_REPO_MISSING"), "{surface}: {text}");
+        assert!(text.contains("mem-repo init --remote"), "{surface}: {text}");
+        assert!(text.contains("pull --all"), "{surface}: {text}");
+        assert!(!text.contains("cargo add"), "{surface}: {text}");
+    };
+
+    let out = memstead()
+        .current_dir(ws.path())
+        .args(["health"])
+        .output()
+        .unwrap();
+    let text =
+        String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    assert_names_the_restore("memstead health", &text);
+
+    let bin = assert_cmd::cargo::cargo_bin("memstead-mcp");
+    let mut child = StdCommand::new(bin)
+        .current_dir(ws.path())
+        .env_remove("MEMSTEAD_WORKSPACE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("memstead-mcp spawns");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut reader = BufReader::new(child.stdout.take().unwrap());
+    for line in [
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memstead_overview","arguments":{}}}"#,
+    ] {
+        stdin.write_all(line.as_bytes()).unwrap();
+        stdin.write_all(b"\n").unwrap();
+        stdin.flush().unwrap();
+    }
+    let reply = loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line).unwrap() == 0 {
+            panic!("mcp exited before answering");
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line)
+            && v["id"] == serde_json::json!(2)
+        {
+            break v;
+        }
+    };
+    let _ = child.kill();
+    let _ = child.wait();
+    assert_names_the_restore("memstead_overview", &reply.to_string());
+}

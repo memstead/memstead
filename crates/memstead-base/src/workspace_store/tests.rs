@@ -963,6 +963,7 @@ fn instantiate_local_backend_rejects_git_branch_with_typed_error() {
         Err(InstantiateError::GitBranchBackendUnavailable { mem }) => {
             assert_eq!(mem, "engine");
         }
+        Err(other) => panic!("expected GitBranchBackendUnavailable, got {other}"),
         Ok(_) => panic!("expected GitBranchBackendUnavailable, got Ok"),
     }
 }

@@ -1143,6 +1143,16 @@ pub enum InstantiateError {
          memstead_git_branch::storage::instantiate_full_backend)` before mounting"
     )]
     GitBranchBackendUnavailable { mem: String },
+    /// A git-branch mount whose mem-repo is not there: the gitdir the
+    /// workspace names does not exist (a workspace copied without its
+    /// `mem-repo/`, a clone of the outer repository, a deleted
+    /// directory). The mem is quarantined with this code, and the
+    /// message names the restore: the remote first, then `pull --all`.
+    #[error(
+        "mem {mem}: its mem-repo is missing ({gitdir} does not exist) — restore it from its remote: \
+         `memstead mem-repo init --remote <url>`, then `memstead pull --all`"
+    )]
+    MemRepoMissing { mem: String, gitdir: String },
 }
 
 impl InstantiateError {
@@ -1155,6 +1165,7 @@ impl InstantiateError {
     pub fn code(&self) -> &'static str {
         match self {
             InstantiateError::GitBranchBackendUnavailable { .. } => "UNSUPPORTED_WORKSPACE_SHAPE",
+            InstantiateError::MemRepoMissing { .. } => "MEM_REPO_MISSING",
         }
     }
 }

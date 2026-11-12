@@ -760,6 +760,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     `memstead mem-repo remote-add`. The transport decides by asking git
     whether the remote is configured, not by the wording of git's error.
     `status --remote`'s fail-open notice says which of the two it met.
+  - New quarantine code `MEM_REPO_MISSING`: a git-branch mem whose
+    mem-repo directory is not there (a workspace copied or cloned
+    without `mem-repo/`) is quarantined with it, and the message names
+    the restore, `memstead mem-repo init --remote <url>` and then
+    `memstead pull --all`. Before, it read `MEM_ERROR` with git's "does
+    not appear to be a git repository". An embedder that builds without
+    the git-branch crate still gets the `cargo add memstead-git-branch`
+    advice; the CLI and MCP never show it.
 
 - **A long-lived engine sees what a fresh one sees.** Six places where a
   server that had been running a while served a different view from an
