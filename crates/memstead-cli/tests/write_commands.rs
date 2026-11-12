@@ -2326,4 +2326,26 @@ fn an_unreachable_configured_remote_is_not_an_unknown_one() {
     let unknown = envelope("nosuch");
     assert_eq!(unknown["code"], "UNKNOWN_REMOTE", "{unknown}");
     assert_eq!(unknown["details"]["remote"], "nosuch", "{unknown}");
+
+    // A push to a configured remote over the network that does not answer
+    // refuses alike, as a fetch does.
+    let tcp = "https://127.0.0.1:1/remote.git";
+    memstead()
+        .current_dir(tmp.path())
+        .args(["mem-repo", "remote-add", "tcp", tcp])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "push", "cli-write", "--remote", "tcp"])
+        .output()
+        .unwrap();
+    let text =
+        String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    let pushed: Value = text
+        .lines()
+        .find_map(|l| serde_json::from_str(l).ok())
+        .unwrap_or_else(|| panic!("no JSON envelope: {text}"));
+    assert_eq!(pushed["code"], "REMOTE_UNREACHABLE", "{pushed}");
+    assert_eq!(pushed["details"]["url"], tcp, "{pushed}");
 }

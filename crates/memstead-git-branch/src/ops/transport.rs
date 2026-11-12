@@ -211,9 +211,7 @@ pub fn push_in_gitdir(
         {
             return format!("NON_FAST_FORWARD:{mem_owned}:{remote_owned}");
         }
-        if lower.contains("does not appear to be a git repository")
-            || lower.contains("could not read from remote repository")
-            || lower.contains("repository not found")
+        if remote_did_not_answer(&lower)
             || (lower.contains("fatal: '") && lower.contains("does not exist"))
         {
             return remote_marker(gitdir, &remote_owned, stderr);
@@ -520,19 +518,32 @@ fn remote_marker(gitdir: &Path, remote: &str, stderr: &str) -> String {
     }
 }
 
+/// Whether git's (lowercased) message says the remote did not answer:
+/// no repository at its URL, a host that does not resolve, a connection
+/// refused or timed out. One list for every transport verb, so a push and
+/// a fetch to the same unreachable remote refuse alike.
+fn remote_did_not_answer(lower: &str) -> bool {
+    [
+        "does not appear to be a git repository",
+        "could not read from remote repository",
+        "repository not found",
+        "name or service not known",
+        "could not resolve host",
+        "failed to connect",
+        "couldn't connect to server",
+        "connection refused",
+        "connection timed out",
+        "unable to access",
+    ]
+    .iter()
+    .any(|p| lower.contains(p))
+}
+
 /// Classify a `git fetch` stderr line into the most specific marker
 /// we can recover. Used by both fetch and pull's underlying fetch.
 fn classify_remote_failure(gitdir: &Path, remote: &str, stderr: &str) -> String {
     let normalized = stderr.to_lowercase();
-    if normalized.contains("does not appear to be a git repository")
-        || normalized.contains("could not read from remote repository")
-        || normalized.contains("repository not found")
-        || normalized.contains("name or service not known")
-        || normalized.contains("could not resolve host")
-        || normalized.contains("failed to connect")
-        || normalized.contains("connection refused")
-        || normalized.contains("connection timed out")
-        || normalized.contains("unable to access")
+    if remote_did_not_answer(&normalized)
         || (normalized.contains("fatal:") && normalized.contains("not found"))
     {
         return remote_marker(gitdir, remote, stderr);
