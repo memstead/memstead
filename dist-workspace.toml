@@ -50,6 +50,10 @@ post-announce-jobs = ["./release-verify"]
 # Reading the run's jobs needs `actions: read`, which the workflow's
 # top-level `contents: write` grant does not include; the checkout keeps
 # `contents: read`.
+# The arm64 macOS build runs on macos-15: GitHub stopped serving the
+# macos-14 image this dist version defaults to (2026-11-12, the first
+# v0.26.0 run was cancelled with "configuration not supported").
+github-custom-runners = { aarch64-apple-darwin = "macos-15" }
 github-custom-job-permissions = { release-verify = { actions = "read", contents = "read" } }
 # Steps inserted into each per-platform build job: install the Rust version
 # rust-toolchain.toml pins, with the job's targets, so the release builds
