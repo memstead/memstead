@@ -45,8 +45,8 @@ use crate::vcs::CommitContext;
 
 /// Source of the archive bytes. Either an on-disk `.mem` file or an
 /// in-memory buffer. The in-memory variant powers the byte-based
-/// hydrate path on `Engine` (snapshot delivery to the bridge / WASM
-/// engine) without forcing the caller to materialise a temp file.
+/// hydrate path on `Engine` (the WASM engine's snapshot load) without
+/// forcing the caller to materialise a temp file.
 enum ArchiveSource {
     Path(PathBuf),
     Bytes(Vec<u8>),

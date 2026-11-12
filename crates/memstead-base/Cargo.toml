@@ -50,7 +50,7 @@ tokio = { version = "1", default-features = false, features = ["sync"], optional
 # non-wasm targets keeps `memstead-base` portable; the `search_index`
 # module and `Engine::search` are gated to match so wasm consumers
 # see a typed `EngineError::SearchUnavailable` refuse instead of a
-# compile error. WASM search lives behind the bridge (see plan 08).
+# compile error. The wasm build serves no search.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tantivy.workspace = true
 

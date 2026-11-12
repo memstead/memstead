@@ -60,7 +60,7 @@ semver.workspace = true
 tempfile.workspace = true
 
 # Optimise the wasm artifact for size. Tantivy-free engine + LTO
-# brings the .wasm under the bundle-size budget documented in plan 07.
+# keeps the .wasm small enough to ship in a web page.
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-Os"]
 
