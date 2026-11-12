@@ -328,10 +328,10 @@ fn a_batch_written_entitys_archive_provenance_is_its_own() {
             anchors_unset: Vec::new(),
         }
     };
-    // Two entities created singly and without a note, so the batch
-    // update's records are their only noted ones: the archive keeps the
-    // newest noted record per entity, and commit times have one-second
-    // resolution, so a create and an update in one second would tie.
+    // Two entities created singly and without a note, and alpha, which the
+    // batch create noted: alpha's update note replaces its creation note
+    // even within the same second (commit times have one-second
+    // resolution; of two notes in one second the later is the newer).
     for title in ["Gamma", "Delta"] {
         engine
             .create_entity(create(title), Actor::Cli, None, None)
@@ -345,6 +345,10 @@ fn a_batch_written_entitys_archive_provenance_is_its_own() {
         (
             update(&engine, "delta"),
             Some("delta was revised".to_string()),
+        ),
+        (
+            update(&engine, "alpha"),
+            Some("alpha was revised".to_string()),
         ),
     ];
     engine
@@ -364,6 +368,9 @@ fn a_batch_written_entitys_archive_provenance_is_its_own() {
     let gamma = find_record(&after_update, "gamma");
     assert_eq!(gamma["rationale"], "gamma was revised", "{gamma}");
     assert_eq!(gamma["kind"], "update", "{gamma}");
+    let alpha = find_record(&after_update, "alpha");
+    assert_eq!(alpha["rationale"], "alpha was revised", "{alpha}");
+    assert_eq!(alpha["kind"], "update", "{alpha}");
     let delta = find_record(&after_update, "delta");
     assert_eq!(delta["rationale"], "delta was revised", "{delta}");
     assert_eq!(delta["kind"], "update", "{delta}");

@@ -730,7 +730,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     `<id>: ` line, with the batch's kind (`batch-create` reads `create`,
     `batch-update` `update`, `batch-relate` `relate`). Before, the
     archive held one record keyed by the commit subject's `(2 entities)`
-    and an empty record for each entity the batch wrote.
+    and an empty record for each entity the batch wrote. Of two notes on one
+    entity in the same second (commit times resolve to seconds), the
+    later one is the archive's rationale; before, the earlier stayed.
   - A red `projection verify` names the entity behind each `drifted` and
     `wrong` finding: the report carries `drifted_anchors` (class, entity,
     artifact) and renders an always-ship `Drifted anchors` section, the

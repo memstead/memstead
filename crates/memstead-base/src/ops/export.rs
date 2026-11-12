@@ -102,8 +102,11 @@ pub fn build_redacted_archive_provenance(
             actor: Some(r.actor.as_trailer().to_string()),
         };
         match by_path.get(&path) {
-            // Keep the existing entry when it is at least as recent.
-            Some((ts, _)) if *ts >= r.timestamp => {}
+            // Keep the existing entry only when it is strictly more recent:
+            // the records arrive oldest first and commit times have
+            // one-second resolution, so of two notes in the same second the
+            // later one is the newer and replaces the earlier.
+            Some((ts, _)) if *ts > r.timestamp => {}
             _ => {
                 by_path.insert(path, (r.timestamp, (candidate, counts)));
             }
