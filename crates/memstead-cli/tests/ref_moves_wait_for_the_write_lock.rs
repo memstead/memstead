@@ -194,6 +194,22 @@ fn cycle_workspace() -> tempfile::TempDir {
             "body=see [[a--x]] and [[a--new]]",
         ],
     );
+    // A first-mem entity that links into the second mem: a link to it
+    // closes the cycle through `b` without naming `b`'s entity.
+    run(
+        ws,
+        &[
+            "create",
+            "--mem",
+            "a",
+            "--type",
+            "thing",
+            "--title",
+            "Mid",
+            "--section",
+            "body=on to [[b--back]]",
+        ],
+    );
     tmp
 }
 
@@ -251,37 +267,54 @@ fn a_body_link_closing_a_cycle_across_two_mems_waits_and_refuses() {
         r#"{"updates":[{"id":"a--x","auto_hash":true,"sections":{"body":"back to [[b--back]]"}}]}"#,
     )
     .unwrap();
-    let calls: Vec<Vec<String>> = vec![
-        vec![
-            "create",
-            "--mem",
-            "a",
-            "--type",
-            "thing",
-            "--title",
-            "New",
-            "--section",
-            "body=back to [[b--back]]",
-        ],
-        vec!["batch-create", "--from", batch_create.to_str().unwrap()],
-        vec![
-            "update",
-            "a--x",
-            "--section",
-            "body=back to [[b--back]]",
-            "--auto-hash",
-        ],
-        vec!["batch-update", "--from", batch_update.to_str().unwrap()],
-    ]
-    .into_iter()
-    .map(|v| v.into_iter().map(String::from).collect())
-    .collect();
+    // The same four calls with a link into `b` directly, and with a link
+    // to `a--mid`, which links into `b`: the case the lock decision did
+    // not see before body links entered it.
+    let _ = (&batch_create, &batch_update);
+    let mut calls: Vec<Vec<String>> = Vec::new();
+    for (n, link) in ["[[b--back]]", "[[a--mid]]"].iter().enumerate() {
+        let bc = ws.join(format!("bc-{n}.json"));
+        std::fs::write(
+            &bc,
+            format!(
+                r#"{{"creates":[{{"mem":"a","entity_type":"thing","title":"New","sections":{{"body":"back to {link}"}}}}]}}"#
+            ),
+        )
+        .unwrap();
+        let bu = ws.join(format!("bu-{n}.json"));
+        std::fs::write(
+            &bu,
+            format!(
+                r#"{{"updates":[{{"id":"a--x","auto_hash":true,"sections":{{"body":"back to {link}"}}}}]}}"#
+            ),
+        )
+        .unwrap();
+        let body = format!("body=back to {link}");
+        for call in [
+            vec![
+                "create",
+                "--mem",
+                "a",
+                "--type",
+                "thing",
+                "--title",
+                "New",
+                "--section",
+                &body,
+            ],
+            vec!["batch-create", "--from", bc.to_str().unwrap()],
+            vec!["update", "a--x", "--section", &body, "--auto-hash"],
+            vec!["batch-update", "--from", bu.to_str().unwrap()],
+        ] {
+            calls.push(call.into_iter().map(String::from).collect());
+        }
+    }
     for call in &calls {
         let args: Vec<&str> = call.iter().map(String::as_str).collect();
         let (waited, out) = refused_while_held(ws, &args);
         assert!(
             waited >= Duration::from_millis(1000),
-            "{args:?} did not wait ({waited:?})"
+            "{args:?} did not wait ({waited:?}): {out}"
         );
         assert!(out.contains("RELATIONSHIP_CYCLE"), "{args:?}: {out}");
     }
