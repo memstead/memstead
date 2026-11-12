@@ -16,6 +16,22 @@ use memstead_schema::TypeDefinition;
 use super::Entity;
 use super::generator::generate_markdown;
 
+/// The refusal of an entity whose stored body ends inside an unterminated
+/// fence, as the message an export reports; `None` when every section's
+/// fences close.
+pub fn unterminated_fence(entity: &Entity) -> Option<String> {
+    entity.sections.iter().find_map(|(k, v)| {
+        crate::markdown::closing_fence_if_unterminated(v.trim()).map(|fence| {
+            WriteError::UnterminatedFence {
+                id: entity.id.to_string(),
+                section: k.clone(),
+                fence,
+            }
+            .to_string()
+        })
+    })
+}
+
 /// Write an entity to its file path under the mem directory.
 /// Creates parent directories as needed.
 /// Returns the absolute path where the file was written.

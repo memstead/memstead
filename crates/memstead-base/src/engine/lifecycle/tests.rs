@@ -960,7 +960,7 @@ fn export_markdown_writes_unchanged_files_zero_writes() {
     // generated content (engine wrote it via create_entity), so
     // export reports `unchanged: 1, written: 0`.
     let tmp = TempDir::new().unwrap();
-    let (engine, _seeded) = engine_with_seed(&tmp, "Sample");
+    let (mut engine, _seeded) = engine_with_seed(&tmp, "Sample");
     let result = engine.export_markdown(None, None).unwrap();
     assert_eq!(
         result.written, 0,
@@ -983,7 +983,7 @@ fn export_markdown_skips_non_folder_mounts() {
     // writes / zero unchanged for the rest.
     let tmp = TempDir::new().unwrap();
     let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"# Title: Foo\n")]);
-    let engine = Engine::from_mounts(vec![(
+    let mut engine = Engine::from_mounts(vec![(
         archive_mount("ext", archive_path.clone()),
         Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
     )])
@@ -1009,7 +1009,7 @@ fn export_markdown_per_mem_refuses_on_incompatible_backend() {
     // naming the active backend and the supported-backend list.
     let tmp = TempDir::new().unwrap();
     let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"# Title: Foo\n")]);
-    let engine = Engine::from_mounts(vec![(
+    let mut engine = Engine::from_mounts(vec![(
         archive_mount("ext", archive_path.clone()),
         Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
     )])
@@ -2909,4 +2909,81 @@ fn schema_pin_bump_keeps_a_field_a_sibling_wrote_in_between() {
         serde_json::from_slice(&backend.inner.read_mem_config().unwrap().unwrap()).unwrap();
     assert_eq!(stored["schema"], "default@1.1.0");
     assert_eq!(stored["reviewMark"], "sibling");
+}
+
+/// Export writes files into the mem, so it reports every entity it could
+/// not write: a target file that cannot be opened for writing is named in
+/// `refused_entities` with its cause, and every other entity is written.
+#[test]
+fn export_markdown_names_an_unwritable_target_and_writes_the_rest() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let mut engine = crate::engine::test_helpers::build_demo_engine(&tmp);
+    let files: Vec<(String, String)> = engine
+        .store
+        .all_entities()
+        .filter(|e| !e.stub && !e.file_path.is_empty())
+        .map(|e| (e.id.to_string(), e.file_path.clone()))
+        .collect();
+    assert!(files.len() >= 2, "{files:?}");
+    for (_, f) in &files {
+        std::fs::write(tmp.path().join(f), "drifted\n").unwrap();
+    }
+    let (locked_id, locked_file) = &files[0];
+    let locked_path = tmp.path().join(locked_file);
+    std::fs::set_permissions(&locked_path, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let result = engine.export_markdown(None, None);
+    std::fs::set_permissions(&locked_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let result = result.expect("the export reports per entity");
+    assert_eq!(
+        result.refused_entities.len(),
+        1,
+        "{:?}",
+        result.refused_entities
+    );
+    assert_eq!(&result.refused_entities[0].id, locked_id);
+    assert_eq!(
+        result.refused_entities[0].reason,
+        "EXPORT_TARGET_NOT_WRITABLE"
+    );
+    assert_eq!(result.written, files.len() - 1);
+    for (id, f) in &files[1..] {
+        let text = std::fs::read_to_string(tmp.path().join(f)).unwrap();
+        assert_ne!(text, "drifted\n", "{id} was written");
+    }
+}
+
+/// Export holds the mem's write lock: with another thread holding it,
+/// the export waits.
+#[test]
+fn export_markdown_waits_for_the_mems_write_lock() {
+    let tmp = TempDir::new().unwrap();
+    let mut engine = crate::engine::test_helpers::build_demo_engine(&tmp);
+    let lock = std::fs::canonicalize(tmp.path())
+        .unwrap()
+        .join(".memstead/locks/write.lock");
+    std::fs::create_dir_all(lock.parent().unwrap()).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock)
+            .unwrap();
+        f.lock().unwrap();
+        tx.send(()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        f.unlock().unwrap();
+    });
+    rx.recv().unwrap();
+    let started = std::time::Instant::now();
+    engine.export_markdown(None, None).unwrap();
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    assert!(
+        waited >= std::time::Duration::from_millis(1000),
+        "the export did not wait for the lock ({waited:?})"
+    );
 }

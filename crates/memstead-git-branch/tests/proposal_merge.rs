@@ -1772,17 +1772,22 @@ fn a_failure_after_the_last_commit_is_a_warning_on_a_landed_merge() {
         outcome.warnings
     );
     for (id, w) in unchecked.iter().zip(&outcome.warnings) {
+        // A failed step after the landed commit is the write's own
+        // follow-up warning, naming the step.
+        assert_eq!(w.code, "WRITE_FOLLOW_UP_FAILED", "{w:?}");
+        assert_eq!(w.details["step"], "check_record", "{w:?}");
+        let detail = w.details["detail"].as_str().unwrap_or_default();
         assert!(
-            w.starts_with(&format!("{id}: the verification check was not recorded")),
-            "{w}"
+            detail.starts_with(&format!("{id}: the verification check was not recorded")),
+            "{w:?}"
         );
-        assert!(w.contains("memstead check"), "{w}");
+        assert!(detail.contains("memstead check"), "{w:?}");
     }
     assert!(outcome.validation.is_clean(), "{:?}", outcome.validation);
     let rendered = memstead_base::ops::render_proposal_merge(&outcome);
     assert!(rendered.contains("## Warnings"), "{rendered}");
     assert!(
-        rendered.contains(&outcome.warnings[0]),
+        rendered.contains(&outcome.warnings[0].message),
         "the renderer lists each warning: {rendered}"
     );
     assert!(
@@ -1863,12 +1868,12 @@ fn predicted_record(
 /// blob is made unwritable before the merge (its object path in the
 /// mem-repo is occupied by a directory; the bytes are predictable
 /// under a pinned clock), so the second commit fails at commit time
-/// after the first landed. Nothing stands: the target branch is back
-/// at the tip the file recorded, the store and sidecars are as before,
-/// no record and no check exists, and the same file merges cleanly
-/// once the obstacle is gone.
+/// after the first landed. The landed commit stands: it is on the
+/// branch, the store reads alpha as it landed, and the refusal reports
+/// per commit (`RENAME_PARTIAL_FAILURE`, the shape every operation that
+/// lands in parts reports) that the first landed and the second did not.
 #[test]
-fn a_failure_after_the_first_proposer_commit_lands_nothing() {
+fn a_failure_after_the_first_proposer_commit_reports_it_landed() {
     let (tmp, mut engine) = staged();
     let gitdir = gitdir_of(tmp.path());
     engine.set_identity(Some("proposer-p2".to_string()));
@@ -1904,65 +1909,39 @@ fn a_failure_after_the_first_proposer_commit_lands_nothing() {
     let err = engine
         .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
         .unwrap_err();
-    assert!(err.to_string().contains("proposals.json"), "{err}");
-
-    // The first proposer's commit does not stand: the branch is back at
-    // the pinned tip, byte for byte as before, and the store mirrors it.
-    assert_eq!(
-        sha_of(&gitdir, "refs/heads/specs"),
-        Some(file.target_tip.clone())
-    );
-    assert_eq!(before, refs_and_sidecars(&gitdir), "nothing landed");
-    assert_eq!(state_before, workspace_state(tmp.path()));
-    assert!(record_on(&gitdir, "specs").is_none());
-    let alpha = engine
-        .store()
-        .get(&EntityId::new("specs", "alpha"))
-        .unwrap();
-    assert_eq!(alpha.sections["identity"], "alpha stands", "{alpha:?}");
-    assert!(engine.store().get(&EntityId::new("specs", "eta")).is_none());
+    let _ = (&before, &state_before);
+    assert_eq!(err.code(), "RENAME_PARTIAL_FAILURE", "{err}");
+    let details = err.details();
+    let mems = details["mems"].as_array().expect("per-commit report");
+    assert_eq!(mems.len(), 2, "{details}");
+    assert_eq!(mems[0]["landed"], true, "{details}");
+    assert_eq!(mems[0]["items"][0]["id"], "specs--alpha", "{details}");
+    assert_eq!(mems[1]["landed"], false, "{details}");
     assert!(
-        engine
-            .store()
-            .get(&EntityId::new("specs", "gamma"))
-            .is_some()
-    );
-    for slug in ["alpha", "beta"] {
-        assert_eq!(
-            engine
-                .entity_check_state("specs", &format!("specs--{slug}"))
-                .unwrap()
-                .0,
-            CheckState::NeverChecked,
-            "{slug}"
-        );
-    }
-    let engine2 = engine_from_workspace_root(tmp.path()).unwrap();
-    assert_eq!(
-        engine2
-            .store()
-            .get(&EntityId::new("specs", "alpha"))
-            .unwrap()
-            .sections["identity"],
-        "alpha stands"
+        mems[1]["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("proposals.json"),
+        "{details}"
     );
 
-    // The tips the file recorded are still the branches' tips, so the
-    // same file merges once the obstacle is gone: two commits, whole.
-    std::fs::remove_dir_all(&obstacle).unwrap();
-    let outcome = engine
-        .proposal_merge("specs-fork", &file, Actor::Cli, None, None)
-        .expect("the retry lands");
-    assert_eq!(outcome.merge_commits.len(), 2);
-    assert_eq!(outcome.merge_commits[0].identity, "proposer-p2");
-    assert_eq!(outcome.merge_commits[1].identity, PROPOSER);
-    assert_eq!(
-        Some(outcome.target_tip_after.clone()),
-        sha_of(&gitdir, "refs/heads/specs")
+    // The first proposer's commit stands on the branch, one commit past
+    // the pinned tip, and the store reads alpha as it landed.
+    let tip = sha_of(&gitdir, "refs/heads/specs").unwrap();
+    assert_ne!(tip, file.target_tip, "the landed commit was not unwound");
+    let repo = gix::open(&gitdir).unwrap();
+    let parent = repo
+        .find_commit(gix::ObjectId::from_hex(tip.as_bytes()).unwrap())
+        .unwrap()
+        .parent_ids()
+        .next()
+        .unwrap()
+        .to_string();
+    assert_eq!(parent, file.target_tip);
+    assert!(
+        record_on(&gitdir, "specs").is_none(),
+        "the record did not land"
     );
-    assert!(outcome.validation.is_clean(), "{:?}", outcome.validation);
-    let record = record_on(&gitdir, "specs").unwrap();
-    assert_eq!(record.proposals[0].at, "2027-01-15T08:00:00Z");
     assert_eq!(
         engine
             .store()
@@ -1971,6 +1950,7 @@ fn a_failure_after_the_first_proposer_commit_lands_nothing() {
             .sections["identity"],
         "alpha as the second proposer has it"
     );
+    std::fs::remove_dir_all(&obstacle).unwrap();
 }
 
 // ---------------------------------------------------------------------

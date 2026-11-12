@@ -31,6 +31,10 @@ pub struct ExportResult {
     /// Empty on the happy path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refused_entities: Vec<RefusedEntity>,
+    /// A step after an export's landed commit that failed
+    /// (`WRITE_FOLLOW_UP_FAILED`): the files are written all the same.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<WarningHint>,
 }
 
 /// One entity `export_markdown` declined, with the condition that stopped it.

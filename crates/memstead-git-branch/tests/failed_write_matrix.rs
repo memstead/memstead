@@ -734,9 +734,34 @@ enum Verb {
     BatchCreate,
     BatchUpdate,
     BatchRelate,
+    /// `export markdown` of a folder mem whose one file is formatted by
+    /// hand: the export rewrites it in the engine's form, through the
+    /// commit call.
+    ExportMarkdown,
 }
 
 impl Verb {
+    /// Whether the verb runs on a mem of this kind: an export rewrites a
+    /// folder mem's files and refuses a git-branch mem.
+    fn applies_to(self, kind: Kind) -> bool {
+        match self {
+            Verb::ExportMarkdown => kind == Kind::Folder,
+            _ => true,
+        }
+    }
+
+    /// Storage the verb needs beyond the shared seed, written into a
+    /// cell's own copy before its engine boots.
+    fn prepare(self, ws: &Workspace) {
+        if self == Verb::ExportMarkdown {
+            let dir = ws.folder.as_ref().expect("an export runs on a folder mem");
+            let path = dir.join("alpha.md");
+            let text = std::fs::read_to_string(&path).unwrap();
+            // The same entity with two blank lines more at the end: it
+            // loads as it was, and the export writes it in its own form.
+            std::fs::write(&path, format!("{text}\n\n")).unwrap();
+        }
+    }
     /// Whether and how the verb wants the second mem mounted.
     fn peer(self) -> Peer {
         match self {
@@ -861,6 +886,10 @@ const VERBS: &[(&str, &[Verb])] = &[
     (
         "engine/mutation/create/batch.rs::batch_create",
         &[Verb::BatchCreate],
+    ),
+    (
+        "engine/lifecycle/export.rs::export_markdown",
+        &[Verb::ExportMarkdown],
     ),
     (
         "engine/mutation/update/mod.rs::update_entity",
@@ -1172,11 +1201,6 @@ const NOT_VERBS: &[(&str, &str)] = &[
     (
         "engine/write_lock.rs::lock_workspace_for_mem_operation",
         "the lock of an operation on one mem as a whole",
-    ),
-    (
-        "engine/lifecycle/export.rs::export_markdown",
-        "writes every entity of a folder mem back to its files from the store, a whole-mem \
-         export; it writes the files itself and not through the backend",
     ),
     (
         "engine/lifecycle/schema.rs::install_schema",
@@ -1744,6 +1768,17 @@ fn run_verb(verb: Verb, engine: &mut Engine) -> Result<Result<Vec<String>, Strin
                 engine.batch_update(updates, actor, None, false)?,
             ));
         }
+        Verb::ExportMarkdown => {
+            let result = engine.export_markdown(Some(MEM), None)?;
+            if let Some(refused) = result.refused_entities.first() {
+                return Ok(Err(refused.reason.clone()));
+            }
+            assert!(
+                result.written > 0,
+                "the export rewrote the hand-formatted file"
+            );
+            result.warnings
+        }
         Verb::BatchRelate => {
             let relates = vec![
                 (relate_args("gamma", "alpha"), Some("first".to_string())),
@@ -1856,6 +1891,7 @@ struct Control {
 
 fn control(template: &Workspace, verb: Verb) -> Control {
     let (kind, ws) = (template.kind, template.copy());
+    verb.prepare(&ws);
     let peer = verb.peer();
     let (mut engine, faults, _inner) = ws.faulted_engine(peer);
     faults.reset();
@@ -1896,6 +1932,7 @@ fn run_cell(template: &Workspace, verb: Verb, method: Method, nth: usize, contro
     let kind = template.kind;
     let cell = format!("{kind:?} {verb:?} {}#{nth}", method.name());
     let ws = template.copy();
+    verb.prepare(&ws);
     let peer = verb.peer();
     let (mut engine, faults, engine_backend) = ws.faulted_engine(peer);
     let before = ws.storage_snapshot();
@@ -1976,6 +2013,9 @@ fn run_matrix(kind: Kind) {
     let template = Workspace::template(kind);
     let mut cells = 0usize;
     for verb in all_verbs() {
+        if !verb.applies_to(kind) {
+            continue;
+        }
         let control = control(&template, verb);
         if std::env::var_os("MATRIX_TRACE").is_some() {
             let calls: Vec<String> = control
@@ -2052,6 +2092,9 @@ fn a_failed_discard_leaves_no_staged_write_for_the_next_operation() {
         let template = Workspace::template(kind);
         let mut cells = 0;
         for verb in all_verbs() {
+            if !verb.applies_to(kind) {
+                continue;
+            }
             let control = control(&template, verb);
             let staging_calls: Vec<(Method, usize)> = [
                 Method::WriteEntity,
@@ -2076,6 +2119,7 @@ fn a_failed_discard_leaves_no_staged_write_for_the_next_operation() {
                         method.name()
                     );
                     let ws = template.copy();
+                    verb.prepare(&ws);
                     let peer = verb.peer();
                     let (mut engine, faults, engine_backend) = ws.faulted_engine(peer);
                     let before = ws.storage_snapshot();

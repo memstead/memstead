@@ -52,9 +52,9 @@ use crate::entity::store_builder::push_entities_into_store;
 use crate::entity::{Entity, EntityId};
 use crate::ops::proposal::{
     DISPOSITION_ADOPT, DISPOSITION_ADOPT_WITH_CHANGES, DISPOSITION_REJECT, DISPOSITION_VOCABULARY,
-    DispositionBody, MergeCommit, MergeValidation, MergedEntity, PROPOSAL_RECORD_PATH,
-    ProposalBrief, ProposalChange, ProposalEntry, ProposalMergeOutcome, ProposalRecord,
-    ProposalRecordEntry, RecordedDisposition,
+    DispositionBody, MergeCommit, MergeValidation, MergeWarning, MergedEntity,
+    PROPOSAL_RECORD_PATH, ProposalBrief, ProposalChange, ProposalEntry, ProposalMergeOutcome,
+    ProposalRecord, ProposalRecordEntry, RecordedDisposition,
 };
 use crate::vcs::{Actor, ClientId, CommitContext, ProposalTrailers, Role};
 use crate::workspace::{MountCapability, MountStorage};
@@ -949,6 +949,9 @@ impl Engine {
 
         // ---- Land: one commit per proposer identity, in slug order ----
         let mut merge_commits: Vec<MergeCommit> = Vec::new();
+        // Follow-up steps of a landed commit that failed; reported, never
+        // turned into a failed merge.
+        let mut follow_ups: Vec<crate::ops::WarningHint> = Vec::new();
         let mut parent = brief.target_tip.clone();
         let mut landed_any = false;
         let mut created_ids: HashSet<EntityId> = HashSet::new();
@@ -989,11 +992,24 @@ impl Engine {
             })();
             let (ids, created) = match staged {
                 Ok(v) => v,
+                Err(e) if landed_any => {
+                    let failed = group
+                        .iter()
+                        .flat_map(|a| a.landings.iter().map(|l| l.id().to_string()))
+                        .collect();
+                    return Err(self.merge_partial_failure(
+                        &target,
+                        &store_snapshot,
+                        &merge_commits,
+                        failed,
+                        e,
+                    ));
+                }
                 Err(e) => {
                     return Err(self.unwind_merge(
                         &target,
                         &brief.target_tip,
-                        landed_any.then_some(parent.as_str()),
+                        None,
                         &store_snapshot,
                         e,
                     ));
@@ -1042,32 +1058,32 @@ impl Engine {
                     .collect(),
             });
             let subject = format!("memstead: proposal-merge {}", brief.proposal_id);
-            let sha = match self.mounts[target_mount]
-                .backend
-                .commit_with_expected_parent(&subject, &ctx, Some(&parent))
-            {
-                Ok(sha) => sha,
-                Err(e) => {
-                    let e = match e {
-                        crate::backend::BackendError::ParentMismatch { expected, actual } => {
-                            EngineError::ProposalStale {
-                                fork: fork.to_string(),
-                                side: "target".to_string(),
-                                recorded: expected,
-                                current: actual,
-                            }
+            let sha =
+                match self.commit_staged_pinned(target_mount, &subject, &ctx, &[], Some(&parent)) {
+                    Ok(landed) => {
+                        follow_ups.extend(landed.warnings);
+                        landed.write_id
+                    }
+                    Err(e) => {
+                        let e = proposal_stale_or(e, fork);
+                        if landed_any {
+                            return Err(self.merge_partial_failure(
+                                &target,
+                                &store_snapshot,
+                                &merge_commits,
+                                ids,
+                                e,
+                            ));
                         }
-                        other => other.into(),
-                    };
-                    return Err(self.unwind_merge(
-                        &target,
-                        &brief.target_tip,
-                        landed_any.then_some(parent.as_str()),
-                        &store_snapshot,
-                        e,
-                    ));
-                }
-            };
+                        return Err(self.unwind_merge(
+                            &target,
+                            &brief.target_tip,
+                            None,
+                            &store_snapshot,
+                            e,
+                        ));
+                    }
+                };
             landed_any = true;
             self.record_self_write(target_mount, &sha);
             for a in &group {
@@ -1132,32 +1148,23 @@ impl Engine {
                 renamed: Vec::new(),
             });
             let subject = format!("memstead: proposal-merge {}", brief.proposal_id);
-            let sha = match self.mounts[target_mount]
-                .backend
-                .commit_with_expected_parent(&subject, &ctx, Some(&parent))
-            {
-                Ok(sha) => sha,
-                Err(e) => {
-                    let e = match e {
-                        crate::backend::BackendError::ParentMismatch { expected, actual } => {
-                            EngineError::ProposalStale {
-                                fork: fork.to_string(),
-                                side: "target".to_string(),
-                                recorded: expected,
-                                current: actual,
-                            }
-                        }
-                        other => other.into(),
-                    };
-                    return Err(self.unwind_merge(
-                        &target,
-                        &brief.target_tip,
-                        None,
-                        &store_snapshot,
-                        e,
-                    ));
-                }
-            };
+            let sha =
+                match self.commit_staged_pinned(target_mount, &subject, &ctx, &[], Some(&parent)) {
+                    Ok(landed) => {
+                        follow_ups.extend(landed.warnings);
+                        landed.write_id
+                    }
+                    Err(e) => {
+                        let e = proposal_stale_or(e, fork);
+                        return Err(self.unwind_merge(
+                            &target,
+                            &brief.target_tip,
+                            None,
+                            &store_snapshot,
+                            e,
+                        ));
+                    }
+                };
             self.record_self_write(target_mount, &sha);
             parent = sha.clone();
             merge_commits.push(MergeCommit {
@@ -1208,7 +1215,10 @@ impl Engine {
         // ---- The owner's final bodies, one commit under the merger ----
         // From the last commit on, a failure is bookkeeping: it goes here
         // and the merge is reported as landed (see the module doc).
-        let mut warnings: Vec<String> = Vec::new();
+        let mut warnings: Vec<MergeWarning> = follow_ups
+            .drain(..)
+            .map(|h| MergeWarning::from_hint(&h))
+            .collect();
         let mut amend_commit: Option<MergeCommit> = None;
         if !amends.is_empty() {
             let staged: Result<(), EngineError> = (|| {
@@ -1217,16 +1227,16 @@ impl Engine {
                 }
                 Ok(())
             })();
+            let ids: Vec<String> = amends.iter().map(|p| p.id.to_string()).collect();
             if let Err(e) = staged {
-                return Err(self.unwind_merge(
+                return Err(self.merge_partial_failure(
                     &target,
-                    &brief.target_tip,
-                    Some(&parent),
                     &store_snapshot,
+                    &merge_commits,
+                    ids,
                     e,
                 ));
             }
-            let ids: Vec<String> = amends.iter().map(|p| p.id.to_string()).collect();
             let mut ctx = self.commit_context(
                 Some(MERGE_TOOL),
                 actor,
@@ -1243,29 +1253,34 @@ impl Engine {
                 renamed: Vec::new(),
             });
             let subject = format!("memstead: proposal-amend {}", brief.proposal_id);
-            let sha = match self.mounts[target_mount]
-                .backend
-                .commit_with_expected_parent(&subject, &ctx, Some(&parent))
-            {
-                Ok(sha) => sha,
-                Err(e) => {
-                    return Err(self.unwind_merge(
-                        &target,
-                        &brief.target_tip,
-                        Some(&parent),
-                        &store_snapshot,
-                        e.into(),
-                    ));
-                }
-            };
+            let sha =
+                match self.commit_staged_pinned(target_mount, &subject, &ctx, &[], Some(&parent)) {
+                    Ok(landed) => {
+                        follow_ups.extend(landed.warnings);
+                        landed.write_id
+                    }
+                    Err(e) => {
+                        return Err(self.merge_partial_failure(
+                            &target,
+                            &store_snapshot,
+                            &merge_commits,
+                            ids,
+                            proposal_stale_or(e, fork),
+                        ));
+                    }
+                };
             self.record_self_write(target_mount, &sha);
             for p in &amends {
                 if let Err(e) = self.apply_prepared_to_store(p) {
-                    warnings.push(format!(
-                        "{}: the store's copy of the amended entity was not refreshed ({}); \
+                    warnings.push(MergeWarning::follow_up_failed(
+                        &target,
+                        "store_update",
+                        format!(
+                            "{}: the store's copy of the amended entity was not refreshed ({}); \
                          the re-read after the merge serves the landed body",
-                        p.id,
-                        e.prose_render()
+                            p.id,
+                            e.prose_render()
+                        ),
                     ));
                 }
             }
@@ -1332,10 +1347,14 @@ impl Engine {
                 ) {
                     Ok(_) => true,
                     Err(e) => {
-                        warnings.push(format!(
-                            "{target_id}: the verification check was not recorded ({}); the \
+                        warnings.push(MergeWarning::follow_up_failed(
+                            &target,
+                            "check_record",
+                            format!(
+                                "{target_id}: the verification check was not recorded ({}); the \
                              entity reads as never checked until `memstead check` records one",
-                            e.prose_render()
+                                e.prose_render()
+                            ),
                         ));
                         false
                     }
@@ -1357,10 +1376,14 @@ impl Engine {
         let reread = match self.reload_one_mem(&target) {
             Ok(_) => true,
             Err(e) => {
-                warnings.push(format!(
-                    "the target was not re-read from its backend after the merge ({}); run \
+                warnings.push(MergeWarning::follow_up_failed(
+                    &target,
+                    "reload",
+                    format!(
+                        "the target was not re-read from its backend after the merge ({}); run \
                      `memstead reload --mem {target}`",
-                    e.prose_render()
+                        e.prose_render()
+                    ),
                 ));
                 false
             }
@@ -1368,10 +1391,14 @@ impl Engine {
         let findings_after = match self.merge_findings(&target) {
             Ok(after) => Some(after),
             Err(e) => {
-                warnings.push(format!(
-                    "the validation reading after the merge failed ({}); `findings_after` \
+                warnings.push(MergeWarning::follow_up_failed(
+                    &target,
+                    "validation",
+                    format!(
+                        "the validation reading after the merge failed ({}); `findings_after` \
                      restates the count before the merge and `new_findings` is unknown",
-                    e.prose_render()
+                        e.prose_render()
+                    ),
                 ));
                 None
             }
@@ -1410,10 +1437,14 @@ impl Engine {
             match resolve_sha(&ops, &gitdir, &crate::branch_full_ref(&target_branch)) {
                 Ok(sha) => sha,
                 Err(e) => {
-                    warnings.push(format!(
-                        "the target tip was not read back after the last commit ({}); \
+                    warnings.push(MergeWarning::follow_up_failed(
+                        &target,
+                        "tip_read",
+                        format!(
+                            "the target tip was not read back after the last commit ({}); \
                          `target_tip_after` is the sha of the last commit landed",
-                        e.prose_render()
+                            e.prose_render()
+                        ),
                     ));
                     parent.clone()
                 }
@@ -1656,6 +1687,51 @@ impl Engine {
     /// target re-read from its backend. Returns `error`, the failure
     /// that triggered the unwind, unless the branch could not be moved
     /// back: then the landed commits stand and the error names both.
+    /// The report of a merge that failed after one of its commits
+    /// landed: the landed commits stay on the branch (no reset), the
+    /// store is brought level with storage, and the error states per
+    /// commit, in the `RENAME_PARTIAL_FAILURE` shape every operation that
+    /// lands in parts reports, which entities landed and their hash now.
+    /// Sending the merge again lands the rest.
+    fn merge_partial_failure(
+        &mut self,
+        target: &str,
+        snapshot: &crate::store::Store,
+        landed: &[MergeCommit],
+        failed: Vec<String>,
+        cause: EngineError,
+    ) -> EngineError {
+        use crate::engine::error::{PartialItem, PartialMem};
+        self.discard_all_pending();
+        self.store = snapshot.clone();
+        let _ = self.reload_one_mem(target);
+        let item =
+            |engine: &Self, ids: &[String], landed: bool, error: Option<String>| PartialMem {
+                mem: target.to_string(),
+                landed,
+                error,
+                items: ids
+                    .iter()
+                    .map(|id| PartialItem {
+                        id: id.clone(),
+                        landed,
+                        current_hash: engine.hash_now(&EntityId(id.clone())),
+                    })
+                    .collect(),
+            };
+        let mut mems: Vec<PartialMem> = landed
+            .iter()
+            .map(|c| item(self, &c.entities, true, None))
+            .collect();
+        mems.push(item(self, &failed, false, Some(cause.to_string())));
+        EngineError::RenamePartialFailure {
+            committed_mems: vec![target.to_string()],
+            failed_mem: target.to_string(),
+            failure_cause: crate::engine::mutation::landing::failure_cause_of(&cause).to_string(),
+            mems,
+        }
+    }
+
     fn unwind_merge(
         &mut self,
         target: &str,
@@ -1683,5 +1759,21 @@ impl Engine {
                 )))
             }
         }
+    }
+}
+
+/// A parent mismatch at a merge commit is the target moving under the
+/// merge: the merge's own refusal names it; every other error passes.
+fn proposal_stale_or(e: EngineError, fork: &str) -> EngineError {
+    match e {
+        EngineError::Backend(crate::backend::BackendError::ParentMismatch { expected, actual }) => {
+            EngineError::ProposalStale {
+                fork: fork.to_string(),
+                side: "target".to_string(),
+                recorded: expected,
+                current: actual,
+            }
+        }
+        other => other,
     }
 }

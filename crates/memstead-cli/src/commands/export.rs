@@ -230,17 +230,17 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         return run_llms_txt(ctx, args);
     }
     match ctx.cli_engine()? {
-        CliEngine::MemRepo(engine) => match args.format {
-            Format::Markdown => run_markdown(ctx, &engine, args.mem_name.as_deref()),
+        CliEngine::MemRepo(mut engine) => match args.format {
+            Format::Markdown => run_markdown(ctx, &mut engine, args.mem_name.as_deref()),
             Format::Mem => run_mem(ctx, &engine, args),
             Format::Json => unreachable!("dispatched to run_json above"),
             Format::Html => unreachable!("dispatched to run_html above"),
             Format::LlmsTxt => unreachable!("dispatched to run_llms_txt above"),
         },
-        CliEngine::Filesystem(engine) => match args.format {
+        CliEngine::Filesystem(mut engine) => match args.format {
             // `--format markdown` regenerates the folder mems in place,
             // through the same engine call as on a mem-repo workspace.
-            Format::Markdown => run_markdown(ctx, &engine, args.mem_name.as_deref()),
+            Format::Markdown => run_markdown(ctx, &mut engine, args.mem_name.as_deref()),
             Format::Mem => run_mem_filesystem(ctx, &engine, args),
             Format::Json => unreachable!("dispatched to run_json above"),
             Format::Html => unreachable!("dispatched to run_html above"),
@@ -466,7 +466,7 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
 fn run_markdown(
     ctx: &CliContext,
-    engine: &memstead_base::Engine,
+    engine: &mut memstead_base::Engine,
     mem_filter: Option<&str>,
 ) -> anyhow::Result<()> {
     // The engine returns a

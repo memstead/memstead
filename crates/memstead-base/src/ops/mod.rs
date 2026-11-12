@@ -43,8 +43,8 @@ pub use commit_envelope::{CommitEnvelope, EntityChange};
 pub use diff::{Diff, DiffConfig, EntityDiff, IncomingRipple};
 pub use export::{MemExportBytes, MemExportError};
 pub use proposal::{
-    ProposalBrief, ProposalChange, ProposalEntry, ProposalMergeOutcome, ProposalRecord,
-    render_proposal_brief, render_proposal_merge, render_proposal_record,
+    MergeWarning, ProposalBrief, ProposalChange, ProposalEntry, ProposalMergeOutcome,
+    ProposalRecord, render_proposal_brief, render_proposal_merge, render_proposal_record,
 };
 pub use transport::{
     FetchOutcome, PullAllOutcome, PullOutcome, PulledRef, PushAllOutcome, PushOutcome, PushedRef,

@@ -84,6 +84,7 @@ pub fn export_markdown(
     }
 
     ExportResult {
+        warnings: Vec::new(),
         written,
         unchanged,
         skipped_mounts: Vec::new(),
@@ -119,6 +120,7 @@ pub fn export_entity(
     if needs_write {
         write_entity(entity, mem_dir, schema).map_err(|e| e.to_string())?;
         Ok(ExportResult {
+            warnings: Vec::new(),
             refused_entities: Vec::new(),
             written: 1,
             unchanged: 0,
@@ -126,6 +128,7 @@ pub fn export_entity(
         })
     } else {
         Ok(ExportResult {
+            warnings: Vec::new(),
             refused_entities: Vec::new(),
             written: 0,
             unchanged: 1,

@@ -32,7 +32,7 @@ impl Engine {
     /// `skipped_mounts` channel (workspace-wide) give the caller an
     /// agent-actionable signal in one round-trip.
     pub fn export_markdown(
-        &self,
+        &mut self,
         mem_filter: Option<&str>,
         schema_filter: Option<&str>,
     ) -> Result<crate::ops::ExportResult, EngineError> {
@@ -59,8 +59,13 @@ impl Engine {
         let mut refused: Vec<crate::ops::RefusedEntity> = Vec::new();
         let mut total_unchanged = 0;
         let mut skipped_mounts: Vec<crate::ops::SkippedMount> = Vec::new();
+        let mut warnings: Vec<crate::ops::WarningHint> = Vec::new();
 
-        for mount in &self.mounts {
+        // The entities whose files an export rewrote, with the hash of the
+        // bytes it wrote: the engine's view takes them once the commit
+        // lands, as any write's view takes the bytes it wrote.
+        let mut rewritten: Vec<(crate::entity::EntityId, String)> = Vec::new();
+        for (mount_idx, mount) in self.mounts.iter().enumerate() {
             let mem_name = mount.mount.mem.as_str();
             if let Some(filter) = mem_filter
                 && mem_name != filter
@@ -79,6 +84,13 @@ impl Engine {
                 Some(s) => s,
                 None => continue,
             };
+            // Export writes files into the mem: it holds the mem's write
+            // lock, stages every file through the backend and commits
+            // once, so it lands through the commit call like any write.
+            let _write_lock = self.lock_mems_for_write(&[mem_name])?;
+            let backend = mount.backend.as_ref();
+            let mut staged: usize = 0;
+            let mut mem_rewritten: Vec<(crate::entity::EntityId, String)> = Vec::new();
 
             for entity in self.store.all_entities() {
                 if entity.stub || entity.file_path.is_empty() {
@@ -102,30 +114,78 @@ impl Engine {
                     Ok(existing) => existing != generated,
                     Err(_) => true,
                 };
-                if needs_write {
-                    match crate::entity::writer::write_entity(entity, mem_dir, type_def.as_ref()) {
-                        Ok(_) => total_written += 1,
-                        // The one refusal the export must not swallow: writing
-                        // this entity would bury the sections its open fence
-                        // absorbed. Name it and carry on — an export that
-                        // aborted here would strand every other entity.
-                        Err(e @ crate::entity::writer::WriteError::UnterminatedFence { .. }) => {
-                            refused.push(crate::ops::RefusedEntity {
-                                id: entity.id.to_string(),
-                                reason: "UNTERMINATED_FENCE_IN_STORED_BODY".to_string(),
-                                detail: e.to_string(),
-                            });
-                        }
-                        Err(_) => {}
-                    }
-                } else {
+                if !needs_write {
                     total_unchanged += 1;
+                    continue;
+                }
+                // The one refusal the export must not perform: writing
+                // this entity would bury the sections its open fence
+                // absorbed. Name it and carry on — an export that aborted
+                // here would strand every other entity.
+                if let Some(detail) = crate::entity::writer::unterminated_fence(entity) {
+                    refused.push(crate::ops::RefusedEntity {
+                        id: entity.id.to_string(),
+                        reason: "UNTERMINATED_FENCE_IN_STORED_BODY".to_string(),
+                        detail,
+                    });
+                    continue;
+                }
+                // A file that cannot be opened for writing would fail the
+                // one commit for every entity: it is named and left out,
+                // and the others land.
+                if full_path.exists()
+                    && let Err(e) = std::fs::OpenOptions::new().write(true).open(&full_path)
+                {
+                    refused.push(crate::ops::RefusedEntity {
+                        id: entity.id.to_string(),
+                        reason: "EXPORT_TARGET_NOT_WRITABLE".to_string(),
+                        detail: format!("{}: {e}", full_path.display()),
+                    });
+                    continue;
+                }
+                match backend.write_entity(
+                    std::path::Path::new(&entity.file_path),
+                    generated.as_bytes(),
+                ) {
+                    Ok(()) => {
+                        staged += 1;
+                        mem_rewritten.push((
+                            entity.id.clone(),
+                            crate::entity::parser::compute_hash(&generated),
+                        ));
+                    }
+                    Err(e) => refused.push(crate::ops::RefusedEntity {
+                        id: entity.id.to_string(),
+                        reason: "EXPORT_WRITE_FAILED".to_string(),
+                        detail: e.to_string(),
+                    }),
                 }
             }
+            if staged > 0 {
+                let landed = self.commit_staged(
+                    mount_idx,
+                    "memstead: export markdown",
+                    &crate::vcs::CommitContext::internal(),
+                    &[],
+                )?;
+                warnings.extend(landed.warnings);
+                total_written += staged;
+                rewritten.extend(mem_rewritten);
+            }
+        }
+        if !rewritten.is_empty() {
+            for (id, hash) in rewritten {
+                if let Some(entity) = self.store.get_mut(&id) {
+                    entity.content_hash = hash;
+                }
+            }
+            self.invalidate_communities();
+            self.invalidate_search_indexes();
         }
 
         Ok(crate::ops::ExportResult {
             refused_entities: refused,
+            warnings,
             written: total_written,
             unchanged: total_unchanged,
             skipped_mounts,

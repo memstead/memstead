@@ -46,6 +46,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Export and proposal merge land through the one commit call
+  (breaking).** `export --format markdown` takes the mem's write lock,
+  stages every file through the backend and commits once; a file it
+  cannot open for writing is named in `refused_entities`
+  (`EXPORT_TARGET_NOT_WRITABLE`) and the other entities are written,
+  where before a write error was dropped. The export's store takes the
+  hashes of the bytes it wrote. A proposal merge whose later commit (a
+  proposer group's or the amend) fails after an earlier one landed no
+  longer resets the branch: the landed commits stand and the refusal is
+  `RENAME_PARTIAL_FAILURE`, one entry per commit, naming what landed and
+  each entity's hash now. The merge outcome's `warnings` are
+  `WRITE_FOLLOW_UP_FAILED` objects (`code`, `message`, `details` with
+  `mem`, `step`, `detail`) instead of strings.
+
 - **Every edge and every ref move passes the write lock.** A create,
   batch create, update or batch update whose body wiki-links land
   pointer edges (`alias_target_rel_type`) on an acyclic relationship now

@@ -730,7 +730,38 @@ pub struct ProposalMergeOutcome {
     /// returned; a merge that refuses returns an error and lands
     /// nothing. Empty when everything after the commits went through.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub warnings: Vec<String>,
+    pub warnings: Vec<MergeWarning>,
+}
+
+/// A step after a landed merge commit that failed, as the
+/// `WRITE_FOLLOW_UP_FAILED` warning every write reports, in its wire shape
+/// (`code`, `message`, `details` with `mem`, `step`, `detail`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MergeWarning {
+    pub code: String,
+    pub message: String,
+    pub details: serde_json::Value,
+}
+
+impl MergeWarning {
+    /// The warning of a failed follow-up step of the merge into `mem`.
+    pub fn follow_up_failed(mem: &str, step: &str, detail: String) -> Self {
+        Self::from_hint(&crate::ops::WarningHint::WriteFollowUpFailed {
+            mem: mem.to_string(),
+            step: step.to_string(),
+            detail,
+        })
+    }
+
+    /// A warning the commit call reported, in the outcome's shape.
+    pub fn from_hint(hint: &crate::ops::WarningHint) -> Self {
+        let v = serde_json::to_value(hint).unwrap_or_default();
+        Self {
+            code: v["code"].as_str().unwrap_or_default().to_string(),
+            message: v["message"].as_str().unwrap_or_default().to_string(),
+            details: v["details"].clone(),
+        }
+    }
 }
 
 /// One commit a merge landed.
@@ -886,7 +917,7 @@ pub fn render_proposal_merge(o: &ProposalMergeOutcome) -> String {
         out.push_str("\n## Warnings\n\n");
         out.push_str("The merge landed; the bookkeeping after the last commit did not complete:\n");
         for w in &o.warnings {
-            out.push_str(&format!("- {w}\n"));
+            out.push_str(&format!("- {}: {}\n", w.code, w.message));
         }
     }
     out
