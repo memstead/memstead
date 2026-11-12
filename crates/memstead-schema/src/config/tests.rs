@@ -1121,3 +1121,16 @@ fn published_config_strips_and_refuses_forked_from() {
     let err = serde_json::from_value::<PublishedMemConfig>(smuggled).unwrap_err();
     assert!(err.to_string().contains("forkedFrom"), "{err}");
 }
+
+/// `renamingFrom` is engine-owned lifecycle state a mem rename writes
+/// while it runs: reading such a config warns about no unknown key.
+#[test]
+fn renaming_from_is_a_known_key() {
+    let config = serde_json::json!({ "schema": "default@1.0.0", "renamingFrom": "old-name" });
+    let result = check_config(&config);
+    assert!(
+        result.warnings.iter().all(|w| !w.contains("renamingFrom")),
+        "{:?}",
+        result.warnings
+    );
+}

@@ -69,9 +69,9 @@ impl ProvenanceKind {
 
 /// One mutation event in a mem's provenance log.
 ///
-/// Constructed at the engine boundary (one per MCP mutating tool, one
-/// per CLI mutation, one per drift-flush) and handed to the backend
-/// via [`crate::backend::MemBackend::append_provenance`]. Read back
+/// Constructed at the engine boundary (one per mutated entity of an
+/// MCP tool call or CLI mutation) and staged with the commit that
+/// lands it ([`crate::backend::MemBackend::stage_provenance`]). Read back
 /// out via [`crate::backend::MemBackend::read_provenance`] for
 /// `memstead_changes_since`.
 ///

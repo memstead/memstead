@@ -61,9 +61,10 @@ impl Engine {
     /// - cached `Some(old)` + on-disk `Some(new)`, `old != new` →
     ///   reload the mem, emit `MemReloaded`, refresh the cached
     ///   head to `new`.
-    /// - cached `None` + on-disk `Some(new)` → silently capture the
-    ///   first observed head as the baseline (no warning — there's
-    ///   no prior in-memory snapshot to be stale against).
+    /// - cached `None` + on-disk `Some(new)` → reload the mem and
+    ///   emit `MemReloaded`: a head appeared where none was seen (a
+    ///   branch that arrived, a folder ledger written by another
+    ///   process), so the view is behind it.
     /// - cached / on-disk match, or on-disk `None` (a backend without a
     ///   head) → no-op.
     /// - `current_head` errors, or the mem's last reload failed or was
@@ -421,9 +422,9 @@ impl Engine {
     /// and fire the warning as before.
     ///
     /// Empty SHA is a no-op (no commit landed — e.g. duplicate-add
-    /// relate). Backends that don't track a head (folder, archive)
-    /// leave `last_known_head` at `None` and still no-op via the
-    /// drift-check's `cached: None` branch.
+    /// relate). A folder backend's head is its change-ledger
+    /// watermark, recorded here like a branch tip; an archive tracks
+    /// no head and leaves `last_known_head` at `None`.
     pub(crate) fn record_self_write(&mut self, mount_idx: usize, write_id: &str) {
         if write_id.is_empty() {
             return;

@@ -851,6 +851,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "reviewMark",
     "mutationStamp",
     "forkedFrom",
+    "renamingFrom",
 ];
 
 /// Keys that are explicitly rejected with a `LEGACY_FIELD_PRESENT`

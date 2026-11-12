@@ -92,9 +92,6 @@ impl Engine {
             .1
     }
 
-    /// Drop the cached per-mem search index map. No-op on `wasm32`
-    /// where no index exists; the method stays present so mutation
-    /// hooks can call it unconditionally.
     /// Incrementally maintain the search-index memo for a known
     /// touched-id set: replace or remove
     /// exactly the touched documents in place and advance the memo's

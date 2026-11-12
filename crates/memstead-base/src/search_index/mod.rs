@@ -46,16 +46,17 @@ use memstead_schema::Schema;
 
 use crate::store::Store;
 
-/// Build per-mem indexes for every writable mem. Each mem's index
-/// uses its own pinned schema from `writable_schemas`.
+/// Build per-mem indexes for every mem with a schema, read-only archive
+/// mems included. Each mem's index
+/// uses its own pinned schema from `schemas`.
 pub fn build_all(
     store: &Store,
-    writable_schemas: &HashMap<String, Arc<Schema>>,
+    schemas: &HashMap<String, Arc<Schema>>,
 ) -> HashMap<String, MemIndex> {
     let mut indexes: HashMap<String, MemIndex> = HashMap::new();
 
     // Write-mems keep their writers alive for the engine lifetime.
-    for (name, schema) in writable_schemas {
+    for (name, schema) in schemas {
         match MemIndex::build_in_ram(name.clone(), Some(schema)) {
             Ok(idx) => {
                 indexes.insert(name.clone(), idx);
@@ -64,7 +65,7 @@ pub fn build_all(
                 tracing::warn!(
                     mem = name.as_str(),
                     error = %e,
-                    "failed to create search index for writable mem; skipping"
+                    "failed to create search index for mem; skipping"
                 );
             }
         }

@@ -548,9 +548,8 @@ impl CliContext {
 /// resolves to the inner.
 ///
 /// Mirrors `memstead-mcp/src/main.rs::find_workspace_root` and the
-/// per-command walkers in `memstead-cli/src/commands/link.rs` /
-/// `memstead-cli/src/commands/publish.rs`. Keep the resolution rules in
-/// sync if any of these change.
+/// per-command walker in `memstead-cli/src/commands/publish.rs`. Keep
+/// the resolution rules in sync if any of these change.
 pub fn find_workspace_root(start: &Path) -> Option<PathBuf> {
     let mut cursor: PathBuf = if start.is_dir() {
         start.to_path_buf()

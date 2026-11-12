@@ -506,11 +506,9 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<SchemaParams>,
     ) -> CallToolResult {
-        // The unified engine exposes `schemas()` as a HashMap keyed by
-        // mem name (one schema per mem per V1). suggest_name is
-        // not available on the unified surface (the per-mem HashMap
-        // has no fuzzy index); not-found errors carry an empty
-        // suggestions list — wire shape stays consistent.
+        // An unknown schema name refuses with the engine's
+        // `SCHEMA_NOT_FOUND`, `details.available` naming the schemas
+        // the workspace resolves.
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
         let drift_warnings = engine.reload_if_stale(None);
