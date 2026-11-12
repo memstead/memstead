@@ -78,6 +78,7 @@ fn base_report() -> FidelityReport {
             excluded_entity_rationales: Vec::new(),
             degradations: vec!["hash-adjudication-deferred — 1 anchor(s) recheck".to_string()],
             intent_findings: Vec::new(),
+        drifted_anchors: Vec::new(),
         }
 }
 
@@ -376,7 +377,7 @@ fn c9_the_uncovered_action_counts_the_body_list_not_the_recorded_findings() {
         .rollup()
         .actions
         .iter()
-        .find(|a| a.contains("moved since the entity was written"))
+        .find(|a| a.contains("moved since their entity was written"))
         .cloned()
         .expect("the drift action is present");
     assert!(
@@ -912,4 +913,57 @@ fn report_marks_resolved_coverage_semantics() {
         !md.contains("(resolved from the sources' media"),
         "no resolution marker on a declared value: {md}"
     );
+}
+
+/// The `Drifted anchors` section names every drifted and wrong finding's
+/// entity with its artifact, and the two classes' "Do next" lines point
+/// to it; past ten entries the rest are counted, not dropped.
+#[test]
+fn drifted_anchors_name_their_entities_and_are_capped_at_ten() {
+    let named = |class: &str, entity: &str, artifact: &str| DriftedAnchor {
+        class: class.to_string(),
+        entity: entity.to_string(),
+        artifact: artifact.to_string(),
+    };
+    let mut r = base_report();
+    r.findings_by_class = BTreeMap::from([("drifted".to_string(), 2), ("wrong".to_string(), 1)]);
+    r.drifted_anchors = vec![
+        named("drifted", "engine--alpha", "src/a.rs"),
+        named("drifted", "engine--beta", "src/b.rs"),
+        named("wrong", "engine--gamma", "src/c.rs"),
+    ];
+    let md = render_fidelity_report(&r, 8_000, &[]).markdown;
+    assert!(md.contains("## Drifted anchors"), "{md}");
+    for line in [
+        "- `engine--alpha` → `src/a.rs` (drifted)",
+        "- `engine--beta` → `src/b.rs` (drifted)",
+        "- `engine--gamma` → `src/c.rs` (wrong)",
+    ] {
+        assert!(md.contains(line), "missing {line}:\n{md}");
+    }
+    let actions = r.rollup().actions;
+    for class_phrase in [
+        "moved since their entity was written",
+        "contradict their source",
+    ] {
+        let action = actions
+            .iter()
+            .find(|a| a.contains(class_phrase))
+            .unwrap_or_else(|| panic!("no action for {class_phrase}: {actions:?}"));
+        assert!(action.contains("**Drifted anchors**"), "{action}");
+    }
+
+    // Twelve drifted anchors: ten listed, two counted.
+    r.drifted_anchors = (0..12)
+        .map(|i| named("drifted", &format!("engine--e{i}"), &format!("src/f{i}.rs")))
+        .collect();
+    let md = render_fidelity_report(&r, 0, &[]).markdown;
+    let listed = md.lines().filter(|l| l.starts_with("- `engine--e")).count();
+    assert_eq!(listed, 10, "{md}");
+    assert!(md.contains("…and 2 more"), "{md}");
+
+    // No drifted or wrong finding: no section.
+    r.drifted_anchors.clear();
+    let md = render_fidelity_report(&r, 8_000, &[]).markdown;
+    assert!(!md.contains("## Drifted anchors"), "{md}");
 }

@@ -724,6 +724,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Archives and reports name the right entities.**
+  - An exported archive's provenance gives each entity of a batch
+    commit its own record: under its own id, with the note of its own
+    `<id>: ` line, with the batch's kind (`batch-create` reads `create`,
+    `batch-update` `update`, `batch-relate` `relate`). Before, the
+    archive held one record keyed by the commit subject's `(2 entities)`
+    and an empty record for each entity the batch wrote.
+  - A red `projection verify` names the entity behind each `drifted` and
+    `wrong` finding: the report carries `drifted_anchors` (class, entity,
+    artifact) and renders an always-ship `Drifted anchors` section, the
+    first ten and the count of the rest; the "Do next" lines of both
+    classes point to it. Before, the report gave only counts and a
+    reader needed a second command to learn which entities to re-read.
+
 - **A refusal names its real cause and its repair (first part).**
   - An empty expected hash states no hash on every surface:
     `ExpectedHash::from_token` maps `""` to missing, so MCP

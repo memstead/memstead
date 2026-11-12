@@ -822,7 +822,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         let mut out: Vec<memstead_base::Provenance> = report
             .notes
             .into_iter()
-            .map(commit_note_to_provenance)
+            .flat_map(commit_note_to_provenance)
             .collect();
         out.reverse();
         Ok(out)
@@ -1084,14 +1084,25 @@ pub(crate) fn read_blob_from_ref(
     Ok(Some(blob.data.clone()))
 }
 
-/// Build a [`memstead_base::Provenance`] from a parsed commit note. Best-
-/// effort: unrecognised verbs map to `Update`, missing actors to
-/// `Unknown`, malformed client trailers drop the field. Matches the
+/// Build the [`memstead_base::Provenance`] records of a parsed commit
+/// note. Best-effort: unrecognised verbs map to `Update`, missing actors
+/// to `Unknown`, malformed client trailers drop the field. Matches the
 /// folder backend's tolerant-reader stance.
-fn commit_note_to_provenance(n: crate::ops::agent_notes::CommitNote) -> memstead_base::Provenance {
-    let kind = n
+///
+/// A commit that names its entities in an `Entities:` trailer (a batch)
+/// gives one record per id: each under its own id, with the note of its
+/// `<id>: ` line, and with the kind of the batch's verb (`batch-create`
+/// is `Create`, `batch-update` `Update`, `batch-relate` `Relate`). The
+/// subject's remainder (`(2 entities)`) is no entity id, so no record is
+/// keyed by it. Any other commit gives the one record of its subject.
+fn commit_note_to_provenance(
+    n: crate::ops::agent_notes::CommitNote,
+) -> Vec<memstead_base::Provenance> {
+    let verb = n
         .tool_verb
         .as_deref()
+        .map(|v| v.strip_prefix("batch-").unwrap_or(v));
+    let kind = verb
         .and_then(memstead_base::ProvenanceKind::parse)
         .unwrap_or(memstead_base::ProvenanceKind::Update);
     let actor = n
@@ -1108,20 +1119,36 @@ fn commit_note_to_provenance(n: crate::ops::agent_notes::CommitNote) -> memstead
     } else {
         std::time::UNIX_EPOCH
     };
-    let mut record =
-        memstead_base::Provenance::new(timestamp, kind, n.entity_id, actor, client, n.note);
-    if let Some(id) = n.logical_operation_id {
-        record = record.with_logical_operation_id(id);
+    let record = |entity: Option<String>, note: Option<String>| {
+        let mut record =
+            memstead_base::Provenance::new(timestamp, kind, entity, actor, client.clone(), note);
+        if let Some(id) = &n.logical_operation_id {
+            record = record.with_logical_operation_id(id.clone());
+        }
+        if let Some(role) = n
+            .role
+            .as_deref()
+            .and_then(memstead_base::vcs::Role::from_wire)
+        {
+            record = record.with_role(role);
+        }
+        record.with_identity(n.identity.clone())
+    };
+    if n.entity_ids.is_empty() {
+        return vec![record(n.entity_id.clone(), n.note.clone())];
     }
-    if let Some(role) = n
-        .role
-        .as_deref()
-        .and_then(memstead_base::vcs::Role::from_wire)
-    {
-        record = record.with_role(role);
-    }
-    record = record.with_identity(n.identity);
-    record
+    n.entity_ids
+        .iter()
+        .map(|id| {
+            let prefix = format!("{id}: ");
+            let note = n.note.as_deref().and_then(|note| {
+                note.lines()
+                    .find_map(|l| l.strip_prefix(&prefix))
+                    .map(str::to_string)
+            });
+            record(Some(id.clone()), note)
+        })
+        .collect()
 }
 
 /// Refresh the working tree and index from `HEAD` when the just-

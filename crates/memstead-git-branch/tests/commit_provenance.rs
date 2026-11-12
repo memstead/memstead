@@ -236,3 +236,144 @@ fn every_commit_the_engine_writes_carries_the_sessions_provenance() {
         );
     }
 }
+
+/// A batch's entities each read their own provenance in the exported
+/// archive: under their own id, with the note of their own entry, with
+/// the batch's kind (`create` for a batch create, `update` for a batch
+/// update). No record is keyed by the batch subject's pseudo-key.
+#[test]
+fn a_batch_written_entitys_archive_provenance_is_its_own() {
+    use indexmap::IndexMap;
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    engine
+        .set_mem_version("specs", semver::Version::new(1, 0, 0), None)
+        .expect("version set");
+    let create = |title: &str| {
+        let mut sections = IndexMap::new();
+        sections.insert("identity".to_string(), format!("{title} identity"));
+        sections.insert("purpose".to_string(), format!("{title} purpose"));
+        memstead_base::CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: "specs".to_string(),
+            title: title.to_string(),
+            entity_type: "spec".to_string(),
+            sections,
+            metadata: IndexMap::new(),
+            relations: Vec::new(),
+            dry_run: false,
+        }
+    };
+    engine
+        .batch_create(
+            vec![
+                (create("Alpha"), Some("alpha was made".to_string())),
+                (create("Beta"), Some("beta was made".to_string())),
+            ],
+            Actor::Cli,
+            None,
+            false,
+        )
+        .expect("batch create lands");
+
+    let provenance = |engine: &memstead_base::Engine| -> serde_json::Value {
+        let out = tmp.path().join("specs.mem");
+        engine.export_mem("specs", &out).expect("export");
+        let bytes = std::fs::read(&out).unwrap();
+        let entries = memstead_base::validator::archive::extract_entries(
+            &bytes,
+            &memstead_base::validator::ValidatorLimits::DEFAULT,
+        )
+        .unwrap();
+        serde_json::from_slice(&entries.provenance_bytes.expect("provenance member")).unwrap()
+    };
+    let after_create = provenance(&engine);
+    let keys: Vec<&String> = after_create["entities"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .collect();
+    assert_eq!(
+        keys,
+        ["alpha", "beta"],
+        "no record is keyed by a subject: {after_create}"
+    );
+    let alpha = find_record(&after_create, "alpha");
+    assert_eq!(alpha["rationale"], "alpha was made", "{alpha}");
+    assert_eq!(alpha["kind"], "create", "{alpha}");
+    let beta = find_record(&after_create, "beta");
+    assert_eq!(beta["rationale"], "beta was made", "{beta}");
+    assert_eq!(beta["kind"], "create", "{beta}");
+
+    let update = |engine: &memstead_base::Engine, slug: &str| {
+        let id = memstead_base::EntityId::new("specs", slug);
+        let mut sections = IndexMap::new();
+        sections.insert("purpose".to_string(), format!("{slug} purpose, updated"));
+        memstead_base::UpdateEntityArgs {
+            expected_hash: memstead_base::ExpectedHash::from_token(
+                engine.get_entity(&id).map(|e| e.content_hash.clone()),
+            ),
+            id,
+            sections,
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            dry_run: false,
+            declare_relations: Vec::new(),
+            relations_unset: Vec::new(),
+            anchors: Vec::new(),
+            anchors_unset: Vec::new(),
+        }
+    };
+    // Two entities created singly and without a note, so the batch
+    // update's records are their only noted ones: the archive keeps the
+    // newest noted record per entity, and commit times have one-second
+    // resolution, so a create and an update in one second would tie.
+    for title in ["Gamma", "Delta"] {
+        engine
+            .create_entity(create(title), Actor::Cli, None, None)
+            .expect("create lands");
+    }
+    let updates = vec![
+        (
+            update(&engine, "gamma"),
+            Some("gamma was revised".to_string()),
+        ),
+        (
+            update(&engine, "delta"),
+            Some("delta was revised".to_string()),
+        ),
+    ];
+    engine
+        .batch_update(updates, Actor::Cli, None, false)
+        .expect("batch update lands");
+    let after_update = provenance(&engine);
+    let keys: Vec<&String> = after_update["entities"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .collect();
+    assert_eq!(
+        keys,
+        ["alpha", "beta", "delta", "gamma"],
+        "no record is keyed by a subject: {after_update}"
+    );
+    let gamma = find_record(&after_update, "gamma");
+    assert_eq!(gamma["rationale"], "gamma was revised", "{gamma}");
+    assert_eq!(gamma["kind"], "update", "{gamma}");
+    let delta = find_record(&after_update, "delta");
+    assert_eq!(delta["rationale"], "delta was revised", "{delta}");
+    assert_eq!(delta["kind"], "update", "{delta}");
+}
+
+/// The archive provenance record of entity `slug` (the payload keys its
+/// records by the entity's mem-relative id under `entities`).
+fn find_record(payload: &serde_json::Value, slug: &str) -> serde_json::Value {
+    payload["entities"]
+        .get(slug)
+        .cloned()
+        .unwrap_or_else(|| panic!("no record for {slug} in {payload}"))
+}

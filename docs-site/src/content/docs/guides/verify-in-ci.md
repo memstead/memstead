@@ -146,10 +146,18 @@ ranked next actions:
 
 **Do next:**
 
-1. 1 anchored artifact(s) moved since the entity was written — re-read the
-   source and update the entity, then re-verify with `--advance` to move the
-   baseline
+1. 1 anchored artifact(s) moved since their entity was written — re-read each
+   artifact listed under **Drifted anchors** below and update its entity, then
+   re-verify with `--advance` to move the baseline
+
+## Drifted anchors
+
+- `docs--getting-started` → `src/cli.rs` (drifted)
 ```
+
+The `Drifted anchors` section names each entity a `drifted` or `wrong`
+finding is about, with its artifact (the first ten, and how many more); the
+JSON payload carries the full list as `report.drifted_anchors`.
 
 ## Machine-readable output
 
@@ -171,9 +179,15 @@ of misparsing:
     "findings_total": 1,
     "because": "1 finding(s) recorded over the current key (drifted: 1)",
     "blind_spots": [],
-    "actions": ["1 anchored artifact(s) moved since the entity was written — …"]
+    "actions": ["1 anchored artifact(s) moved since their entity was written — …"]
   },
-  "report": { "findings_by_class": { "drifted": 1 }, "coverage": { … } }
+  "report": {
+    "findings_by_class": { "drifted": 1 },
+    "drifted_anchors": [
+      { "class": "drifted", "entity": "docs--getting-started", "artifact": "src/cli.rs" }
+    ],
+    "coverage": { … }
+  }
 }
 ```
 

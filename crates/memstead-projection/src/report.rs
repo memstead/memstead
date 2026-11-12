@@ -421,6 +421,24 @@ pub struct FidelityReport {
     /// record that already carries one; empty proves a clean intent. Not a
     /// fidelity figure, so it never moves the rollup verdict.
     pub intent_findings: Vec<memstead_base::binding_intent::IntentFinding>,
+    /// Every current `drifted` and `wrong` finding with the entity it
+    /// names and the artifact behind it, so a red verify says which
+    /// entities to re-read. Rendered in the always-ship `Drifted anchors`
+    /// section (capped like the report's other named lists, with the count
+    /// of the rest); the counts above stay complete.
+    pub drifted_anchors: Vec<DriftedAnchor>,
+}
+
+/// One drifted or wrong finding, named: its class, the entity it is
+/// about and the artifact behind it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DriftedAnchor {
+    /// `drifted` or `wrong`.
+    pub class: String,
+    /// The entity id (`mem--slug`) the finding names.
+    pub entity: String,
+    /// The source artifact the finding is about.
+    pub artifact: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -598,12 +616,13 @@ const CLASS_SEVERITY: [&str; 6] = [
 fn class_action(class: &str, n: usize, binding: &str) -> String {
     match class {
         "wrong" => format!(
-            "{n} entity/entities contradict their source — read them against the source and \
-             correct the entity (`memstead projection brief {binding}` lists them)"
+            "{n} entity/entities contradict their source — read each one listed under \
+             **Drifted anchors** below against its artifact and correct the entity"
         ),
         "drifted" => format!(
-            "{n} anchored artifact(s) moved since the entity was written — re-read the source \
-             and update the entity, then re-verify with `--advance` to move the baseline"
+            "{n} anchored artifact(s) moved since their entity was written — re-read each \
+             artifact listed under **Drifted anchors** below and update its entity, then \
+             re-verify with `--advance` to move the baseline"
         ),
         "unresolvable-anchor" => format!(
             "{n} anchor(s) no longer resolve to anything — repoint them at the artifact's new \
@@ -910,6 +929,27 @@ fn render_hard_required(report: &FidelityReport) -> String {
         md.push_str("**This pass could not see:**\n\n");
         for spot in &rollup.blind_spots {
             md.push_str(&format!("- {spot}\n"));
+        }
+        md.push('\n');
+    }
+
+    // --- Drifted anchors (always ships with a drifted or wrong finding) ---
+    // The entities the two classes above name, so the reader needs no second
+    // command to learn which ones to re-read.
+    if !report.drifted_anchors.is_empty() {
+        const NAMED_CAP: usize = 10;
+        md.push_str("## Drifted anchors\n\n");
+        for d in report.drifted_anchors.iter().take(NAMED_CAP) {
+            md.push_str(&format!(
+                "- `{}` → `{}` ({})\n",
+                d.entity, d.artifact, d.class
+            ));
+        }
+        if report.drifted_anchors.len() > NAMED_CAP {
+            md.push_str(&format!(
+                "- …and {} more (the counts above are complete)\n",
+                report.drifted_anchors.len() - NAMED_CAP
+            ));
         }
         md.push('\n');
     }
@@ -2003,6 +2043,7 @@ pub fn compute_fidelity_report(
 
     // --- Findings tally + backlog + superseded, from the durable store ---
     let mut findings_by_class: BTreeMap<String, usize> = BTreeMap::new();
+    let mut drifted_anchors: Vec<DriftedAnchor> = Vec::new();
     let mut backlog = 0usize;
     let mut superseded: Vec<String> = Vec::new();
     if let Some((mem, name)) = parse_binding_id(&binding_id)
@@ -2014,6 +2055,18 @@ pub fn compute_fidelity_report(
                 .or_insert(0) += 1;
             if f.class == FindingClass::QueuedForAdjudication {
                 backlog += 1;
+            }
+            if matches!(f.class, FindingClass::Drifted | FindingClass::Wrong)
+                && let super::findings::FindingTarget::Anchor { entity, artifact }
+                | super::findings::FindingTarget::Mention {
+                    entity, artifact, ..
+                } = &f.target
+            {
+                drifted_anchors.push(DriftedAnchor {
+                    class: f.class.as_wire().to_string(),
+                    entity: entity.clone(),
+                    artifact: artifact.clone(),
+                });
             }
         }
         for f in store.superseded(key) {
@@ -2113,6 +2166,7 @@ pub fn compute_fidelity_report(
         excluded_entity_rationales,
         degradations,
         intent_findings,
+        drifted_anchors,
     }
 }
 

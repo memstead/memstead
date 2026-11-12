@@ -69,6 +69,7 @@ fn clean_report() -> FidelityReport {
             excluded_entity_rationales: Vec::new(),
             degradations: Vec::new(),
             intent_findings: Vec::new(),
+        drifted_anchors: Vec::new(),
         }
 }
 
@@ -166,7 +167,7 @@ fn clean_requires_a_substantive_pass_and_no_findings() {
     assert_eq!(roll.verdict, RollupVerdict::Drifted);
     assert_eq!(roll.findings_total, 2);
     assert!(
-        roll.actions[0].contains("moved since the entity was written"),
+        roll.actions[0].contains("moved since their entity was written"),
         "the top action is the concrete next step: {:?}",
         roll.actions
     );

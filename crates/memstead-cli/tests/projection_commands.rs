@@ -5419,3 +5419,82 @@ fn binding_store_writes_commit_with_the_sessions_provenance() {
         }
     }
 }
+
+/// A red verify names the entities whose anchors drifted. Two entities,
+/// each anchoring its own file; both files change; the verify's report
+/// lists both entities with their artifacts in its always-ship `Drifted
+/// anchors` section (markdown) and `drifted_anchors` (JSON), and its
+/// "Do next" line points to that section.
+#[test]
+fn a_red_verify_names_the_drifted_entities() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+    let src = root.join("src");
+    std::fs::write(src.join("c.rs"), "sea").unwrap();
+    git(&src, &["add", "-A"]);
+    git(&src, &["commit", "-qm", "add c"]);
+    std::fs::write(
+        root.join("engine-mem").join("covers-c.md"),
+        "---\ntype: decision\n---\n\n# Covers C\n\n## Decision\n\nBody.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("engine-mem").join(".memstead").join("anchors.json"),
+        r#"{"version":1,"entities":{"engine--covers-a":[{"artifact":"src/a.rs","grain":"file","class":"anchored","hash_stability":"stable"}],"engine--covers-c":[{"artifact":"src/c.rs","grain":"file","class":"anchored","hash_stability":"stable"}]}}"#,
+    )
+    .unwrap();
+    // The first verify records each anchor's hash; then both files move.
+    memstead()
+        .current_dir(root)
+        .args(["projection", "verify", "engine/graph"])
+        .assert()
+        .success();
+    std::fs::write(src.join("a.rs"), "one-drifted").unwrap();
+    std::fs::write(src.join("c.rs"), "sea-drifted").unwrap();
+    git(&src, &["add", "-A"]);
+    git(&src, &["commit", "-qm", "drift both"]);
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    let listed: Vec<(String, String)> = env["report"]["drifted_anchors"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no drifted_anchors: {env}"))
+        .iter()
+        .map(|d| {
+            (
+                d["entity"].as_str().unwrap().to_string(),
+                d["artifact"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    for (entity, artifact) in [
+        ("engine--covers-a", "src/a.rs"),
+        ("engine--covers-c", "src/c.rs"),
+    ] {
+        assert!(
+            listed.contains(&(entity.to_string(), artifact.to_string())),
+            "{entity} → {artifact} is named: {listed:?}"
+        );
+    }
+
+    let md = memstead()
+        .current_dir(root)
+        .args(["projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let md = String::from_utf8(md).unwrap();
+    assert!(md.contains("## Drifted anchors"), "{md}");
+    assert!(md.contains("`engine--covers-a` → `src/a.rs`"), "{md}");
+    assert!(md.contains("`engine--covers-c` → `src/c.rs`"), "{md}");
+    assert!(md.contains("listed under **Drifted anchors**"), "{md}");
+}
