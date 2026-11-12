@@ -84,6 +84,28 @@ impl Engine {
         }
     }
 
+    /// [`Self::entity_anchors`] for a write that copies them: a sidecar
+    /// that cannot be read or parsed refuses instead of reading as none,
+    /// which would drop the anchors from the copy.
+    pub(crate) fn entity_anchors_for_write(
+        &self,
+        id: &EntityId,
+    ) -> Result<Vec<crate::anchor::Anchor>, crate::engine::EngineError> {
+        let Some(mount) = self.mounts.iter().find(|m| m.mount.mem == id.mem()) else {
+            return Ok(Vec::new());
+        };
+        let Some(bytes) = mount.backend.read_anchors_sidecar()? else {
+            return Ok(Vec::new());
+        };
+        let sidecar = crate::anchor::AnchorSidecar::from_bytes(&bytes).map_err(|e| {
+            crate::engine::EngineError::InvalidInput(format!(
+                "the anchors sidecar of `{}` does not parse: {e}",
+                id.mem()
+            ))
+        })?;
+        Ok(sidecar.get(id.as_ref()).to_vec())
+    }
+
     pub fn entity_anchors(&self, id: &EntityId) -> Vec<crate::anchor::Anchor> {
         let Some(mount) = self.mounts.iter().find(|m| m.mount.mem == id.mem()) else {
             return Vec::new();

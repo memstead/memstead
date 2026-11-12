@@ -873,7 +873,16 @@ impl Engine {
         // else the merge's note; the file wins when both are given.
         let description = crate::vcs::normalise_identity(Some(&file.description))
             .or_else(|| crate::vcs::normalise_identity(note));
-        let mut record = self.read_proposal_record(&target)?.unwrap_or_default();
+        // The store holds the planned landings from here on: a refusal
+        // puts it back as it was, as every refusal above does.
+        let mut record = match self.read_proposal_record(&target) {
+            Ok(record) => record.unwrap_or_default(),
+            Err(e) => {
+                self.discard_all_pending();
+                self.store = store_snapshot;
+                return Err(e);
+            }
+        };
         // The identities the merge commits land under: one per adopted
         // proposer, in slug order.
         let mut distinct_proposers: Vec<String> = Vec::new();
@@ -968,13 +977,15 @@ impl Engine {
                         match l {
                             Landing::Create(p) => {
                                 self.stage_prepared_create(p)?;
-                                let rows = self.entity_anchors(&EntityId::new(fork, &a.slug));
+                                let rows =
+                                    self.entity_anchors_for_write(&EntityId::new(fork, &a.slug))?;
                                 stage_anchors_replace(backend, &p.id, rows)?;
                                 created.push(p.id.to_string());
                             }
                             Landing::Update(p) => {
                                 self.stage_prepared_update(p)?;
-                                let rows = self.entity_anchors(&EntityId::new(fork, &a.slug));
+                                let rows =
+                                    self.entity_anchors_for_write(&EntityId::new(fork, &a.slug))?;
                                 stage_anchors_replace(backend, &p.id, rows)?;
                             }
                             Landing::Delete { id, file_path, .. } => {
@@ -1487,6 +1498,17 @@ impl Engine {
             .into_iter()
             .chain(self.consistency_findings(mem)?)
         {
+            // A sidecar the backend could not read is a storage failure,
+            // not a finding of the mem: the reading refuses. One that reads
+            // and does not parse stays a finding.
+            if f.code == "ANCHORS_SIDECAR_UNREADABLE"
+                && let Some(reason) = f.detail["reason"].as_str()
+                && reason.starts_with("could not read the sidecar")
+            {
+                return Err(EngineError::Backend(crate::backend::BackendError::Other(
+                    reason.to_string(),
+                )));
+            }
             out.insert((f.id, f.code));
         }
         Ok(out)

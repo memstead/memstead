@@ -185,7 +185,7 @@ impl Engine {
                 change,
                 &target_changes,
                 record.as_ref(),
-            );
+            )?;
             entries.push(entry);
         }
         entries.sort_by(|a, b| a.slug.cmp(&b.slug));
@@ -263,7 +263,7 @@ impl Engine {
         change: &SideChange,
         target_changes: &BTreeMap<String, SideChange>,
         record: Option<&ProposalRecord>,
-    ) -> ProposalEntry {
+    ) -> Result<ProposalEntry, EngineError> {
         let fork_schema = self.schema_for(fork);
         let target_schema = self.schema_for(target);
         let normalise = |body: &Option<String>| -> Option<String> {
@@ -386,8 +386,10 @@ impl Engine {
         referrers.dedup();
 
         // The fork's anchor rows, as stored, under the fork's ids.
+        // An unreadable sidecar refuses the brief: a reviewer would
+        // otherwise read the entry as carrying no anchors.
         let anchors: Vec<AnchorRow> = self
-            .entity_anchors(&EntityId::new(fork, slug))
+            .entity_anchors_for_write(&EntityId::new(fork, slug))?
             .into_iter()
             .map(|a| AnchorRow {
                 artifact: a.artifact.clone(),
@@ -410,14 +412,14 @@ impl Engine {
                     message: error,
                 }],
             ),
-            None => self.precheck(target, slug, status, &conflict, landing_entity.as_ref()),
+            None => self.precheck(target, slug, status, &conflict, landing_entity.as_ref())?,
         };
 
         let re_proposal: Vec<ReProposalMark> = record
             .map(|r| r.rejections_matching(slug, content_hash.as_deref()))
             .unwrap_or_default();
 
-        ProposalEntry {
+        Ok(ProposalEntry {
             slug: slug.to_string(),
             fork_id: EntityId::new(fork, slug).to_string(),
             target_id: EntityId::new(target, slug).to_string(),
@@ -434,7 +436,7 @@ impl Engine {
             re_proposal,
             base_body,
             fork_body,
-        }
+        })
     }
 
     /// Rehearse the write the merge would run in the target for this
@@ -448,33 +450,33 @@ impl Engine {
         status: ProposalChange,
         conflict: &Option<Conflict>,
         landing: Option<&Entity>,
-    ) -> Precheck {
+    ) -> Result<Precheck, EngineError> {
         let Some(landing) = landing else {
-            return match status {
+            return Ok(match status {
                 ProposalChange::Deleted => Precheck::not_run(
                     "a deletion is judged against the target's referrers, listed above",
                 ),
                 _ => Precheck::not_run("the fork's body does not parse under the target's schema"),
-            };
+            });
         };
         if status == ProposalChange::Deleted {
-            return Precheck::not_run(
+            return Ok(Precheck::not_run(
                 "a deletion is judged against the target's referrers, listed above",
-            );
+            ));
         }
         let target_id = EntityId::new(target, slug);
         let target_has = self.target_holds(&target_id);
         if let Some(c) = conflict {
             match c.kind {
                 ConflictKind::TargetDeleted => {
-                    return Precheck::not_run(
+                    return Ok(Precheck::not_run(
                         "the target no longer holds this entity; the owner resolves the conflict first",
-                    );
+                    ));
                 }
                 ConflictKind::TargetAdded => {
-                    return Precheck::not_run(
+                    return Ok(Precheck::not_run(
                         "the target holds its own entity under this slug; the owner resolves the conflict first",
-                    );
+                    ));
                 }
                 ConflictKind::TargetModified => {}
             }
@@ -512,8 +514,15 @@ impl Engine {
             };
         self.store = snapshot;
         let operation = if target_has { "update" } else { "create" };
-        match outcome {
+        Ok(match outcome {
             Ok(()) => Precheck::clean(operation),
+            // A storage failure says nothing about the proposal: the
+            // brief refuses rather than report it as the entry's result.
+            Err(
+                e @ (EngineError::Backend(_)
+                | EngineError::StaleView { .. }
+                | EngineError::CommitNotApplied { .. }),
+            ) => return Err(e),
             Err(e) => Precheck::failed(
                 operation,
                 vec![PrecheckFailure {
@@ -521,7 +530,7 @@ impl Engine {
                     message: e.prose_render(),
                 }],
             ),
-        }
+        })
     }
 }
 

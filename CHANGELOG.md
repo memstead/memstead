@@ -58,7 +58,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `RENAME_PARTIAL_FAILURE`, one entry per commit, naming what landed and
   each entity's hash now. The merge outcome's `warnings` are
   `WRITE_FOLLOW_UP_FAILED` objects (`code`, `message`, `details` with
-  `mem`, `step`, `detail`) instead of strings.
+  `mem`, `step`, `detail`) instead of strings. A storage failure while the
+  merge prepares (reading the proposal record, the fork's anchors, the
+  validation baseline) refuses and leaves the store as it was; before,
+  some of these read as empty and the merge went on. `proposal brief`
+  likewise refuses on a storage failure during its precheck instead of
+  reporting it as the entry's precheck result.
 
 - **Every edge and every ref move passes the write lock.** A create,
   batch create, update or batch update whose body wiki-links land

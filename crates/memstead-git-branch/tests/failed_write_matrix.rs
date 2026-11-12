@@ -42,6 +42,8 @@ const MEM: &str = "notes";
 /// A second mem beside the one under test, for the two verbs that need
 /// one (see [`Peer`]).
 const PEER: &str = "peer";
+/// The fork of the mem whose proposal the merge verb lands.
+const FORK: &str = "notes-fork";
 
 /// How a verb wants the second mem mounted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +58,8 @@ enum Peer {
     /// exist in the mem under test, which keeps a stub alive there that
     /// only a read-only mem refers to (the one stub a delete accepts).
     ReadOnly,
+    /// The mem's fork on the same mem-repo, with one change to propose.
+    Fork,
 }
 
 // ---------------------------------------------------------------------
@@ -495,6 +499,13 @@ impl Workspace {
                 .unwrap();
             }
             Kind::GitBranch => {
+                // A workspace root, so the template can fork the mem.
+                std::fs::create_dir_all(tmp.path().join(".memstead")).unwrap();
+                std::fs::write(
+                    tmp.path().join(".memstead/workspace.toml"),
+                    "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+                )
+                .unwrap();
                 init_real_mem_repo(tmp.path(), &[(MEM, "default@1.0.0")]);
             }
         }
@@ -507,15 +518,79 @@ impl Workspace {
         .unwrap();
         let ws = Self::over(tmp, kind);
         ws.seed();
+        if kind == Kind::GitBranch {
+            ws.seed_fork();
+        }
         ws
+    }
+
+    /// The mem forked, and one entity changed on the fork by another
+    /// identity: the proposal the merge verb lands.
+    fn seed_fork(&self) {
+        let mut engine =
+            memstead_git_branch::workspace_store::engine_from_workspace_root(self._tmp.path())
+                .expect("the template boots from its root");
+        memstead_base::mem_management::fork_mem(
+            &mut engine,
+            memstead_base::mem_management::MemForkParams {
+                source: MEM.to_string(),
+                sha: None,
+                name: FORK.to_string(),
+                remote: None,
+                adopt: false,
+                note: None,
+                operator_mode: true,
+                actor: Actor::Cli,
+                client: None,
+            },
+        )
+        .expect("the fork lands");
+        engine.set_identity(Some("proposer-p".to_string()));
+        let fork_id = EntityId::new(FORK, "gamma");
+        let mut sections = IndexMap::new();
+        sections.insert("purpose".to_string(), "Gamma purpose, proposed".to_string());
+        let args = UpdateEntityArgs {
+            id: fork_id.clone(),
+            expected_hash: memstead_base::ExpectedHash::from_token(
+                engine.get_entity(&fork_id).map(|e| e.content_hash.clone()),
+            ),
+            sections,
+            append_sections: Default::default(),
+            patch_sections: Default::default(),
+            sections_unset: Vec::new(),
+            metadata: Default::default(),
+            metadata_unset: Vec::new(),
+            dry_run: false,
+            declare_relations: Vec::new(),
+            anchors: Vec::new(),
+            anchors_unset: Vec::new(),
+            relations_unset: Vec::new(),
+        };
+        engine
+            .update_entity(args, Actor::Cli, None, None)
+            .expect("the fork's change lands");
     }
 
     fn peer_mount(&self, peer: Peer) -> Mount {
         let (capability, lifecycle) = match peer {
             Peer::Lazy => (MountCapability::Write, MountLifecycle::Lazy),
             Peer::ReadOnly => (MountCapability::ReadOnly, MountLifecycle::Eager),
-            Peer::Absent => (MountCapability::Write, MountLifecycle::Eager),
+            Peer::Absent | Peer::Fork => (MountCapability::Write, MountLifecycle::Eager),
         };
+        if peer == Peer::Fork {
+            return Mount {
+                mem: FORK.to_string(),
+                schema: Some("default@1.0.0".parse().unwrap()),
+                storage: MountStorage::GitBranch {
+                    gitdir: self._tmp.path().join("mem-repo").join(".git"),
+                    branch: FORK.to_string(),
+                },
+                capability,
+                lifecycle,
+                cross_linkable: true,
+                migration_target: None,
+            };
+        }
         Mount {
             mem: PEER.to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
@@ -738,6 +813,9 @@ enum Verb {
     /// hand: the export rewrites it in the engine's form, through the
     /// commit call.
     ExportMarkdown,
+    /// The merge of the fork's proposal (one proposer, one commit),
+    /// every entry adopted.
+    ProposalMerge,
 }
 
 impl Verb {
@@ -746,6 +824,7 @@ impl Verb {
     fn applies_to(self, kind: Kind) -> bool {
         match self {
             Verb::ExportMarkdown => kind == Kind::Folder,
+            Verb::ProposalMerge => kind == Kind::GitBranch,
             _ => true,
         }
     }
@@ -767,6 +846,7 @@ impl Verb {
         match self {
             Verb::CreateIntoDeferredMem => Peer::Lazy,
             Verb::DeleteStub => Peer::ReadOnly,
+            Verb::ProposalMerge => Peer::Fork,
             _ => Peer::Absent,
         }
     }
@@ -890,6 +970,10 @@ const VERBS: &[(&str, &[Verb])] = &[
     (
         "engine/lifecycle/export.rs::export_markdown",
         &[Verb::ExportMarkdown],
+    ),
+    (
+        "engine/mutation/proposal_merge.rs::proposal_merge",
+        &[Verb::ProposalMerge],
     ),
     (
         "engine/mutation/update/mod.rs::update_entity",
@@ -1168,10 +1252,6 @@ const NOT_VERBS: &[(&str, &str)] = &[
     (
         "engine/mutation/mem_sweep.rs::land_mem_sweep",
         "one mem's commit of that sweep",
-    ),
-    (
-        "engine/mutation/proposal_merge.rs::proposal_merge",
-        "the merge of a proposal, an operation over several commits",
     ),
     (
         "mem_management/fork.rs::retarget_fork_tree",
@@ -1768,6 +1848,20 @@ fn run_verb(verb: Verb, engine: &mut Engine) -> Result<Result<Vec<String>, Strin
                 engine.batch_update(updates, actor, None, false)?,
             ));
         }
+        Verb::ProposalMerge => {
+            // A merge records its merger beside the proposer.
+            engine.set_identity(Some("owner-o".to_string()));
+            let mut file = engine.proposal_brief(FORK)?;
+            for slot in file.dispositions.values_mut() {
+                slot.disposition = "adopt".to_string();
+            }
+            let outcome = engine.proposal_merge(FORK, &file, actor, None, note)?;
+            return Ok(Ok(outcome
+                .warnings
+                .iter()
+                .map(|w| w.code.clone())
+                .collect()));
+        }
         Verb::ExportMarkdown => {
             let result = engine.export_markdown(Some(MEM), None)?;
             if let Some(refused) = result.refused_entities.first() {
@@ -2107,7 +2201,13 @@ fn a_failed_discard_leaves_no_staged_write_for_the_next_operation() {
             ]
             .into_iter()
             .flat_map(|method| {
-                let calls = control.log.iter().filter(|(m, _)| *m == method).count();
+                // The calls before the commit landed: a failure after it
+                // is a warning on a landed write, which the matrix covers.
+                let calls = control
+                    .log
+                    .iter()
+                    .filter(|(m, landed)| *m == method && !landed)
+                    .count();
                 (1..=calls).map(move |nth| (method, nth))
             })
             .collect();
