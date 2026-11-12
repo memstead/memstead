@@ -1716,7 +1716,8 @@ impl Engine {
     /// store is brought level with storage, and the error states per
     /// commit, in the `RENAME_PARTIAL_FAILURE` shape every operation that
     /// lands in parts reports, which entities landed and their hash now.
-    /// Sending the merge again lands the rest.
+    /// The branch tip moved, so the same file is stale: re-render the
+    /// brief and merge again to land the rest.
     fn merge_partial_failure(
         &mut self,
         target: &str,

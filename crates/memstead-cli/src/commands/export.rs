@@ -491,6 +491,10 @@ fn run_markdown(
             body["refused_entities"] = serde_json::to_value(&result.refused_entities)
                 .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
         }
+        if !result.warnings.is_empty() {
+            body["warnings"] = serde_json::to_value(&result.warnings)
+                .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
+        }
         print_json(&body)?;
     } else {
         let mut block = format!(
@@ -513,6 +517,14 @@ fn run_markdown(
             block.push_str("\n\n## Refused entities\n");
             for r in &result.refused_entities {
                 block.push_str(&format!("\n- `{}` [{}] — {}", r.id, r.reason, r.detail));
+            }
+        }
+        // A step after the landed commit that failed: the files are
+        // written, and the failure is named.
+        if !result.warnings.is_empty() {
+            block.push_str("\n\n## Warnings\n");
+            for w in &result.warnings {
+                block.push_str(&format!("\n- [{}] {}", w.code(), w.message()));
             }
         }
         print_markdown(&block);
