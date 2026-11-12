@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-19T09:22:20Z
-last_modified: 2026-08-19T09:22:20Z
+last_modified: 2026-11-12T04:48:47Z
 status: accepted
 decided_on: 2026-08-19
 deciders: backlog-sweep plan 07 (operator decision 20, 2026-08-18)
@@ -29,4 +29,4 @@ A machine path replaces a human gate without weakening any guard — the plugin'
 
 ## Notes
 
-
+2026-11-12 amendment: the merged-content resolution stays out of scope for anything the agent must judge, and one narrow case is let in. `conflicts resolve --side merged` keeps git's merged file when every conflict block covers the engine-stamped `last_modified` alone (the later value wins), and validates and commits it like the other sides. Any other block, a body section or another frontmatter key `created_date` included, refuses `CONFLICT_NOT_TIMESTAMP_ONLY` naming it; a body conflict is still a content judgement made by choosing a side (engine 6eef74d4).

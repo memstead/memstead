@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-10T22:10:15Z
-last_modified: 2026-09-10T22:10:15Z
+last_modified: 2026-11-11T17:59:28Z
 status: accepted
 decided_on: 2026-09-11
 deciders: architecture-seams bundle plan 02 (agent, under the delegated schema-change rule of 2026-09-02)
@@ -33,3 +33,7 @@ The 2026-09-10 architecture assessment and both of its adversarial counter-check
 - A new constraint kind for the floor instead of a field on the existing one: rejected, the floor is a property of the same gate (how many related entities it quantifies over), and a second kind would duplicate the field, value, relationship and direction declarations.
 - Migrate the running 0.6.0 bundles to 0.7.0 at once: rejected, changing transition semantics under a bundle mid-walk; they finish on the generation they were born on.
 - Ship the forms in a built-in planning generation: deferred, the built-ins stop at planning 0.4.0 and the dogfood line is workspace-local by design; the forms are engine work, the generation is workspace work.
+
+## Notes
+
+2026-11-11 amendment (checks-and-spelling bundle, plan 01): both forms gate the transition only, a write after which the entity holds the gated value where before it did not exist, was of a type without the form, or held another value. A write that leaves the entity at the value is not gated, and nothing is carried across it: a later edit leaves the check behind, the entity reads `check_stale`, and the health constraints axis reports the gate as a standing violation until a new check or a value change. On the self-check form the transition write passes on a fresh independent record of the bytes it produces, or of the stored content when the write changes nothing but the gated field and the engine-stamped timestamps; only then is the record carried. A transition write that also changes content refuses, naming what changed, so fields required at the gated value are written before the check. Conflict resolution runs both forms on the side it lands; a retype entering a self-check gate refuses. "An identity other than the entity's author" now reads: an identity that wrote none of the content it checked, every identity on a write of the entity up to the write the record names (`checked_write`), in write order on every backend. Rejected: keeping the carry across later edits as the rule (an approval would stand for text nobody checked), freezing an entity at the gated value, carrying across a transition write that also changes content, comparing with the first and last writer only. Deciders: authoring session under the engine-changes rule, executed by session b65e9530.

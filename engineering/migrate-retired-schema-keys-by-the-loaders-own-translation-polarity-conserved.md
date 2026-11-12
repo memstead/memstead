@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T00:46:51Z
-last_modified: 2026-09-02T00:46:51Z
+last_modified: 2026-11-11T22:41:21Z
 status: accepted
 decided_on: 2026-09-02
 deciders: execute-graph-plan loop, evidence-engine bundle
@@ -46,3 +46,6 @@ The authoring tier refuses retired keys loudly by design ([[engineering--one-nam
 ## Notes
 
 Landed in engine commit c1423f7 (0.15.0 line) with the CLI coverage declaration, the changelog entry, the guide section in the docs-site schema-authoring guide, and the regenerated CLI and error references. Acceptance evidence ran on scratch copies of the two external pilot packages; their originals were checksummed identical before and after.
+
+
+2026-11-11, engine dfd6bfde to aa4c526f: the table gained a constraint scope. Seven rows retire the direction values `incoming` / `outgoing` (now `in` / `out`, one direction type) on `status_propagation` and `transition_requires_checks`, and the relation keys `rel_type` / `rel_types` (now `relationships`; a single name becomes a one-element list) on `status_propagation` and `enum_from_neighbour`. These rows carry no serde sentinel: the loader translates a parsed type document by the table itself (`translate_retired_constraint_spellings`), so sealed content loads with its meaning and authoring content refuses naming the retired spelling, its replacement and `schema migrate`. Two rewrite kinds were added for it (a value rewrite and a rename into a list). The faithfulness proof now also compares each type's constraints, and a run with nothing the rewriter reaches refuses when the authoring read still refuses a retired spelling (a flow-style mapping), instead of reporting nothing to migrate.

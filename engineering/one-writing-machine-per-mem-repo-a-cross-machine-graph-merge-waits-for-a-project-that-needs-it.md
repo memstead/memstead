@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-10T14:08:00Z
-last_modified: 2026-09-30T20:49:41Z
+last_modified: 2026-11-12T04:48:47Z
 status: superseded
 decided_on: 2026-09-10
 deciders: operator (in-session), implementing agent
@@ -38,3 +38,4 @@ The 2026-09-10 review of prune separated two questions the merge word had fused.
 ## Notes
 
 2026-09-20 amendment: the trigger named in Decision fired (a project that uses the engine needs to merge a second lineage into an owner's mem); superseded by [[engineering--build-proposals-as-forks-with-a-recorded-ancestor-merged-entity-wise-under-two-identities]], which keeps the design order recorded under Consequences.
+2026-11-12 amendment: not reopened. `pull --all` now merges a diverged schema-and-config ref file by file when no file changed on both sides; that ref holds one config file per mem plus the schema packages, so two machines that each created a mem touch disjoint files and no entity is merged. A file changed on both sides still refuses. The entity-wise graph merge this decision rules out stays out: entity branches remain fast-forward only (engine 342d82d7).

@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-11T11:30:34Z
-last_modified: 2026-11-11T11:35:19Z
+last_modified: 2026-11-12T01:14:38Z
 status: accepted
 decided_on: 2026-11-10
 deciders: engine-soundness bundle, executing session and its independent graders
@@ -24,7 +24,7 @@ The folder backend applied its staged files one by one, returned at the first er
 - Readers that walk a folder mem's directory or ledger directly must call the refusal first.
 - A killed attempt can leave empty directories; they hold no content and are not removed. Directory sync is skipped off unix, where the platform offers none.
 - A load that sweeps leftover temps looks for a commit record again under the mem's lock, so a sibling killed just past its commit point keeps its commit.
-- Not covered: the markdown export writes a folder mem's files directly, past the commit point and without the lock.
+- The markdown export stages a folder mem's files through the backend under the mem's write lock and commits them at the one commit point (amended 2026-11-12, engine 6a9dbc7f).
 
 ## Relationships
 - **GOVERNS**: [[engine:filesystem-backend]]
