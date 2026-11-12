@@ -975,9 +975,29 @@ fn two_clones_that_each_created_a_mem_reconcile_with_pull_all() {
     ok(&f.b, &["pull", "--all"]);
     let (a, b) = (&f.a, &f.b);
 
+    let spec = |ws: &Path, mem: &str, title: &str| {
+        ok(
+            ws,
+            &[
+                "create",
+                "--mem",
+                mem,
+                "--title",
+                title,
+                "--type",
+                "spec",
+                "--section",
+                "identity=x",
+                "--section",
+                "purpose=y",
+            ],
+        );
+    };
     ok(a, &["mem", "init", "kettle", "--schema", "default@1.3.0"]);
+    spec(a, "kettle", "Spout");
     ok(a, &["push", "--all"]);
     ok(b, &["mem", "init", "kiln", "--schema", "default@1.3.0"]);
+    spec(b, "kiln", "Chamber");
 
     let pulled = run(b, &["--json", "pull", "--all"]);
     let text = String::from_utf8_lossy(&pulled.stdout).to_string()
@@ -1050,12 +1070,50 @@ fn two_clones_that_each_created_a_mem_reconcile_with_pull_all() {
                 "--reattach",
             ],
         );
+        // The re-attached mem's branch arrives with the next pull.
+        ok(ws, &["pull", "--all"]);
         let list = ok(ws, &["mem", "list"]);
         for mem in ["knowledge", "kitchen", "kettle", "kiln"] {
             assert!(list.contains(&format!("`{mem}`")), "{mem} loads: {list}");
         }
+        assert!(
+            list.lines()
+                .filter(|l| l.contains("`kettle`") || l.contains("`kiln`"))
+                .all(|l| l.contains("1 entities")),
+            "each new mem loads with its entity: {list}"
+        );
         assert!(quarantined(ws).is_empty(), "{:?}", quarantined(ws));
+        ok(ws, &["push", "--all"]);
     }
+}
+
+/// The remote side deleted a file on the schema-and-config ref (a mem
+/// deleted on the other clone) while this clone created one: the merge
+/// applies the deletion and the creation alike, with no work tree.
+#[test]
+fn a_config_ref_merge_carries_the_other_clones_deletion() {
+    let f = workspace_a();
+    clone_b(&f);
+    ok(&f.b, &["pull", "--all"]);
+    let (a, b) = (&f.a, &f.b);
+    ok(a, &["mem", "init", "kettle", "--schema", "default@1.3.0"]);
+    ok(a, &["push", "--all"]);
+    ok(b, &["pull", "--all"]);
+    ok(a, &["mem", "delete", "kettle", "--operator-mode"]);
+    ok(a, &["push", "--all"]);
+    ok(b, &["mem", "init", "kiln", "--schema", "default@1.3.0"]);
+
+    let pulled = run(b, &["--json", "pull", "--all"]);
+    let text = String::from_utf8_lossy(&pulled.stdout).to_string()
+        + &String::from_utf8_lossy(&pulled.stderr);
+    assert!(pulled.status.success(), "{text}");
+    let tree = git(
+        &b.join("mem-repo"),
+        &["ls-tree", "-r", "--name-only", "refs/heads/__MEMSTEAD"],
+    );
+    assert!(tree.contains("mems/kiln/config.json"), "{tree}");
+    assert!(!tree.contains("mems/kettle/config.json"), "{tree}");
+    ok(b, &["push", "--all"]);
 }
 
 /// Both clones changed the same file on the schema-and-config ref (each

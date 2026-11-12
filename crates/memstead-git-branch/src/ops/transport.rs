@@ -387,44 +387,68 @@ pub fn merge_disjoint_in_gitdir(
     // read or written; removed whatever happens.
     let index = gitdir.join(format!("memstead-merge-{}.index", std::process::id()));
     let result = (|| -> Result<String, BackendError> {
-        let with_index = |args: &[&str], what: &str| -> Result<String, BackendError> {
-            let output = Command::new("git")
-                .arg("-C")
-                .arg(gitdir)
-                .args(args)
-                .env("GIT_INDEX_FILE", &index)
-                .env("GIT_TERMINAL_PROMPT", "0")
-                .env("GIT_AUTHOR_NAME", "engine")
-                .env("GIT_AUTHOR_EMAIL", "noreply@memstead.com")
-                .env("GIT_COMMITTER_NAME", "engine")
-                .env("GIT_COMMITTER_EMAIL", "noreply@memstead.com")
-                .stdin(Stdio::null())
-                .output()
-                .map_err(|e| BackendError::Other(format!("{what} failed to start: {e}")))?;
-            if !output.status.success() {
-                return Err(BackendError::Other(format!(
-                    "{what} failed: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                )));
-            }
-            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-        };
-        with_index(&["read-tree", ours], "git read-tree")?;
-        for (path, mode, sha, status) in &theirs_changed {
-            if status == "D" {
-                with_index(
-                    &["update-index", "--force-remove", "--", path],
-                    "git update-index",
-                )?;
-            } else {
-                let cacheinfo = format!("{mode},{sha},{path}");
-                with_index(
-                    &["update-index", "--add", "--cacheinfo", &cacheinfo],
-                    "git update-index",
-                )?;
-            }
-        }
-        let tree = with_index(&["write-tree"], "git write-tree")?;
+        let with_index =
+            |args: &[&str], stdin: Option<&str>, what: &str| -> Result<String, BackendError> {
+                let mut child = Command::new("git")
+                    .arg("-C")
+                    .arg(gitdir)
+                    .args(args)
+                    .env("GIT_INDEX_FILE", &index)
+                    .env("GIT_TERMINAL_PROMPT", "0")
+                    .env("GIT_AUTHOR_NAME", "engine")
+                    .env("GIT_AUTHOR_EMAIL", "noreply@memstead.com")
+                    .env("GIT_COMMITTER_NAME", "engine")
+                    .env("GIT_COMMITTER_EMAIL", "noreply@memstead.com")
+                    .stdin(if stdin.is_some() {
+                        Stdio::piped()
+                    } else {
+                        Stdio::null()
+                    })
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .map_err(|e| BackendError::Other(format!("{what} failed to start: {e}")))?;
+                if let Some(input) = stdin {
+                    use std::io::Write as _;
+                    child
+                        .stdin
+                        .take()
+                        .expect("piped stdin")
+                        .write_all(input.as_bytes())
+                        .map_err(|e| BackendError::Other(format!("{what}: {e}")))?;
+                }
+                let output = child
+                    .wait_with_output()
+                    .map_err(|e| BackendError::Other(format!("{what} failed: {e}")))?;
+                if !output.status.success() {
+                    return Err(BackendError::Other(format!(
+                        "{what} failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )));
+                }
+                Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            };
+        with_index(&["read-tree", ours], None, "git read-tree")?;
+        // One `--index-info` batch: `<mode> <sha>\t<path>` adds or replaces,
+        // a zero mode and sha removes. It edits the index alone, so it needs
+        // no work tree (a mem-repo is bare as far as this merge is concerned).
+        let zero = "0".repeat(40);
+        let info: String = theirs_changed
+            .iter()
+            .map(|(path, mode, sha, status)| {
+                if status == "D" {
+                    format!("0 {zero}\t{path}\n")
+                } else {
+                    format!("{mode} {sha}\t{path}\n")
+                }
+            })
+            .collect();
+        with_index(
+            &["update-index", "--index-info"],
+            Some(&info),
+            "git update-index",
+        )?;
+        let tree = with_index(&["write-tree"], None, "git write-tree")?;
         with_index(
             &[
                 "commit-tree",
@@ -436,6 +460,7 @@ pub fn merge_disjoint_in_gitdir(
                 "-m",
                 message,
             ],
+            None,
             "git commit-tree",
         )
     })();

@@ -330,8 +330,9 @@ pub enum Command {
     /// the one sanctioned repair when a merge in the user's repo
     /// writes conflict markers into entity files. `conflicts list`
     /// shows conflicted entities; `conflicts resolve <id> --side
-    /// ours|theirs` keeps one side, validated before it lands and
-    /// committed as an attributed mutation.
+    /// ours|theirs` keeps one side (`--side merged` keeps git's merge
+    /// when only `last_modified` conflicts), validated before it lands
+    /// and committed as an attributed mutation.
     Conflicts(commands::conflicts::Args),
 
     /// Report a mem's changes since a cursor. The cursor is

@@ -167,7 +167,8 @@ created a mem (or otherwise changed different files on it), `pull --all`
 merges the two histories file by file and pushes nothing for you; run
 `push --all` afterwards. The other machine's new mem then shows under
 `unmounted_on_remote`; mount it with
-`memstead mem init <name> --schema <pin> --reattach`. When both machines
+`memstead mem init <name> --schema <pin> --reattach`, then run
+`pull --all` once more to bring in its branch. When both machines
 changed the same file, `pull --all` refuses `LOCAL_DIVERGENCE` naming it.
 
 ## 5. Fork a mem at a recorded ancestor
