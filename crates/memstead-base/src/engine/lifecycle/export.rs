@@ -65,6 +65,8 @@ impl Engine {
         // bytes it wrote: the engine's view takes them once the commit
         // lands, as any write's view takes the bytes it wrote.
         let mut rewritten: Vec<(crate::entity::EntityId, String)> = Vec::new();
+        // The folder mems in scope; the others are reported skipped.
+        let mut targets: Vec<(usize, String)> = Vec::new();
         for (mount_idx, mount) in self.mounts.iter().enumerate() {
             let mem_name = mount.mount.mem.as_str();
             if let Some(filter) = mem_filter
@@ -72,22 +74,34 @@ impl Engine {
             {
                 continue;
             }
-            let MountStorage::Folder { path: mem_dir } = &mount.mount.storage else {
+            if !matches!(mount.mount.storage, MountStorage::Folder { .. }) {
                 skipped_mounts.push(crate::ops::SkippedMount {
                     mem: mem_name.to_string(),
                     active_backend: mount.mount.storage.backend_id().to_string(),
                     reason: "backend_does_not_support_markdown_export".to_string(),
                 });
                 continue;
+            }
+            targets.push((mount_idx, mem_name.to_string()));
+        }
+        for (mount_idx, mem) in targets {
+            // Export writes files into the mem: it holds the mem's write
+            // lock and plans from a view read under it (a write another
+            // process landed before the lock is in the view, never
+            // overwritten), stages every file through the backend and
+            // commits once, so it lands through the commit call like any
+            // write.
+            let _write_lock = self.lock_mems_for_write(&[mem.as_str()])?;
+            warnings.extend(self.level_for_write(&[mem.as_str()]));
+            let mem_name = mem.as_str();
+            let mount = &self.mounts[mount_idx];
+            let MountStorage::Folder { path: mem_dir } = &mount.mount.storage else {
+                continue;
             };
             let schema = match self.schemas.get(mem_name) {
                 Some(s) => s,
                 None => continue,
             };
-            // Export writes files into the mem: it holds the mem's write
-            // lock, stages every file through the backend and commits
-            // once, so it lands through the commit call like any write.
-            let _write_lock = self.lock_mems_for_write(&[mem_name])?;
             let backend = mount.backend.as_ref();
             let mut staged: usize = 0;
             let mut mem_rewritten: Vec<(crate::entity::EntityId, String)> = Vec::new();

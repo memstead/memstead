@@ -2987,3 +2987,51 @@ fn export_markdown_waits_for_the_mems_write_lock() {
         "the export did not wait for the lock ({waited:?})"
     );
 }
+
+/// A write another engine landed before the export took the lock is in
+/// the view the export plans from: the export never overwrites it.
+#[test]
+fn export_markdown_does_not_overwrite_a_write_it_had_not_seen() {
+    let tmp = TempDir::new().unwrap();
+    let mut a = crate::engine::test_helpers::build_demo_engine(&tmp);
+    let mut b = Engine::from_mounts(vec![(
+        folder_mount("specs", tmp.path().to_path_buf()),
+        Box::new(FilesystemBackend::new(tmp.path().to_path_buf())) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+    let id = b
+        .store
+        .all_entities()
+        .find(|e| !e.stub && !e.file_path.is_empty())
+        .map(|e| e.id.clone())
+        .unwrap();
+    let file = b.get_entity(&id).unwrap().file_path.clone();
+    let mut args = crate::engine::UpdateEntityArgs {
+        anchors: Vec::new(),
+        anchors_unset: Vec::new(),
+        expected_hash: crate::ExpectedHash::from_token(
+            b.get_entity(&id).map(|e| e.content_hash.clone()),
+        ),
+        id: id.clone(),
+        sections: indexmap::IndexMap::new(),
+        append_sections: indexmap::IndexMap::new(),
+        patch_sections: indexmap::IndexMap::new(),
+        sections_unset: Vec::new(),
+        metadata: indexmap::IndexMap::new(),
+        metadata_unset: Vec::new(),
+        declare_relations: Vec::new(),
+        dry_run: false,
+        relations_unset: Vec::new(),
+    };
+    args.append_sections
+        .insert("purpose".to_string(), "SIBLING-WRITE".to_string());
+    b.update_entity(args, crate::vcs::Actor::Cli, None, None)
+        .expect("the other engine's write lands");
+
+    a.export_markdown(None, None).expect("export");
+    let after = std::fs::read_to_string(tmp.path().join(&file)).unwrap();
+    assert!(
+        after.contains("SIBLING-WRITE"),
+        "the export overwrote it:\n{after}"
+    );
+}

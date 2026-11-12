@@ -816,6 +816,9 @@ enum Verb {
     /// The merge of the fork's proposal (one proposer, one commit),
     /// every entry adopted.
     ProposalMerge,
+    /// The same merge with the changed entry adopted with the owner's
+    /// changes: a second commit, the amend, under the merger.
+    ProposalMergeAmend,
 }
 
 impl Verb {
@@ -824,7 +827,7 @@ impl Verb {
     fn applies_to(self, kind: Kind) -> bool {
         match self {
             Verb::ExportMarkdown => kind == Kind::Folder,
-            Verb::ProposalMerge => kind == Kind::GitBranch,
+            Verb::ProposalMerge | Verb::ProposalMergeAmend => kind == Kind::GitBranch,
             _ => true,
         }
     }
@@ -846,7 +849,7 @@ impl Verb {
         match self {
             Verb::CreateIntoDeferredMem => Peer::Lazy,
             Verb::DeleteStub => Peer::ReadOnly,
-            Verb::ProposalMerge => Peer::Fork,
+            Verb::ProposalMerge | Verb::ProposalMergeAmend => Peer::Fork,
             _ => Peer::Absent,
         }
     }
@@ -973,7 +976,7 @@ const VERBS: &[(&str, &[Verb])] = &[
     ),
     (
         "engine/mutation/proposal_merge.rs::proposal_merge",
-        &[Verb::ProposalMerge],
+        &[Verb::ProposalMerge, Verb::ProposalMergeAmend],
     ),
     (
         "engine/mutation/update/mod.rs::update_entity",
@@ -1848,12 +1851,24 @@ fn run_verb(verb: Verb, engine: &mut Engine) -> Result<Result<Vec<String>, Strin
                 engine.batch_update(updates, actor, None, false)?,
             ));
         }
-        Verb::ProposalMerge => {
+        Verb::ProposalMerge | Verb::ProposalMergeAmend => {
             // A merge records its merger beside the proposer.
             engine.set_identity(Some("owner-o".to_string()));
             let mut file = engine.proposal_brief(FORK)?;
             for slot in file.dispositions.values_mut() {
                 slot.disposition = "adopt".to_string();
+            }
+            if verb == Verb::ProposalMergeAmend {
+                let slot = file
+                    .dispositions
+                    .get_mut("gamma")
+                    .expect("the fork changed gamma");
+                slot.disposition = "adopt_with_changes".to_string();
+                slot.reason = "merged by hand".to_string();
+                slot.body = Some(serde_json::json!({
+                    "sections": {"identity": "Gamma identity", "purpose": "Gamma purpose, amended"},
+                    "metadata": {}
+                }));
             }
             let outcome = engine.proposal_merge(FORK, &file, actor, None, note)?;
             return Ok(Ok(outcome
@@ -2096,6 +2111,16 @@ fn run_cell(template: &Workspace, verb: Verb, method: Method, nth: usize, contro
                 view(&engine, true),
                 view(&ws.fresh_engine(peer), true),
                 "{cell}: after a failed follow-up the engine's view differs from a fresh load"
+            );
+        }
+        // An operation over several commits that failed after one landed:
+        // the report names what landed (its designed answer), and the
+        // landed part is in the engine's view as in a fresh load.
+        (Err(e), true) if e.starts_with("RENAME_PARTIAL_FAILURE") => {
+            assert_eq!(
+                view(&engine, true),
+                view(&ws.fresh_engine(peer), true),
+                "{cell}: after a partial failure the engine's view differs from a fresh load"
             );
         }
         (Err(e), true) => panic!("{cell}: a write that is in storage was reported as failed: {e}"),
@@ -2362,5 +2387,58 @@ fn a_failed_worktree_refresh_is_a_warning_on_a_landed_write() {
     assert!(
         engine.reload_if_stale(Some(MEM)).is_empty(),
         "the engine's own landed write reads as drift"
+    );
+}
+
+/// A merge whose two commits (the proposer's and the amend) land on a
+/// mem-repo whose worktree cannot be written reports both failed
+/// worktree syncs: no follow-up of a landed commit is dropped.
+#[test]
+fn every_landed_merge_commits_failed_follow_up_is_reported() {
+    use std::os::unix::fs::PermissionsExt;
+    let set_mode = |path: &Path, mode: u32| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap()
+    };
+    let ws = Workspace::template(Kind::GitBranch);
+    let repo = ws._tmp.path().join("mem-repo");
+    // A worktree checkout for the mem's branch, so a commit syncs it.
+    for args in [
+        vec!["config", "core.bare", "false"],
+        vec!["symbolic-ref", "HEAD", "refs/heads/notes"],
+    ] {
+        let status = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.join(".git"))
+            .args(&args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+    let mut engine = ws.fresh_engine(Peer::Fork);
+    engine.set_identity(Some("owner-o".to_string()));
+    let mut file = engine.proposal_brief(FORK).unwrap();
+    for slot in file.dispositions.values_mut() {
+        slot.disposition = "adopt".to_string();
+    }
+    let slot = file.dispositions.get_mut("gamma").unwrap();
+    slot.disposition = "adopt_with_changes".to_string();
+    slot.reason = "merged by hand".to_string();
+    slot.body = Some(serde_json::json!({
+        "sections": {"identity": "Gamma identity", "purpose": "Gamma purpose, amended"},
+        "metadata": {}
+    }));
+    set_mode(&repo, 0o555);
+    let outcome = engine.proposal_merge(FORK, &file, Actor::Cli, None, None);
+    set_mode(&repo, 0o755);
+    let outcome = outcome.expect("the merge landed");
+    let syncs = outcome
+        .warnings
+        .iter()
+        .filter(|w| w.details.to_string().contains("worktree_sync"))
+        .count();
+    assert_eq!(
+        syncs, 2,
+        "two commits landed and both worktree syncs failed: {:#?}",
+        outcome.warnings
     );
 }

@@ -1267,7 +1267,9 @@ impl Engine {
             let sha =
                 match self.commit_staged_pinned(target_mount, &subject, &ctx, &[], Some(&parent)) {
                     Ok(landed) => {
-                        follow_ups.extend(landed.warnings);
+                        // After the drain into `warnings` above: the
+                        // amend's own follow-ups go straight to the outcome.
+                        warnings.extend(landed.warnings.iter().map(MergeWarning::from_hint));
                         landed.write_id
                     }
                     Err(e) => {
