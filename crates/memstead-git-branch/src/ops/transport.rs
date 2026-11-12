@@ -85,7 +85,7 @@ pub fn fetch_in_gitdir(
     let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
     let remote_owned = remote.to_string();
     run_git(gitdir, &args_ref, move |stderr| {
-        classify_remote_failure(&remote_owned, stderr)
+        classify_remote_failure(gitdir, &remote_owned, stderr)
     })?;
 
     let post = ref_snapshot(gitdir);
@@ -216,7 +216,7 @@ pub fn push_in_gitdir(
             || lower.contains("repository not found")
             || (lower.contains("fatal: '") && lower.contains("does not exist"))
         {
-            return format!("UNKNOWN_REMOTE:{remote_owned}");
+            return remote_marker(gitdir, &remote_owned, stderr);
         }
         format!("push to `{remote_owned}` failed: {stderr}")
     })?;
@@ -251,7 +251,7 @@ pub fn ls_remote_in_gitdir(
     let stdout = run_git(
         gitdir,
         &["ls-remote", "--heads", "--", remote],
-        move |stderr| classify_remote_failure(&remote_owned, stderr),
+        move |stderr| classify_remote_failure(gitdir, &remote_owned, stderr),
     )?;
     Ok(stdout
         .lines()
@@ -487,9 +487,42 @@ pub fn read_md_blobs_at_ref(
     Ok(out)
 }
 
+/// The marker for a remote that did not answer: whether the name is a
+/// configured remote decides it, not the wording of git's message, which
+/// is the same for both ("could not read from remote repository").
+/// A configured remote that cannot be reached is
+/// `REMOTE_UNREACHABLE:<remote>\t<url>\t<first line of git's message>`
+/// (reach it: the URL, the network); a name that is no configured remote
+/// is `UNKNOWN_REMOTE:<remote>` (add it).
+fn remote_marker(gitdir: &Path, remote: &str, stderr: &str) -> String {
+    let url = Command::new("git")
+        .arg("-C")
+        .arg(gitdir)
+        .args(["remote", "get-url", "--", remote])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|u| !u.is_empty());
+    match url {
+        Some(url) => {
+            let detail = stderr
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or("no answer")
+                .replace('\t', " ");
+            format!("REMOTE_UNREACHABLE:{remote}\t{url}\t{detail}")
+        }
+        None => format!("UNKNOWN_REMOTE:{remote}"),
+    }
+}
+
 /// Classify a `git fetch` stderr line into the most specific marker
 /// we can recover. Used by both fetch and pull's underlying fetch.
-fn classify_remote_failure(remote: &str, stderr: &str) -> String {
+fn classify_remote_failure(gitdir: &Path, remote: &str, stderr: &str) -> String {
     let normalized = stderr.to_lowercase();
     if normalized.contains("does not appear to be a git repository")
         || normalized.contains("could not read from remote repository")
@@ -502,7 +535,7 @@ fn classify_remote_failure(remote: &str, stderr: &str) -> String {
         || normalized.contains("unable to access")
         || (normalized.contains("fatal:") && normalized.contains("not found"))
     {
-        return format!("UNKNOWN_REMOTE:{remote}");
+        return remote_marker(gitdir, remote, stderr);
     }
     // Heuristic: git's "fatal: '<remote>' does not appear..." line.
     if normalized.contains("not configured")

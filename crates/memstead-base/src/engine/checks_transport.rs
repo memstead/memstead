@@ -48,9 +48,7 @@ fn tracking_ref(remote: &str) -> String {
 
 fn lift_remote(e: BackendError) -> EngineError {
     match e {
-        BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
-            EngineError::UnknownRemote(msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string())
-        }
+        other if EngineError::is_remote_marker(&other) => EngineError::from_transport(other),
         other => EngineError::Backend(other),
     }
 }

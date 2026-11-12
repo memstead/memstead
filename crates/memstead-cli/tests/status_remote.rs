@@ -334,14 +334,14 @@ fn status_remote_fails_open_without_a_reachable_remote() {
     assert!(json["remote"]["refs"].as_array().unwrap().is_empty());
     let notices = json["remote"]["notices"].as_array().unwrap();
     assert!(
-        notices.iter().any(|n| n
-            .as_str()
-            .unwrap()
-            .contains("not configured or not reachable")),
+        notices
+            .iter()
+            .any(|n| n.as_str().unwrap().contains("unknown remote: origin")),
         "{notices:?}"
     );
 
-    // A remote that points nowhere reads the same way.
+    // A configured remote that points nowhere fails open too, and its
+    // notice names the remote as unreachable at its URL, not as unknown.
     memstead()
         .current_dir(ws.path())
         .args(["mem-repo", "remote-add", "origin", "--quiet"])
@@ -350,7 +350,14 @@ fn status_remote_fails_open_without_a_reachable_remote() {
         .success();
     let (code, json, _) = status_remote(ws.path());
     assert_eq!(code, 0, "{json}");
-    assert!(!json["remote"]["notices"].as_array().unwrap().is_empty());
+    let notices = json["remote"]["notices"].as_array().unwrap();
+    assert!(
+        notices.iter().any(|n| {
+            let n = n.as_str().unwrap();
+            n.contains("could not be reached") && n.contains("no-such-remote")
+        }),
+        "{notices:?}"
+    );
     assert!(json["remote"]["refs"].as_array().unwrap().is_empty());
 
     // Without --remote the payload carries no remote block at all.

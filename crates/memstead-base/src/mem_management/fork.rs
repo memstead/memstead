@@ -929,11 +929,8 @@ fn adopted_fork_base(
 /// other transport verbs use.
 fn lift_remote_marker(e: BackendError) -> FullEngineError {
     match e {
-        BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
-            crate::EngineError::UnknownRemote(
-                msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
-            )
-            .into()
+        other if crate::EngineError::is_remote_marker(&other) => {
+            crate::EngineError::from_transport(other).into()
         }
         other => crate::EngineError::Backend(other).into(),
     }

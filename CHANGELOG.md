@@ -752,6 +752,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - A batch that loses a race to another writer in one of its mems
     reports `failure_cause: drift` in its partial-failure envelope, as a
     rename does, instead of `storage`.
+  - New code `REMOTE_UNREACHABLE`: a remote that is configured on the
+    mem-repo and cannot be reached (an address that does not resolve, a
+    refused connection, a URL that names no repository) refuses with it,
+    `details` naming the remote, its URL and git's answer. `UNKNOWN_REMOTE`
+    stays for a name no remote carries, and its message now names
+    `memstead mem-repo remote-add`. The transport decides by asking git
+    whether the remote is configured, not by the wording of git's error.
+    `status --remote`'s fail-open notice says which of the two it met.
 
 - **A long-lived engine sees what a fresh one sees.** Six places where a
   server that had been running a while served a different view from an

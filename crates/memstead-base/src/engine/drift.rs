@@ -761,10 +761,8 @@ impl Engine {
                 Some(hook) => {
                     let mut outcome =
                         (hook.fetch)(gitdir, remote, refspecs).map_err(|e| match e {
-                            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
-                                EngineError::UnknownRemote(
-                                    msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
-                                )
+                            other if EngineError::is_remote_marker(&other) => {
+                                EngineError::from_transport(other)
                             }
                             other => EngineError::Backend(other),
                         })?;
@@ -827,11 +825,7 @@ impl Engine {
             ))
         })?;
         (hook.fetch)(&gitdir, remote, &[]).map_err(|e| match e {
-            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
-                EngineError::UnknownRemote(
-                    msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
-                )
-            }
+            other if EngineError::is_remote_marker(&other) => EngineError::from_transport(other),
             other => EngineError::Backend(other),
         })?;
 
@@ -853,11 +847,7 @@ impl Engine {
         // that's a no-op cache-wise and keeps the fast-forward logic
         // co-located with the rest of the transport implementation).
         let mut outcome = (hook.pull)(&gitdir, remote, &branch, mem).map_err(|e| match e {
-            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
-                EngineError::UnknownRemote(
-                    msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
-                )
-            }
+            other if EngineError::is_remote_marker(&other) => EngineError::from_transport(other),
             BackendError::Other(msg) if msg.starts_with("LOCAL_DIVERGENCE:") => {
                 let payload = msg.trim_start_matches("LOCAL_DIVERGENCE:");
                 let mut parts = payload.splitn(2, ':');
@@ -960,10 +950,8 @@ impl Engine {
 
         let mut outcome =
             (hook.push)(&gitdir, remote, &branch, mem, force).map_err(|e| match e {
-                BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
-                    EngineError::UnknownRemote(
-                        msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
-                    )
+                other if EngineError::is_remote_marker(&other) => {
+                    EngineError::from_transport(other)
                 }
                 BackendError::Other(msg) if msg.starts_with("NON_FAST_FORWARD:") => {
                     let payload = msg.trim_start_matches("NON_FAST_FORWARD:");
@@ -1047,11 +1035,10 @@ impl Engine {
             let remote_refs: std::collections::BTreeMap<String, String> =
                 match (hook.ls_remote)(gitdir, remote) {
                     Ok(v) => v.into_iter().collect(),
-                    Err(BackendError::Other(msg)) if msg.starts_with("UNKNOWN_REMOTE:") => {
+                    Err(e) if EngineError::is_remote_marker(&e) => {
                         outcome.notices.push(format!(
-                            "remote `{}` is not configured or not reachable from {}: the \
-                             comparison did not run (fail open)",
-                            msg.trim_start_matches("UNKNOWN_REMOTE:").trim(),
+                            "{} (from {}): the comparison did not run (fail open)",
+                            EngineError::from_transport(e),
                             gitdir.display()
                         ));
                         continue;
@@ -1203,10 +1190,8 @@ impl Engine {
             let remote_refs: std::collections::HashMap<String, String> =
                 (hook.ls_remote)(gitdir, remote)
                     .map_err(|e| match e {
-                        BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
-                            EngineError::UnknownRemote(
-                                msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
-                            )
+                        other if EngineError::is_remote_marker(&other) => {
+                            EngineError::from_transport(other)
                         }
                         other => EngineError::Backend(other),
                     })?
@@ -1274,10 +1259,8 @@ impl Engine {
                                     remote: remote.to_string(),
                                 }
                             }
-                            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
-                                EngineError::UnknownRemote(
-                                    msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
-                                )
+                            other if EngineError::is_remote_marker(&other) => {
+                                EngineError::from_transport(other)
                             }
                             other => EngineError::Backend(other),
                         }),
@@ -1392,11 +1375,7 @@ impl Engine {
             ))
         })?;
         let map_fetch_err = |e: BackendError| match e {
-            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
-                EngineError::UnknownRemote(
-                    msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
-                )
-            }
+            other if EngineError::is_remote_marker(&other) => EngineError::from_transport(other),
             other => EngineError::Backend(other),
         };
 

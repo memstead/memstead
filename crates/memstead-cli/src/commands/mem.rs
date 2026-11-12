@@ -182,7 +182,8 @@ pub struct ForkArgs {
     /// workspace (`SCHEMA_NOT_FOUND`, remedy `memstead schema install`).
     /// No grant is inherited from a remote; the create rule's
     /// `default_cross_links` apply as for any created mem. Unknown
-    /// remote: `UNKNOWN_REMOTE`; a branch the remote lacks: `UNKNOWN_REF`.
+    /// remote: `UNKNOWN_REMOTE`; a configured one that cannot be reached:
+    /// `REMOTE_UNREACHABLE`; a branch the remote lacks: `UNKNOWN_REF`.
     #[arg(long)]
     pub remote: Option<String>,
 

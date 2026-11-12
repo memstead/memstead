@@ -53,6 +53,9 @@ branch, and `pull --all` restores that declared branch from
 The push refuses rather than surprises:
 
 - `UNKNOWN_REMOTE` — the remote name isn't configured (step 1).
+- `REMOTE_UNREACHABLE` — the remote is configured but did not answer at
+  its URL (shown in the message): check the address and the network, or
+  re-point it with `memstead mem-repo remote-add origin <url>`.
 - `NON_FAST_FORWARD` — the remote has commits this workspace lacks
   (another machine pushed). Run `memstead pull <mem>` first, or
   `--force` to overwrite deliberately (force-with-lease under the hood).

@@ -126,6 +126,7 @@ variant_tags!(
         MergeConflictUnsupportedBackend,
         NotConflicted,
         UnknownRemote,
+        RemoteUnreachable,
         LocalDivergence,
         NonFastForward,
         LocalInvalidState,
@@ -998,6 +999,14 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
         (
             "UnknownRemote".into(),
             EngineError::UnknownRemote(s("origin")),
+        ),
+        (
+            "RemoteUnreachable".into(),
+            EngineError::RemoteUnreachable {
+                remote: s("origin"),
+                url: s("https://example.invalid/r.git"),
+                detail: s("fatal: unable to access"),
+            },
         ),
         (
             "LocalDivergence".into(),

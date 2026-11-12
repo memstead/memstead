@@ -1211,8 +1211,25 @@ pub enum EngineError {
     /// not configured on the workspace's mem-repo. Typed code
     /// `UNKNOWN_REMOTE`. Recovery: configure the remote via
     /// `memstead mem-repo remote-add <name> <url>`.
-    #[error("unknown remote: {0}")]
+    #[error(
+        "unknown remote: {0} — no remote of that name is configured on the mem-repo; add it with `memstead mem-repo remote-add {0} <url>`"
+    )]
     UnknownRemote(String),
+    /// A remote that IS configured on the mem-repo could not be reached
+    /// (the host does not resolve, the connection is refused, the URL
+    /// names no repository). Typed code `REMOTE_UNREACHABLE`, apart from
+    /// `UNKNOWN_REMOTE` because the repair differs: reach the URL (the
+    /// network, the address), or re-point the remote, rather than add
+    /// one. `details` names the remote, its configured URL and the first
+    /// line of git's answer.
+    #[error(
+        "remote `{remote}` is configured ({url}) but could not be reached: {detail} — check the URL and the network, or re-point it with `memstead mem-repo remote-add {remote} <url>`"
+    )]
+    RemoteUnreachable {
+        remote: String,
+        url: String,
+        detail: String,
+    },
     /// `memstead_pull` refused because the local branch has diverged from
     /// the remote-tracking ref — fast-forward is impossible without
     /// losing local commits. Recovery: run `memstead branch-reset` to the
@@ -1676,6 +1693,7 @@ impl EngineError {
             EngineError::ProposalUnattributed { .. } => "PROPOSAL_UNATTRIBUTED",
             EngineError::ProposalLinksRejected { .. } => "PROPOSAL_LINKS_REJECTED_ENTITY",
             EngineError::UnknownRemote(_) => "UNKNOWN_REMOTE",
+            EngineError::RemoteUnreachable { .. } => "REMOTE_UNREACHABLE",
             EngineError::LocalDivergence { .. } => "LOCAL_DIVERGENCE",
             EngineError::NonFastForward { .. } => "NON_FAST_FORWARD",
             EngineError::LocalInvalidState { .. } => "LOCAL_INVALID_STATE",
@@ -2498,6 +2516,11 @@ impl EngineError {
                 serde_json::json!({ "mem": mem })
             }
             EngineError::UnknownRemote(remote) => serde_json::json!({ "remote": remote }),
+            EngineError::RemoteUnreachable {
+                remote,
+                url,
+                detail,
+            } => serde_json::json!({ "remote": remote, "url": url, "detail": detail }),
             EngineError::LocalDivergence { mem, remote_ref } => serde_json::json!({
                 "mem": mem,
                 "remote_ref": remote_ref,
@@ -2900,6 +2923,39 @@ fn _required_field_unset_msg(field: &str, entity_type: &str, on_create: bool) ->
         )
     } else {
         format!("cannot unset required field '{field}' for type '{entity_type}'")
+    }
+}
+
+impl EngineError {
+    /// Whether `e` is a transport's in-band remote marker
+    /// (`UNKNOWN_REMOTE:` or `REMOTE_UNREACHABLE:`), which
+    /// [`Self::from_transport`] lifts to its typed code.
+    pub(crate) fn is_remote_marker(e: &BackendError) -> bool {
+        matches!(e, BackendError::Other(msg)
+            if msg.starts_with("UNKNOWN_REMOTE:") || msg.starts_with("REMOTE_UNREACHABLE:"))
+    }
+
+    /// A transport failure, lifted: the two remote markers to their typed
+    /// codes, anything else as the backend error it is. The one place a
+    /// transport verb's remote failure becomes an engine error.
+    pub(crate) fn from_transport(e: BackendError) -> Self {
+        match e {
+            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
+                EngineError::UnknownRemote(
+                    msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
+                )
+            }
+            BackendError::Other(msg) if msg.starts_with("REMOTE_UNREACHABLE:") => {
+                let rest = msg.trim_start_matches("REMOTE_UNREACHABLE:");
+                let mut parts = rest.splitn(3, '\t');
+                EngineError::RemoteUnreachable {
+                    remote: parts.next().unwrap_or_default().trim().to_string(),
+                    url: parts.next().unwrap_or_default().trim().to_string(),
+                    detail: parts.next().unwrap_or_default().trim().to_string(),
+                }
+            }
+            other => EngineError::Backend(other),
+        }
     }
 }
 

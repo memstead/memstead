@@ -267,6 +267,7 @@ impl CliError {
             | BranchResetHeadMoved { .. }
             | PushedCommitsProtected { .. }
             | UnknownRemote { .. }
+            | RemoteUnreachable { .. }
             | LocalDivergence { .. }
             | NonFastForward { .. }
             | LocalInvalidState { .. }

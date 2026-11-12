@@ -604,11 +604,12 @@ fn a_wrong_remote_refuses_and_a_retry_succeeds() {
     );
     let out = run(&f.b, &["pull", "--all"]);
     assert!(!out.status.success());
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("UNKNOWN_REMOTE"),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    // The remote is configured and cannot be reached: the code says so,
+    // naming the URL, never that the remote is unknown.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("REMOTE_UNREACHABLE"), "{stderr}");
+    assert!(stderr.contains(wrong.to_str().unwrap()), "{stderr}");
+    assert!(!stderr.contains("UNKNOWN_REMOTE"), "{stderr}");
     // An unreachable network remote refuses with the same typed code.
     ok(
         &f.b,
@@ -621,10 +622,11 @@ fn a_wrong_remote_refuses_and_a_retry_succeeds() {
     );
     let out = run(&f.b, &["pull", "--all"]);
     assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("REMOTE_UNREACHABLE"), "{stderr}");
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("UNKNOWN_REMOTE"),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
+        stderr.contains("https://127.0.0.1:1/backup.git"),
+        "{stderr}"
     );
     // The documented command again, with the right URL.
     ok(

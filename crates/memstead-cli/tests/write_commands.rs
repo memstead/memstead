@@ -2285,3 +2285,45 @@ fn mem_repo_init_remote_raises_the_engines_error_as_remote_add_does() {
         "init {init} / remote-add {add}"
     );
 }
+
+/// A fetch from a configured remote whose URL cannot be reached refuses
+/// `REMOTE_UNREACHABLE`, naming the URL; from a name that is no
+/// configured remote it refuses `UNKNOWN_REMOTE`. The two repairs differ
+/// (reach the URL, or add the remote), so a connection failure never
+/// reads `UNKNOWN_REMOTE` while the remote is configured.
+#[test]
+fn an_unreachable_configured_remote_is_not_an_unknown_one() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+    let url = tmp.path().join("no-such-remote.git");
+    let url = url.display().to_string();
+    memstead()
+        .current_dir(tmp.path())
+        .args(["mem-repo", "remote-add", "origin", &url])
+        .assert()
+        .success();
+    let envelope = |remote: &str| -> Value {
+        let out = memstead()
+            .current_dir(tmp.path())
+            .args(["--json", "fetch", "cli-write", "--remote", remote])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "fetch from {remote} must refuse");
+        let text = String::from_utf8_lossy(&out.stdout).to_string()
+            + &String::from_utf8_lossy(&out.stderr);
+        text.lines()
+            .find_map(|l| serde_json::from_str(l).ok())
+            .unwrap_or_else(|| panic!("no JSON envelope: {text}"))
+    };
+    let unreachable = envelope("origin");
+    assert_eq!(unreachable["code"], "REMOTE_UNREACHABLE", "{unreachable}");
+    assert_eq!(unreachable["details"]["remote"], "origin", "{unreachable}");
+    assert_eq!(unreachable["details"]["url"], url.as_str(), "{unreachable}");
+    assert!(
+        unreachable["message"].as_str().unwrap().contains(&url),
+        "{unreachable}"
+    );
+    let unknown = envelope("nosuch");
+    assert_eq!(unknown["code"], "UNKNOWN_REMOTE", "{unknown}");
+    assert_eq!(unknown["details"]["remote"], "nosuch", "{unknown}");
+}

@@ -374,7 +374,8 @@ pub enum Command {
     /// Fetch a mem's branch refs from a git remote into the mem-repo
     /// (no local branch moves — inspect first, then `pull`). Requires a
     /// git-branch-backed mem (`INVALID_INPUT` on folder mounts);
-    /// refuses `UNKNOWN_REMOTE` when the remote is not configured.
+    /// refuses `UNKNOWN_REMOTE` when the remote is not configured and
+    /// `REMOTE_UNREACHABLE` when it is configured and cannot be reached.
     Fetch(commands::transport::FetchArgs),
 
     /// Fast-forward a mem's branch to its fetched remote counterpart
@@ -391,7 +392,8 @@ pub enum Command {
     /// Push a mem's branch to a git remote. `--force` uses
     /// force-with-lease semantics; without it, non-fast-forward pushes
     /// refuse (`NON_FAST_FORWARD`). Refuses `UNKNOWN_REMOTE` when the
-    /// remote is not configured. `--all` pushes every mounted
+    /// remote is not configured, `REMOTE_UNREACHABLE` when it is and
+    /// cannot be reached. `--all` pushes every mounted
     /// git-branch mem's branch plus the workspace's schema-and-config
     /// ref, fast-forward only: silent for refs already in sync, one line
     /// per ref moved, a refused ref named while the others still go,
