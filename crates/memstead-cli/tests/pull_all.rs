@@ -884,3 +884,78 @@ fn a_schema_ref_with_state_is_never_replaced() {
         before
     );
 }
+
+/// Run `args` in `ws` while a thread holds `mem`'s write lock there for
+/// 1.5 s; return how long the call took.
+fn timed_while_locked(ws: &Path, mem: &str, args: &[&str]) -> std::time::Duration {
+    let held = std::fs::canonicalize(ws.join("mem-repo").join(".git"))
+        .unwrap()
+        .join("memstead-locks")
+        .join(format!("refs%heads%{mem}.lock"));
+    fs::create_dir_all(held.parent().unwrap()).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&held)
+            .unwrap();
+        f.lock().unwrap();
+        tx.send(()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        f.unlock().unwrap();
+    });
+    rx.recv().unwrap();
+    let started = std::time::Instant::now();
+    ok(ws, args);
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    waited
+}
+
+/// A pull and a pull of every mem move a branch only after a write in
+/// progress in another mem has finished: with `knowledge`'s lock held,
+/// each waits, then fast-forwards `kitchen` to the remote's new commit.
+#[test]
+fn a_pull_waits_for_a_write_in_another_mem() {
+    for all in [false, true] {
+        let f = workspace_a();
+        clone_b(&f);
+        // B takes the schemas and every mem once, so no mem of B is out
+        // of service when the timed pull runs.
+        ok(&f.b, &["pull", "--all"]);
+        ok(
+            &f.a,
+            &[
+                "create",
+                "--mem",
+                "kitchen",
+                "--title",
+                "Oven",
+                "--type",
+                "spec",
+                "--metadata",
+                "level=M0",
+                "--section",
+                "identity=x",
+                "--section",
+                "purpose=y",
+            ],
+        );
+        ok(&f.a, &["push", "--all"]);
+        let args: Vec<&str> = if all {
+            vec!["pull", "--all"]
+        } else {
+            vec!["pull", "kitchen"]
+        };
+        let waited = timed_while_locked(&f.b, "knowledge", &args);
+        assert!(
+            waited >= std::time::Duration::from_millis(1000),
+            "{args:?} did not wait ({waited:?})"
+        );
+        let list = ok(&f.b, &["list", "--mem", "kitchen"]);
+        assert!(list.contains("Oven"), "{args:?} moved kitchen: {list}");
+    }
+}
