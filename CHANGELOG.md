@@ -10,1152 +10,532 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 
 - **`pull --all` reconciles two machines that each created a mem.** When
-  the schema-and-config ref diverged and no file on it changed on both
-  sides, `pull --all` merges the two histories path by path from their
-  merge base into a commit with both parents and moves the ref
-  compare-and-set; the pin re-resolution runs as before, and `push --all`
-  then succeeds. A file changed on both sides still refuses
+  the schema-and-config ref diverged with no file changed on both sides,
+  it merges the histories into a two-parent commit and `push --all` then
+  succeeds. A file changed on both sides still refuses
   `LOCAL_DIVERGENCE`, now naming the files. Entity branches stay
-  fast-forward only. The merge is a new git-branch operation
-  (`GitBranchOps::merge_disjoint`) on git plumbing and a temporary index.
+  fast-forward only.
 
 - **`conflicts resolve --side merged`** settles a folder-mem conflict
-  whose only collision is the engine-stamped timestamp. When every
-  conflict block lies in the frontmatter and covers `last_modified`
-  alone, the resolution keeps git's merged file and the later
-  timestamp, then validates and commits it like the other sides. Any
-  other block (a body section, `created_date`, any other key) refuses
-  with the new code `CONFLICT_NOT_TIMESTAMP_ONLY`, `details.key` or
-  `details.section` naming it, and the file stays in conflict. A body
-  conflict stays a content judgement made by choosing `ours` or
-  `theirs`.
+  whose only collision is the `last_modified` timestamp: it keeps git's
+  merged file with the later timestamp. Any other block refuses with the
+  new code `CONFLICT_NOT_TIMESTAMP_ONLY` (`details.key` or
+  `details.section`); a body conflict still takes `ours` or `theirs`.
 
 - **A due date from the check ledger.** A type's `due` block may take
-  `check_kind: <kind>` (an engine kind or an `x-` kind) in place of
-  `date_field`; exactly one of the two is declared, and `schema validate`
-  refuses both or neither naming the two keys. When the entity's newest
-  record of that kind confirms (ok, fresh against the current content,
-  independent, in a checking role), it is due on the UTC date of the
-  check's act plus `offset_days`, so a recorded check moves the date
-  without anyone typing one. Otherwise it is listed due now with the
-  standing in place of a date (`never_checked`, `check_stale`,
-  `check_failed`, `self_checked`, a role label): `memstead due` renders
-  it as "**due now**", the JSON brief and `health --include due` carry it
-  under `due_now`, and no overdue count is invented for it. The reading
-  refuses no write and never fails `health --strict`; a schema that does
-  not declare the key reads exactly as before. One clock pin:
-  `memstead due` and `health --include due` now take `MEMSTEAD_TODAY` when
-  `--today` is not given, as the staleness clock and the anchors overlay
-  already did. A second dated run of the schema probe
-  (`docs/proof/schema-probe/2026-11-11/`) reads the four rules the first
-  run found missing as carried.
+  `check_kind: <kind>` instead of `date_field` (exactly one; `schema
+  validate` refuses both or neither). A confirming newest check makes the
+  entity due on the check's UTC date plus `offset_days`; otherwise it is
+  listed due now with its standing (`never_checked`, `check_stale`,
+  `check_failed`, `self_checked`, a role label) under `due_now` in
+  `memstead due` and `health --include due`. It refuses no write and
+  never fails `health --strict`. Both commands now read `MEMSTEAD_TODAY`
+  when `--today` is not given.
 
 - **`memstead-mcp --pin-identity` makes the declared identity the
-  session's one identity.** A server started with `--identity <name>`
-  (or `MEMSTEAD_IDENTITY`) and `--pin-identity` refuses a tool call whose
-  `identity` differs, `INVALID_IDENTITY` with `details.declared`,
-  `details.claimed` and `details.pinned: true`; an absent or equal value
-  records the declared identity as before. Off by default, so an
-  orchestrator running several agents through one server keeps its
-  per-call names; on, the start-up declaration is a fence a client cannot
-  step over by picking a name of its own and reading as a different
-  person at the author≠checker gate. `--pin-identity` without a declared
-  identity refuses at start. Before, a per-call `identity` always won
-  over the declared one, by design and as documented; a headless agent
-  that invented its own handle therefore landed its checks under that
-  handle instead of the operator's declaration.
+  session's one identity.** With `--identity <name>` (or
+  `MEMSTEAD_IDENTITY`), a tool call whose `identity` differs refuses
+  `INVALID_IDENTITY` (`details.declared`, `details.claimed`,
+  `details.pinned: true`). Off by default; `--pin-identity` without a
+  declared identity refuses at start.
 
 ### Changed
 
 - **Export and proposal merge land through the one commit call
-  (breaking).** `export --format markdown` takes the mem's write lock,
-  stages every file through the backend and commits once; a file it
-  cannot open for writing is named in `refused_entities`
-  (`EXPORT_TARGET_NOT_WRITABLE`) and the other entities are written,
-  where before a write error was dropped. The export's store takes the
-  hashes of the bytes it wrote. A proposal merge whose later commit (a
-  proposer group's or the amend) fails after an earlier one landed no
-  longer resets the branch: the landed commits stand and the refusal is
-  `RENAME_PARTIAL_FAILURE`, one entry per commit, naming what landed and
-  each entity's hash now. The merge outcome's `warnings` are
-  `WRITE_FOLLOW_UP_FAILED` objects (`code`, `message`, `details` with
-  `mem`, `step`, `detail`) instead of strings. A storage failure while the
-  merge prepares (reading the proposal record, the fork's anchors, the
-  validation baseline) refuses and leaves the store as it was; before,
-  some of these read as empty and the merge went on. `proposal brief`
-  likewise refuses on a storage failure during its precheck instead of
-  reporting it as the entry's precheck result.
+  (breaking).** `export --format markdown` takes the write lock and
+  commits once; a file it cannot write is named in `refused_entities`
+  (`EXPORT_TARGET_NOT_WRITABLE`) instead of being dropped. A proposal
+  merge whose later commit fails keeps the landed commits and refuses
+  `RENAME_PARTIAL_FAILURE`. Migration: the merge outcome's `warnings` are
+  now `WRITE_FOLLOW_UP_FAILED` objects (`code`, `message`, `details`)
+  instead of strings. A storage failure while a merge or `proposal
+  brief` prepares now refuses instead of reading as empty.
 
-- **Every edge and every ref move passes the write lock.** A create,
-  batch create, update or batch update whose body wiki-links land
-  pointer edges (`alias_target_rel_type`) on an acyclic relationship now
-  takes the workspace lock and loads every mem before its cycle guard
-  runs, as a declared edge does, so a body link closing a cycle through
-  another mem refuses `RELATIONSHIP_CYCLE` after waiting for a write in
-  progress there. `conflicts resolve` passes the chosen side's
-  relationship rows through the declared-edge checks (target grammar,
-  `INVALID_REL_TYPE`, `INVALID_REL_SHAPE`, `RELATIONSHIP_CYCLE`) and
-  refuses with their code, the file staying in conflict; a refused link
-  synthesis is no longer written over. `pull`, `pull --all`,
-  `branch-reset` and `mem set-schema` take the workspace write lock
-  before they plan; their own subject may be unreadable or out of
-  service, so each stays a repair path.
+- **Every edge and every ref move passes the write lock.** A body
+  wiki-link that lands an edge on an acyclic relationship waits for the
+  workspace lock and refuses `RELATIONSHIP_CYCLE` like a declared edge.
+  `conflicts resolve` runs the chosen side's rows through
+  `INVALID_REL_TYPE`, `INVALID_REL_SHAPE` and `RELATIONSHIP_CYCLE`.
+  `pull`, `pull --all`, `branch-reset` and `mem set-schema` take the
+  workspace write lock.
 
 - **The scaffold, the gates brief and three messages say what the engine
-  does.** `memstead gates` now lists `transition_requires_self_check`
-  gates beside `transition_requires_checks` ones, each open entity with
-  the standing of its own check, so a planning bundle's own completion
-  gate shows. The `schema new` type file marks every key `schema
-  validate` requires (`updatable_fields`, `health_required_fields`,
-  `staleness_threshold_days`, the type's `write_rules`, a section's
-  `search_weight` and one `catch_all` section, a field's `description`
-  and `field_type`), so each key it leaves unmarked can be deleted. A
-  value that misses a `value_pattern` names the field's declared type
-  (`number`) instead of `String`. `due --help` lists `--today`.
-  `memstead schema <built-in>` renders, after the sealed README, the
-  steps that turn an installed copy into a package you author (install,
-  copy, remove the seal marker, rename, `schema migrate --write`,
-  validate); a test runs them for every built-in.
+  does.** `memstead gates` lists `transition_requires_self_check` gates.
+  The `schema new` type file marks every key `schema validate` requires.
+  A `value_pattern` miss names the field's declared type. `due --help`
+  lists `--today`. `memstead schema <built-in>` shows the steps to turn
+  an installed copy into a package you author.
 
-- **One spelling per concept in the schema language (breaking).** A
-  constraint names a direction `out` / `in` and a relation set
-  `relationships` in every form: `status_propagation` and
-  `transition_requires_checks` no longer take `direction: incoming` /
-  `outgoing`, `status_propagation` no longer takes `rel_type` /
-  `rel_types`, and `enum_from_neighbour` no longer takes `rel_type`
-  (it now reaches neighbours over any of its `relationships`). A package
-  you author with a retired spelling refuses `schema validate` and
-  `schema install` with `SCHEMA_VALIDATION_FAILED`, the message naming
-  the retired spelling, its replacement and the fix: run
-  `memstead schema migrate <package> --write`, which rewrites each one
-  (a single `rel_type: X` becomes `relationships: [X]`), keeps comments
-  and key order, and proves the rewrite resolves to what the engine
-  read before. Sealed and installed packages keep loading with the
-  meaning they had. Wire change: the schema read, the gates brief
-  ("related via [VERIFIES] (in)"), the health constraints axis and the
-  `CONSTRAINT_UNSATISFIED` details render `in` / `out` and
-  `relationships` for these forms, and the generated
-  `type-definition.schema.json` carries one direction type.
+- **One spelling per concept in the schema language (breaking).**
+  Constraints name a direction `out` / `in` and a relation set
+  `relationships` everywhere: `status_propagation` and
+  `transition_requires_checks` drop `direction: incoming` / `outgoing`,
+  `status_propagation` drops `rel_type` / `rel_types`, and
+  `enum_from_neighbour` drops `rel_type`. A retired spelling refuses
+  `schema validate` and `schema install` with `SCHEMA_VALIDATION_FAILED`.
+  Migration: run `memstead schema migrate <package> --write`. Sealed and
+  installed packages keep loading. The schema read, gates brief, health
+  constraints axis, `CONSTRAINT_UNSATISFIED` details and the generated
+  `type-definition.schema.json` render the new spelling.
 
 - **Independence counts every identity that wrote what was checked
-  (breaking).** On an entity that is not a plan criterion, a check reads
-  `self_checked` when its identity wrote the entity at any point up to
-  the write the check saw, not only when it created it; a write without
-  an identity in that range reads `unconfirmable`. A new optional ledger
-  field, `checked_write`, names that write (the commit sha on a
-  git-branch mem, the ledger line's timestamp token on a folder mem), so
-  writes in the same second before and after a check are told apart; a
-  carried line keeps its source's. Lines without it are read against
-  every write at or before their `ts`. Touches are ordered by write
-  order on every backend, so the first author is the creating write's
-  identity even when two writes share a second, and a rename on a folder
-  mem keeps the writers before it in the entity's story (and
-  `entity --provenance` now names the creator after a rename on a folder
-  mem too, where `created_by` was absent before); a
-  rename records its writer on every entry whose links it rewrites, and a
-  proposal merge names every fork identity that wrote a landed entity in
-  a `Co-Writer:` trailer (carried on through a fork of a fork and across
-  renames on the fork, a renamer who rewrote a link inside the landed
-  entry included; a merge that lands a fork rename names the pair in a
-  `Renamed: <old> → <new>` trailer, so the landed entry's story and its
-  first author continue the old id's; a fork write
-  without an identity rides as `Unattributed-Writer:` and leaves the
-  reading `unconfirmable`). A merger who adopts a
-  proposal with changes therefore reads `self_checked` on the check it
-  records for that entity.
+  (breaking).** A check reads `self_checked` when its identity wrote the
+  entity at any point up to the checked write, and `unconfirmable` when a
+  write in that range has no identity. A new optional ledger field,
+  `checked_write`, names that write. `entity --provenance` names the
+  creator after a rename on a folder mem. A proposal merge records fork
+  writers in `Co-Writer:`, `Unattributed-Writer:` and `Renamed:`
+  trailers, so a merger who adopts a proposal with changes reads
+  `self_checked` on their check of it.
 
 - **A gated approval no longer outlives an edit of what it approved
   (breaking).** `transition_requires_checks` and
-  `transition_requires_self_check` now gate the transition only: a write
-  that moves an entity onto the gated value (from another value, from a
-  type without the form, or by creating it). A write that leaves the
-  entity at the value is not gated. On a self-check gate the transition
-  write passes on a fresh independent record of the result's own bytes,
-  or on a record of the stored content when the write changes nothing
-  but the gated field and the engine-stamped timestamps; only then is the
-  record carried to the new hash. A later edit carries nothing: the
-  entity reads `check_stale` and the health constraints axis reports the
-  gate as a standing violation until a new check is recorded or the
-  value is left. A create gates on the hash of the bytes it writes, and
-  a record with an empty hash (a check of a placeholder stub) never
-  licenses a result. A retype refused on a constraint or a required edge now
-  names the violation in `details.problems` (it serialized as `null`).
-  A transition write that also changes content refuses
-  `CONSTRAINT_UNSATISFIED`, the violation naming the changed content in
-  `changed`; fields a schema requires at the gated value are therefore
-  written before the check. Conflict resolution now runs both gates on
-  the side it lands (before, it validated section keys and content
-  only), and a proposal merge carries the record across an adopted
-  status-only change as an update does, judging an amended entry once by
-  the merge's net effect against the entity as it stood before; a batch create, a batch update and a proposal merge
-  read the checks gate over the store as the whole write leaves it, so an
-  edit of a checked criterion and the closing of its plan in one write
-  refuse as they do one after the other. Carried lines earlier engines wrote across content edits stay
-  in the ledger and keep standing where they stand.
+  `transition_requires_self_check` gate only a write that moves an entity
+  onto the gated value. A later edit carries no record: the entity reads
+  `check_stale` and health reports a standing violation until it is
+  checked again. A transition write that also changes content refuses
+  `CONSTRAINT_UNSATISFIED`; migration: write required fields before the
+  check. A refused retype names its violation in `details.problems`.
+  Conflict resolution, batches and proposal merges run both gates on what
+  they land.
 
 - **The newest check of a kind is the one made last, not the line the
-  ledger holds last (breaking).** Every reader of a standing (an
-  entity's check state and foreign checks, the gate provider, the
-  constraints and checks axes of `health`, the acknowledgements of
-  `health --strict`, the gates brief, the export seal) now reads one
-  order derived from the rows alone: a line the engine carried across a
-  licensed transition stands over the records it carried; among the
-  rest the latest time of the act wins (`observed_at` where present,
-  else `ts`); equal times are ordered by the rows' canonical bytes. Two
-  machines holding the same rows therefore read the same newest record.
-  Before, a check fetched from another machine and appended after a
-  newer local one displaced it. A carried line supersedes only records
-  made no later than it and lower in its carry chain (a new
-  `carried_from.depth`), so a check made after the content returns to
-  an earlier hash stands, and so does the last carry of a chain that
-  returns to one; lines earlier engines carried keep their reading. A local check made in the same second
-  as the entity's previous act is stamped one second past it, so a
-  re-check after an edit never ties with the check it replaces. `fetch`,
-  `pull` and `pull --all` refuse an imported row whose time of the act
-  lies more than five minutes ahead of the receiving clock, as a local
-  `observed_at` that far ahead refuses, and name each such row in
-  `checks_refused`. A push names the rows its import
-  refused the same way and leaves them on the remote: a mem's published
-  rows are the union of the remote's and the local ledger's. `memstead check list` lists rows in that order.
+  ledger holds last (breaking).** Every reader of a standing orders
+  records by time of the act (`observed_at`, else `ts`), so two machines
+  with the same rows read the same newest record; carried lines add
+  `carried_from.depth`. `fetch`, `pull` and `pull --all` refuse a row
+  more than five minutes in the future and name it in `checks_refused`;
+  a push does the same. `memstead check list` uses this order.
 
 - **A boolean metadata field refuses a value that is neither true nor
-  false.** `create`, `update` and `retype` read `true` / `false` in any
-  case, and `1` / `0`; any other value refuses `INVALID_FIELD_VALUE`
-  (`expected_type: Boolean`), as a Number or Date field already does,
-  where it was stored as `false`. Health's integrity check reports a
-  stored value of that kind the same way.
+  false.** `create`, `update` and `retype` accept `true` / `false` in any
+  case and `1` / `0`; anything else refuses `INVALID_FIELD_VALUE`
+  (`expected_type: Boolean`) instead of storing `false`.
 
 - **A storage backend's move refuses an occupied target and leaves the
-  staged state untouched.** `move_entity` on the folder, in-memory and
-  git-branch backends refuses when the target is already committed, where
-  it overwrote that file, and a refused move keeps the source's staged
-  bytes, where it dropped them.
+  staged state untouched**, on the folder, in-memory and git-branch
+  backends, where it overwrote the target and dropped the staged bytes.
 
 - **A folder mem's config write is crash-safe and its lock is never
-  entered while held.** The config is written to a temp file and renamed
-  into place, where it was truncated and rewritten in place, so a crash
-  leaves the old config or the new one. Every config write, plain or
-  compare-and-set, holds an operating-system lock
-  (`.memstead/locks/config.lock`) that a dying writer releases, where the
-  compare-and-set deleted any lock after half a second and proceeded
-  without exclusivity and the plain write took no lock at all.
+  entered while held.** The config is written by temp file and rename,
+  under an operating-system lock (`.memstead/locks/config.lock`).
 
-- **A schema-pin change no longer overwrites a concurrent config write.**
-  `set_mem_schema` and the below-boot pin repair write the pin as a
-  compare-and-set, re-reading and re-applying on a mismatch, where they
-  read and rewrote the whole config unguarded. The git-branch and
-  in-memory backends' config compare-and-set now honours the expected
-  bytes (git: against the blob at the tip the commit is built on, with the
-  ref advance pinned to that tip), where it wrote unconditionally and
-  reported success.
+- **A schema-pin change no longer overwrites a concurrent config
+  write.** Pin writes are compare-and-set, and the git-branch and
+  in-memory backends now honour the expected bytes.
 
-- **`pull --all` never drops a commit that lands during its fast-forward.**
-  The move of the schema-and-config ref and of each mounted branch is
-  pinned to the local tip the fast-forward was decided on, where it moved
-  the ref unconditionally; a commit that lands in between makes the move
-  decide again on the new tip.
+- **`pull --all` never drops a commit that lands during its
+  fast-forward.** Each ref move is pinned to the tip it was decided on.
 
-- **An in-memory mem's provenance cursor never hides a record.** Records
-  that format to the same millisecond are clamped strictly forward, as the
-  folder backend's ledger already does, where a cursor equal to the first
-  record's timestamp hid the second.
+- **An in-memory mem's provenance cursor never hides a record** that
+  formats to the same millisecond as another.
 
 - **A folder mem never writes through a symbolic link, nor over its own
-  files.** A write, delete or move whose path passes through a symlink
-  inside the mem refuses at staging, and a link that appears before the
-  commit refuses the commit, where the commit followed the link and wrote
-  outside the mem. A `.memstead` that is itself a link refuses the config
-  writes and the commit. Under `.memstead/` an entity path reaches only the
-  declared sidecars (anchors, derivations, proposals), where a staged write
-  to the commit record destroyed it and its own bytes with it.
+  files.** A path through a symlink refuses at staging or commit, a
+  `.memstead` link refuses config writes, and under `.memstead/` only
+  the declared sidecars are writable.
 
 - **`changes_since` reports an entity renamed from or to a non-entity
-  path.** When git pairs such a rename by similarity, the entity side is
-  reported as added or removed, where the pair was dropped and neither
-  change appeared.
+  path** as added or removed, where the change was dropped.
 
 - **`MEM_STORAGE_RESIDUE_DETECTED` counts the entities the leftover
-  branch holds.** `mem create` and `mem fork` report that number in the
-  message and in `details.entity_count`, where both always said 0.
+  branch holds** in `mem create` and `mem fork` (`details.entity_count`),
+  where it always said 0.
 
-- **A write that loses the race to another writer on a git-branch mem
-  refuses with the entity and its current hash.** `HASH_MISMATCH` names
-  the entity and carries its content hash at the new tip, so retrying
-  with that hash lands; it carried an empty id and the commit id as
-  `current`, which no retry could match. An entity the other writer
-  removed refuses as not found.
+- **A write that loses the race on a git-branch mem refuses with the
+  entity and its current hash.** `HASH_MISMATCH` now carries a hash a
+  retry can use; an entity the other writer removed refuses as not
+  found.
 
-- **`batch_update` items naming one entity compose in order.** Each later
-  item is checked and written against the earlier one's result, so a
-  second item carrying the pre-batch hash refuses the batch with
-  `HASH_MISMATCH`, where it replaced the first item's write while both
-  reported `updated`.
+- **`batch_update` items naming one entity compose in order.** A later
+  item carrying the pre-batch hash refuses with `HASH_MISMATCH` instead
+  of overwriting the earlier item.
 
-- **The catch-all section refuses every spelling of a declared heading.**
-  A heading inside the catch-all that derives to a declared section's key
-  (`## identity`, `## Identity `, the catch-all's own heading in another
-  case) refuses `SECTION_CONTENT_INVALID`, as the exact heading already
-  did, where it was accepted and its text dropped on the next parse.
+- **The catch-all section refuses every spelling of a declared
+  heading** (case, trailing space) with `SECTION_CONTENT_INVALID`,
+  where the text was dropped on the next parse.
 
-- **A patch that completes a section heading refuses.** The heading gate
-  now also runs on the section body the patches compose, so a patch whose
-  text turns an indented `## ` into a column-0 heading refuses
-  `SECTION_CONTENT_INVALID`, where it landed and the next parse dropped
-  the real section's body.
+- **A patch that completes a section heading refuses**
+  `SECTION_CONTENT_INVALID`, where it landed and cost a section's body.
 
-- **An update or relate that does not land leaves no stub behind.** The
-  stubs its composition made for absent targets (a declared relation, a
-  body wiki-link, a relate target) are taken back when the write refuses,
-  fails to commit, or is a rehearsal, where they stayed in the live store
-  for a target the committed graph never referenced.
+- **An update or relate that does not land leaves no stub behind**,
+  whether it refuses, fails to commit, or is a rehearsal.
 
-- **A mem rename's cross-mem grants govern every running engine at once.**
-  The renaming engine reads the rewritten grants back, and another
-  long-lived engine (an MCP server) adopts them with the roster change,
-  where both kept the grant table read at boot: a granted edge to the new
-  name refused `CROSS_MEM_LINK_NOT_ALLOWED`, and the old name stayed
-  granted.
+- **A mem rename's cross-mem grants govern every running engine at
+  once.** Running MCP servers adopt the rewritten grants, so an edge to
+  the new name no longer refuses `CROSS_MEM_LINK_NOT_ALLOWED`.
 
-- **A git-branch mem whose branch cannot be read reports a storage error,
-  never an empty or unconfigured mem.** The head probe, the config read
-  and the change feed refuse a repository that does not open and a branch
-  that exists but does not resolve to a readable commit, where they read
-  it as no head, no config, or a mem whose every entity was removed. A
-  missing branch still reads as absent.
+- **A git-branch mem whose branch cannot be read reports a storage
+  error, never an empty or unconfigured mem.** A missing branch still
+  reads as absent.
 
-- **Deleting a git-branch mem never drops a commit that lands during the
-  delete.** The branch deletion is pinned to the tip the delete started
-  from, where it deleted whatever the branch pointed at.
+- **Deleting a git-branch mem never drops a commit that lands during
+  the delete.**
 
-- **A git-branch mem's config never lands in a namesake's.** A mem named
-  like the last segment of another mem's hierarchical branch (`alpha`
-  beside `aaa/alpha`) writes and reads its own config, where the write
-  could resolve to the other mem's branch and replace its config.
+- **A git-branch mem's config never lands in a namesake's** (`alpha`
+  beside `aaa/alpha`).
 
-- **One unreadable entity no longer fails a git-branch mem's whole load.**
-  A blob that cannot be read is that entity's own read failure, reported
-  as such, while every other entity loads, as the backend contract
-  states, where the whole read failed and the mem did not load.
+- **One unreadable entity no longer fails a git-branch mem's whole
+  load.** It is that entity's own read failure; the rest loads.
 
-- **A folder mem's ledger reconciliation and change feed agree with what
-  the engine wrote.** The health reconciliation replays the ledger, so a
-  deleted entity, an id a rename retired, a peer mem's rename row and the
-  folder's `README.md` no longer read as divergence; a rename's ledger
-  line now names the id it retired (`renamed_from`). The change feed
-  treats an id that was deleted and created again as alive, so its later
-  rename arrives as one `renamed` event, where it surfaced as an update
-  of the new id.
+- **A folder mem's ledger reconciliation and change feed agree with
+  what the engine wrote.** Deletes, renames, peer renames and
+  `README.md` no longer read as divergence; a rename's ledger line
+  names `renamed_from`; a re-created id's rename arrives as one
+  `renamed` event.
 
-- **A section may open with an indented code block whose first line looks
-  like a heading.** The write gate reads a body as the parser stores it
-  (leading blank lines dropped, the first line's indent kept), so
-  `    ## not a heading` leading a section is accepted and round-trips
-  unchanged, where it was refused `SECTION_CONTENT_INVALID` although the
-  same block after a prose line was accepted.
+- **A section may open with an indented code block whose first line
+  looks like a heading**, where it was refused `SECTION_CONTENT_INVALID`.
 
 - **Repairing a quarantined mem's schema reports a repair that did not
-  take.** `set-schema` on a quarantined mem returns the re-attach failure
-  (the pin switch stands, the mem stays quarantined with that reason),
-  where it reported a clean `Switched` on the CLI and over MCP.
+  take.** `set-schema` returns the re-attach failure on the CLI and over
+  MCP instead of `Switched`.
 
-- **A mem delete reports a grant scrub that failed.** When the destructive
-  delete lands but the grants naming the mem cannot be removed from
-  `.memstead/workspace.toml`, the response carries
-  `WRITE_FOLLOW_UP_FAILED` (step `policy_scrub`), where the failure was
-  only logged and the delete read as complete.
+- **A mem delete reports a grant scrub that failed** as
+  `WRITE_FOLLOW_UP_FAILED` (step `policy_scrub`).
 
 - **A mem create or delete whose roster write fails leaves a coherent
-  workspace.** A delete writes the roster before it touches storage, so a
-  failed roster write deletes nothing and the mem stays served, where the
-  storage was already gone under a roster entry still naming it. A create
-  whose roster write fails takes its registration back, so the engine
-  serves no mem the roster does not name, and the seeded storage is the
+  workspace.** A failed delete deletes nothing; a failed create leaves
   residue the next create reports (`MEM_STORAGE_RESIDUE_DETECTED`).
 
-- **After a pull or a branch reset the engine serves the branch as it now
-  stands, or takes no write.** `branch_reset` reloads the mem, where the
-  store kept the discarded commits' contents and the next write put them
-  back on the reset branch. `pull` moves its head cursor only with a
-  reload that went through; a reload that fails marks the view behind, so
-  writes refuse until a reload succeeds, where the pre-pull view read as
-  current and its writes landed on the pulled tip.
+- **After a pull or a branch reset the engine serves the branch as it
+  now stands, or takes no write.** `branch_reset` reloads the mem, and a
+  failed reload after `pull` blocks writes until a reload succeeds.
 
-- **A mem rename resumes only itself.** A rename stamps its old name on
-  the mem it moves (`renamingFrom` in the mem config) and clears it when
-  it finishes; re-issuing a cut-off rename resumes only a mem carrying
-  that marker. A rename from a name no mount holds onto a live mem's name
-  refuses as an unknown mem, where it ran as a resumption and rewrote the
-  absent name's links and grants onto the live mem.
+- **A mem rename resumes only itself.** A rename marks its mem
+  (`renamingFrom` in the mem config); a rename from a name no mount holds
+  onto a live mem refuses as an unknown mem.
 
-- **A body wiki-link's synthesised edge passes the gates a declared edge
-  passes.** On a schema whose `alias_target_rel_type` carries a shape or
-  sits under an acyclicity law, a wiki-link whose edge breaks the shape
-  refuses `INVALID_REL_SHAPE` and one that would close a cycle refuses
-  `RELATIONSHIP_CYCLE`, where the edge was written and the next load
-  dropped it, or dropped a different, explicit edge to break the cycle.
+- **A body wiki-link's synthesised edge passes the gates a declared
+  edge passes:** `INVALID_REL_SHAPE` and `RELATIONSHIP_CYCLE`, where the
+  edge was written and a later load dropped an edge.
 
-- **A body wiki-link reads by one rule at create, at push and on rename.**
-  A `#anchor` decorates a link to the entity on every path: push accepts
-  what create accepts, where it refused the anchor as reserved syntax and
-  an entity create had committed could not be pushed. A rename rewrites
-  every legal spelling of a link to the renamed entity (`../`, `.md`,
-  `#anchor`, `|label`) and keeps its decorations, where it rewrote only
-  the bare slug and the next update brought the old id back as a stub.
+- **A body wiki-link reads by one rule at create, at push and on
+  rename.** Push accepts a `#anchor` that create accepts, and a rename
+  rewrites every legal link spelling (`../`, `.md`, `#anchor`, `|label`)
+  and keeps its decorations.
 
-- **A write that reads every mem holds every mem's lock.** A write whose
-  schema (or an edge target's) declares aggregate signals takes the whole
-  workspace's write lock, as a write under an acyclicity law already did,
-  so its threshold-crossing warnings are computed from a view reloaded
-  under that lock, where it read other mems without their locks and could
-  warn from a state another writer was changing.
+- **A write that reads every mem holds every mem's lock** when its
+  schema declares aggregate signals, so its threshold warnings come from
+  a locked view.
 
 - **An engine error carries one payload, the same on MCP and the CLI.**
-  Every error the engine defines now builds its recovery payload once, in
-  the engine (`EngineError::details`, with no catch-all arm), and both
-  surfaces encode that value: the code, the `details` and the message are
-  equal field for field, which a test holds over one sample of every
-  error. Before, the MCP server and the CLI each rebuilt most payloads by
-  hand and four had drifted apart. No key either surface served is gone
-  and no value changed; six keys are added where one surface served less:
-  `known_mems` on the CLI's `UNKNOWN_MEM`, `suggestions` on the CLI's
-  `ENTITY_NOT_FOUND` (bare and inside a batch entry), `expected` on the
-  CLI's `UNTERMINATED_FENCE_IN_STORED_BODY`, and `proposed_slug` on
-  `INVALID_WIKI_LINK_TARGET` on both. The mem-management refusals render
-  the same way, and so do the refusals of `memstead_health` /
-  `memstead health` and `memstead_overview` / `memstead overview`, which
-  each surface used to build itself: every `UNKNOWN_MEM` now carries both
-  `known_mems` and `writable_mems` (the two had served one list each under
-  different keys, and the text names the writable ones as the health and
-  overview refusals did); a malformed `target_schema` carries
-  `details.target_schema` and `details.reason` on the CLI too; the removed
-  `schema_types` include key carries `details.message` on the CLI too,
-  and its value on MCP is now the engine's sentence, with each surface's
-  own recovery step (`memstead_schema(name=...)`, `memstead type <name>`)
-  appended to the message. In the Rust interface `EngineError::UnknownMem`
-  becomes `{ name, known_mems, writable_mems }`, `EngineError::NotFound`
-  gains `suggestions` (both filled where raised: `Engine::unknown_mem`,
-  `Engine::not_found`), `EngineError::InvalidTargetSchema` is new, and the
-  compose errors convert through `into_engine_error`. Two declared
-  retirements: the CLI's `MEM_NOT_FOUND` (`memstead anchors --mem` on a
-  mem the workspace does not mount) is `UNKNOWN_MEM`, with the mem under
-  `details.name` instead of `details.mem` and `known_mems` kept; and the
-  hand-built `ENTITY_NOT_FOUND` of `memstead_entity`, `memstead entity`
-  and `memstead relations` is the engine's, so its message reads `entity
-  not found: <id>` (then `Did you mean: ...` when there are suggestions)
-  instead of `Entity not found: ...`, and the CLI ones gain
-  `details.suggestions`. Every hand-built `UNKNOWN_MEM` on the CLI
-  (`memstead type`, `list`, `search`, `export`, `create`, `changes`,
-  `uninstall`) and on `memstead_schema` is the engine's too: the mem is
-  under `details.name` (the retired key `details.mem`), the mounted mems
-  under `details.known_mems` (the retired key `details.loaded` on
-  `memstead export`), both lists sorted; each command's own recovery hint
-  follows the engine's message. On `memstead_overview` / `memstead
-  overview`, `details.writable_mems` now lists the writable mems only;
-  the visible roster it used to carry is `details.known_mems`. A schema
-  name `memstead_schema` cannot serve is `SCHEMA_NOT_FOUND`, the code the
-  CLI reports for the same state (it was `ENTITY_NOT_FOUND`, a declared
-  retirement), with the name under `details.name` (was `details.id`) and
-  the names it can serve under `details.available`; the always-empty
-  `details.suggestions` is gone. The remaining hand-built
-  `ENTITY_NOT_FOUND` on the CLI (`delete`, `context`, `check`, the
-  `--force` / `--auto-hash` read) is the engine's too, with
-  `details.suggestions` and the engine's message (`context`'s read
-  `no entity found for: ...` before). `memstead schema` (readme and
-  install) raises the same `SCHEMA_NOT_FOUND` for a name the built-in
-  registry does not carry, so the CLI's refusal now has `details.name` and
-  `details.available` where it had no details; the built-in names leave
-  its message for `details.available`, and the hint to pass a path or a
-  pin stays as its own sentence. The `projection verify` and brief
-  refusals for a destination mem this workspace does not serve carry the
-  engine's payload beside `details.binding`: the mem is under
-  `details.name` on `UNKNOWN_MEM` (the retired `details.mem`, with
-  `known_mems` and `writable_mems` added) and the quarantine reason under
-  `details.reason_message` on `MEM_QUARANTINED` (the retired
-  `details.reason`). An unknown name in `memstead_schema`'s `types`
-  selection is the engine's `UNKNOWN_ENTITY_TYPE` with `details.unknown`,
-  `details.declared` (the retired `details.known_types`) and
-  `details.schema_ref`, the engine's message and a sentence naming the
-  parameter. `INVALID_TITLE` on `memstead create --from` and
-  `batch-create` with a template id carries the engine's payload
-  (`details.reason`, `details.input`, and the slug facts) where it carried
-  none; `batch-create` names the entry in a sentence after the message.
-  The id check every MCP tool runs first is the engine's
-  (`EngineError::check_entity_id_syntax`): `INVALID_ENTITY_ID` with the
-  same payload, and the engine's messages (`entity id '' is malformed:
-  empty`, `entity id is too long: N characters, the limit is M`) in place
-  of the server's own. `MEM_ERROR` from `memstead mem` commands and from
-  `memstead workspace dump`'s snapshot read is the engine's
-  (`details.detail` added); a `workspace dump` gitdir lookup now reports
-  the engine's own refusal for the mem instead of wrapping it as
-  `MEM_ERROR`; `memstead publish`'s missing-workspace refusal is the
-  engine's boot refusal (`WORKSPACE_NOT_INITIALISED`, its message and
-  details, exit 3 kept, with "Or supply an archive path." after it).
-  The projection refusals state their own code and payload in the
-  engine (advance, exclude, brief, binding resolution); `projection
-  advance` on a binding that does not exist now refuses
-  `PROJECTION_NOT_FOUND` (exit 3), the code `projection brief` gives the
-  same state, where it refused `PROJECTION_ADVANCE_FAILED` (a declared
-  retirement for this state); `PROJECTION_NOT_FOUND` carries
-  `details.available`, the bindings there are, and
-  `PROJECTION_SCOPE_UNINTERPRETABLE` carries `details.reason`. The verify
-  refusals do too; a malformed binding id under `projection verify` is
-  `PROJECTION_INVALID_NAME` (exit 5) as under every other projection
-  command, where it was `PROJECTION_VERIFY_FAILED` (exit 1). A binding
-  edit refusal names its code in the engine (`PipelineEditError::code`):
-  on the CLI an edit that would create a binding whose name is taken now
-  refuses `PROJECTION_EXISTS` (exit 5) where it fell to
-  `PROJECTION_EDIT_FAILED` (exit 1). The binding lookup and
-  operation-state refusals are the engine's too
-  (`BindingConfigs::lookup_error`, `Binding::absent_sync_error`); a binding
-  that does not exist now lists `details.available` on every command that
-  looks one up. `NO_WRITABLE_MEM` and `AMBIGUOUS_MEM` (`memstead create`,
-  `batch-create`, `changes`, `export`, `publish`) are the engine's
-  (`Engine::default_writable_mem_or_refuse`, `Engine::sole_writable_mem`),
-  with each command's own hint after the engine's message. Two more
-  retirements: `memstead schema install` outside a workspace refuses
-  `WORKSPACE_NOT_INITIALISED` (the engine's boot refusal), where it refused
-  `NO_WORKSPACE`; `memstead workspace show` on an unreadable store reports
-  the store's own code (`WORKSPACE_STORE_PARSE`, ...) where it reported
-  `WORKSPACE_CONFIG_READ_FAILED`. The refusals of `memstead init` and
-  `quickstart` for where a workspace cannot go (inside another, over one
-  already there, over a foreign `.memstead/`, into a folder with content)
-  are one engine type (`workspace_create::WorkspaceCreateError`), so both
-  commands serve one payload per state: `WORKSPACE_ALREADY_EXISTS_ABOVE`
-  carries `details.found_at` and `details.hint` on both (the hint is now
-  the engine's, naming no command; each command's own advice follows the
-  message), and `TARGET_NOT_EMPTY` carries `details.path` and
-  `details.found` on both, `details.retry` where quickstart has one.
-  `PROJECTION_INIT_FAILED` and `PROJECTION_ENABLE_FAILED` retire: a
-  failed binding write under `projection init`, `projection enable` or
-  quickstart's guided mode reports the binding store's or the binding
-  edit's own code (`PROJECTION_EDIT_FAILED`, `PROJECTION_EDIT_REFUSED`
-  with the refusals, the store's `WORKSPACE_STORE_*`), as `projection
-  edit` does for the same write. `ANCHORS_SIDECAR_UNREADABLE`,
-  `AMBIGUOUS_QUERY`, `CONTEXT_NOT_COMPUTABLE`, `MEM_NOT_READ_ONLY` and
-  `NO_ACTIVE_BINDING` are engine values too; `CONTEXT_NOT_COMPUTABLE`
-  carries `details.id` and the `projection verify` sidecar refusal
-  carries the same `mem` and `reason` as every other sidecar refusal,
-  beside its `binding`. The last state refusals a command built itself are
-  the engine's: `READ_MEM_SHADOWS_WRITABLE` and `ARCHIVE_VALIDATION_FAILED`
-  under `memstead install` (`InstallError::code`, `details`), with
-  `EMBEDDED_SCHEMA_INVALID` and `ARCHIVE_VALIDATION_FAILED` now one
-  archive-validator value that `export --self-contained` reports too;
-  `SCHEMA_MIGRATE_FAILED` (`MigrateError::code`, `reason`, `details`,
-  payload unchanged); and `memstead schema new`'s `SCHEMA_PACKAGE_EXISTS`
-  and `TARGET_NOT_EMPTY`, which join the creation refusals of `init` and
-  `quickstart` (`TARGET_NOT_EMPTY` now carries `details.retry` here too).
-  `FINDINGS_STORE_ERROR` retires: a findings store that cannot be written
-  under `verify-anchors` reports the store's own code
-  (`WORKSPACE_STORE_*`). The engine codes a command still spelled by hand
-  are the engine's values now, and these payloads change: a binding store
-  that cannot be read under `projection brief`, `advance`, `exclude`,
-  `verify` and the brief's sync gate reports the store's own code
-  (`WORKSPACE_STORE_*`) where it reported `PROJECTION_LOAD_FAILED`,
-  `PROJECTION_ADVANCE_FAILED`, `PROJECTION_EXCLUDE_FAILED` or
-  `PROJECTION_VERIFY_FAILED`; `projection enable` on a binding that does
-  not exist lists `details.available`, and its capability refusal reads
-  the engine's message (`OperationStateError::CapabilityUnsupported`);
-  `projection init` over an existing binding reads `projection '<id>'
-  already exists` before its advice; malformed binding ids and parts are
-  one engine type (`pipeline_store::BindingIdError`, payload unchanged).
-  `memstead type <unknown>` refuses with the engine's `UNKNOWN_ENTITY_TYPE`
-  payload, the one `create` serves (`details.name`, `schema_ref`,
-  `declared`, now `suggestion`), beside the run's `fallback`; its
-  `AMBIGUOUS_MEM` is the engine's value. `verify-anchors --observations` reads the file
-  through the engine (`anchor::read_supplied_observations`), whose
-  refusals carry `details.path` (and `details.reason`). `schema validate`
-  and `schema install` share one engine authoring read
-  (`Engine::validate_authoring_package`): install's invalid-package
-  message reads `schema at <path> is invalid` like validate's. A built-in
-  schema source that cannot be collected reports its own code and payload
-  (`SchemaSourceError::code`, `details`). A command that cannot write its
-  own output file (`export --format llms-txt|html --output`, `schema
-  new`, `schema install` writing a package) refuses `INTERNAL_IO_ERROR` with `details.path`,
-  as quickstart does, where it refused `IO_ERROR`. `WORKSPACE_NOT_INITIALISED`
-  from the CLI's workspace walk carries the engine's payload, adding
-  `details.path`. `memstead push --all` and `pull --all` exit with the
-  refused ref's own code where an unlisted code became `INTERNAL`. Three state refusals
-  spelled as input errors are engine values: a git operation on a folder
-  mem or a workspace without git-branch mems (`fetch`, `pull`, `push`,
-  `branch-reset`, `diff`, `push --all`, `pull --all`, `mem-repo
-  remote-add`, on MCP and the CLI) stays `INVALID_INPUT` and now carries
-  `details.mem` and `details.operation` (`EngineError::NotGitBacked`);
-  `export --format llms-txt|html` without `--mem` and with no or several
-  writable mems refuses `NO_WRITABLE_MEM` or `AMBIGUOUS_MEM` (with
-  `details.mems`) where it refused `INVALID_INPUT`; and `init` or
-  `quickstart` pointed at a file refuses `TARGET_NOT_EMPTY` (with
-  `details.path` and `details.found`) where it refused `INVALID_INPUT`.
-  The gate refusals a command raises after its report are engine values
-  too, payloads unchanged: `REMOTE_STALE` (`status --remote`,
-  `RemoteStatusOutcome::stale_refusal`), `HEALTH_STRICT_VIOLATIONS`
-  (`health --strict`, `ops::strict::StrictViolations`) and
-  `PROJECTION_VERIFY_FINDINGS` / `PROJECTION_VERIFY_INCONCLUSIVE`
-  (`projection verify --fail-on-findings` / `--fail-on-inconclusive`,
-  `Rollup::gate_refusal`); `REMOTE_STALE` and the verify gates read `;`
-  or `:` where they read a dash. A refused batch is one engine value
-  (`BatchResult::refusal`, `BATCH_REFUSED`) on MCP's list-form
-  `memstead_relate` and the CLI's `batch-create`, `batch-update` and
-  `batch-relate`: `details` carries `entries` (per entry `index`, `id`,
-  `action`, the relate entry's `from`, `to`, `rel_type`, and a failed
-  entry's `code`, `message`, `details`), `applied`, `failed`, `succeeded`
-  and `errors_suppressed`. The CLI's `details.results` (the serialized
-  batch result, each failure nested under `error`) is retired for
-  `details.entries`, and its `details.write_id`, always empty on a
-  refused batch, is retired with it; MCP's entries gain `id`, and its `details` gains
-  `applied` and `succeeded`. The message reads `batch refused: <n> of <m>
-  operation(s) failed, nothing committed; first failure [<code>] on
-  `<id>`: <message>` on both. `check --from`'s refused batch is the
-  engine's `check::CheckBatchRefused` (payload unchanged).
-  An engine error that reaches the CLI's exit without a command's own
-  mapping renders as the engine's code and payload, where it rendered
-  `INTERNAL`.
-  On a filesystem-mem workspace, `update --append`, `--patch`,
-  `--patch-all` and `--dry-run`, `create --dry-run` and `export --format
-  markdown` run through the engine, as on MCP and a mem-repo workspace,
-  where the CLI refused them with `INVALID_INPUT`. An update template
-  whose `title` or `entity_type` differs from the entity is the engine's
-  `TemplateIdentityMismatch` (`INVALID_INPUT`, with `details.id`,
-  `field`, `template`, `current`).
-  A `chunk` past the end of a chunked response is one engine value,
-  `EngineError::ChunkOutOfRange` (`CHUNK_OUT_OF_RANGE`, with
-  `details.chunk` and `details.total`), on MCP's `memstead_overview`,
-  `memstead_entity` and `memstead_health` and the CLI's `overview`,
-  `entity` and `context`: MCP refused it with `INVALID_INPUT`, now
-  retired for this case.
-  A schema pin that does not parse (`name@version` with a bad version)
-  is one engine value, `EngineError::InvalidSchemaPin` (`INVALID_INPUT`,
-  with `details.pin` and `details.reason`), on `memstead schema`,
-  `schema install`, `mem init`, `mem set-schema` and MCP's
-  `memstead_schema`, `memstead_mem_create` and `memstead_mem_set_schema`:
-  MCP's `memstead_schema` reported it as `SCHEMA_NOT_FOUND` with
-  `details.name` (now `details.pin`) and `details.available` (kept, the
-  schema names the engine resolves), and the two MCP mem tools carried
-  `details.message` (retired for `pin` and `reason`); the CLI carried no
-  details and now carries `available` from the built-in catalogue. The
-  CLI's exit for it stays `5`, the validation exit.
-  `memstead init --schema` refuses a malformed pin the same way; `init
-  --name` and `quickstart --name` refuse a name a folder mem cannot take
-  with the engine's `INVALID_MEM_NAME` (`details.name`, `details.reason`;
-  the slug rule follows in the message), where they refused
-  `INVALID_INPUT`, the code `mem init` and MCP's `memstead_mem_create`
-  already served. `VALIDATION_FAILED` retires: `memstead mem` commands
-  outside a workspace refuse `WORKSPACE_NOT_INITIALISED` (with the
-  engine's payload), and on a filesystem-mem workspace the mem-repo-only
-  commands (`mem init`, `mem rename`, `mem delete`, the other `mem`
-  verbs, and every command `UNSUPPORTED_WORKSPACE_SHAPE` already covered)
-  refuse `UNSUPPORTED_WORKSPACE_SHAPE`, now an engine value carrying
-  `details.path`. Both exit `1`, as every other command's
-  `WORKSPACE_NOT_INITIALISED` and `UNSUPPORTED_WORKSPACE_SHAPE` already
-  did, where `mem init`, `mem rename`, `mem delete` and `mem fork`
-  outside a workspace and `mem rename` and `mem delete` on a
-  filesystem-mem workspace exited `5`. `mem-repo init` over an existing mem-repo refuses
-  `MEM_DB_ALREADY_EXISTS` with `details.path`; a broken built-in schema
-  catalogue under `init` is the engine's `SCHEMA_RESOLVER_INIT_FAILED`.
-  The plugin's `/ingest --clear` recognises a filesystem-mem workspace by
-  the code `UNSUPPORTED_WORKSPACE_SHAPE` instead of the message wording.
-  `memstead publish` refuses a workspace the engine does not boot with
-  the boot refusal's own code (`WORKSPACE_STORE_PARSE`, ...), where it
-  reported `ARCHIVE_ASSEMBLY_FAILED` or, when the folders could be
-  assembled, published them behind the refusal; when the folder assembly
-  would fail too, its refusal rides beside the boot refusal under
-  `details.assembly` (`code`, `message`, `details`). The assembly's own
-  refusals are the engine's (`AssembleError::code`, `details`: `stage`,
-  `reason`, `path` where known); a schema source or anchors refusal now
-  reports its own code (the schema source's, or
-  `ANCHORS_SIDECAR_UNREADABLE`) where publish reported
-  `ARCHIVE_ASSEMBLY_FAILED`; and an
-  archive that fails local validation before signing refuses with the
-  validator's code (`ARCHIVE_VALIDATION_FAILED`,
-  `EMBEDDED_SCHEMA_INVALID`), as install does, where it refused
-  `ARCHIVE_INVALID`. quickstart's seed step reports a boot failure with
-  the boot refusal's code where it reported `INTERNAL`.
+  Code, `details` and message are now equal on both surfaces. Most
+  payloads only gain keys; the changes below are what a caller matching
+  on codes or keys must update.
+  - Added keys: `known_mems` and `writable_mems` on every `UNKNOWN_MEM`,
+    `suggestions` on every `ENTITY_NOT_FOUND`, `expected` on
+    `UNTERMINATED_FENCE_IN_STORED_BODY`, `proposed_slug` on
+    `INVALID_WIKI_LINK_TARGET`, `details.target_schema` and
+    `details.reason` on a malformed `target_schema`, `details.message`
+    on the removed `schema_types` include key.
+  - `UNKNOWN_MEM` puts the mem under `details.name` (retired:
+    `details.mem`, and `details.loaded` on `memstead export`) on
+    `memstead type`, `list`, `search`, `export`, `create`, `changes`,
+    `uninstall`, `memstead_schema`, `projection verify` and the brief.
+    The `memstead_health` / `memstead health` refusals match. On
+    `memstead_overview` / `memstead overview`, `writable_mems` lists
+    writable mems only and the roster moves to `known_mems`. The CLI's
+    `MEM_NOT_FOUND` (`memstead anchors --mem`) is now `UNKNOWN_MEM`.
+    `MEM_QUARANTINED` moves `details.reason` to `details.reason_message`.
+  - `ENTITY_NOT_FOUND` on `memstead_entity`, `memstead entity`,
+    `memstead relations`, `delete`, `context`, `check` and the `--force`
+    / `--auto-hash` read uses the engine's message (`entity not found:
+    <id>`).
+  - `memstead_schema` refuses an unknown schema with `SCHEMA_NOT_FOUND`
+    (was `ENTITY_NOT_FOUND`), name under `details.name` (was
+    `details.id`), plus `details.available`; `memstead schema` (readme
+    and install) does the same. An unknown name in its `types` selection
+    is `UNKNOWN_ENTITY_TYPE` with `details.declared` (was
+    `details.known_types`); `memstead type <unknown>` serves the same
+    payload, adding `suggestion`.
+  - `INVALID_TITLE` on `memstead create --from` and `batch-create`, and
+    `INVALID_ENTITY_ID` on every MCP tool, carry the engine's payload and
+    messages.
+  - `MEM_ERROR` from `memstead mem` and `memstead workspace dump` adds
+    `details.detail`. `memstead publish` outside a workspace refuses
+    `WORKSPACE_NOT_INITIALISED` (exit 3 kept); on a workspace that does
+    not boot it reports the boot code (`WORKSPACE_STORE_PARSE`, ...) with
+    any assembly refusal under `details.assembly`, where it reported
+    `ARCHIVE_ASSEMBLY_FAILED`; a schema source or anchors failure reports
+    its own code (`ANCHORS_SIDECAR_UNREADABLE`); local validation refuses
+    `ARCHIVE_VALIDATION_FAILED` or `EMBEDDED_SCHEMA_INVALID` instead of
+    `ARCHIVE_INVALID`. quickstart's seed step reports the boot code
+    instead of `INTERNAL`.
+  - Projection codes: `projection advance` on a missing binding refuses
+    `PROJECTION_NOT_FOUND` (exit 3, was `PROJECTION_ADVANCE_FAILED`),
+    which now carries `details.available` on every command;
+    `PROJECTION_SCOPE_UNINTERPRETABLE` carries `details.reason`; a
+    malformed id under `projection verify` is `PROJECTION_INVALID_NAME`
+    (exit 5, was `PROJECTION_VERIFY_FAILED`); a taken binding name on
+    edit is `PROJECTION_EXISTS` (exit 5, was `PROJECTION_EDIT_FAILED`).
+    `PROJECTION_INIT_FAILED` and `PROJECTION_ENABLE_FAILED` retire for
+    `PROJECTION_EDIT_FAILED`, `PROJECTION_EDIT_REFUSED` or
+    `WORKSPACE_STORE_*` under `projection init`, `projection enable` and
+    quickstart, as `projection edit` reports. An unreadable binding store under `projection brief`,
+    `advance`, `exclude` and `verify` reports `WORKSPACE_STORE_*`
+    instead of `PROJECTION_LOAD_FAILED`, `PROJECTION_ADVANCE_FAILED`,
+    `PROJECTION_EXCLUDE_FAILED` or `PROJECTION_VERIFY_FAILED`.
+    `projection init` over an existing binding reads `projection '<id>'
+    already exists`.
+  - Other retirements: `memstead schema install` outside a workspace
+    refuses `WORKSPACE_NOT_INITIALISED` (was `NO_WORKSPACE`); `memstead
+    workspace show` reports the store's code (was
+    `WORKSPACE_CONFIG_READ_FAILED`); `FINDINGS_STORE_ERROR` under
+    `verify-anchors` becomes `WORKSPACE_STORE_*`; `VALIDATION_FAILED`
+    retires: `memstead mem` commands outside a workspace refuse
+    `WORKSPACE_NOT_INITIALISED`, and on a filesystem-mem workspace `mem
+    init`, `mem rename`, `mem delete` and the other `mem` verbs refuse
+    `UNSUPPORTED_WORKSPACE_SHAPE` (`details.path`), both exit `1` (was
+    `5`, also for `mem fork`). A command that cannot write its output
+    file (`export --format llms-txt|html --output`, `schema new`,
+    `schema install`) refuses `INTERNAL_IO_ERROR` (was `IO_ERROR`).
+  - `init` and `quickstart` share one payload per state:
+    `WORKSPACE_ALREADY_EXISTS_ABOVE` (`details.found_at`,
+    `details.hint`), `TARGET_NOT_EMPTY` (`details.path`, `details.found`,
+    `details.retry`; also for a file target, was `INVALID_INPUT`, and on
+    `schema new` beside `SCHEMA_PACKAGE_EXISTS`). `init --name` and
+    `quickstart --name` refuse a bad name with `INVALID_MEM_NAME` (was
+    `INVALID_INPUT`); `init --schema` refuses a malformed pin.
+    `mem-repo init` over an existing mem-repo refuses
+    `MEM_DB_ALREADY_EXISTS`; a broken catalogue under `init` is
+    `SCHEMA_RESOLVER_INIT_FAILED`.
+  - `READ_MEM_SHADOWS_WRITABLE` and `ARCHIVE_VALIDATION_FAILED` under
+    `memstead install`, `SCHEMA_MIGRATE_FAILED`, `AMBIGUOUS_QUERY`,
+    `CONTEXT_NOT_COMPUTABLE` (now with `details.id`),
+    `MEM_NOT_READ_ONLY` and `NO_ACTIVE_BINDING` keep their payloads;
+    `export --self-contained` reports the archive validator's codes too.
+    `verify-anchors --observations` refusals carry `details.path`.
+    `schema install` reads `schema at <path> is invalid` like `schema
+    validate`.
+  - `NO_WRITABLE_MEM` and `AMBIGUOUS_MEM` are shared by `memstead
+    create`, `batch-create`, `changes`, `export` and `publish`; `export
+    --format llms-txt|html` without `--mem` refuses with them (was
+    `INVALID_INPUT`). A git operation on a non-git mem (`fetch`, `pull`,
+    `push`, `branch-reset`, `diff`, `push --all`, `pull --all`,
+    `mem-repo remote-add`) stays `INVALID_INPUT` and adds `details.mem`
+    and `details.operation`. `push --all` and `pull --all` exit with the
+    refused ref's code instead of `INTERNAL`, as does any unmapped
+    engine error on the CLI.
+  - `REMOTE_STALE` (`status --remote`), `HEALTH_STRICT_VIOLATIONS`
+    (`health --strict`), `PROJECTION_VERIFY_FINDINGS` and
+    `PROJECTION_VERIFY_INCONCLUSIVE` (`projection verify
+    --fail-on-findings` / `--fail-on-inconclusive`) keep their payloads.
+  - A refused batch is `BATCH_REFUSED` on list-form `memstead_relate`
+    and on `batch-create`, `batch-update` and `batch-relate`, with
+    `details.entries`, `applied`, `failed`, `succeeded` and
+    `errors_suppressed`. The CLI's `details.results` and
+    `details.write_id` retire for `details.entries`. `check --from` keeps
+    its payload.
+  - `chunk` past the end is `CHUNK_OUT_OF_RANGE` (`details.chunk`,
+    `details.total`) on `memstead_overview`, `memstead_entity`,
+    `memstead_health`, `overview`, `entity` and `context` (MCP was
+    `INVALID_INPUT`).
+  - A bad schema pin is `INVALID_INPUT` with `details.pin` and
+    `details.reason` on `memstead schema`, `schema install`, `mem init`,
+    `mem set-schema`, `memstead_schema` (was `SCHEMA_NOT_FOUND`),
+    `memstead_mem_create` and `memstead_mem_set_schema` (retired:
+    `details.message`). CLI exit stays `5`.
+  - On a filesystem-mem workspace the CLI now runs `update --append`,
+    `--patch`, `--patch-all`, `--dry-run`, `create --dry-run` and
+    `export --format markdown` instead of refusing `INVALID_INPUT`. An
+    update template whose `title` or `entity_type` differs refuses
+    `INVALID_INPUT` with `details.field`. The plugin's `/ingest --clear`
+    matches `UNSUPPORTED_WORKSPACE_SHAPE` by code.
+  - Rust interface: `EngineError::UnknownMem` becomes `{ name,
+    known_mems, writable_mems }`, `EngineError::NotFound` gains
+    `suggestions`, and `EngineError::InvalidTargetSchema` is new.
 
 - **The engine decides whether a write needs a hash, and refuses a
   missing one with one code everywhere.** Update, delete, rename, retype
-  and batch update now state one of three things to the engine: the hash
-  the caller read, an internal override, or nothing; nothing is refused
-  for a real entity with `EXPECTED_HASH_REQUIRED` (`details.field`,
-  `details.id`), after the existence and stub gates, on MCP and the CLI
-  alike and on folder and git-branch mems. Before, each surface decided
-  this itself and they differed. Three declared wire changes follow:
-  (1) the CLI's `HASH_FLAG_REQUIRED`, MCP retype's `INVALID_INPUT` and a
-  batch-update entry's `INVALID_INPUT` ("exactly one of `expected_hash`,
-  `auto_hash`, or `force`") are retired for this case and answer
-  `EXPECTED_HASH_REQUIRED`, and so does a `memstead_delete` or
-  `memstead_rename` call that omits `expected_hash`, which used to fail
-  as an uncoded parameter error (the schema still marks it required); (2) `batch-update`'s per-entry `force` reads
-  the current hash and presents it, as `--force` on `memstead update`
-  always did, instead of sending none: a write that lands between that
-  read and the commit is now refused with `HASH_MISMATCH` where it used
-  to be overwritten (`--force` on every verb is documented accordingly:
-  it names the intent, the engine still compares); (3) `memstead_delete`
-  with an empty `expected_hash` refuses a real entity with
-  `EXPECTED_HASH_REQUIRED`, where it used to delete any entity without a
-  compare; a stub, which has no content to protect, still deletes with
-  the empty hash. An update that changes no content (anchors only) and a
-  dry run keep their exemptions, and relate stays outside the rule: it
-  adds or removes one edge and returns the hash the next content change
-  presents. In the engine's Rust interface the `expected_hash` field of
+  and batch update without a hash refuse a real entity with
+  `EXPECTED_HASH_REQUIRED` (`details.field`, `details.id`) on MCP and
+  the CLI. It replaces the CLI's `HASH_FLAG_REQUIRED` and the
+  `INVALID_INPUT` of MCP retype and batch-update entries; `memstead_delete`
+  or `memstead_rename` without `expected_hash`, and `memstead_delete`
+  with an empty one, refuse with it too (a stub still deletes).
+  `batch-update`'s per-entry `force` now presents the current hash, so a
+  racing write refuses `HASH_MISMATCH`. Relate, anchors-only updates and
+  dry runs are exempt. Rust interface: the `expected_hash` field of
   `UpdateEntityArgs`, `DeleteEntityArgs`, `RenameEntityArgs` and
   `RetypeEntityArgs` is now an `ExpectedHash` (`Missing`, `Current`,
-  `Override(HashOverride)`) instead of an `Option<String>` whose `None`
-  skipped the compare; the override has one caller, the proposal merge,
-  and no tool parameter or flag reaches it.
+  `Override`) instead of `Option<String>`.
 
 - **VISION states what reading a mem is worth, measurement by
-  measurement.** The core value proposition opened by denying a
-  read-side advantage and called the read side closed, which read as
-  "reading a mem is beside the point". It now opens with what a mem is
-  for (to be read) and where the engine works (on what the reader
-  finds), then keeps the three results apart: the typed form by itself
-  does not improve answers, curation does save a reader tokens, and a
-  readable source beats the mem where one exists. It also names what is
-  unmeasured: reading knowledge that no source states. No figure
-  changed.
+  measurement**: typed form alone does not improve answers, curation
+  saves a reader tokens, a readable source beats the mem where one
+  exists, and reading knowledge no source states is unmeasured.
 
-- **A folder mem's write is durable, and costs disk syncs.** A commit to
-  a folder mem now has one commit point. Before it, every new file
-  content is written beside its target and synced, together with a
-  commit record (`.memstead/commit.json`) that names the commit's files
-  and its ledger lines; after it the engine only moves the files into
-  place, appends the ledger lines and removes the record. Success is
-  returned after the contents, the record and the directory entries
-  that name them are synced. A write to a folder mem therefore takes
-  tens of milliseconds where it took one (about 60 ms on macOS, where a
-  sync flushes the drive). The ledger line of a write now lands with
-  its commit instead of after it. For implementers of `MemBackend`: the
-  trait gains the required `stage_provenance` (a record that lands with
-  the next commit), `complete_interrupted_commit` (default: nothing to
-  do), and the errors `CommitNotApplied` and `FollowUpFailed`;
-  `Engine::unregister_writable_mem` and `unregister_read_mount` return
-  the backend as an `Arc`.
+- **A folder mem's write is durable, and costs disk syncs.** A commit
+  has one commit point backed by a synced commit record
+  (`.memstead/commit.json`), and the ledger line lands with the commit.
+  A write now takes tens of milliseconds (about 60 ms on macOS). For
+  `MemBackend` implementers: new required `stage_provenance`, new
+  `complete_interrupted_commit`, errors `CommitNotApplied` and
+  `FollowUpFailed`; `Engine::unregister_writable_mem` and
+  `unregister_read_mount` return an `Arc`.
+
+- **`memstead checks` reads an unmounted mem's rows, and the whole
+  ledger without `--mem`.** `checks --mem <m>` serves rows for any mem
+  name, with `mounted: false` when unmounted, instead of refusing
+  `UNKNOWN_MEM`; without `--mem` it lists every row.
 
 ### Security
 
-- **pulldown-cmark 0.13.6 and rmcp 3.9.0.** The RustSec gate went red on
-  three advisories published after the last green run: two on
-  pulldown-cmark 0.13.4 (quadratic parsing and exponential event growth
-  with `ENABLE_WIKILINKS`, RUSTSEC-2026-0414 and RUSTSEC-2026-0433) and
-  one on rmcp 3.8.0 (unbounded response buffering in Streamable HTTP
-  clients, RUSTSEC-2026-0462). Neither reaches the engine: it parses
-  markdown with tables enabled and nothing else, and it uses rmcp as a
-  server over stdio. The bumps are taken rather than ignored, because an
-  ignore line outlives its reason. Lockfile only; both are inside the
-  version requirements already declared.
+- **pulldown-cmark 0.13.6 and rmcp 3.9.0.** Bumped for RUSTSEC-2026-0414
+  and RUSTSEC-2026-0433 (pulldown-cmark 0.13.4, with `ENABLE_WIKILINKS`)
+  and RUSTSEC-2026-0462 (rmcp 3.8.0, Streamable HTTP clients). Neither
+  reaches the engine's use. Lockfile only.
 
 ### Fixed
 
-- **`branch-reset` works on a machine with no git identity.** The reset
-  signed its ref-log entry from the ambient git config and refused with
-  `Could not update reflog` where no `user.name` / `user.email` is set,
-  a CI runner or a fresh container; it now signs with the engine's own
-  identity, as every other ref move already did.
+- **`branch-reset` works on a machine with no git identity.** It signs
+  its ref-log entry with the engine's identity instead of refusing with
+  `Could not update reflog`.
 
 - **Archives and reports name the right entities.**
-  - An exported archive's provenance gives each entity of a batch
-    commit its own record: under its own id, with the note of its own
-    `<id>: ` line, with the batch's kind (`batch-create` reads `create`,
-    `batch-update` `update`, `batch-relate` `relate`). Before, the
-    archive held one record keyed by the commit subject's `(2 entities)`
-    and an empty record for each entity the batch wrote. Of two notes on one
-    entity in the same second (commit times resolve to seconds), the
-    later one is the archive's rationale; before, the earlier stayed.
-  - A red `projection verify` names the entity behind each `drifted` and
-    `wrong` finding: the report carries `drifted_anchors` (class, entity,
-    artifact) and renders an always-ship `Drifted anchors` section, the
-    first ten and the count of the rest; the "Do next" lines of both
-    classes point to it. Before, the report gave only counts and a
-    reader needed a second command to learn which entities to re-read.
+  - An exported archive gives each entity of a batch commit its own
+    provenance record, note and kind (`create`, `update`, `relate`);
+    of two notes in one second the later wins.
+  - A red `projection verify` lists the entity behind each `drifted` and
+    `wrong` finding (`drifted_anchors`, a `Drifted anchors` section).
 
 - **A refusal names its real cause and its repair (first part).**
-  - An empty expected hash states no hash on every surface:
-    `ExpectedHash::from_token` maps `""` to missing, so MCP
-    `memstead_update` and `memstead_rename` and a CLI `batch-update`
-    entry refuse `EXPECTED_HASH_REQUIRED` on a real entity, as every
-    other verb already did, instead of `HASH_MISMATCH`. A stub, whose
-    `_hash` is empty, is still written without one.
+  - An empty expected hash counts as missing: MCP `memstead_update`,
+    `memstead_rename` and a CLI `batch-update` entry refuse
+    `EXPECTED_HASH_REQUIRED` instead of `HASH_MISMATCH`.
   - A relative `--workspace` (or `MEMSTEAD_WORKSPACE`) is made absolute
-    once, at entry, so a refusal's `details.path` and message name the
-    path the caller meant.
-  - `mem-repo init --remote` raises the engine's error when configuring
-    the remote fails, the same code and message `mem-repo remote-add`
-    raises, instead of wrapping it in `MEM_REPO_INIT_FAILED`.
-  - `Engine::resolved_schema(mem)` returns a mem's resolved schema or the
-    engine's refusal (`UNKNOWN_MEM`, `MEM_QUARANTINED` with its reason,
-    `SCHEMA_NOT_FOUND` with the per-source diagnostics), so a surface
-    serving a mem's schema renders one engine value.
-  - The quickstart and init disclosure for a folder workspace no longer
-    says `update --append`, `--patch`, `--dry-run` and `create --dry-run`
-    refuse there; they run on a folder mem like on any other.
-  - `MEM_VIEW_STALE` carries a typed `details.cause` (`drift`,
-    `out_of_service`, `lock_unavailable`, `discard_failed`), and the
-    message names that state and its repair. Before, every case said the
-    mem changed in storage, also for a mem out of service, a read-only
-    mem whose lock cannot be taken, and a discard that failed.
-  - A batch that loses a race to another writer in one of its mems
-    reports `failure_cause: drift` in its partial-failure envelope, as a
-    rename does, instead of `storage`.
-  - New code `REMOTE_UNREACHABLE`: a remote that is configured on the
-    mem-repo and cannot be reached (an address that does not resolve, a
-    refused connection, a URL that names no repository) refuses with it,
-    `details` naming the remote, its URL and git's answer. `UNKNOWN_REMOTE`
-    stays for a name no remote carries, and its message now names
-    `memstead mem-repo remote-add`. The transport decides by asking git
-    whether the remote is configured, not by the wording of git's error.
-    `status --remote`'s fail-open notice says which of the two it met.
-  - New quarantine code `MEM_REPO_MISSING`: a git-branch mem whose
-    mem-repo directory is not there (a workspace copied or cloned
-    without `mem-repo/`) is quarantined with it, and the message names
-    the restore, `memstead mem-repo init --remote <url>` and then
-    `memstead pull --all`. Before, it read `MEM_ERROR` with git's "does
-    not appear to be a git repository". An embedder that builds without
-    the git-branch crate still gets the `cargo add memstead-git-branch`
-    advice; the CLI and MCP never show it.
+    at entry, so `details.path` names the path meant.
+  - `mem-repo init --remote` raises the engine's remote error, as
+    `mem-repo remote-add` does, instead of `MEM_REPO_INIT_FAILED`.
+  - `Engine::resolved_schema(mem)` returns the schema or `UNKNOWN_MEM`,
+    `MEM_QUARANTINED` or `SCHEMA_NOT_FOUND`.
+  - The quickstart and init folder-workspace disclosure no longer claims
+    `update --append`, `--patch`, `--dry-run` and `create --dry-run`
+    refuse there.
+  - `MEM_VIEW_STALE` carries `details.cause` (`drift`, `out_of_service`,
+    `lock_unavailable`, `discard_failed`) and a matching message.
+  - A batch that loses a race reports `failure_cause: drift` instead of
+    `storage`.
+  - New code `REMOTE_UNREACHABLE` for a configured remote that cannot be
+    reached, with the remote, URL and git's answer. `UNKNOWN_REMOTE`
+    stays for an unknown name and names `memstead mem-repo remote-add`.
+  - New quarantine code `MEM_REPO_MISSING` for a git-branch mem whose
+    `mem-repo/` is absent (was `MEM_ERROR`); restore with `memstead
+    mem-repo init --remote <url>` then `memstead pull --all` (embedders
+    without the git-branch crate still see `cargo add
+    memstead-git-branch`).
 
-- **A long-lived engine sees what a fresh one sees.** Six places where a
-  server that had been running a while served a different view from an
-  engine loaded just then:
-  - A per-mem reload, a mem registered again and a mem unregistered now
-    settle the cross-mem state a fresh load derives: the edges other mems
-    point into the mem are rebuilt, and stubs nothing points at any more
-    are collected. Before, a rename seen through two per-mem reloads left
-    an edge-less stub at the old id, and a mem registered again lost its
-    incoming edges, so a delete of a linked entity was not refused
-    `HAS_INCOMING_REFS`.
-  - A write sent again right after a failed one whose discard kept
-    failing commits. The stray writes are discarded in the lock path,
-    before the write holds the backend, so a backend that cannot be
-    cleaned is replaced. Before, such a retry was refused
-    `MEM_VIEW_STALE` until some read without the lock came first.
-  - The MCP `memstead_update`, `memstead_rename`, `memstead_retype` and
-    `memstead_delete` tools no longer resolve a bare slug before the
-    verb's lock. The verb resolves it under its lock and reload, so an
-    entity another process just created is found (`SHORT_ID_RESOLVED`)
-    instead of refused `ENTITY_ID_MISSING_MEM`.
-  - `MOUNT_UNBACKED` with the `empty` reason is derived from the live
-    store when health or overview is read; only missing storage is
-    stored at mount time. A mem the server has since written into is no
-    longer reported empty.
-  - The folder walkers (load, export, ledger reconciliation) skip a
-    subdirectory holding `.memstead/config.json`, so a nested mem's
-    entities are not loaded, exported or reconciled a second time as the
-    outer mem's, under another id.
-  - MCP `memstead_mem_create` on a folder workspace refuses
-    `UNSUPPORTED_WORKSPACE_SHAPE` and writes nothing, as CLI `mem init`
-    does there.
+- **A long-lived engine sees what a fresh one sees.**
+  - A per-mem reload, re-registration or unregistration rebuilds
+    cross-mem edges and collects orphan stubs, so a linked delete is
+    refused `HAS_INCOMING_REFS` again.
+  - A retry after a write whose discard kept failing commits instead of
+    refusing `MEM_VIEW_STALE`.
+  - `memstead_update`, `memstead_rename`, `memstead_retype` and
+    `memstead_delete` resolve a bare slug under the verb's lock
+    (`SHORT_ID_RESOLVED`), not refusing `ENTITY_ID_MISSING_MEM`.
+  - `MOUNT_UNBACKED` with reason `empty` is derived from the live store.
+  - Folder walkers skip a nested mem's subdirectory.
+  - `memstead_mem_create` on a folder workspace refuses
+    `UNSUPPORTED_WORKSPACE_SHAPE`, as `mem init` does.
 
 - **An entity rename with referrers in other mems loses no concurrent
   write, reaches a mem that was not loaded yet, and can be completed
-  after a partial failure.** A rename locked and reloaded the renamed
-  entity's own mem only. It rewrote the referrers in other mems from
-  the view it had loaded earlier, so an update a second process made to
-  such a referrer was overwritten; it never loaded a lazily mounted
-  mem, whose referrers kept the old id; and it committed the entity's
-  own mem first, so after a failure at a peer the old id was gone, the
-  caller's hash was stale and the call could not be sent again. A
-  rename now takes the write lock of every writable mem, reloads every
-  mem and loads the deferred ones before it looks for a referrer. It
-  commits the peer mems first and the entity's own mem last. A commit
-  that fails after another landed returns `RENAME_PARTIAL_FAILURE` for
-  a storage failure as for a moved head (`details.failure_cause`:
-  `storage` or `drift`), and `details.mems[]` now states for every mem
-  and every entity the rename writes whether it landed and the
-  entity's current hash; the running engine serves exactly what is in
-  storage. The entity is then still under the id and the hash the
-  caller sent, and the identical call completes the rename. A failure
-  before any commit landed fails the rename as a whole, with the cause
-  as the error. A stub at the new id no longer refuses a rename with
-  `ENTITY_ALREADY_EXISTS`: the rename brings the entity the forward
-  references were waiting for.
+  after a partial failure.** A failure after a commit landed returns
+  `RENAME_PARTIAL_FAILURE` (`details.failure_cause`, `details.mems[]`
+  with each entity's state and hash); resending the identical call
+  completes it. A stub at the new id no longer refuses
+  `ENTITY_ALREADY_EXISTS`.
 
-- **A mem rename holds every writable mem's lock, and its sweep can
-  be completed after a partial failure.** The sweep that rewrites the
-  references to a renamed mem wrote every peer mem without the write
-  lock, guarded by the head pin alone, which the folder backend
-  ignores: an update a second process made to a referrer in a folder
-  mem was written over. It appended no ledger line, so a second process
-  on a folder mem never learned of the rewrite, and it left the running
-  engine serving the references as they were before. The rename now
-  holds the write lock of every writable mem from its first write to
-  its last and reloads every mem under it. The sweep commits through
-  the engine's one commit call, with one provenance record per
-  rewritten entity; it commits the peers first and the renamed mem
-  itself last, and reloads every mem it committed; a reload that fails
-  after the commit landed is a `WRITE_FOLLOW_UP_FAILED` warning on the
-  rename's response. A commit that fails
-  after another landed returns `RENAME_PARTIAL_FAILURE` for a storage
-  failure as for a moved head, with `details.mems[]` stating what
-  landed; a failure before any commit landed fails the rename as a
-  whole. The mount still carries the old name in both cases, and the
-  same `mem rename` sent again completes it.
+- **A mem rename holds every writable mem's lock, and its sweep can be
+  completed after a partial failure.** The sweep writes provenance per
+  rewritten entity; a partial failure returns `RENAME_PARTIAL_FAILURE`,
+  a failed reload after commit a `WRITE_FOLLOW_UP_FAILED` warning, and
+  the same `mem rename` sent again completes it.
 
 - **A proposal merge and a conflict resolution commit under the write
-  lock.** Both committed to their mem without taking its write lock. An
-  update that had locked the mem, reloaded and passed its hash compare
-  could be followed, before its own commit, by a merge that landed in
-  between, and then commit over what the merge wrote; two resolutions
-  of one conflicted entity could both be acknowledged with one of them
-  written over. A merge now holds the write lock of every writable mem
-  (a deletion it carries is guarded by referrers in any mem) and takes
-  its picture of the target under it, so a write in progress is
-  finished first and the merge then refuses a tip that moved with
-  `PROPOSAL_STALE`. A conflict resolution holds its mem's lock from
-  before it reads the conflicted file, and its provenance record lands
-  with its commit.
+  lock.** A merge over a moved tip refuses `PROPOSAL_STALE`, and two
+  resolutions of one entity can no longer both be acknowledged.
 
 - **A write whose guard reads the whole workspace locks the whole
-  workspace.** Three cases were guarded from a view of other mems taken
-  before any of their locks was held. (1) Two writes in two mems, each
-  adding an edge on an acyclic relationship, could each pass the cycle
-  guard and together close a cycle; both were acknowledged, and the
-  next load dropped one edge. A `create`, `update` or `relate` (single
-  or batch) that adds an edge on an acyclic relationship now takes the
-  write lock of every writable mem and reloads every mem before its
-  guard runs; the relationship's name is judged in its normal form, so
-  `depends_on` counts as `DEPENDS_ON` does. (2) A bare slug was resolved to its mem before the lock;
-  a second process that had created the same slug in another mem was
-  not seen, and the call ran on the first mem where a freshly started
-  engine refuses it with `ENTITY_ID_MISSING_MEM`. A call that names an
-  entity by a bare slug now takes the whole workspace and resolves the
-  slug under it. (3) When a mem could not be reloaded under the lock, a
-  `delete`, `retype` or `rename` evaluated its referrers on that mem's
-  old view, without a warning. Such a call, and any write whose
-  relation target lies in a mem that could not be reloaded, is now
-  refused with `MEM_VIEW_STALE` naming the mem. The cost: these writes
-  wait for a write in progress in any mem, and one mem that cannot be
-  read blocks them across the workspace until it can.
+  workspace.** Cross-mem cycles on an acyclic relationship (names
+  normalised, so `depends_on` is `DEPENDS_ON`) and bare-slug resolution
+  (`ENTITY_ID_MISSING_MEM`) are now judged under every mem's lock; a
+  guard over a mem that cannot be reloaded refuses `MEM_VIEW_STALE`.
+  Such writes wait for a write in progress in any mem.
 
-- **A batch that fails after one mem committed says what landed.** A
-  batch over several mems commits once per mem. When a later mem's
-  commit failed, the batch returned the storage error alone, and the
-  caller could not tell which items were in storage. It now returns
-  `RENAME_PARTIAL_FAILURE`, the one partial-failure report (the code
-  keeps its name), with `details.mems[]` naming every mem and every
-  item of the batch, whether it landed, and the item's current hash.
-  Sending the items named as not landed completes the batch. A batch
-  whose first commit fails still fails as a whole.
+- **A batch that fails after one mem committed says what landed.** It
+  returns `RENAME_PARTIAL_FAILURE` with `details.mems[]`; resending the
+  items not landed completes it.
 
-- **Two processes that spell a mem's path differently take their
-  write locks in one order.** The locks of an operation over several
-  mems were sorted by the lock file's path as each process spelled it.
-  Two processes that reached the same folder mems through different
-  spellings (a symlink, a `..`), as two workspaces mounting the same
-  folders do, could sort them in opposite orders and wait on each other
-  for ever. Both backends now name their lock file by its canonical
-  path.
+- **Two processes that spell a mem's path differently take their write
+  locks in one order**, ending a possible deadlock (locks are named by
+  canonical path).
 
 - **A partial-failure report no longer calls a decided commit not
-  landed.** When the failing mem's commit was already decided in
-  storage (a folder commit whose apply step failed and whose immediate
-  completion failed too), the report named that mem and its items as
-  not landed with their old hashes, while a freshly started engine
-  completed the commit: resending them was refused, and the identical
-  rename found its entity gone. An operation over several mems now
-  tries the completion once more and, when it goes through, lands whole
-  with a `WRITE_FOLLOW_UP_FAILED` warning. When it fails again the
-  report names the mem as landed, with the failure as its error, and
-  the reload that builds the report completes the commit. A reload
-  that fails while a report is built is tried once more, and a mem
-  whose view still could not be brought level is reported without
-  hashes (`current_hash: null`) instead of with stale ones.
+  landed.** The engine retries completion (landing whole with
+  `WRITE_FOLLOW_UP_FAILED`), else reports the mem as landed; a mem it
+  cannot bring level reports `current_hash: null`.
 
 - **A mem that is out of service blocks the writes that read every
-  mem.** A lazily mounted mem whose first load failed under a delete's
-  or a rename's lock was taken out of service, and the verb went on
-  without it: the delete landed although the mem held a referrer, the
-  rename left that referrer on the old id. `delete`, `retype`,
-  `rename`, a mem rename, a proposal merge, a write that adds an edge
-  on an acyclic relationship and a call with a bare slug are now
-  refused with `MEM_VIEW_STALE` while any mem of the workspace is out
-  of service.
+  mem.** `delete`, `retype`, `rename`, mem rename, proposal merge,
+  acyclic-edge writes and bare-slug calls refuse `MEM_VIEW_STALE`.
 
 - **A write that waited out a mem rename no longer lands on the old
-  name.** A process that wanted to write into a mem while another
-  process renamed it waited on the mem's lock, got it when the rename
-  was done, and wrote: with the roster it had read before it waited,
-  onto a branch it created anew under the old name, from its view from
-  before the rename. The write was acknowledged and no engine started
-  afterwards served it. A mutation now reconciles the roster once more
-  when it holds its locks and takes them again if the mounts changed,
-  so the write is refused with `UNKNOWN_MEM`; and a mem whose storage
-  is gone where it had a head before takes no write (`MEM_VIEW_STALE`),
-  which covers an engine that has no roster to reconcile.
+  name.** It refuses `UNKNOWN_MEM`, and a mem whose storage vanished
+  takes no write (`MEM_VIEW_STALE`).
 
 - **A load under another mem's write lock no longer waits for a lock
-  out of order, and a mem mounted read-only is locked too.** A write
-  reloads the other mems under its own lock. When one of them held a
-  commit that another process had left cut off, that reload waited for
-  the other mem's lock, which is outside the sorted set the write had
-  taken; a second write holding that lock and waiting for the first
-  one's left both waiting for ever. A load or a read that runs under
-  another mem's lock now takes that lock only if it is free, and
-  otherwise leaves the commit to its writer and reports the mem as not
-  readable. A write that locks the whole workspace also takes the lock
-  of a mem this engine mounts read-only when it has one, because
-  another process may mount the same storage writable: a reference it
-  adds while a delete or a retype is under way now waits for it. When
-  that lock cannot be taken (the lock file cannot be opened), the
-  operation is refused with `MEM_VIEW_STALE` naming the mem: it would
-  read a mem it cannot hold still.
+  out of order, and a mem mounted read-only is locked too.** This ends
+  a deadlock; a read-only mem whose lock file cannot be opened refuses
+  `MEM_VIEW_STALE`.
 
-- **A create or an update takes the lock of every mem it refers to.**
-  A delete, a rename or a retype holds the locks of the mems that
-  existed when it started. A mem that another process created while
-  one was under way was in no lock set, and a write into it that
-  referred to the verb's entity went through at once: the delete
-  landed and left the new reference pointing at nothing its writer
-  knew of. A `create` or `update` (single or batch) now locks, with its
-  own mem, the mems of its declared relation targets and of the
-  wiki-links in the sections it leaves behind (for an append or a
-  patch that is the stored text with the call's text worked in, so a
-  link completed by a patch counts), as `relate` already locked its
-  target's mem. Such a write waits for a delete, rename or retype of
-  its target, reloads, and is told the target is gone. A conflict
-  resolution, whose chosen side can refer to any mem, holds every
-  mem's lock. Writes that refer to other mems therefore wait for a
-  write in progress there.
+- **A create or an update takes the lock of every mem it refers to**,
+  including relation targets and body wiki-links, so it waits for a
+  delete, rename or retype of its target. Conflict resolution holds
+  every mem's lock.
 
 - **A resolved conflict's links are edges, and a mem's deletion and a
-  fork lock the workspace.** A conflict resolution wrote the chosen
-  side as it stood. A link in its body got no relationship row, so it
-  was no edge, and a later delete of the link's target did not see it
-  and went through. The resolved entity now gets the rows any engine
-  write gives its body links (a side whose links cannot be validated
-  is still written as it stands, so a resolution stays possible).
-  `mem delete` evaluated `MEM_HAS_INCOMING_REFS` on the view the engine
-  had loaded earlier and took no lock: a reference a second process
-  had added was not seen, and the deletion did not wait for a write in
-  progress. It now holds every mem's write lock and reloads every mem
-  first; the mem being deleted may itself be unreadable. A fork copied
-  its source's entities, references included, beside an entity rename
-  or delete under way in another mem; it now waits for it. A link in a
-  relation's description counts among the mems a write refers to.
+  fork lock the workspace.** `mem delete` checks `MEM_HAS_INCOMING_REFS`
+  under every mem's lock after a reload; a fork waits for a rename or
+  delete in progress.
 
 - **A delete and a retype check their referrers against every mem as it
-  is now.** Both verbs guard on the edges that point at the entity, and
-  such an edge can come from any mem. They reloaded their own mem only
-  and read the others from the view the engine had loaded earlier, so a
-  relation or a body link that a second process had added from another
-  mem was not seen: the delete went through and left the reference
-  pointing at nothing, the retype kept an edge its new type does not
-  allow. Both now take the write lock of every writable mem, in the one
-  order the lock defines, and reload every mem under it before they
-  read a referrer; a second process that writes a reference in that
-  time waits, reloads, and writes against a target that is gone.
-  `create`, `update` and `relate` reload every loaded mem under their
-  lock for the same reason, so a relation target is checked as it is
-  now and not as it was when the engine last read its mem. A workspace
-  with several mems pays one head probe per loaded mem on each write,
-  and a delete or a retype waits for a write in progress in any mem.
+  is now.** Both lock and reload every writable mem first; `create`,
+  `update` and `relate` reload every loaded mem. Cost: one head probe
+  per loaded mem on each write.
 
 - **The first write into a mem attached after the engine started is a
-  locked write.** A mutation computed its lock set from the mounts it
-  had and reconciled the roster afterwards, so a mem that another
-  process had attached since was written without its write lock. The
-  roster is now reconciled before the lock set is computed, in
-  `create`, `update`, `relate` and their batch forms, in `delete`,
-  `retype` and `rename`, and in the writes of a mem's settings, review
-  mark and anchor observations.
+  locked write.** The roster is reconciled before the lock set is
+  computed in every mutating verb.
 
 - **A load no longer sweeps the files of a commit that was decided a
-  moment before.** A load of a folder mem that found no commit record
-  went on to remove leftover temp files. A writer in another process
-  that passed its commit point and died between that look and the
-  sweep left a record whose contents were those temp files; the sweep
-  deleted them, and every later load of the mem failed on a record it
-  could not apply. The load now looks for the record again once it
-  holds the mem's lock and completes the commit.
+  moment before.** It re-checks for a commit record under the lock and
+  completes the commit.
 
-- **A failed write leaves nothing behind.** A mutation that failed
-  between staging its bytes and committing them (a refused sidecar
-  write, a failed commit) left the staged bytes in the backend, and the
-  next read or reload served them as content that never landed: single
-  `create` and `update` never discarded them, the folder backend
-  returned from a failed commit with files half written and the rest
-  still staged, and the git-branch backend kept its staged set when it
-  could not open the repository, write an object, or when it refused a
-  parent mismatch. Every mutation verb now shares one exit: the write
-  lock it already holds discards what is still staged when it is
-  released, and both backends end their own transaction on every exit
-  of a commit. A discard that itself fails is remembered and made good
-  before the next operation reads or writes; a backend whose staged
-  writes cannot be discarded at all is replaced by a fresh one over the
-  same storage. After a failed call,
-  storage is byte for byte what it was and the same call sent again is
-  a first call.
-- **A write that landed is never reported as failed.** A step that
-  failed after the commit (the ledger line or a file move of a folder
-  mem, the refresh of a checked-out worktree, the update of the
-  engine's own view) used
-  to return an error for a write that was in storage, so a caller that
-  retried wrote twice, and `delete` could leave the engine's view behind
-  the files. Such a call now succeeds with the new warning
+- **A failed write leaves nothing behind.** Every mutation discards its
+  staged bytes on every exit; after a failed call storage is byte for
+  byte unchanged and the same call is a first call.
+- **A write that landed is never reported as failed.** A failed
+  follow-up step returns success with the new warning
   `WRITE_FOLLOW_UP_FAILED` (`details.mem`, `details.step`,
-  `details.detail`), and where the engine's own view was the step that
-  failed, the engine reloads the mem from storage first. A batch whose
-  commit to a second mem fails reloads the mems it had already
-  committed, instead of rolling its view back behind them.
+  `details.detail`), so a retry no longer writes twice.
 - **A folder commit that is cut off is completed, never served half
-  applied.** A crash, a kill or an IO error between two files of one
-  commit used to leave the first file written, the second not, and no
-  trace of it. Loading the mem is now the recovery: an attempt that
-  never reached its commit point is removed, a commit that reached it
-  is completed before anything is read, and the load carries the new
-  warning `INTERRUPTED_COMMIT_COMPLETED` (`details.mem`,
-  `details.files`). A call that hits an IO error after the commit point
-  has the engine complete the commit at once and succeeds with
-  `WRITE_FOLLOW_UP_FAILED` (`details.step: commit_apply`). Only when
-  that completion fails as well does the call return the new code
-  `COMMIT_NOT_APPLIED` (`details.mem`, `details.detail`): the write is
-  decided and must not be resent, and the next operation on the mem
-  completes it first. Until then nothing of the commit is served: a
-  read that goes to the files (an anchor lookup, a publish, a conflict
-  scan) refuses until a load has completed the commit.
-- **A write never lands on a view the engine could not reload.** Before
-  every operation the engine reloads a mem that changed in storage, and
-  a reload that failed was logged and the operation went on with the
-  stale view. For a read that is a stale answer; for a write it was a
-  lost update: the caller's hash still matched the stale view, the
-  compare passed, and the commit overwrote what a sibling (or the
-  engine's own cut-off commit) had put there. A write whose mem could
-  not be reloaded is now refused with the new code `MEM_VIEW_STALE`
-  (`details.mem`, `details.detail`) and nothing is written; the next
-  operation retries the reload. A reload that could not read every file
-  counts as failed and keeps the view it had: it used to load without
-  the unread entity, and a write of that id then landed over the file.
-  A mem that booted with an unreadable file serves what was read and
-  takes no write until a reload reads all of it.
-- **A batch's receipt carries what its reloads report.** `batch_create`,
-  `batch_update` and `batch_relate` dropped the warnings of the reload
-  they run before writing, so a batch that met a sibling's commit
-  (`MEM_RELOADED`) or whose load completed a cut-off commit
-  (`INTERRUPTED_COMMIT_COMPLETED`) said nothing where a single verb
-  says it. The receipt's `warnings` now carry them.
-- **`memstead rename` rewrites a self-prefixed link inside a hierarchical
-  mem.** Inside mem `library/a`, a body link spelled by the full id
-  (`[[library/a--first-note]]`) is accepted at write (the resolver strips
-  the self-prefix) and its relationship row followed a rename, but the
-  body kept the old slug, because the rewriter refused any dash form with
-  a `/` in the mem half as ambiguous; `health --strict` then read the
-  body link as dangling until someone edited it by hand. The rewriter
-  now follows the exact `<mem>--<slug>` spelling of the renamed entity
-  as the resolver does; a dash form into a different hierarchical mem
-  stays out, as it stays out of the resolver. Every other same-mem form
-  (bare slug, alias, colon self-reference) and the flat-mem forms were
-  already rewritten.
-
-### Changed
-
-- **`memstead checks` reads an unmounted mem's rows, and the whole
-  ledger without `--mem`.** The ledger keeps a mem's check records after
-  the mem was unmounted or deleted (an archived bundle, a deleted fork),
-  and a reader computing a history over every row needs exactly those,
-  but `checks --mem <m>` refused a name that was not mounted
-  (`UNKNOWN_MEM`), so the file read it was meant to replace stayed. The
-  verb now serves the ledger's rows for any mem name, with `mounted:
-  false` (and a notice on the human surface) when the mem is not
-  mounted, and `--mem` is optional: without it every row of the
-  workspace ledger is listed, with the same filters.
+  applied.** A load completes or removes it and warns
+  `INTERRUPTED_COMMIT_COMPLETED` (`details.mem`, `details.files`). If
+  completion fails, the call returns the new code `COMMIT_NOT_APPLIED`:
+  the write is decided, do not resend it.
+- **A write never lands on a view the engine could not reload.** It
+  refuses with the new code `MEM_VIEW_STALE` (`details.mem`,
+  `details.detail`); a partial reload keeps the old view, and a mem that
+  booted with an unreadable file takes no write.
+- **A batch's receipt carries what its reloads report.**
+  `batch_create`, `batch_update` and `batch_relate` now carry
+  `MEM_RELOADED` and `INTERRUPTED_COMMIT_COMPLETED` in `warnings`.
+- **`memstead rename` rewrites a self-prefixed link inside a
+  hierarchical mem** (`[[library/a--first-note]]` in mem `library/a`),
+  so `health --strict` no longer reads it as dangling.
 
 ## [0.25.0] - 2026-10-27
 
