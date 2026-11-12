@@ -748,9 +748,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     store when health or overview is read; only missing storage is
     stored at mount time. A mem the server has since written into is no
     longer reported empty.
-  - The folder walker skips a subdirectory holding `.memstead/config.json`,
-    so a nested mem's entities are not loaded a second time as the outer
-    mem's, under another id.
+  - The folder walkers (load, export, ledger reconciliation) skip a
+    subdirectory holding `.memstead/config.json`, so a nested mem's
+    entities are not loaded, exported or reconciled a second time as the
+    outer mem's, under another id.
   - MCP `memstead_mem_create` on a folder workspace refuses
     `UNSUPPORTED_WORKSPACE_SHAPE` and writes nothing, as CLI `mem init`
     does there.

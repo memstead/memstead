@@ -788,6 +788,11 @@ fn collect_markdown(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), std::io::E
             if name.starts_with('.') {
                 continue;
             }
+            // A subdirectory with its own mem config is another mem, which
+            // load skips: its entities are never this mem's.
+            if crate::mem::is_nested_mem_root(&path) {
+                continue;
+            }
             collect_markdown(&path, out)?;
         } else if name.ends_with(".md") && name.as_ref() != "README.md" {
             out.push(path);

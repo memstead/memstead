@@ -870,7 +870,11 @@ pub fn reconcile_ledger(
                 continue;
             }
             if path.is_dir() {
-                stack.push(path);
+                // A nested mem keeps its own ledger, as load keeps its
+                // entities apart.
+                if !crate::mem::is_nested_mem_root(&path) {
+                    stack.push(path);
+                }
             } else if is_entity_file(&path)
                 && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
             {
@@ -1010,6 +1014,23 @@ mod reconcile_tests {
     fn an_agreeing_mem_reconciles_clean() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path(), &["alpha", "beta"], &["alpha", "beta"]);
+        assert!(reconcile_ledger(tmp.path(), "docs").unwrap().is_clean());
+    }
+
+    /// A nested mem folder keeps its own ledger: its entity is not
+    /// reported as a file of the outer mem without a ledger line.
+    #[test]
+    fn a_nested_mem_is_not_reconciled_as_the_outer_mems_content() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), &["alpha"], &["alpha"]);
+        let inner = tmp.path().join("inner");
+        std::fs::create_dir_all(inner.join(crate::mem::MEM_META_DIR)).unwrap();
+        std::fs::write(
+            inner.join(crate::mem::MEM_META_DIR).join("config.json"),
+            b"{}",
+        )
+        .unwrap();
+        std::fs::write(inner.join("inner-page.md"), b"# x\n").unwrap();
         assert!(reconcile_ledger(tmp.path(), "docs").unwrap().is_clean());
     }
 

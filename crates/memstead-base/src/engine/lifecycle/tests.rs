@@ -897,6 +897,51 @@ fn export_mem_folder_backend_produces_archive() {
     assert_eq!(result.entity_count, 0);
 }
 
+/// A nested mem folder inside a folder mem is another mem: load skips
+/// it, and so does the outer mem's export, so its entity never enters
+/// the outer archive under a second id.
+#[test]
+fn export_of_a_folder_mem_leaves_a_nested_mem_out() {
+    let tmp = TempDir::new().unwrap();
+    let mem_dir = tmp.path().join("specs");
+    let inner = mem_dir.join("inner");
+    for dir in [&mem_dir, &inner] {
+        std::fs::create_dir_all(dir.join(".memstead")).unwrap();
+        std::fs::write(
+            dir.join(".memstead").join("config.json"),
+            r#"{"format": 1, "schema": "default@1.0.0", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+    }
+    let page = |title: &str| {
+        format!(
+            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# {title}\n\n## Identity\n\n{title}.\n\n## Purpose\n\n{title}.\n"
+        )
+    };
+    std::fs::write(mem_dir.join("outer-page.md"), page("Outer Page")).unwrap();
+    std::fs::write(inner.join("inner-page.md"), page("Inner Page")).unwrap();
+
+    let writer = FilesystemBackend::new(mem_dir.clone());
+    let engine = Engine::from_mounts(vec![(
+        folder_mount("specs", mem_dir.clone()),
+        Box::new(writer) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+    let archive_path = tmp.path().join("specs.mem");
+    let result = engine.export_mem("specs", &archive_path).unwrap();
+    assert_eq!(result.entity_count, 1);
+    let zip = zip::ZipArchive::new(std::fs::File::open(&archive_path).unwrap()).unwrap();
+    let names: Vec<String> = zip.file_names().map(|n| n.unwrap().into_owned()).collect();
+    assert!(
+        names.iter().any(|n| n.ends_with("outer-page.md")),
+        "{names:?}"
+    );
+    assert!(
+        !names.iter().any(|n| n.contains("inner")),
+        "the nested mem's files stay out: {names:?}"
+    );
+}
+
 #[test]
 fn export_mem_unknown_mem_returns_unknown_mem() {
     let tmp = TempDir::new().unwrap();
