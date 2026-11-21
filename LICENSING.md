@@ -19,6 +19,7 @@ The proprietary code is **not part of this repository**:
 
 - The registry **server**: a separate, private project that builds on the open engine and is not operated publicly at the moment. It lives in a private repository (its own cargo workspace) and depends on the open engine crates by path. The `.mem` format, authority protocol, and publish/install client stay open, and the client names no registry: `--registry` or `MEMSTEAD_REGISTRY` points it at one. The server code stays closed.
 - The **hosted-deployment server layer** — the serve/bridge crates behind our hosted web surfaces (read-only HTTP/MCP deployment server, HTTP+SSE sync bridge, and its JS sync client). Product surface, not public libraries; lives in the same private repository, wired like the registry (own workspace roots, path-dependencies on the open engine). The open JS story is snapshot reads through the `memstead-wasm` crate in this repository, built from the tree with `wasm-pack`; its npm package, `@memstead/wasm`, was published until 0.18.1 and that channel closed on 2026-09-05.
+- The **workspace-local UI API and the node app**: the HTTP read surface behind the app (`memstead-ui-api`) and the app's own packages. Product surface, not public libraries; they live in the same private repository, wired like the registry (own workspace root, path-dependencies on the open engine).
 
 ## Rationale
 
