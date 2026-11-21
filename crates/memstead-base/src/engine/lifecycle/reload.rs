@@ -157,6 +157,21 @@ impl Engine {
         target: &memstead_schema::SchemaRef,
     ) -> Result<crate::engine::SetSchemaOutcome, EngineError> {
         use crate::engine::{SetSchemaOutcome, SetSchemaResult};
+        // The capability gate of the ordinary branch, judged on the
+        // roster as it stands: a pin change is a write, and a mount the
+        // roster gives read-only refuses it in quarantine as it does in
+        // service. Without this the repair path would write a pin into
+        // storage the workspace may only read.
+        if let Some(capability) = self.roster_capability_on_disk(mem)
+            && let Some(q) = self.quarantined.iter_mut().find(|q| q.mount.mem == mem)
+        {
+            q.mount.capability = capability;
+        }
+        if self.quarantined.iter().any(|q| {
+            q.mount.mem == mem && q.mount.capability != crate::workspace::MountCapability::Write
+        }) {
+            return Err(EngineError::ReadOnlyMount(mem.to_string()));
+        }
         // Same target-ref validation as the ordinary branch.
         if self.resolve_schema_by_ref(target).is_none() {
             let consulted: Vec<_> = self
@@ -228,6 +243,13 @@ impl Engine {
         let Some(q_idx) = self.quarantined.iter().position(|q| q.mount.mem == mem) else {
             return Err(self.unknown_mem_error(mem));
         };
+        // The roster may have changed this mount's capability since it
+        // was quarantined, and no reconciliation need have run in
+        // between: the row on disk decides, so the attach never restores
+        // an access the roster withdrew.
+        if let Some(capability) = self.roster_capability_on_disk(mem) {
+            self.quarantined[q_idx].mount.capability = capability;
+        }
         let mount = self.quarantined[q_idx].mount.clone();
 
         let requarantine = |this: &mut Self, e: &EngineError| {

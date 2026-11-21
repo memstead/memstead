@@ -9,14 +9,16 @@
 //! operation the engine compares a fingerprint of the mount roster
 //! (`.memstead/state/mounts.json`) with the one it booted or last reconciled
 //! on, and on a change mounts the new entries cold under the boot quarantine
-//! rules, unmounts the gone entries atomically, re-scans the schema sources,
+//! rules, unmounts the gone entries atomically, remounts the entries whose
+//! capability changed (every row counts, read-only ones included: a read
+//! that was withdrawn must stop being served), re-scans the schema sources,
 //! and reports the change (`MEM_ROSTER_CHANGED`) so an agent drops the cached
 //! hashes of the mems that left.
 //!
 //! The probe is a `stat` plus, only when size or mtime moved, a hash of the
 //! file — the same cost band as the branch-tip probe, never a boot.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -37,6 +39,8 @@ pub struct RosterFingerprint {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RosterChange {
     /// Mems the roster gained and the engine mounted cold, ready to serve.
+    /// A mem whose capability changed is here and under `removed`: it was
+    /// unmounted and mounted again under the roster's capability.
     pub added: Vec<String>,
     /// Mems the roster lost and the engine unmounted: their entities,
     /// search index, community partition and derived views are gone.
@@ -139,9 +143,9 @@ impl Engine {
     /// Per mem the change is atomic: an unmount that cannot complete leaves
     /// that mem fully served, is reported under `failures`, and keeps the
     /// baseline where it was so it is retried next time; a cold mount that
-    /// fails quarantines the mem exactly as boot would. Read-only
-    /// attachments (installed archives) are not roster entries and never
-    /// count as removals.
+    /// fails quarantines the mem exactly as boot would. Every roster row
+    /// counts, read-only ones included; a row whose capability changed is
+    /// unmounted and mounted again under the new capability.
     pub fn reconcile_roster(&mut self) -> Result<Option<RosterChange>, EngineError> {
         let now = self.roster_fingerprint_now().map_err(|e| {
             EngineError::Backend(crate::backend::BackendError::Other(format!(
@@ -195,17 +199,19 @@ impl Engine {
         })?;
 
         let cross_mem_links = workspace.settings.cross_mem_links.clone();
-        let manifest: BTreeSet<String> = workspace
+        // Every roster row counts, whatever its capability: a read-only
+        // mount another process added or withdrew is membership like a
+        // writable one, and a row whose capability changed is a mount to
+        // take down and bring up again under the new capability.
+        let manifest: BTreeMap<String, crate::workspace::MountCapability> = workspace
             .mounts
             .iter()
-            .filter(|m| m.capability == crate::workspace::MountCapability::Write)
-            .map(|m| m.mem.clone())
+            .map(|m| (m.mem.clone(), m.capability))
             .collect();
-        let mounted: BTreeSet<String> = self
+        let mounted: BTreeMap<String, crate::workspace::MountCapability> = self
             .mounts
             .iter()
-            .filter(|m| m.mount.capability == crate::workspace::MountCapability::Write)
-            .map(|m| m.mount.mem.clone())
+            .map(|m| (m.mount.mem.clone(), m.mount.capability))
             .collect();
         let quarantined_now: BTreeSet<String> = self
             .quarantined
@@ -223,11 +229,23 @@ impl Engine {
         self.refresh_schema_sources(&mut schema_report);
         change.failures.extend(schema_report.failures);
 
-        // Removals first, each atomic. A gone quarantined entry just leaves
-        // the quarantine roster: it served nothing.
-        for name in mounted.difference(&manifest) {
+        // Removals first, each atomic: the mems the roster no longer
+        // names, and the ones it names under another capability. The
+        // latter are mounted again below, so a capability change is
+        // reported the way it happened, under removed and under added.
+        let mut remounting: BTreeSet<String> = BTreeSet::new();
+        for (name, capability) in &mounted {
+            let roster_capability = manifest.get(name);
+            if roster_capability == Some(capability) {
+                continue;
+            }
             match self.unmount_mem(name) {
-                Ok(()) => change.removed.push(name.clone()),
+                Ok(()) => {
+                    change.removed.push(name.clone());
+                    if roster_capability.is_some() {
+                        remounting.insert(name.clone());
+                    }
+                }
                 Err(e) => {
                     all_applied = false;
                     change.failures.push(crate::ops::RefreshFailure {
@@ -237,28 +255,49 @@ impl Engine {
                 }
             }
         }
-        let gone_quarantined: Vec<String> =
-            quarantined_now.difference(&manifest).cloned().collect();
+        // A gone quarantined entry just leaves the quarantine roster: it
+        // served nothing. One that stays follows its row's capability, so
+        // a later attach never restores an access the roster withdrew.
+        let gone_quarantined: Vec<String> = quarantined_now
+            .iter()
+            .filter(|name| !manifest.contains_key(*name))
+            .cloned()
+            .collect();
         if !gone_quarantined.is_empty() {
             self.quarantined
                 .retain(|q| !gone_quarantined.contains(&q.mount.mem));
             change.removed.extend(gone_quarantined);
         }
+        for q in &mut self.quarantined {
+            if let Some(capability) = manifest.get(&q.mount.mem) {
+                q.mount.capability = *capability;
+            }
+        }
 
         // Additions: cold mount under the boot quarantine rules.
         let mut any_mounted = false;
         for mount in workspace.mounts {
-            if mount.capability != crate::workspace::MountCapability::Write
-                || mounted.contains(&mount.mem)
+            if (mounted.contains_key(&mount.mem) && !remounting.contains(&mount.mem))
                 || quarantined_now.contains(&mount.mem)
             {
                 continue;
             }
             let name = mount.mem.clone();
+            // A mem that is mounted again under another capability was
+            // never away for the caller: it must not read as unmounted
+            // if the remount ends in quarantine.
+            if remounting.contains(&name) {
+                self.recently_unmounted.remove(&name);
+            }
             let backend = match (self.backend_factory)(&mount) {
                 Ok(b) => b,
                 Err(e) => {
-                    self.quarantine_mount(mount, e.code(), e.to_string());
+                    // Boot's reason for a mount that cannot be
+                    // instantiated: a missing installed archive says
+                    // what to install.
+                    let (code, message) =
+                        super::boot::instantiate_failure_reason(&mount, e.code(), e.to_string());
+                    self.quarantine_mount(mount, &code, message);
                     change.quarantined.push(name);
                     continue;
                 }
@@ -319,7 +358,7 @@ impl Engine {
         });
     }
 
-    /// Unmount one writable mem atomically: every derived structure for it
+    /// Unmount one mem, writable or read-only, atomically: every derived structure for it
     /// (store slice, schema entry, router slot, load warnings, pending
     /// change notices, community and search memos, its quarantine entry)
     /// is gone afterwards, or nothing is touched and the error names why.
@@ -332,7 +371,16 @@ impl Engine {
                 format!("injected unmount failure for mem `{mem}`"),
             )));
         }
-        let removed = self.unregister_writable_mem(mem)?;
+        // The read-only slot has its own unregistration: it clears the
+        // router's read-only entry, which the writable one leaves alone.
+        let read_only = self.mounts.iter().any(|m| {
+            m.mount.mem == mem && m.mount.capability == crate::workspace::MountCapability::ReadOnly
+        });
+        let removed = if read_only {
+            self.unregister_read_mount(mem)?
+        } else {
+            self.unregister_writable_mem(mem)?
+        };
         if removed.is_none() {
             // Not mounted: a quarantined entry leaving the roster.
             self.quarantined.retain(|q| q.mount.mem != mem);
@@ -341,6 +389,52 @@ impl Engine {
         self.labelling_memo = std::cell::OnceCell::new();
         self.recently_unmounted.insert(mem.to_string());
         Ok(())
+    }
+
+    /// Resolve `mem` for a write on the roster as it stands now: the
+    /// roster is reconciled first, so a verb that judges writability
+    /// before it takes the write lock never refuses on a capability the
+    /// roster has since changed, and never accepts one it has withdrawn.
+    /// Returns the mount index and the roster notice the reconciliation
+    /// produced, for the caller's response.
+    pub(in crate::engine) fn writable_mount_on_current_roster(
+        &mut self,
+        mem: &str,
+    ) -> Result<(usize, Vec<crate::ops::WarningHint>), EngineError> {
+        let notice = self.roster_warnings();
+        let idx = self
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == mem)
+            .ok_or_else(|| self.unknown_mem_error(mem))?;
+        if self.mounts[idx].mount.capability != crate::workspace::MountCapability::Write {
+            return Err(EngineError::ReadOnlyMount(mem.to_string()));
+        }
+        Ok((idx, notice))
+    }
+
+    /// The capability the roster file gives `mem` at this instant, read
+    /// without reconciling: for the one caller that attaches a mount the
+    /// reconciliation does not touch (a quarantined mem on its way back
+    /// into service) and must not attach it under a capability the roster
+    /// has since changed. `None` when there is no roster file, it cannot
+    /// be read, or it does not name the mem.
+    pub(in crate::engine) fn roster_capability_on_disk(
+        &self,
+        mem: &str,
+    ) -> Option<crate::workspace::MountCapability> {
+        let root = self.workspace_root.as_ref()?;
+        self.roster_path().filter(|p| p.is_file())?;
+        let workspace = crate::workspace_store::WorkspaceStoreAdapter::load(
+            &crate::workspace_store::FileWorkspaceStore::new(),
+            root,
+        )
+        .ok()?;
+        workspace
+            .mounts
+            .iter()
+            .find(|m| m.mem == mem)
+            .map(|m| m.capability)
     }
 
     /// Whether `mem` left the roster during this engine's lifetime and has

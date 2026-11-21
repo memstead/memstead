@@ -7,6 +7,29 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **A running engine follows read-only mounts in its roster.** The
+  roster reconciliation every operation runs looked at writable mounts
+  only. A read-only mount another process added was not served until a
+  restart, one it removed kept being served, and a mount downgraded
+  from write to read-only disappeared until the next boot. Every roster
+  row now counts: a read-only mount is mounted and unmounted like a
+  writable one, and a row whose capability changed is remounted under
+  the new capability at the next operation. `MEM_ROSTER_CHANGED` lists
+  such a mem under both `added` and `removed`. A mem-settings write
+  (`mem set-version` and its siblings) that is the first operation
+  after the change sees the new capability. A quarantined mount follows
+  its row's capability, also when its own reload is what brings it
+  back, and a read-only installed mem whose archive is missing stays
+  quarantined with the reason that says what to install.
+
+- **A pin change on a quarantined read-only mount is refused.** A
+  schema pin change (`mem set-schema`) on a quarantined mount the roster
+  gives read-only refuses `READ_ONLY_MOUNT`, in a running engine and
+  below boot, where it used to write the pin into storage the workspace
+  may only read.
+
 ## [0.26.1] - 2026-11-21
 
 ### Fixed

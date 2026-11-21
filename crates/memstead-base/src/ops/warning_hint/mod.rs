@@ -424,6 +424,8 @@ pub enum WarningHint {
     /// `quarantined` mems failed to mount under the boot rules and are on
     /// the quarantine roster with their reason, `failures` names anything
     /// that could not be applied (that part is retried next operation).
+    /// A mem under both `added` and `removed` changed capability (write
+    /// to read-only, or back): it was remounted and serves.
     MemRosterChanged {
         added: Vec<String>,
         removed: Vec<String>,

@@ -5041,3 +5041,468 @@ fn a_recorded_observation_lands_on_the_one_row_the_verify_adjudicated() {
     assert_eq!(plain.at, "2026-09-02T13:00:00Z");
     assert_eq!(counts(&engine), (1, 2, 1, 1, 1));
 }
+
+fn roster_mount(mem: &str, storage: MountStorage, capability: MountCapability) -> Mount {
+    Mount {
+        mem: mem.to_string(),
+        schema: Some(SchemaRef::new("default", semver::Version::new(1, 0, 0))),
+        storage,
+        capability,
+        lifecycle: MountLifecycle::Eager,
+        cross_linkable: true,
+        migration_target: None,
+    }
+}
+
+fn roster_folder_mount(root: &Path, mem: &str, capability: MountCapability) -> Mount {
+    roster_mount(
+        mem,
+        MountStorage::Folder {
+            path: root.join(mem),
+        },
+        capability,
+    )
+}
+
+fn save_roster_mounts(root: &Path, mounts: Vec<Mount>) {
+    use crate::workspace_store::WorkspaceStoreAdapter;
+    crate::FileWorkspaceStore::new()
+        .save_state(
+            root,
+            &crate::workspace::Workspace {
+                mounts,
+                settings: crate::workspace::WorkspaceSettings::default(),
+            },
+        )
+        .unwrap();
+}
+
+fn try_create(engine: &mut Engine, mem: &str, title: &str) -> Result<(), String> {
+    engine
+        .create_entity_with_ctx(
+            crate::engine::CreateEntityArgs {
+                anchors: Vec::new(),
+                mem: mem.to_string(),
+                title: title.to_string(),
+                entity_type: "spec".to_string(),
+                sections: indexmap::IndexMap::from_iter([
+                    ("identity".to_string(), "i".to_string()),
+                    ("purpose".to_string(), "p".to_string()),
+                ]),
+                metadata: indexmap::IndexMap::new(),
+                relations: Vec::new(),
+                dry_run: false,
+            },
+            &crate::vcs::CommitContext::internal(),
+        )
+        .map(|_| ())
+        .map_err(|e| e.code().to_string())
+}
+
+/// A read-only mount another process adds to the roster is served by
+/// the next operation, reads and refuses writes, and stops being served
+/// once its row is withdrawn: a read that was taken back is not served
+/// until a restart.
+#[test]
+fn a_read_only_roster_row_is_followed_without_a_restart() {
+    let (tmp, mut engine) = roster_fixture();
+    let root = tmp.path();
+    let dir = root.join("gamma");
+    std::fs::create_dir_all(dir.join(".memstead")).unwrap();
+    std::fs::write(
+        dir.join(".memstead").join("config.json"),
+        br#"{"format":1,"schema":"default@1.0.0"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("three.md"),
+        "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Three\n\n## Identity\n\ngamma three\n\n## Purpose\n\nseed\n",
+    )
+    .unwrap();
+
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            roster_folder_mount(root, "beta", MountCapability::Write),
+            roster_folder_mount(root, "gamma", MountCapability::ReadOnly),
+        ],
+    );
+    let warnings = engine.reload_if_stale(None);
+    let (added, removed) = roster_change(&warnings).expect("the new row is a change");
+    assert_eq!(added, vec!["gamma".to_string()]);
+    assert!(removed.is_empty());
+    assert!(
+        engine
+            .get_entity(&crate::EntityId("gamma--three".into()))
+            .is_some(),
+        "the read-only mem's entity is served without a restart"
+    );
+    assert!(
+        !engine.writable_mem_set().contains("gamma") && !engine.mem_router().is_writable("gamma"),
+        "a read-only row never reads as writable"
+    );
+    assert!(engine.mem_router().is_visible("gamma"));
+    assert_eq!(
+        try_create(&mut engine, "gamma", "Refused"),
+        Err("READ_ONLY_MOUNT".to_string())
+    );
+
+    // The read is withdrawn.
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            roster_folder_mount(root, "beta", MountCapability::Write),
+        ],
+    );
+    let warnings = engine.reload_if_stale(None);
+    let (added, removed) = roster_change(&warnings).expect("the withdrawal is a change");
+    assert_eq!(removed, vec!["gamma".to_string()]);
+    assert!(added.is_empty());
+    assert!(
+        engine
+            .get_entity(&crate::EntityId("gamma--three".into()))
+            .is_none(),
+        "a withdrawn read is not served"
+    );
+    assert!(!engine.mem_router().is_visible("gamma"));
+    assert_eq!(engine.unknown_mem_error("gamma").code(), "MEM_UNMOUNTED");
+    assert!(
+        engine.reload_if_stale(None).is_empty(),
+        "reconciled once, quiet after"
+    );
+}
+
+/// A row whose capability changes takes effect at the next operation,
+/// in both directions, is reported, and never leaves the mem unserved.
+#[test]
+fn a_capability_change_remounts_and_never_unserves_the_mem() {
+    let (tmp, mut engine) = roster_fixture();
+    let root = tmp.path();
+    assert_eq!(try_create(&mut engine, "beta", "Before"), Ok(()));
+
+    // write -> read-only
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            roster_folder_mount(root, "beta", MountCapability::ReadOnly),
+        ],
+    );
+    let warnings = engine.reload_if_stale(None);
+    let (added, removed) = roster_change(&warnings).expect("the downgrade is reported");
+    assert_eq!(removed, vec!["beta".to_string()]);
+    assert_eq!(added, vec!["beta".to_string()]);
+    assert_eq!(engine.mem_names(), vec!["alpha", "beta"], "never absent");
+    assert!(
+        engine
+            .get_entity(&crate::EntityId("beta--two".into()))
+            .is_some(),
+        "reads are served under the new capability"
+    );
+    assert!(!engine.mem_router().is_writable("beta"));
+    assert_eq!(
+        try_create(&mut engine, "beta", "Refused"),
+        Err("READ_ONLY_MOUNT".to_string())
+    );
+    assert_eq!(
+        engine.unknown_mem_error("beta").code(),
+        "UNKNOWN_MEM",
+        "a remounted mem is not remembered as unmounted"
+    );
+
+    // read-only -> write
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            roster_folder_mount(root, "beta", MountCapability::Write),
+        ],
+    );
+    let warnings = engine.reload_if_stale(None);
+    let (added, removed) = roster_change(&warnings).expect("the upgrade is reported");
+    assert_eq!(removed, vec!["beta".to_string()]);
+    assert_eq!(added, vec!["beta".to_string()]);
+    assert!(engine.mem_router().is_writable("beta"));
+    assert_eq!(try_create(&mut engine, "beta", "After"), Ok(()));
+}
+
+/// Quarantine follows the roster for every capability: a read-only
+/// archive row whose file is missing quarantines with boot's reason and
+/// stays quarantined across later reconciliations, and a quarantined
+/// mount takes its row's capability, so a later attach cannot restore an
+/// access the roster withdrew.
+#[test]
+fn quarantined_rows_follow_the_roster_for_every_capability() {
+    let (tmp, mut engine) = roster_fixture();
+    let root = tmp.path();
+    let cellar = roster_mount(
+        "cellar",
+        MountStorage::Archive {
+            path: root.join("not-installed").join("cellar-0.1.0.mem"),
+        },
+        MountCapability::ReadOnly,
+    );
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            roster_folder_mount(root, "beta", MountCapability::Write),
+            cellar.clone(),
+            roster_mount(
+                "hollow",
+                MountStorage::Folder {
+                    path: root.join("does-not-exist"),
+                },
+                MountCapability::Write,
+            ),
+        ],
+    );
+    engine.reload_if_stale(None);
+    let booted = Engine::from_workspace_root(root).unwrap();
+    for name in ["cellar", "hollow"] {
+        let reconciled = engine
+            .quarantine_reason(name)
+            .unwrap_or_else(|| panic!("{name} is quarantined, not mounted empty and not dropped"));
+        let at_boot = booted
+            .quarantine_reason(name)
+            .unwrap_or_else(|| panic!("boot quarantines {name} too"));
+        assert_eq!(reconciled.reason_code, at_boot.reason_code, "{name}");
+        assert_eq!(reconciled.reason_message, at_boot.reason_message, "{name}");
+        assert!(!engine.mem_names().contains(&name));
+    }
+
+    // A later change elsewhere in the roster: the read-only quarantined
+    // row stands, and the writable one that turned read-only follows.
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            cellar,
+            roster_mount(
+                "hollow",
+                MountStorage::Folder {
+                    path: root.join("does-not-exist"),
+                },
+                MountCapability::ReadOnly,
+            ),
+        ],
+    );
+    let warnings = engine.reload_if_stale(None);
+    let (_, removed) = roster_change(&warnings).expect("beta leaving is a change");
+    assert_eq!(removed, vec!["beta".to_string()]);
+    assert!(
+        engine.quarantine_reason("cellar").is_some(),
+        "a quarantined read-only row is not dropped while its row stands"
+    );
+    let hollow = engine
+        .quarantined_mems()
+        .iter()
+        .find(|q| q.mount.mem == "hollow")
+        .expect("still quarantined");
+    assert_eq!(hollow.mount.capability, MountCapability::ReadOnly);
+}
+
+/// A mem-settings write that is itself the first operation after a
+/// capability change judges writability on the roster as it stands: it
+/// refuses once the roster says read-only and lands once the roster
+/// says write, with no other operation in between to reconcile first.
+#[test]
+fn a_settings_write_right_after_a_capability_change_sees_the_new_capability() {
+    let (tmp, mut engine) = roster_fixture();
+    let root = tmp.path();
+    let read_only = |root: &Path| {
+        save_roster_mounts(
+            root,
+            vec![
+                roster_folder_mount(root, "alpha", MountCapability::Write),
+                roster_folder_mount(root, "beta", MountCapability::ReadOnly),
+            ],
+        )
+    };
+    let writable = |root: &Path| {
+        save_roster_mounts(
+            root,
+            vec![
+                roster_folder_mount(root, "alpha", MountCapability::Write),
+                roster_folder_mount(root, "beta", MountCapability::Write),
+            ],
+        )
+    };
+
+    // Each verb in turn: downgraded, it refuses as the first operation;
+    // upgraded again, it lands as the first operation.
+    read_only(root);
+    let err = engine
+        .set_mem_version("beta", semver::Version::new(0, 2, 0), None)
+        .expect_err("read-only on the roster");
+    assert_eq!(err.code(), "READ_ONLY_MOUNT", "{err}");
+    writable(root);
+    engine
+        .set_mem_version("beta", semver::Version::new(0, 2, 0), None)
+        .expect("writable on the roster again: the version write lands at once");
+
+    read_only(root);
+    let err = engine
+        .set_mem_description("beta", Some("a description".to_string()), None)
+        .expect_err("read-only on the roster");
+    assert_eq!(err.code(), "READ_ONLY_MOUNT", "{err}");
+    writable(root);
+    engine
+        .set_mem_description("beta", Some("a description".to_string()), None)
+        .expect("writable on the roster again: the description write lands at once");
+
+    read_only(root);
+    let err = engine
+        .set_review_mark("beta", None, None)
+        .expect_err("read-only on the roster");
+    assert_eq!(err.code(), "READ_ONLY_MOUNT", "{err}");
+    writable(root);
+    engine
+        .set_review_mark("beta", None, None)
+        .expect("writable on the roster again: the review mark write lands at once");
+}
+
+/// A quarantined mem that comes back into service through its own
+/// reload attaches under the capability the roster gives it now, also
+/// when no reconciliation ran between the roster change and the reload.
+#[test]
+fn a_quarantined_mem_reattaches_under_the_rosters_current_capability() {
+    let (tmp, mut engine) = roster_fixture();
+    let root = tmp.path();
+    let hollow = |capability| {
+        roster_mount(
+            "hollow",
+            MountStorage::Folder {
+                path: root.join("hollow"),
+            },
+            capability,
+        )
+    };
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            roster_folder_mount(root, "beta", MountCapability::Write),
+            hollow(MountCapability::Write),
+        ],
+    );
+    engine.reload_if_stale(None);
+    assert!(
+        engine.quarantine_reason("hollow").is_some(),
+        "no storage yet: quarantined"
+    );
+
+    // The roster withdraws the write, the storage appears, and the mem's
+    // own reload is the very next call.
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            roster_folder_mount(root, "beta", MountCapability::Write),
+            hollow(MountCapability::ReadOnly),
+        ],
+    );
+    std::fs::create_dir_all(root.join("hollow").join(".memstead")).unwrap();
+    std::fs::write(
+        root.join("hollow").join(".memstead").join("config.json"),
+        br#"{"format":1,"schema":"default@1.0.0"}"#,
+    )
+    .unwrap();
+    engine
+        .reload_one_mem("hollow")
+        .expect("the storage is there: the mem attaches");
+    assert!(engine.quarantine_reason("hollow").is_none());
+    assert!(
+        !engine.mem_router().is_writable("hollow"),
+        "attached under the roster's capability, not the one it was quarantined with"
+    );
+    assert_eq!(
+        try_create(&mut engine, "hollow", "Refused"),
+        Err("READ_ONLY_MOUNT".to_string())
+    );
+}
+
+/// A schema-pin change is a write a read-only mount refuses, also when
+/// the mount sits in quarantine: the repair path never writes a pin into
+/// storage the roster lets this workspace only read.
+#[test]
+fn a_pin_change_on_a_quarantined_read_only_mount_is_refused() {
+    let (tmp, mut engine) = roster_fixture();
+    let root = tmp.path();
+    // The roster withdraws the write and, in the same moment, the mem's
+    // own pin becomes unresolvable: the remount ends in quarantine.
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            roster_folder_mount(root, "beta", MountCapability::ReadOnly),
+        ],
+    );
+    let config = root.join("beta").join(".memstead").join("config.json");
+    std::fs::write(&config, br#"{"format":1,"schema":"nosuch@9.9.9"}"#).unwrap();
+
+    let err = engine
+        .set_mem_schema(
+            "beta",
+            &SchemaRef::new("default", semver::Version::new(1, 1, 0)),
+        )
+        .expect_err("the first call after the change is the pin write, and it is refused");
+    assert_eq!(err.code(), "READ_ONLY_MOUNT", "{err}");
+    assert_eq!(
+        std::fs::read(&config).unwrap(),
+        br#"{"format":1,"schema":"nosuch@9.9.9"}"#,
+        "nothing was written into the read-only mem"
+    );
+    assert!(
+        engine.quarantine_reason("beta").is_some(),
+        "the mem stays quarantined with its reason, never absent"
+    );
+
+    // A quarantined mount the roster turns read-only without a
+    // reconciliation in between refuses just the same.
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            roster_folder_mount(root, "beta", MountCapability::Write),
+        ],
+    );
+    engine.reload_if_stale(None);
+    assert!(engine.quarantine_reason("beta").is_some());
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            roster_folder_mount(root, "beta", MountCapability::ReadOnly),
+        ],
+    );
+    let err = engine
+        .set_mem_schema(
+            "beta",
+            &SchemaRef::new("default", semver::Version::new(1, 1, 0)),
+        )
+        .expect_err("read-only on the roster");
+    assert_eq!(err.code(), "READ_ONLY_MOUNT", "{err}");
+    assert_eq!(
+        std::fs::read(&config).unwrap(),
+        br#"{"format":1,"schema":"nosuch@9.9.9"}"#
+    );
+
+    // Writable on the roster again, the repair path works as before.
+    save_roster_mounts(
+        root,
+        vec![
+            roster_folder_mount(root, "alpha", MountCapability::Write),
+            roster_folder_mount(root, "beta", MountCapability::Write),
+        ],
+    );
+    engine
+        .set_mem_schema(
+            "beta",
+            &SchemaRef::new("default", semver::Version::new(1, 0, 0)),
+        )
+        .expect("a writable quarantined mem is repinned");
+    assert!(engine.quarantine_reason("beta").is_none());
+}

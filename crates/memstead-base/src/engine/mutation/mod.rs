@@ -517,14 +517,7 @@ impl super::Engine {
         if observed.is_empty() {
             return Ok(0);
         }
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
-        }
+        let (_, _roster_notice) = self.writable_mount_on_current_roster(mem_name)?;
         // Same posture as every other commit-producing write: probe for
         // sibling-engine drift so the sidecar merge runs against current truth.
         let (_write_lock, _roster) = self.lock_for_write(true, &[mem_name])?;
@@ -601,14 +594,7 @@ impl super::Engine {
         if observations.is_empty() {
             return Ok(0);
         }
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
-        }
+        let (_, _roster_notice) = self.writable_mount_on_current_roster(mem_name)?;
         let (_write_lock, _roster) = self.lock_for_write(true, &[mem_name])?;
         let _warnings = self.reload_if_stale_content_only(Some(mem_name));
         let mount_idx = self.writable_mount_index(mem_name)?;

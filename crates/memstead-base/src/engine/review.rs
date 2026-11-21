@@ -81,14 +81,7 @@ impl Engine {
         target: Option<&str>,
         note: Option<&str>,
     ) -> Result<SetReviewMarkOutcome, EngineError> {
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
-        }
+        let (mount_idx, roster_notice) = self.writable_mount_on_current_roster(mem_name)?;
 
         // Validate the explicit target against the backend's cursor
         // vocabulary BEFORE any write. Clearing needs no validation.
@@ -98,6 +91,7 @@ impl Engine {
 
         // Same posture as every other commit-producing mutation.
         let (_write_lock, mut warnings) = self.lock_for_write(true, &[mem_name])?;
+        warnings.splice(0..0, roster_notice);
         warnings.extend(self.reload_if_stale_content_only(Some(mem_name)));
         let mount_idx = self.writable_mount_index(mem_name)?;
         if let Some(w) = self.note_missing_warning("set_review_mark", note) {

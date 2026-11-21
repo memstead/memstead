@@ -714,4 +714,106 @@ write_rules: []
         );
         assert_eq!(engine.mem_names(), ["notes"]);
     }
+
+    /// A running engine follows a read-only git-branch row another
+    /// process adds to its roster or withdraws from it: the mem is
+    /// served from the next operation on, refuses writes, and stops
+    /// being served once the row is gone, without a restart.
+    #[test]
+    fn a_running_engine_follows_a_read_only_git_branch_row() {
+        use memstead_base::workspace_store::WorkspaceStoreAdapter as _;
+
+        let tmp = TempDir::new().unwrap();
+        let holder = tmp.path().join("holder");
+        let view = tmp.path().join("view");
+
+        // The holding workspace: one mem with one entity.
+        crate::test_support::init_real_mem_repo(&holder, &[("notes", "default@1.0.0")]);
+        let holder_gitdir = std::fs::canonicalize(holder.join("mem-repo").join(".git")).unwrap();
+        let args = |mem: &str, title: &str| memstead_base::engine::CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: mem.to_string(),
+            title: title.to_string(),
+            entity_type: "spec".to_string(),
+            sections: indexmap::IndexMap::from_iter([
+                ("identity".to_string(), "i".to_string()),
+                ("purpose".to_string(), "p".to_string()),
+            ]),
+            metadata: indexmap::IndexMap::new(),
+            relations: Vec::new(),
+            dry_run: false,
+        };
+        let ctx = memstead_base::vcs::CommitContext::internal();
+        let mut holding = engine_from_workspace_root(&holder).unwrap();
+        holding
+            .create_entity_with_ctx(args("notes", "Held"), &ctx)
+            .expect("the holding workspace writes its mem");
+
+        // The mounting workspace: engine state only, nothing mounted yet.
+        std::fs::create_dir_all(view.join(".memstead")).unwrap();
+        std::fs::write(
+            view.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let save = |mounts: Vec<Mount>| {
+            FileWorkspaceStore::new()
+                .save_state(
+                    &view,
+                    &memstead_base::Workspace {
+                        mounts,
+                        settings: Default::default(),
+                    },
+                )
+                .unwrap();
+        };
+        save(Vec::new());
+        let mut engine = engine_from_workspace_root(&view).unwrap();
+        assert!(engine.mem_names().is_empty());
+
+        // Another process grants the read.
+        save(vec![Mount {
+            mem: "notes".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: memstead_base::MountStorage::GitBranch {
+                gitdir: holder_gitdir.clone(),
+                branch: "notes".to_string(),
+            },
+            capability: memstead_base::MountCapability::ReadOnly,
+            lifecycle: memstead_base::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        }]);
+        engine.reload_if_stale(None);
+        assert_eq!(engine.mem_names(), ["notes"]);
+        assert!(
+            engine
+                .get_entity(&memstead_base::EntityId("notes--held".into()))
+                .is_some(),
+            "the granted mem is read without a restart"
+        );
+        assert!(!engine.mem_router().is_writable("notes"));
+        let refused = engine
+            .create_entity_with_ctx(args("notes", "Refused"), &ctx)
+            .expect_err("a read-only mount refuses the write");
+        assert_eq!(refused.code(), "READ_ONLY_MOUNT", "{refused}");
+
+        // The read is withdrawn.
+        save(Vec::new());
+        engine.reload_if_stale(None);
+        assert!(
+            engine.mem_names().is_empty(),
+            "a withdrawn read is not served"
+        );
+        assert!(
+            !engine.mem_router().is_visible("notes"),
+            "the router's read-only slot is cleared with the mount"
+        );
+        assert!(
+            engine
+                .get_entity(&memstead_base::EntityId("notes--held".into()))
+                .is_none()
+        );
+        assert_eq!(engine.unknown_mem_error("notes").code(), "MEM_UNMOUNTED");
+    }
 }

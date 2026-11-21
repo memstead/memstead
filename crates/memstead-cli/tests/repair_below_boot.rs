@@ -481,3 +481,76 @@ fn set_schema_reports_a_repair_whose_reattach_fails() {
         String::from_utf8_lossy(&out.stdout)
     );
 }
+
+/// A pin change is a write, and a mount the roster gives read-only
+/// refuses it below boot as it does in a booted engine: on a workspace
+/// whose boot fails, `mem set-schema` on a read-only row refuses
+/// `READ_ONLY_MOUNT` and writes nothing, while the same repair on a
+/// write row still lands.
+#[test]
+fn set_schema_below_boot_refuses_a_read_only_mount() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    std::fs::create_dir_all(ws.join("sample-mem")).unwrap();
+    let mounts = ws.join(".memstead").join("state").join("mounts.json");
+    std::fs::create_dir_all(mounts.parent().unwrap()).unwrap();
+    // Two rows of one name: the boot fails on the duplicate, so the
+    // verb runs below boot.
+    let roster = |capability: &str| {
+        format!(
+            r#"{{
+  "format": "memstead-mounts-3",
+  "mounts": [
+    {{ "mem": "sample-mem", "schema": "ghost@1.0.0", "storage": {{ "type": "folder", "path": "sample-mem" }}, "capability": "{capability}", "lifecycle": "eager", "cross_linkable": true }},
+    {{ "mem": "sample-mem", "schema": "ghost@1.0.0", "storage": {{ "type": "folder", "path": "sample-mem" }}, "capability": "{capability}", "lifecycle": "eager", "cross_linkable": true }}
+  ]
+}}"#
+        )
+    };
+
+    std::fs::write(&mounts, roster("read-only")).unwrap();
+    let before = std::fs::read(&mounts).unwrap();
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "mem", "set-schema", "sample-mem", "default@1.0.0"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains("READ_ONLY_MOUNT"), "got: {text}");
+    assert_eq!(
+        std::fs::read(&mounts).unwrap(),
+        before,
+        "a refused pin change leaves the roster untouched"
+    );
+    assert!(
+        !ws.join("sample-mem")
+            .join(".memstead")
+            .join("config.json")
+            .exists(),
+        "and writes nothing into the read-only mem"
+    );
+
+    // The same rows as write: the below-boot repair lands.
+    std::fs::write(&mounts, roster("write")).unwrap();
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "mem", "set-schema", "sample-mem", "default@1.0.0"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env = parse_envelope(&out);
+    assert_eq!(env["below_boot"], true, "got: {env}");
+    assert_eq!(env["schema_pin"], "default@1.0.0", "got: {env}");
+}

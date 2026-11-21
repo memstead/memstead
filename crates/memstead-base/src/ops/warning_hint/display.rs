@@ -521,7 +521,8 @@ impl fmt::Display for WarningHint {
                 f,
                 "the mount roster changed and the engine reconciled it before serving this \
                  call — added: [{}], removed: [{}], quarantined: [{}]{}. Cached hashes for a \
-                 removed mem are void; an operation naming it refuses MEM_UNMOUNTED.",
+                 removed mem are void; an operation naming it refuses MEM_UNMOUNTED. A mem \
+                 under both added and removed changed capability and serves under the new one.",
                 added.join(", "),
                 removed.join(", "),
                 quarantined.join(", "),

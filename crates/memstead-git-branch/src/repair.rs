@@ -105,6 +105,14 @@ pub fn set_mem_schema_below_boot(
             })
         })?;
 
+    // The booted path's capability gate: a pin change is a write, and a
+    // mount the roster gives read-only refuses it below boot as well.
+    if workspace.mounts[mount_idx].capability != memstead_base::workspace::MountCapability::Write {
+        return Err(BootError::Engine(EngineError::ReadOnlyMount(
+            mem.to_string(),
+        )));
+    }
+
     // Shared target-ref validation: same resolver, same catalogue
     // construction, same refusal shape as the booted path.
     let catalogue = below_boot_schema_catalogue(workspace_root, &workspace.mounts)

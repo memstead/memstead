@@ -11,14 +11,7 @@ impl Engine {
     ) -> Result<crate::ops::SetMemVersionOutcome, EngineError> {
         // Resolve the mount up-front so an unknown-mem name refuses
         // before any drift-probe side effect lands.
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
-        }
+        let (_, roster_notice) = self.writable_mount_on_current_roster(mem_name)?;
 
         // Probe for concurrent-drift before the write — a sibling
         // engine that committed between our last snapshot and now
@@ -28,6 +21,7 @@ impl Engine {
         // unreachable-backend probe collapses to no warnings (the
         // existing accessor warn-logs internally and skips).
         let (_write_lock, mut warnings) = self.lock_for_write(true, &[mem_name])?;
+        warnings.splice(0..0, roster_notice);
         warnings.extend(self.reload_if_stale_content_only(Some(mem_name)));
         let mount_idx = self.writable_mount_index(mem_name)?;
         // Provenance nudge — same posture as every other commit-
@@ -82,16 +76,10 @@ impl Engine {
         new_description: Option<String>,
         note: Option<&str>,
     ) -> Result<crate::ops::SetMemDescriptionOutcome, EngineError> {
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
-        }
+        let (_, roster_notice) = self.writable_mount_on_current_roster(mem_name)?;
 
         let (_write_lock, mut warnings) = self.lock_for_write(true, &[mem_name])?;
+        warnings.splice(0..0, roster_notice);
         warnings.extend(self.reload_if_stale_content_only(Some(mem_name)));
         let mount_idx = self.writable_mount_index(mem_name)?;
         if let Some(w) = self.note_missing_warning("set_mem_description", note) {
@@ -137,16 +125,10 @@ impl Engine {
         new_title: Option<String>,
         note: Option<&str>,
     ) -> Result<crate::ops::SetMemTitleOutcome, EngineError> {
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
-        }
+        let (_, roster_notice) = self.writable_mount_on_current_roster(mem_name)?;
 
         let (_write_lock, mut warnings) = self.lock_for_write(true, &[mem_name])?;
+        warnings.splice(0..0, roster_notice);
         warnings.extend(self.reload_if_stale_content_only(Some(mem_name)));
         let mount_idx = self.writable_mount_index(mem_name)?;
         if let Some(w) = self.note_missing_warning("set_mem_title", note) {
@@ -191,16 +173,10 @@ impl Engine {
         new_subject: Option<memstead_schema::MemSubject>,
         note: Option<&str>,
     ) -> Result<crate::ops::SetMemSubjectOutcome, EngineError> {
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
-        }
+        let (_, roster_notice) = self.writable_mount_on_current_roster(mem_name)?;
 
         let (_write_lock, mut warnings) = self.lock_for_write(true, &[mem_name])?;
+        warnings.splice(0..0, roster_notice);
         warnings.extend(self.reload_if_stale_content_only(Some(mem_name)));
         let mount_idx = self.writable_mount_index(mem_name)?;
         if let Some(w) = self.note_missing_warning("set_mem_subject", note) {
@@ -253,14 +229,7 @@ impl Engine {
         internal: bool,
         note: Option<&str>,
     ) -> Result<crate::ops::SetMemInternalOutcome, EngineError> {
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
-        }
+        let (_, _roster_notice) = self.writable_mount_on_current_roster(mem_name)?;
 
         let (_write_lock, _roster) = self.lock_for_write(true, &[mem_name])?;
         let _ = self.reload_if_stale_content_only(Some(mem_name));
@@ -316,14 +285,7 @@ impl Engine {
         process_mem: Option<String>,
         note: Option<&str>,
     ) -> Result<crate::ops::SetMemProcessMemOutcome, EngineError> {
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
-        }
+        let (_, roster_notice) = self.writable_mount_on_current_roster(mem_name)?;
         if let Some(target) = process_mem.as_deref() {
             let refuse =
                 |reason: &'static str, schema: Option<String>| EngineError::ProcessMemNotEligible {
@@ -352,6 +314,7 @@ impl Engine {
         }
 
         let (_write_lock, mut warnings) = self.lock_for_write(true, &[mem_name])?;
+        warnings.splice(0..0, roster_notice);
         warnings.extend(self.reload_if_stale_content_only(Some(mem_name)));
         let mount_idx = self.writable_mount_index(mem_name)?;
         if let Some(w) = self.note_missing_warning("set_mem_process_mem", note) {
@@ -418,19 +381,13 @@ impl Engine {
     ) -> Result<crate::ops::SetMemSyncStateOutcome, EngineError> {
         // Resolve the mount up-front so an unknown-mem name refuses
         // before any drift-probe side effect lands.
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
-        }
+        let (_, roster_notice) = self.writable_mount_on_current_roster(mem_name)?;
 
         // Probe for concurrent-drift before the write — same posture as
         // every other commit-producing mutation; a sibling engine that
         // committed since our last snapshot surfaces `MEM_RELOADED`.
         let (_write_lock, mut warnings) = self.lock_for_write(true, &[mem_name])?;
+        warnings.splice(0..0, roster_notice);
         warnings.extend(self.reload_if_stale_content_only(Some(mem_name)));
         let mount_idx = self.writable_mount_index(mem_name)?;
         if let Some(w) = self.note_missing_warning("set_mem_sync_state", note) {

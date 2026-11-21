@@ -40,19 +40,12 @@ impl Engine {
         if self.quarantine_reason(mem).is_some() {
             return self.set_schema_on_quarantined(mem, target);
         }
-        let mount_idx = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == mem)
-            .ok_or_else(|| self.unknown_mem_error(mem))?;
         // Capability gate, identical in shape and position to the six
         // sibling setters (`set_mem_version` … `set_mem_sync_state`):
         // a schema-pin change starts a migration — the one lifecycle
         // mutation a read-only mount must be able to refuse like any
-        // other.
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem.to_string()));
-        }
+        // other. Judged on the roster as it stands now.
+        let (mount_idx, _roster_notice) = self.writable_mount_on_current_roster(mem)?;
 
         // The requested target must resolve before anything else —
         // an unknown ref is an error, not a migration into nowhere.
