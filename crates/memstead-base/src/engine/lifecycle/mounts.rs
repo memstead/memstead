@@ -556,14 +556,18 @@ impl Engine {
             }
         }
         if let Some(ops) = self.git_branch_ops() {
-            match (ops.read_ref_schemas)(&root) {
-                Ok(mut s) => fresh.append(&mut s),
-                Err(e) => {
-                    sources_complete = false;
-                    report.failures.push(crate::ops::RefreshFailure {
-                        item: "schema-source:memstead-ref".to_string(),
-                        error: e.to_string(),
-                    });
+            // Every registry the workspace reads from: the mounts' git
+            // directories as well as its own mem-repo.
+            for gitdir in self.schema_registry_gitdirs() {
+                match (ops.read_ref_schemas)(&gitdir) {
+                    Ok(mut s) => fresh.append(&mut s),
+                    Err(e) => {
+                        sources_complete = false;
+                        report.failures.push(crate::ops::RefreshFailure {
+                            item: "schema-source:memstead-ref".to_string(),
+                            error: e.to_string(),
+                        });
+                    }
                 }
             }
         }

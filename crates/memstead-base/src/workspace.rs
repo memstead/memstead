@@ -439,6 +439,44 @@ pub struct DeleteRuleSetting {
 /// schema. Consumed by the create-rule allowlist parser.
 pub const SCHEMA_WILDCARD: &str = "*";
 
+/// The git directories whose `__MEMSTEAD:schemas/` registry a workspace
+/// resolves schema pins from: the git directory of every git-branch
+/// mount, in mount order, then the workspace's own `mem-repo/.git` when
+/// it exists. Each directory appears once (compared after
+/// canonicalisation, so a mount that names the workspace's own mem-repo
+/// through another spelling does not double).
+///
+/// A git-branch mem's schema is sealed on the registry of the
+/// repository that holds the mem, which is the mount's git directory
+/// and need not be the mounting workspace's `mem-repo/`: a workspace
+/// may consist of engine state only and mount mems that live in
+/// another workspace's mem-repo. Every reader of the registry (boot,
+/// full refresh, below-boot repair, export, health) walks this list,
+/// so the place a schema is installed into is a place it is read from.
+/// On a name-and-version collision between two registries the earlier
+/// directory wins.
+pub fn schema_registry_gitdirs<'a>(
+    mounts: impl IntoIterator<Item = &'a Mount>,
+    workspace_root: Option<&std::path::Path>,
+) -> Vec<PathBuf> {
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut out: Vec<PathBuf> = Vec::new();
+    let own = workspace_root
+        .map(|root| root.join("mem-repo").join(".git"))
+        .filter(|gitdir| gitdir.is_dir());
+    let mounted = mounts.into_iter().filter_map(|m| match &m.storage {
+        MountStorage::GitBranch { gitdir, .. } => Some(gitdir.clone()),
+        _ => None,
+    });
+    for gitdir in mounted.chain(own) {
+        let key = gitdir.canonicalize().unwrap_or_else(|_| gitdir.clone());
+        if seen.insert(key) {
+            out.push(gitdir);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

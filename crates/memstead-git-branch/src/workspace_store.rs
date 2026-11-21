@@ -261,29 +261,21 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
             );
         }
     }
-    // Read authored schemas off the git-branch `__MEMSTEAD:schemas/` ref
-    // (empty for a fresh, legacy `__SCHEMAS`-only, or pre-migration
-    // workspace) and overlay them, so a schema installed onto the ref by
-    // `memstead schema install` is resolvable at boot — folder schemas
-    // alone (`from_mounts_with_schemas_dir`) never covered the ref.
-    use memstead_base::schema_source::SchemaSource as _;
-    let ref_schemas =
-        match crate::mem_repo_schemas::GitBranchSchemaSource::for_workspace(workspace_root)
-            .read_schemas()
-        {
-            Ok(schemas) => schemas,
-            // Best-effort overlay: a stub/invalid `mem-repo/.git` or a
-            // transient gix read failure must not brick boot — fall back
-            // to built-ins (the pre-overlay behaviour) and warn.
-            Err(e) => {
-                tracing::warn!(
-                    "could not read schemas from `__MEMSTEAD:schemas/` ref at {}: {e}; \
-                     resolving against built-ins only",
-                    workspace_root.display()
-                );
-                Vec::new()
-            }
-        };
+    // Read authored schemas off the `__MEMSTEAD:schemas/` registries
+    // (empty for a fresh or pre-migration workspace) and overlay them,
+    // so a schema installed onto the ref by `memstead schema install`
+    // is resolvable at boot. The registries are the git directories the
+    // git-branch mounts name plus the workspace's own mem-repo: a mem
+    // mounted from another workspace's mem-repo resolves its pin from
+    // the repository that holds it. Quarantined mounts count, their
+    // repository may be the one that carries the schema.
+    let ref_schemas = crate::mem_repo_schemas::read_workspace_ref_schemas(
+        workspace_root,
+        mounts
+            .iter()
+            .map(|(m, _)| m)
+            .chain(instantiate_quarantine.iter().map(|q| &q.mount)),
+    );
     // Folder mounts in a full workspace read authored schemas from the
     // fixed `<workspace>/.memstead/schemas/` location (the `schemas_dir`
     // key is retired). Git-branch mounts get their schemas from the
@@ -540,28 +532,8 @@ Body.
         );
     }
 
-    /// A schema installed onto the `__MEMSTEAD:schemas/` ref overlays
-    /// into the engine's resolution catalogue at boot — so a mem can
-    /// pin a git-branch-installed (non-built-in) schema. Regression for
-    /// the gap where the full boot read folder schemas only and never the
-    /// ref, leaving ref-installed schemas unresolvable.
-    #[test]
-    fn engine_from_workspace_root_overlays_ref_schemas() {
-        use memstead_base::schema_source::SchemaSource as _;
-
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path();
-        std::fs::create_dir_all(root.join(".memstead")).unwrap();
-        std::fs::write(
-            root.join(".memstead").join("workspace.toml"),
-            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
-        )
-        .unwrap();
-        let gitdir = root.join("mem-repo").join(".git");
-        std::fs::create_dir_all(&gitdir).unwrap();
-        gix::init_bare(&gitdir).unwrap();
-
-        let manifest = br#"name: refsrc
+    /// A small schema no built-in carries, for the ref-registry tests.
+    const REFSRC_MANIFEST: &[u8] = br#"name: refsrc
 version: 0.1.0
 description: A ref-installed (non-built-in) schema.
 when_to_use: tests
@@ -577,7 +549,8 @@ community:
   resolution: 1.0
   seed: 42
 "#;
-        let doc = br#"name: doc
+
+    const REFSRC_DOC: &[u8] = br#"name: doc
 description: t
 when_to_use: here
 sections:
@@ -601,13 +574,35 @@ health_required_fields:
 staleness_threshold_days: 90
 write_rules: []
 "#;
+
+    /// A schema installed onto the `__MEMSTEAD:schemas/` ref overlays
+    /// into the engine's resolution catalogue at boot — so a mem can
+    /// pin a git-branch-installed (non-built-in) schema. Regression for
+    /// the gap where the full boot read folder schemas only and never the
+    /// ref, leaving ref-installed schemas unresolvable.
+    #[test]
+    fn engine_from_workspace_root_overlays_ref_schemas() {
+        use memstead_base::schema_source::SchemaSource as _;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let gitdir = root.join("mem-repo").join(".git");
+        std::fs::create_dir_all(&gitdir).unwrap();
+        gix::init_bare(&gitdir).unwrap();
+
         crate::mem_repo_schemas::GitBranchSchemaSource::for_workspace(root)
             .write_schema(
                 "refsrc",
                 "0.1.0",
                 &[
-                    ("schema.yaml".to_string(), manifest.to_vec()),
-                    ("types/doc.yaml".to_string(), doc.to_vec()),
+                    ("schema.yaml".to_string(), REFSRC_MANIFEST.to_vec()),
+                    ("types/doc.yaml".to_string(), REFSRC_DOC.to_vec()),
                 ],
             )
             .unwrap();
@@ -625,5 +620,98 @@ write_rules: []
                 .map(|s| s.manifest.name.clone())
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// A workspace that holds engine state only (no `mem-repo/` of its
+    /// own) and mounts a mem that lives in another workspace's mem-repo
+    /// resolves the mem's pin from the registry of the repository the
+    /// mount names: warm, once the schema is installed there out of
+    /// band, and cold, at the next boot. Before the install the mem
+    /// quarantines with the ordinary not-found reason.
+    #[test]
+    fn a_mount_of_another_mem_repo_resolves_its_schema_from_that_repo() {
+        use memstead_base::schema_source::SchemaSource as _;
+        use memstead_base::workspace_store::WorkspaceStoreAdapter as _;
+
+        let tmp = TempDir::new().unwrap();
+        let holder = tmp.path().join("holder");
+        let view = tmp.path().join("view");
+
+        // The holding workspace: a real mem-repo with one mem pinned to
+        // a schema that is not installed yet.
+        crate::test_support::init_real_mem_repo(&holder, &[("notes", "refsrc@0.1.0")]);
+        let holder_gitdir = std::fs::canonicalize(holder.join("mem-repo").join(".git")).unwrap();
+
+        // The mounting workspace: engine state only.
+        std::fs::create_dir_all(view.join(".memstead")).unwrap();
+        std::fs::write(
+            view.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        FileWorkspaceStore::new()
+            .save_state(
+                &view,
+                &memstead_base::Workspace {
+                    mounts: vec![Mount {
+                        mem: "notes".to_string(),
+                        schema: Some("refsrc@0.1.0".parse().unwrap()),
+                        storage: memstead_base::MountStorage::GitBranch {
+                            gitdir: holder_gitdir.clone(),
+                            branch: "notes".to_string(),
+                        },
+                        capability: memstead_base::MountCapability::ReadOnly,
+                        lifecycle: memstead_base::MountLifecycle::Eager,
+                        cross_linkable: true,
+                        migration_target: None,
+                    }],
+                    settings: Default::default(),
+                },
+            )
+            .unwrap();
+        assert!(!view.join("mem-repo").exists());
+
+        // Not installed anywhere: quarantined, not found.
+        let mut engine = engine_from_workspace_root(&view).unwrap();
+        let reasons: Vec<&str> = engine
+            .quarantined_mems()
+            .iter()
+            .map(|q| q.reason_code.as_str())
+            .collect();
+        assert_eq!(reasons, ["SCHEMA_NOT_FOUND"]);
+
+        // Installed into the repository that holds the mem.
+        crate::mem_repo_schemas::GitBranchSchemaSource::for_gitdir(&holder_gitdir)
+            .write_schema(
+                "refsrc",
+                "0.1.0",
+                &[
+                    ("schema.yaml".to_string(), REFSRC_MANIFEST.to_vec()),
+                    ("types/doc.yaml".to_string(), REFSRC_DOC.to_vec()),
+                ],
+            )
+            .unwrap();
+
+        // Warm: a full refresh of the running engine finds it.
+        let report = engine.full_refresh();
+        assert_eq!(
+            report.schemas_added,
+            vec!["refsrc@0.1.0".to_string()],
+            "failures: {:?}",
+            report.failures
+        );
+
+        // Cold: the next boot serves the mem.
+        let engine = engine_from_workspace_root(&view).unwrap();
+        assert!(
+            engine.quarantined_mems().is_empty(),
+            "quarantined: {:?}",
+            engine
+                .quarantined_mems()
+                .iter()
+                .map(|q| (&q.mount.mem, &q.reason_message))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(engine.mem_names(), ["notes"]);
     }
 }

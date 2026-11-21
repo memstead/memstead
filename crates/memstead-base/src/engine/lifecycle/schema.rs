@@ -151,6 +151,21 @@ impl Engine {
         Ok(SchemaStaging::Staged)
     }
 
+    /// Every git directory this engine reads sealed schema packages
+    /// from: [`crate::workspace::schema_registry_gitdirs`] over the live
+    /// mounts and the quarantined ones. A quarantined mount counts
+    /// because its quarantine is often the unresolved pin a later
+    /// install into its own repository repairs.
+    pub(crate) fn schema_registry_gitdirs(&self) -> Vec<PathBuf> {
+        crate::workspace::schema_registry_gitdirs(
+            self.mounts
+                .iter()
+                .map(|m| &m.mount)
+                .chain(self.quarantined.iter().map(|q| &q.mount)),
+            self.workspace_root(),
+        )
+    }
+
     /// The gitdir that holds sealed third-party packages (the
     /// `__MEMSTEAD:schemas/` ref): the first git-branch mount's, else the
     /// workspace's `mem-repo/.git`. `None` on a folder-shaped workspace,

@@ -237,9 +237,10 @@ impl Engine {
         config: &memstead_schema::MemConfig,
     ) -> Option<Vec<memstead_schema::SchemaSourceFile>> {
         let ops = self.git_branch_ops.as_ref()?;
-        let root = self.workspace_root.as_deref()?;
         let pin = config.schema.as_ref()?;
-        (ops.collect_ref_schema_source)(root, pin).ok().flatten()
+        self.schema_registry_gitdirs()
+            .iter()
+            .find_map(|gitdir| (ops.collect_ref_schema_source)(gitdir, pin).ok().flatten())
     }
 
     pub fn export_mem(

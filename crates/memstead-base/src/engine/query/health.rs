@@ -875,25 +875,20 @@ impl Engine {
         version: &str,
     ) -> Option<(String, Vec<(String, String)>)> {
         let ops = self.git_branch_ops()?;
-        let root = self.workspace_root.as_deref()?;
-        let gitdir = self
-            .mounts
-            .iter()
-            .find_map(|m| match &m.mount.storage {
-                crate::workspace::MountStorage::GitBranch { gitdir, .. } => Some(gitdir.clone()),
-                _ => None,
-            })
-            .or_else(|| {
-                let g = root.join("mem-repo").join(".git");
-                g.is_dir().then_some(g)
-            })?;
-        let read = |rel: &str| -> Option<String> {
-            (ops.read_schema_file)(&gitdir, name, version, rel)
+        self.workspace_root.as_deref()?;
+        let read_at = |gitdir: &Path, rel: &str| -> Option<String> {
+            (ops.read_schema_file)(gitdir, name, version, rel)
                 .ok()
                 .flatten()
                 .and_then(|bytes| String::from_utf8(bytes).ok())
         };
-        let manifest = read("schema.yaml")?;
+        // The first registry that carries the package: the same walk the
+        // loader resolved the pin through.
+        let (gitdir, manifest) = self
+            .schema_registry_gitdirs()
+            .into_iter()
+            .find_map(|g| read_at(&g, "schema.yaml").map(|manifest| (g, manifest)))?;
+        let read = |rel: &str| read_at(&gitdir, rel);
         let schema = self
             .schemas
             .values()
@@ -929,27 +924,16 @@ impl Engine {
             std::fs::read(&folder_stamp).ok()
         } else {
             let ops = self.git_branch_ops()?;
-            let gitdir = self
-                .mounts
-                .iter()
-                .find_map(|m| match &m.mount.storage {
-                    crate::workspace::MountStorage::GitBranch { gitdir, .. } => {
-                        Some(gitdir.clone())
-                    }
-                    _ => None,
-                })
-                .or_else(|| {
-                    let g = root.join("mem-repo").join(".git");
-                    g.is_dir().then_some(g)
-                })?;
-            (ops.read_schema_file)(
-                &gitdir,
-                name,
-                version,
-                memstead_schema::INSTALL_PROVENANCE_FILE,
-            )
-            .ok()
-            .flatten()
+            self.schema_registry_gitdirs().iter().find_map(|gitdir| {
+                (ops.read_schema_file)(
+                    gitdir,
+                    name,
+                    version,
+                    memstead_schema::INSTALL_PROVENANCE_FILE,
+                )
+                .ok()
+                .flatten()
+            })
         }?;
         let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
         v.get("authoring_path")?.as_str().map(String::from)

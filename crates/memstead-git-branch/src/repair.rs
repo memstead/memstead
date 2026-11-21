@@ -51,27 +51,20 @@ pub struct BelowBootSetSchema {
 /// the same construction the boot path performs in
 /// `engine_from_workspace_root`: workspace-authored schemas (the fixed
 /// `.memstead/schemas/` dir via the shared [`load_workspace_schemas`]
-/// walker, plus the `__MEMSTEAD:schemas/` ref) layered over the
+/// walker, plus the `__MEMSTEAD:schemas/` registries of the mounts' git
+/// directories and the workspace's own mem-repo) layered over the
 /// built-ins. Ref-read failures degrade to built-ins with a warning,
 /// mirroring the boot path's best-effort overlay.
 fn below_boot_schema_catalogue(
     workspace_root: &Path,
+    mounts: &[memstead_base::Mount],
 ) -> Result<Vec<Arc<memstead_schema::Schema>>, EngineError> {
     let fixed_dir = workspace_root.join(".memstead").join("schemas");
     let mut catalogue = load_workspace_schemas(Some(fixed_dir.as_path()))?;
-    use memstead_base::schema_source::SchemaSource as _;
-    match crate::mem_repo_schemas::GitBranchSchemaSource::for_workspace(workspace_root)
-        .read_schemas()
-    {
-        Ok(schemas) => catalogue.extend(schemas),
-        Err(e) => {
-            tracing::warn!(
-                "below-boot repair: could not read schemas from `__MEMSTEAD:schemas/` at {}: {e}; \
-                 resolving against the folder dir and built-ins only",
-                workspace_root.display()
-            );
-        }
-    }
+    catalogue.extend(crate::mem_repo_schemas::read_workspace_ref_schemas(
+        workspace_root,
+        mounts,
+    ));
     catalogue.extend(
         memstead_schema::builtins::load_builtin_schemas()
             .map_err(|e| EngineError::SchemaResolverInit(e.to_string()))?,
@@ -114,7 +107,8 @@ pub fn set_mem_schema_below_boot(
 
     // Shared target-ref validation: same resolver, same catalogue
     // construction, same refusal shape as the booted path.
-    let catalogue = below_boot_schema_catalogue(workspace_root).map_err(BootError::Engine)?;
+    let catalogue = below_boot_schema_catalogue(workspace_root, &workspace.mounts)
+        .map_err(BootError::Engine)?;
     SchemaResolver::new(&catalogue)
         .resolve(target)
         .map_err(|_sources| {

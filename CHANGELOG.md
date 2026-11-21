@@ -7,6 +7,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **A mem mounted from another mem-repo resolves its installed schema.**
+  A git-branch mount names the git directory that holds the mem, and
+  that need not be the mounting workspace's own `mem-repo/`. A schema
+  installed with `memstead schema install` is now read from the
+  registry of every git directory the workspace's git-branch mounts
+  name, then from the workspace's own mem-repo. Before, boot, `reload
+  --full`, `mem set-schema` below boot, export and the health schema
+  checks read only `<workspace>/mem-repo`, so a workspace holding
+  engine state only quarantined such a mem with `SCHEMA_NOT_FOUND`
+  although `schema install` already wrote to the mount's git directory.
+  When two registries carry the same name and version, the earlier one
+  wins: mounts in roster order, then the workspace's own.
+
 ## [0.26.0] - 2026-11-12
 
 ### Added

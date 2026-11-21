@@ -899,26 +899,29 @@ pub type GitBranchReadSchemaFileFn = fn(
     rel: &str,
 ) -> Result<Option<Vec<u8>>, BackendError>;
 
-/// Re-read every schema sealed on the workspace's
-/// `__MEMSTEAD:schemas/` ref (empty when the ref or subtree is
-/// absent). Read-only; `Engine::full_refresh` is the consumer — the
-/// warm-server path that makes an out-of-band `memstead schema
-/// install` resolvable without a process restart.
+/// Re-read every schema sealed on one git directory's
+/// `__MEMSTEAD:schemas/` ref (empty when the directory, the ref or the
+/// subtree is absent). Read-only; `Engine::full_refresh` is the
+/// consumer, the warm-server path that makes an out-of-band `memstead
+/// schema install` resolvable without a process restart. It calls this
+/// once per directory of [`crate::workspace::schema_registry_gitdirs`].
 pub type GitBranchReadRefSchemasFn =
-    fn(workspace_root: &Path) -> Result<Vec<Arc<memstead_schema::Schema>>, BackendError>;
+    fn(gitdir: &Path) -> Result<Vec<Arc<memstead_schema::Schema>>, BackendError>;
 
 /// Collect one pinned schema's raw source files (manifest, sealed
-/// format marker, type definitions) from the workspace's
+/// format marker, type definitions) from one git directory's
 /// `__MEMSTEAD:schemas/<name>@<version>/` ref — the tree `memstead
 /// schema install` writes on the git-branch backend. `Ok(None)` when
-/// the workspace has no mem-repo, the ref, or the package. Read-only;
+/// the directory, the ref, or the package is absent. Read-only;
 /// the consumer is the FOLDER-mount export path: a folder mem living
 /// in a mem-repo workspace pins a schema the installer sealed on the
 /// ref, so the archive assembler must read the same store the loader
-/// resolves from, or the mem loads but cannot export.
+/// resolves from, or the mem loads but cannot export. The caller walks
+/// [`crate::workspace::schema_registry_gitdirs`] and takes the first
+/// directory that carries the package.
 pub type GitBranchCollectSchemaSourceFn =
     fn(
-        workspace_root: &Path,
+        gitdir: &Path,
         schema_ref: &memstead_schema::SchemaRef,
     ) -> Result<Option<Vec<memstead_schema::SchemaSourceFile>>, BackendError>;
 

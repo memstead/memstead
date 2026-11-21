@@ -118,7 +118,7 @@ pub use store::{Edge, EdgeSource, InEdge, Store};
 pub use workspace::{
     CreateRuleSetting, DeleteRuleSetting, MEMSTEAD_CHECKS_REF_BRANCH, MEMSTEAD_REF_BRANCH, Mount,
     MountCapability, MountLifecycle, MountStorage, SCHEMA_WILDCARD, Workspace, WorkspaceSettings,
-    branch_full_ref, branch_short_name, checks_ref_member_path,
+    branch_full_ref, branch_short_name, checks_ref_member_path, schema_registry_gitdirs,
 };
 pub use workspace_store::{
     FileWorkspaceStore, InstantiateError, Layout, StoreError, WORKSPACE_STORE_DIR,

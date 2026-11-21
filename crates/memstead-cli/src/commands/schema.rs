@@ -286,8 +286,8 @@ fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
 
 /// The sealed README of a workspace-installed schema package, from the
 /// filesystem `.memstead/schemas/<name>@<version>/` layout first, then
-/// the mem-repo's `__MEMSTEAD:schemas/` ref (where `memstead schema
-/// install` writes on git-backed workspaces). `None` outside a
+/// the `__MEMSTEAD:schemas/` ref (where `memstead schema install`
+/// writes on git-backed workspaces) of each schema registry. `None` outside a
 /// workspace or when the package (or its README) is absent.
 fn workspace_installed_readme(ctx: &CliContext, schema_ref: &SchemaRef) -> Option<Vec<u8>> {
     let (_, root) = ctx.workspace_shape()?;
@@ -299,16 +299,21 @@ fn workspace_installed_readme(ctx: &CliContext, schema_ref: &SchemaRef) -> Optio
     if let Ok(bytes) = std::fs::read(&fs_readme) {
         return Some(bytes);
     }
-    {
-        let gitdir = root.join("mem-repo").join(".git");
-        if gitdir.is_dir()
-            && let Ok(Some(bytes)) =
-                memstead_git_branch::storage_memstead::read_schema_file_from_memstead_ref(
-                    &gitdir,
-                    &schema_ref.name,
-                    &schema_ref.version.to_string(),
-                    "README.md",
-                )
+    // Every registry the workspace resolves pins from: the git
+    // directories its git-branch mounts name, then its own mem-repo.
+    use memstead_base::WorkspaceStoreAdapter as _;
+    let mounts = memstead_base::FileWorkspaceStore::new()
+        .load(&root)
+        .map(|workspace| workspace.mounts)
+        .unwrap_or_default();
+    for gitdir in memstead_base::schema_registry_gitdirs(&mounts, Some(root.as_path())) {
+        if let Ok(Some(bytes)) =
+            memstead_git_branch::storage_memstead::read_schema_file_from_memstead_ref(
+                &gitdir,
+                &schema_ref.name,
+                &schema_ref.version.to_string(),
+                "README.md",
+            )
         {
             return Some(bytes);
         }

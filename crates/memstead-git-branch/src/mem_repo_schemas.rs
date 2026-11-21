@@ -75,21 +75,30 @@ pub fn load_schemas_from_ref(workspace_root: &Path) -> Result<LoadOutcome, MemRe
 }
 
 /// The git-branch backend's [`SchemaSource`](memstead_base::schema_source::SchemaSource):
-/// schemas live on the `__MEMSTEAD:schemas/<name>@<version>/` ref of the
-/// workspace's `mem-repo/.git`. `read_schemas` wraps
-/// [`load_schemas_from_ref`]; `write_schema` wraps
+/// schemas live on the `__MEMSTEAD:schemas/<name>@<version>/` ref of one
+/// git directory. `read_schemas` reads that ref; `write_schema` wraps
 /// [`crate::storage_memstead::write_schema_to_memstead_ref`]. The engine
 /// owns mem-repo state, so this type is constructed and used inside the
 /// engine layer, never by an external consumer directly.
+///
+/// A workspace reads more than one such source when its git-branch
+/// mounts name a git directory other than its own `mem-repo/.git`:
+/// [`read_workspace_ref_schemas`] walks them all.
 pub struct GitBranchSchemaSource {
-    workspace_root: std::path::PathBuf,
+    gitdir: std::path::PathBuf,
 }
 
 impl GitBranchSchemaSource {
-    /// Build a git-branch source for a workspace (its `mem-repo/.git`).
+    /// Build a git-branch source for a workspace's own `mem-repo/.git`.
     pub fn for_workspace(workspace_root: &Path) -> Self {
+        Self::for_gitdir(&workspace_root.join("mem-repo").join(".git"))
+    }
+
+    /// Build a git-branch source for one git directory, typically the
+    /// one a git-branch mount names.
+    pub fn for_gitdir(gitdir: &Path) -> Self {
         Self {
-            workspace_root: workspace_root.to_path_buf(),
+            gitdir: gitdir.to_path_buf(),
         }
     }
 }
@@ -98,9 +107,12 @@ impl memstead_base::schema_source::SchemaSource for GitBranchSchemaSource {
     fn read_schemas(
         &self,
     ) -> Result<Vec<Arc<Schema>>, memstead_base::schema_source::SchemaSourceError> {
-        match load_schemas_from_ref(&self.workspace_root) {
+        if !self.gitdir.is_dir() {
+            return Ok(Vec::new());
+        }
+        match crate::storage_memstead::load_schemas_from_memstead_ref_at_gitdir(&self.gitdir) {
             Ok(LoadOutcome::Schemas(schemas)) => Ok(schemas),
-            // No mem-repo or no `__MEMSTEAD:schemas/` subtree → nothing
+            // No `__MEMSTEAD` ref or no `schemas/` subtree → nothing
             // to overlay; the catalogue falls back to built-ins.
             Ok(LoadOutcome::NoMemRepo) | Ok(LoadOutcome::NoSchemas) => Ok(Vec::new()),
             Err(e) => Err(memstead_base::schema_source::SchemaSourceError::Read(
@@ -115,11 +127,48 @@ impl memstead_base::schema_source::SchemaSource for GitBranchSchemaSource {
         version: &str,
         files: &[(String, Vec<u8>)],
     ) -> Result<(), memstead_base::schema_source::SchemaSourceError> {
-        let gitdir = self.workspace_root.join("mem-repo").join(".git");
-        crate::storage_memstead::write_schema_to_memstead_ref(&gitdir, name, version, files)
+        crate::storage_memstead::write_schema_to_memstead_ref(&self.gitdir, name, version, files)
             .map(|_| ())
             .map_err(|e| memstead_base::schema_source::SchemaSourceError::Write(e.to_string()))
     }
+}
+
+/// Every schema a workspace resolves from a `__MEMSTEAD:schemas/`
+/// registry: the registries of
+/// [`memstead_base::schema_registry_gitdirs`] read in order, one schema
+/// per name and version (the earlier registry wins a collision).
+///
+/// Best-effort per registry: a stub or unreadable git directory, or a
+/// transient read failure, must not brick the caller. It is skipped
+/// with a warning and the remaining registries and the built-ins still
+/// resolve.
+pub fn read_workspace_ref_schemas<'a>(
+    workspace_root: &Path,
+    mounts: impl IntoIterator<Item = &'a memstead_base::Mount>,
+) -> Vec<Arc<Schema>> {
+    use memstead_base::schema_source::SchemaSource as _;
+    let mut seen: std::collections::HashSet<(String, semver::Version)> =
+        std::collections::HashSet::new();
+    let mut out: Vec<Arc<Schema>> = Vec::new();
+    for gitdir in memstead_base::schema_registry_gitdirs(mounts, Some(workspace_root)) {
+        match GitBranchSchemaSource::for_gitdir(&gitdir).read_schemas() {
+            Ok(schemas) => {
+                for schema in schemas {
+                    if seen.insert(schema.id()) {
+                        out.push(schema);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "could not read schemas from `__MEMSTEAD:schemas/` ref at {}: {e}; \
+                     resolving against the remaining schema sources",
+                    gitdir.display()
+                );
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
