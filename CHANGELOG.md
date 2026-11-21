@@ -36,7 +36,50 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   output and the enclosing repository's ignore file; the command
   behaves as before.
 
+- **A change notice is relative to the caller.** The `mem_changed`
+  notice (and its `MEM_RELOADED` warning) used to describe what the
+  engine instance reloaded, so a write made through the same engine by
+  another caller told nobody, and a server with several agents had to
+  keep one engine per agent. The engine now remembers, per caller and
+  mem, the head that caller last saw, and tells each caller what moved
+  since, whoever wrote it. A write another caller made through the same
+  engine is told on the caller's very next operation, whatever that is,
+  also one that reloads nothing itself (an explicit reload, a settings
+  write). A write made through another engine is told, as before, on
+  the caller's next operation that brings that mem up to date (an
+  operation scoped to another mem does not look at it), and from then
+  on to every other caller on its very next operation. A notice covers
+  everything storage holds for its mem at that moment, so its two heads
+  agree with its entries and nothing is told twice. A caller is not
+  told about its own write, what the report of a reload it asked for
+  lists is not told to it again, and a caller seen for the first time
+  is told nothing, about no change that landed before it came. A
+  program that links the engine names the caller when it opens an
+  operation (`OperationScope::begin_as` with a `CallerKey`) and takes
+  the notices when it closes it; over MCP, `McpServer::for_caller` gives
+  a further server instance over the same engine, with its own client id
+  and identity settings, and the response of every tool call the server
+  runs carries the notice (`memstead_overview`, which answers in
+  markdown, through its `MEM_RELOADED` warning); a call whose parameters
+  do not parse, or that names a disabled tool, is not run. No tool's
+  parameters change, and the notice keeps its shape. The CLI and the
+  stdio MCP server have one caller and are told what they were told
+  before, with the one correction listed under Fixed. The engine
+  remembers up to 1024 callers and forgets the least recently used; a
+  forgotten caller starts over as a first contact.
+
 ### Fixed
+
+- **No MCP tool swallows a change notice.** `memstead_check` and
+  `memstead_mem_delete` reloaded a mem another process had written and
+  then answered without the `mem_changed` notice or the `MEM_RELOADED`
+  warning, so an agent whose next call was one of the two was never
+  told that its cached hashes were stale. A refused call that returned
+  before its response was assembled lost the notice the same way. The
+  server now adds a notice the tool did not hand out itself to that
+  tool's response, whichever path the tool took: `mem_changed` on the
+  structured channel, and the `MEM_RELOADED` warning on the text
+  channel where the text is not the JSON body.
 
 - **An installed schema is readable without a README.** `memstead
   schema <name>@<version>` refused `SCHEMA_NOT_FOUND` for a schema that

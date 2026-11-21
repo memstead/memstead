@@ -5679,3 +5679,64 @@ fn the_write_lock_timeout_is_a_workspace_setting_and_refuses_a_bad_value() {
         );
     }
 }
+
+/// One operation of `caller` on the roster fixture's engine: a reload,
+/// optionally a create, and the notices the operation hands out.
+fn caller_operation(
+    engine: &mut Engine,
+    caller: &str,
+    create: Option<(&str, &str)>,
+) -> Vec<crate::ops::MemChangedNotice> {
+    let mut op =
+        crate::OperationScope::begin_as(engine, crate::engine::callers::CallerKey::new(caller));
+    op.reload_if_stale(None);
+    if let Some((mem, title)) = create {
+        assert_eq!(try_create(&mut op, mem, title), Ok(()));
+    }
+    let (_, notices) = op.finish();
+    notices
+}
+
+/// The engine's memory of callers is bounded: past the cap the least
+/// recently used caller is forgotten, and when it returns it reads as a
+/// first contact. Its operation succeeds, it is told nothing about what
+/// happened while it was away, and no stale delta reaches it later.
+#[test]
+fn the_callers_the_engine_remembers_are_capped_and_a_forgotten_one_starts_over() {
+    use crate::engine::callers::MAX_TRACKED_CALLERS;
+    let (_tmp, mut engine) = roster_fixture();
+
+    assert!(caller_operation(&mut engine, "first", None).is_empty());
+    // Something `first` has not seen yet, written by another caller.
+    assert!(caller_operation(&mut engine, "writer", Some(("beta", "While Away"))).is_empty());
+
+    // Enough further callers to push `first` out.
+    for n in 0..MAX_TRACKED_CALLERS {
+        assert!(caller_operation(&mut engine, &format!("crowd-{n}"), None).is_empty());
+    }
+    assert!(
+        engine.callers.tracked() <= MAX_TRACKED_CALLERS + 1,
+        "the cap holds, the default caller aside: {}",
+        engine.callers.tracked()
+    );
+
+    // `first` returns: a first contact again, so nothing about the write
+    // it missed, and its operation is an ordinary success.
+    assert!(
+        caller_operation(&mut engine, "first", None).is_empty(),
+        "a forgotten caller is told nothing on its return"
+    );
+    assert!(caller_operation(&mut engine, "first", None).is_empty());
+
+    // From here on it is told like anyone else, and only about what is new.
+    assert!(caller_operation(&mut engine, "writer", Some(("beta", "After Return"))).is_empty());
+    let notices = caller_operation(&mut engine, "first", None);
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0].mem, "beta");
+    let listed = serde_json::to_value(&notices[0]).unwrap().to_string();
+    assert!(listed.contains("beta--after-return"), "{listed}");
+    assert!(
+        !listed.contains("beta--while-away"),
+        "nothing from before its return: {listed}"
+    );
+}

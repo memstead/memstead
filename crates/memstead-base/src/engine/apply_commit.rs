@@ -160,6 +160,8 @@ impl Engine {
         if let Some(state) = self.mounts.get_mut(mount_idx) {
             state.last_known_head = Some(envelope.sha.clone());
         }
+        // The caller applied the commit itself: it has seen it.
+        self.caller_saw_own_write(mem, &previous, &envelope.sha);
         self.invalidate_communities();
         #[cfg(not(target_arch = "wasm32"))]
         self.invalidate_search_indexes();

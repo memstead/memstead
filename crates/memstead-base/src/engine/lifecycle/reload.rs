@@ -243,6 +243,8 @@ impl Engine {
         let Some(q_idx) = self.quarantined.iter().position(|q| q.mount.mem == mem) else {
             return Err(self.unknown_mem_error(mem));
         };
+        // A mem that comes back into service is new to every caller.
+        self.callers.forget_mem(mem);
         // The roster may have changed this mount's capability since it
         // was quarantined, and no reconciliation need have run in
         // between: the row on disk decides, so the attach never restores
@@ -611,6 +613,10 @@ impl Engine {
         &mut self,
         mem: &str,
     ) -> Result<crate::ops::ReloadReport, EngineError> {
+        // Before anything is reloaded: what other callers wrote through
+        // this engine is news to the caller and no part of the report,
+        // which covers what the reload itself brings in.
+        self.bring_caller_up_to_date();
         // `head_before` is the engine's PRIOR cursor — the SHA it last
         // knew for this mem — not the current (possibly already
         // drifted) on-disk tip. Reporting the tip would collapse the
@@ -653,7 +659,15 @@ impl Engine {
         if let Some(new_head) = head_after_raw.clone()
             && let Some(m) = self.mounts.iter_mut().find(|m| m.mount.mem == mem)
         {
-            m.last_known_head = Some(new_head);
+            let before = m
+                .last_known_head
+                .replace(new_head.clone())
+                .unwrap_or_default();
+            // The caller asked for this reload and reads what it brought
+            // in from the report: it has seen the new head. A caller that
+            // was behind the engine before the reload stays behind and is
+            // told on its next operation.
+            self.caller_saw_own_write(mem, &before, &new_head);
         }
         let head_after = head_after_raw.unwrap_or_else(|| crate::ops::EMPTY_TREE_SHA.to_string());
 

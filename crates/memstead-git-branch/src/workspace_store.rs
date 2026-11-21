@@ -816,4 +816,796 @@ write_rules: []
         );
         assert_eq!(engine.unknown_mem_error("notes").code(), "MEM_UNMOUNTED");
     }
+
+    fn caller_fixture() -> (TempDir, std::path::PathBuf) {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("ws");
+        crate::test_support::init_real_mem_repo(
+            &root,
+            &[("notes", "default@1.0.0"), ("other", "default@1.0.0")],
+        );
+        (tmp, root)
+    }
+
+    fn spec(mem: &str, title: &str) -> memstead_base::engine::CreateEntityArgs {
+        memstead_base::engine::CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: mem.to_string(),
+            title: title.to_string(),
+            entity_type: "spec".to_string(),
+            sections: indexmap::IndexMap::from_iter([
+                ("identity".to_string(), "i".to_string()),
+                ("purpose".to_string(), "p".to_string()),
+            ]),
+            metadata: indexmap::IndexMap::new(),
+            relations: Vec::new(),
+            dry_run: false,
+        }
+    }
+
+    /// One operation of `caller`: reload (workspace-wide, or scoped to
+    /// `scope`), optionally create an entity, and hand back the notices
+    /// and warning codes the operation carries.
+    fn operate(
+        engine: &mut Engine,
+        caller: &str,
+        scope: Option<&str>,
+        create: Option<(&str, &str)>,
+    ) -> (Vec<memstead_base::ops::MemChangedNotice>, Vec<String>) {
+        let mut op =
+            memstead_base::OperationScope::begin_as(engine, memstead_base::CallerKey::new(caller));
+        let mut codes: Vec<String> = op
+            .reload_if_stale(scope)
+            .iter()
+            .map(|w| w.code().to_string())
+            .collect();
+        if let Some((mem, title)) = create {
+            let outcome = op
+                .create_entity_with_ctx(
+                    spec(mem, title),
+                    &memstead_base::vcs::CommitContext::internal(),
+                )
+                .expect("the write lands");
+            codes.extend(outcome.warnings.iter().map(|w| w.code().to_string()));
+        }
+        let (_, notices) = op.finish();
+        (notices, codes)
+    }
+
+    fn listed_ids(notice: &memstead_base::ops::MemChangedNotice) -> Vec<String> {
+        let value = serde_json::to_value(notice).unwrap();
+        value["changes"]["entries"]
+            .as_array()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|e| e["id"].as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Two callers on one engine: what one writes, the other is told on
+    /// its next operation, whatever that operation is, and only once;
+    /// the writer is not told about its own write; a caller seen for the
+    /// first time is told nothing.
+    #[test]
+    fn a_caller_is_told_once_what_another_caller_wrote_through_the_same_engine() {
+        let (_tmp, root) = caller_fixture();
+        let mut engine = engine_from_workspace_root(&root).unwrap();
+
+        // First contact of each caller: the baseline, no notice.
+        assert!(operate(&mut engine, "a", None, None).0.is_empty());
+        assert!(operate(&mut engine, "b", None, None).0.is_empty());
+
+        // A writes: no notice for its own write, now or on its next call.
+        let (notices, _) = operate(&mut engine, "a", Some("notes"), Some(("notes", "From A")));
+        assert!(
+            notices.is_empty(),
+            "a writer is not told about its own write"
+        );
+
+        // B's next operation is a read scoped to another mem: it carries
+        // the notice for the mem A wrote, listing the entity.
+        let (notices, codes) = operate(&mut engine, "b", Some("other"), None);
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(notices[0].mem, "notes");
+        assert_eq!(listed_ids(&notices[0]), ["notes--from-a"]);
+        assert!(
+            codes.iter().any(|c| c == "MEM_RELOADED"),
+            "the text channel's warning rides along: {codes:?}"
+        );
+
+        // Told once: B's following operation carries none, nor does A's.
+        assert!(operate(&mut engine, "b", None, None).0.is_empty());
+        assert!(operate(&mut engine, "a", None, None).0.is_empty());
+
+        // A caller seen for the first time after all that is told nothing.
+        let (notices, codes) = operate(&mut engine, "c", None, None);
+        assert!(notices.is_empty());
+        assert!(!codes.iter().any(|c| c == "MEM_RELOADED"), "{codes:?}");
+
+        // B writes in turn; A and C are each told once, B is not.
+        let (notices, _) = operate(&mut engine, "b", Some("other"), Some(("other", "From B")));
+        assert!(notices.is_empty());
+        for caller in ["a", "c"] {
+            let (notices, _) = operate(&mut engine, caller, None, None);
+            assert_eq!(notices.len(), 1, "{caller}: {notices:?}");
+            assert_eq!(notices[0].mem, "other");
+            assert_eq!(listed_ids(&notices[0]), ["other--from-b"]);
+            assert!(operate(&mut engine, caller, None, None).0.is_empty());
+        }
+        assert!(operate(&mut engine, "b", None, None).0.is_empty());
+    }
+
+    /// A change made by another process reaches every caller of this
+    /// engine exactly once, each on its own next operation; and a
+    /// surface with one caller is told as it was when the notice was
+    /// relative to the engine.
+    #[test]
+    fn a_change_from_another_process_reaches_every_caller_once() {
+        let (_tmp, root) = caller_fixture();
+        let mut engine = engine_from_workspace_root(&root).unwrap();
+        assert!(operate(&mut engine, "a", None, None).0.is_empty());
+        assert!(operate(&mut engine, "b", None, None).0.is_empty());
+
+        // Another engine over the same mem-repo writes.
+        let mut sibling = engine_from_workspace_root(&root).unwrap();
+        sibling
+            .create_entity_with_ctx(
+                spec("notes", "Outside"),
+                &memstead_base::vcs::CommitContext::internal(),
+            )
+            .unwrap();
+
+        for caller in ["a", "b"] {
+            let (notices, codes) = operate(&mut engine, caller, None, None);
+            assert_eq!(notices.len(), 1, "{caller}: {notices:?}");
+            assert_eq!(notices[0].mem, "notes");
+            assert_eq!(listed_ids(&notices[0]), ["notes--outside"]);
+            assert_eq!(
+                codes.iter().filter(|c| *c == "MEM_RELOADED").count(),
+                1,
+                "{caller}: one reload warning, not two: {codes:?}"
+            );
+            assert!(operate(&mut engine, caller, None, None).0.is_empty());
+        }
+
+        // The single caller of a surface that names none: the default
+        // key, known since before the sibling's next write.
+        let mut single = engine_from_workspace_root(&root).unwrap();
+        sibling
+            .create_entity_with_ctx(
+                spec("notes", "Outside Again"),
+                &memstead_base::vcs::CommitContext::internal(),
+            )
+            .unwrap();
+        let mut op = memstead_base::OperationScope::begin(&mut single);
+        let codes: Vec<String> = op
+            .reload_if_stale(None)
+            .iter()
+            .map(|w| w.code().to_string())
+            .collect();
+        let (_, notices) = op.finish();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(listed_ids(&notices[0]), ["notes--outside-again"]);
+        assert_eq!(codes.iter().filter(|c| *c == "MEM_RELOADED").count(), 1);
+    }
+
+    /// A caller that reloads explicitly reads what the reload brought
+    /// in from its report: its next operation carries no notice for
+    /// it, as when the notice was relative to the engine. Another
+    /// caller of the same engine is still told.
+    #[test]
+    fn an_explicit_reload_counts_as_seen_by_the_caller_that_asked_for_it() {
+        let (_tmp, root) = caller_fixture();
+        let mut engine = engine_from_workspace_root(&root).unwrap();
+        let mut sibling = engine_from_workspace_root(&root).unwrap();
+        let ctx = memstead_base::vcs::CommitContext::internal();
+
+        // The default caller and a named one are both known.
+        let mut op = memstead_base::OperationScope::begin(&mut engine);
+        op.reload_if_stale(None);
+        assert!(op.finish().1.is_empty());
+        assert!(operate(&mut engine, "b", None, None).0.is_empty());
+
+        for (title, workspace_wide) in [("Outside One", false), ("Outside Two", true)] {
+            sibling
+                .create_entity_with_ctx(spec("notes", title), &ctx)
+                .unwrap();
+
+            // The default caller reloads explicitly, without the
+            // reload-before-operation step.
+            let mut op = memstead_base::OperationScope::begin(&mut engine);
+            if workspace_wide {
+                op.reload_each_writable_mem_reports().unwrap();
+            } else {
+                op.reload_one_mem_report("notes").unwrap();
+            }
+            assert!(op.finish().1.is_empty(), "the report is the answer");
+
+            // Its next operation carries nothing for what it reloaded.
+            let mut op = memstead_base::OperationScope::begin(&mut engine);
+            let codes: Vec<String> = op
+                .reload_if_stale(None)
+                .iter()
+                .map(|w| w.code().to_string())
+                .collect();
+            assert!(op.finish().1.is_empty(), "{title}");
+            assert!(!codes.iter().any(|c| c == "MEM_RELOADED"), "{codes:?}");
+
+            // The other caller did not ask for the reload: it is told.
+            let (notices, codes) = operate(&mut engine, "b", None, None);
+            assert_eq!(notices.len(), 1, "{title}: {notices:?}");
+            assert_eq!(notices[0].mem, "notes");
+            assert_eq!(codes.iter().filter(|c| *c == "MEM_RELOADED").count(), 1);
+            assert!(operate(&mut engine, "b", None, None).0.is_empty());
+        }
+    }
+
+    /// One operation of `caller` that reloads nothing before it acts:
+    /// an explicit reload of one mem, of every mem, or nothing at all.
+    fn operate_without_the_reload_step(
+        engine: &mut Engine,
+        caller: &str,
+        explicit: Option<Option<&str>>,
+    ) -> Vec<memstead_base::ops::MemChangedNotice> {
+        let mut op =
+            memstead_base::OperationScope::begin_as(engine, memstead_base::CallerKey::new(caller));
+        match explicit {
+            Some(Some(mem)) => {
+                op.reload_one_mem_report(mem).unwrap();
+            }
+            Some(None) => {
+                op.reload_each_writable_mem_reports().unwrap();
+            }
+            None => {}
+        }
+        op.finish().1
+    }
+
+    /// The told caller's next operation may be one that reloads nothing
+    /// before it acts. It carries the notice all the same, and the
+    /// operation after it carries none; and such an operation counts as
+    /// a first contact like any other.
+    #[test]
+    fn an_operation_that_reloads_nothing_first_still_tells_its_caller() {
+        // Closed list: an explicit reload of the written mem, of the
+        // other mem, of every mem, and an operation that does nothing.
+        let kinds: [Option<Option<&str>>; 4] =
+            [Some(Some("notes")), Some(Some("other")), Some(None), None];
+        for (n, kind) in kinds.into_iter().enumerate() {
+            let (_tmp, root) = caller_fixture();
+            let mut engine = engine_from_workspace_root(&root).unwrap();
+            assert!(operate(&mut engine, "a", None, None).0.is_empty());
+            assert!(operate(&mut engine, "b", None, None).0.is_empty());
+
+            operate(&mut engine, "a", Some("notes"), Some(("notes", "From A")));
+            let notices = operate_without_the_reload_step(&mut engine, "b", kind);
+            assert_eq!(notices.len(), 1, "kind {n}: {notices:?}");
+            assert_eq!(notices[0].mem, "notes");
+            assert_eq!(listed_ids(&notices[0]), ["notes--from-a"]);
+            assert!(
+                operate(&mut engine, "b", None, None).0.is_empty(),
+                "kind {n}"
+            );
+            assert!(operate_without_the_reload_step(&mut engine, "a", kind).is_empty());
+
+            // As a first contact: nothing on it, and the caller is known
+            // from then on.
+            assert!(operate_without_the_reload_step(&mut engine, "new", kind).is_empty());
+            operate(
+                &mut engine,
+                "a",
+                Some("notes"),
+                Some(("notes", "From A Again")),
+            );
+            let (notices, _) = operate(&mut engine, "new", None, None);
+            assert_eq!(notices.len(), 1, "kind {n}: {notices:?}");
+            assert_eq!(listed_ids(&notices[0]), ["notes--from-a-again"]);
+        }
+    }
+
+    /// A caller that is behind the engine for a mem while storage is
+    /// further ahead still is told everything in one notice whose two
+    /// ends agree with its entries, and nothing of it a second time
+    /// when a later operation looks at that mem.
+    #[test]
+    fn a_notice_covers_what_storage_holds_and_nothing_is_told_twice() {
+        let (_tmp, root) = caller_fixture();
+        let mut engine = engine_from_workspace_root(&root).unwrap();
+        let mut sibling = engine_from_workspace_root(&root).unwrap();
+        let ctx = memstead_base::vcs::CommitContext::internal();
+        assert!(operate(&mut engine, "a", None, None).0.is_empty());
+        assert!(operate(&mut engine, "b", None, None).0.is_empty());
+
+        // The engine reloads the first outside write for A; a second one
+        // lands that no operation has looked at.
+        sibling
+            .create_entity_with_ctx(spec("notes", "W One"), &ctx)
+            .unwrap();
+        let (notices, _) = operate(&mut engine, "a", Some("notes"), None);
+        assert_eq!(listed_ids(&notices[0]), ["notes--w-one"]);
+        sibling
+            .create_entity_with_ctx(spec("notes", "W Two"), &ctx)
+            .unwrap();
+        let storage_head = {
+            let mut probe = engine_from_workspace_root(&root).unwrap();
+            probe.reload_one_mem_report("notes").unwrap().head_after
+        };
+
+        // B's operation is scoped to the other mem: it is behind the
+        // engine for `notes`, so it is told, and told all of it.
+        let (notices, codes) = operate(&mut engine, "b", Some("other"), None);
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(listed_ids(&notices[0]), ["notes--w-one", "notes--w-two"]);
+        assert_eq!(
+            notices[0].to_head, storage_head,
+            "the ends agree with the entries"
+        );
+        assert_eq!(codes.iter().filter(|c| *c == "MEM_RELOADED").count(), 1);
+        assert!(
+            operate(&mut engine, "b", None, None).0.is_empty(),
+            "not twice"
+        );
+
+        // A was told the first write already: only the second reaches it.
+        let (notices, _) = operate(&mut engine, "a", None, None);
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(listed_ids(&notices[0]), ["notes--w-two"]);
+
+        // The same with a write as the operation of the caller that is
+        // behind: one notice, not two.
+        sibling
+            .create_entity_with_ctx(spec("notes", "W Three"), &ctx)
+            .unwrap();
+        operate(&mut engine, "a", Some("notes"), None);
+        sibling
+            .create_entity_with_ctx(spec("notes", "W Four"), &ctx)
+            .unwrap();
+        let (notices, _) = operate(&mut engine, "b", Some("other"), Some(("other", "By B")));
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(listed_ids(&notices[0]), ["notes--w-four", "notes--w-three"]);
+        assert!(operate(&mut engine, "b", None, None).0.is_empty());
+    }
+
+    /// A caller that came while storage was ahead of the engine for a
+    /// mem gives its later operations no reason to look at that mem: an
+    /// operation scoped to another mem stays scoped, as it does for a
+    /// caller that was there before, and the change that lands later is
+    /// told to each caller once the mem is reloaded.
+    #[test]
+    fn a_caller_that_came_while_storage_was_ahead_makes_no_scoped_operation_look_further() {
+        // Closed list of the new caller's first and second operation:
+        // a read scoped to the other mem, nothing at all, an explicit
+        // reload of the other mem.
+        fn other_only(engine: &mut Engine, caller: &str, kind: usize) -> usize {
+            match kind {
+                0 => operate(engine, caller, Some("other"), None).0.len(),
+                1 => operate_without_the_reload_step(engine, caller, None).len(),
+                _ => operate_without_the_reload_step(engine, caller, Some(Some("other"))).len(),
+            }
+        }
+        for first in 0..3 {
+            for second in 0..3 {
+                let (_tmp, root) = caller_fixture();
+                let mut engine = engine_from_workspace_root(&root).unwrap();
+                let mut sibling = engine_from_workspace_root(&root).unwrap();
+                let ctx = memstead_base::vcs::CommitContext::internal();
+                assert!(operate(&mut engine, "k", None, None).0.is_empty());
+
+                sibling
+                    .create_entity_with_ctx(spec("notes", "E One"), &ctx)
+                    .unwrap();
+                assert_eq!(other_only(&mut engine, "n", first), 0);
+                sibling
+                    .create_entity_with_ctx(spec("notes", "E Two"), &ctx)
+                    .unwrap();
+
+                // Nobody has reloaded `notes`: neither the caller that
+                // was there before nor the new one is told by an
+                // operation that stays with the other mem.
+                assert_eq!(other_only(&mut engine, "k", second), 0, "{first}/{second}");
+                assert_eq!(other_only(&mut engine, "n", second), 0, "{first}/{second}");
+                assert_eq!(other_only(&mut engine, "k", second), 0, "{first}/{second}");
+
+                // Once an operation looks at `notes`, each is told what
+                // is news to it, once.
+                let (notices, _) = operate(&mut engine, "n", None, None);
+                assert_eq!(notices.len(), 1, "{first}/{second}: {notices:?}");
+                assert_eq!(listed_ids(&notices[0]), ["notes--e-two"]);
+                let (notices, _) = operate(&mut engine, "k", Some("other"), None);
+                assert_eq!(notices.len(), 1, "{first}/{second}: {notices:?}");
+                assert_eq!(listed_ids(&notices[0]), ["notes--e-one", "notes--e-two"]);
+                assert!(operate(&mut engine, "n", None, None).0.is_empty());
+                assert!(operate(&mut engine, "k", None, None).0.is_empty());
+            }
+        }
+    }
+
+    /// Seeded sequences over four callers, another process and every
+    /// kind of operation: whatever the order, a caller learns of each
+    /// entity someone else created after its first contact exactly
+    /// once (by a notice, or by the report of a reload it asked for),
+    /// and no notice ever lists its own write or an entity that was
+    /// there before it came. A reload's report describes what the
+    /// engine brought in, so it may list what landed before the caller
+    /// came; a notice may not.
+    #[test]
+    fn any_sequence_tells_each_caller_each_foreign_change_exactly_once() {
+        use std::collections::HashMap;
+        const CALLERS: [&str; 4] = ["", "a", "b", "c"];
+        for seed in 0u64..40 {
+            let (_tmp, root) = caller_fixture();
+            let mut engine = engine_from_workspace_root(&root).unwrap();
+            let mut sibling = engine_from_workspace_root(&root).unwrap();
+            let ctx = memstead_base::vcs::CommitContext::internal();
+            let mut state = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let mut next = |bound: u64| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                (state >> 33) % bound
+            };
+            // id -> (creator, step); caller -> first-contact step;
+            // (caller, id) -> times told.
+            let mut created: HashMap<String, (String, usize)> = HashMap::new();
+            let mut first_contact: HashMap<&str, usize> = HashMap::new();
+            let mut told: HashMap<(String, String), usize> = HashMap::new();
+            let mut reported: HashMap<(String, String), usize> = HashMap::new();
+            let mut trace: Vec<String> = Vec::new();
+            let mut serial = 0usize;
+
+            // The single caller of a surface has been there since boot.
+            let mut op = memstead_base::OperationScope::begin(&mut engine);
+            op.reload_if_stale(None);
+            assert!(op.finish().1.is_empty());
+            first_contact.insert("", 0);
+
+            let steps = 30usize;
+            for step in 1..=steps + CALLERS.len() {
+                // The last steps: every caller looks at everything.
+                let closing = step > steps;
+                let actor = if closing { 0 } else { next(5) };
+                if actor == 4 {
+                    serial += 1;
+                    let mem = if next(2) == 0 { "notes" } else { "other" };
+                    let title = format!("E{serial}");
+                    sibling
+                        .create_entity_with_ctx(spec(mem, &title), &ctx)
+                        .unwrap();
+                    created.insert(format!("{mem}--e{serial}"), ("outside".to_string(), step));
+                    trace.push(format!("{step}: outside writes {mem}--e{serial}"));
+                    continue;
+                }
+                let caller = if closing {
+                    CALLERS[step - steps - 1]
+                } else {
+                    CALLERS[next(4) as usize]
+                };
+                let kind = if closing { 0 } else { next(9) };
+                let mut op = memstead_base::OperationScope::begin_as(
+                    &mut engine,
+                    memstead_base::CallerKey::new(caller),
+                );
+                let mut seen_now: Vec<String> = Vec::new();
+                let mut in_report: Vec<String> = Vec::new();
+                let mut wrote: Option<String> = None;
+                match kind {
+                    0 => {
+                        op.reload_if_stale(None);
+                    }
+                    1 => {
+                        op.reload_if_stale(Some("notes"));
+                    }
+                    2 => {
+                        op.reload_if_stale(Some("other"));
+                    }
+                    3 | 4 => {
+                        let mem = if kind == 3 { "notes" } else { "other" };
+                        serial += 1;
+                        op.reload_if_stale(Some(mem));
+                        op.create_entity_with_ctx(spec(mem, &format!("E{serial}")), &ctx)
+                            .expect("the write lands");
+                        wrote = Some(format!("{mem}--e{serial}"));
+                    }
+                    5 | 6 => {
+                        let mem = if kind == 5 { "notes" } else { "other" };
+                        let report = op.reload_one_mem_report(mem).unwrap();
+                        in_report.extend(report.changed_entity_ids.iter().map(|id| id.to_string()));
+                    }
+                    7 => {
+                        for report in op.reload_each_writable_mem_reports().unwrap() {
+                            in_report
+                                .extend(report.changed_entity_ids.iter().map(|id| id.to_string()));
+                        }
+                    }
+                    _ => {}
+                }
+                let (_, notices) = op.finish();
+                let mut mems_told: Vec<&str> = notices.iter().map(|n| n.mem.as_str()).collect();
+                mems_told.sort_unstable();
+                let distinct = mems_told.len();
+                mems_told.dedup();
+                assert_eq!(
+                    distinct,
+                    mems_told.len(),
+                    "seed {seed}: one notice per mem: {trace:#?}"
+                );
+                for notice in &notices {
+                    seen_now.extend(listed_ids(notice));
+                }
+                trace.push(format!(
+                    "{step}: {caller:?} kind {kind} wrote {wrote:?} told {seen_now:?} report {in_report:?}"
+                ));
+                first_contact.entry(caller).or_insert(step);
+                if let Some(id) = wrote {
+                    created.insert(id, (caller.to_string(), step));
+                }
+                for id in seen_now {
+                    *told.entry((caller.to_string(), id)).or_default() += 1;
+                }
+                for id in in_report {
+                    *reported.entry((caller.to_string(), id)).or_default() += 1;
+                }
+            }
+
+            for caller in CALLERS {
+                let Some(&came) = first_contact.get(caller) else {
+                    continue;
+                };
+                for (id, (creator, at)) in &created {
+                    let key = (caller.to_string(), id.clone());
+                    let noticed = told.get(&key).copied().unwrap_or(0);
+                    let by_report = reported.get(&key).copied().unwrap_or(0);
+                    let context = format!(
+                        "seed {seed}: caller {caller:?} (came at {came}) and {id} (by {creator} at {at}): {trace:#?}"
+                    );
+                    if creator == caller || *at <= came {
+                        assert_eq!(noticed, 0, "no notice for it: {context}");
+                    } else {
+                        assert_eq!(noticed + by_report, 1, "learnt exactly once: {context}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The warning a named caller's operation returns is the text form
+    /// of its notice: it runs from the head that caller last saw, also
+    /// when the operation's own reload moved the engine by less, and
+    /// there is none where the reload is no news to the caller.
+    #[test]
+    fn the_reload_warning_of_a_named_caller_describes_its_own_notice() {
+        let (_tmp, root) = caller_fixture();
+        let mut engine = engine_from_workspace_root(&root).unwrap();
+        let mut sibling = engine_from_workspace_root(&root).unwrap();
+        let ctx = memstead_base::vcs::CommitContext::internal();
+        let reloads = |engine: &mut Engine, caller: &str| {
+            let mut op = memstead_base::OperationScope::begin_as(
+                engine,
+                memstead_base::CallerKey::new(caller),
+            );
+            let warnings: Vec<(String, String, usize)> = op
+                .reload_if_stale(None)
+                .into_iter()
+                .filter_map(|w| match w {
+                    memstead_base::ops::WarningHint::MemReloaded {
+                        old_head,
+                        new_head,
+                        entities_loaded,
+                        ..
+                    } => Some((old_head, new_head, entities_loaded)),
+                    _ => None,
+                })
+                .collect();
+            (warnings, op.finish().1)
+        };
+        assert!(reloads(&mut engine, "a").1.is_empty());
+        assert!(reloads(&mut engine, "c").1.is_empty());
+
+        // The engine reloads the first outside write for A; C's own
+        // operation then reloads the second.
+        sibling
+            .create_entity_with_ctx(spec("notes", "X One"), &ctx)
+            .unwrap();
+        let (warnings, notices) = reloads(&mut engine, "a");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].0, notices[0].from_head);
+        sibling
+            .create_entity_with_ctx(spec("notes", "X Two"), &ctx)
+            .unwrap();
+        let (warnings, notices) = reloads(&mut engine, "c");
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(listed_ids(&notices[0]), ["notes--x-one", "notes--x-two"]);
+        assert_eq!(
+            warnings,
+            [(notices[0].from_head.clone(), notices[0].to_head.clone(), 2)],
+            "the warning runs from the head C last saw and counts both"
+        );
+
+        // A caller that comes after a change gets no warning for the
+        // reload its first operation performs.
+        sibling
+            .create_entity_with_ctx(spec("notes", "X Three"), &ctx)
+            .unwrap();
+        let (warnings, notices) = reloads(&mut engine, "late");
+        assert!(notices.is_empty() && warnings.is_empty(), "{warnings:?}");
+
+        // The default caller in the same seat as C: where it shares the
+        // engine and is behind it, its warning runs from the head it
+        // last saw as well. (As the single caller of a surface it is
+        // never behind, and its warning is the reload's own.)
+        // (It has been known since the engine's first reload, so its
+        // first operation here brings it up to date.)
+        reloads(&mut engine, "");
+        sibling
+            .create_entity_with_ctx(spec("notes", "X Four"), &ctx)
+            .unwrap();
+        reloads(&mut engine, "a");
+        sibling
+            .create_entity_with_ctx(spec("notes", "X Five"), &ctx)
+            .unwrap();
+        let (warnings, notices) = reloads(&mut engine, "");
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(listed_ids(&notices[0]), ["notes--x-five", "notes--x-four"]);
+        assert_eq!(
+            warnings,
+            [(notices[0].from_head.clone(), notices[0].to_head.clone(), 2)]
+        );
+    }
+
+    /// What landed before a caller's first contact is never news to it,
+    /// also while the engine has not reloaded that change yet: the
+    /// caller starts from what storage holds, and the gap to the
+    /// engine's older head does not read as a move, neither backwards
+    /// before the engine catches up nor forwards when it does.
+    #[test]
+    fn a_change_the_engine_had_not_reloaded_at_a_first_contact_is_never_news_to_it() {
+        // Closed list of first operations that do not look at the
+        // changed mem: nothing at all, a read scoped to the other mem,
+        // an explicit reload of the other mem.
+        for kind in 0..3 {
+            let (_tmp, root) = caller_fixture();
+            let mut engine = engine_from_workspace_root(&root).unwrap();
+            let mut sibling = engine_from_workspace_root(&root).unwrap();
+            let ctx = memstead_base::vcs::CommitContext::internal();
+            assert!(operate(&mut engine, "a", None, None).0.is_empty());
+
+            sibling
+                .create_entity_with_ctx(spec("notes", "Before"), &ctx)
+                .unwrap();
+            let first = match kind {
+                0 => operate_without_the_reload_step(&mut engine, "new", None),
+                1 => operate(&mut engine, "new", Some("other"), None).0,
+                _ => operate_without_the_reload_step(&mut engine, "new", Some(Some("other"))),
+            };
+            assert!(first.is_empty(), "kind {kind}: {first:?}");
+
+            // While the engine still holds the older head: no notice
+            // backwards.
+            let notices = operate_without_the_reload_step(&mut engine, "new", None);
+            assert!(notices.is_empty(), "kind {kind}: {notices:?}");
+            let (notices, _) = operate(&mut engine, "new", Some("other"), None);
+            assert!(notices.is_empty(), "kind {kind}: {notices:?}");
+
+            // The engine catches up: news to the caller that was there
+            // before, not to the one that came after the change.
+            let (notices, codes) = operate(&mut engine, "new", None, None);
+            assert!(notices.is_empty(), "kind {kind}: {notices:?}");
+            assert!(!codes.iter().any(|c| c == "MEM_RELOADED"), "{codes:?}");
+            let (notices, _) = operate(&mut engine, "a", None, None);
+            assert_eq!(notices.len(), 1, "kind {kind}: {notices:?}");
+            assert_eq!(listed_ids(&notices[0]), ["notes--before"]);
+
+            // From then on the new caller is told like anyone else.
+            sibling
+                .create_entity_with_ctx(spec("notes", "After"), &ctx)
+                .unwrap();
+            let (notices, _) = operate(&mut engine, "new", None, None);
+            assert_eq!(notices.len(), 1, "kind {kind}: {notices:?}");
+            assert_eq!(listed_ids(&notices[0]), ["notes--after"]);
+        }
+    }
+
+    /// A caller's first contact hands out nothing, whatever its first
+    /// operation is and whatever landed before it came: also when
+    /// another process wrote in between and the first operation is a
+    /// write to another mem, which reloads mem by mem. What landed
+    /// before the caller came never reaches it later either. The same
+    /// holds for a caller the cap had forgotten.
+    #[test]
+    fn a_first_contact_is_silent_whatever_landed_before_it() {
+        let (_tmp, root) = caller_fixture();
+        let mut engine = engine_from_workspace_root(&root).unwrap();
+        let mut sibling = engine_from_workspace_root(&root).unwrap();
+        let outside = |sibling: &mut Engine, title: &str| {
+            sibling
+                .create_entity_with_ctx(
+                    spec("notes", title),
+                    &memstead_base::vcs::CommitContext::internal(),
+                )
+                .unwrap();
+        };
+
+        // First operations of a never-seen caller, each after an outside
+        // write the engine has not reloaded yet. Closed list: a write to
+        // the other mem, a write to the same mem, a read scoped to the
+        // other mem, an unscoped read.
+        type First = (
+            &'static str,
+            Option<&'static str>,
+            Option<(&'static str, &'static str)>,
+        );
+        let firsts: [First; 4] = [
+            (
+                "new-write-other",
+                Some("other"),
+                Some(("other", "By New One")),
+            ),
+            (
+                "new-write-same",
+                Some("notes"),
+                Some(("notes", "By New Two")),
+            ),
+            ("new-read-other", Some("other"), None),
+            ("new-read-all", None, None),
+        ];
+        for (n, (caller, scope, create)) in firsts.into_iter().enumerate() {
+            outside(&mut sibling, &format!("Before {n}"));
+            let (notices, _) = operate(&mut engine, caller, scope, create);
+            assert!(
+                notices.is_empty(),
+                "{caller}: first contact told {notices:?}"
+            );
+            // Nor later: operations that touch every mem bring no notice
+            // for what landed before the caller came.
+            let (notices, _) = operate(&mut engine, caller, None, None);
+            assert!(notices.is_empty(), "{caller}: told later {notices:?}");
+            let (notices, _) = operate(&mut engine, caller, Some("notes"), None);
+            assert!(notices.is_empty(), "{caller}: told later {notices:?}");
+        }
+
+        // From then on each is told like anyone else: about what landed
+        // after its own first contact, and nothing from before it.
+        outside(&mut sibling, "After All");
+        let (notices, _) = operate(&mut engine, "new-read-all", None, None);
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(listed_ids(&notices[0]), ["notes--after-all"]);
+        let (notices, _) = operate(&mut engine, "new-write-other", None, None);
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(
+            listed_ids(&notices[0]),
+            [
+                "notes--after-all",
+                "notes--before-1",
+                "notes--before-2",
+                "notes--before-3",
+                "notes--by-new-two"
+            ],
+            "everything since its first contact, and not the write that preceded it"
+        );
+
+        // A caller the cap forgot returns with a write to the other mem
+        // after an outside write: a first contact again.
+        assert!(operate(&mut engine, "early", None, None).0.is_empty());
+        for n in 0..memstead_base::MAX_TRACKED_CALLERS {
+            operate(&mut engine, &format!("crowd-{n}"), Some("other"), None);
+        }
+        outside(&mut sibling, "While Forgotten");
+        let (notices, _) = operate(
+            &mut engine,
+            "early",
+            Some("other"),
+            Some(("other", "Early Returns")),
+        );
+        assert!(
+            notices.is_empty(),
+            "a forgotten caller's return told {notices:?}"
+        );
+        let (notices, _) = operate(&mut engine, "early", None, None);
+        assert!(notices.is_empty(), "and nothing stale later: {notices:?}");
+    }
 }

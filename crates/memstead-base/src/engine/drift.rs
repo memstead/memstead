@@ -125,6 +125,10 @@ impl Engine {
         mem: Option<&str>,
     ) -> Vec<crate::ops::WarningHint> {
         let mut warnings = Vec::new();
+        // A single-caller surface has been there since boot: it is known
+        // with the heads as they stand before this reload, so what the
+        // reload brings in is news to it.
+        self.know_default_caller();
         // Phase 0 — the lazy-mount first-read trigger. Every operation
         // funnels through this check, so a deferred mem the operation's
         // scope touches loads here, before the staleness probes — a
@@ -218,14 +222,11 @@ impl Engine {
                             {
                                 state.last_known_head = Some(new.clone());
                             }
-                            // Build the structured notice now — the
-                            // backend's current head equals `new` and no
-                            // follow-on write in this operation has
-                            // committed yet, so the `old → new` delta
-                            // describes only the sibling's change. Stashed
-                            // for the response layer to drain.
-                            let notice = self.mem_changed_notice(&name, &old, &new);
-                            self.pending_mem_changed.push(notice);
+                            // The structured notice is built once the
+                            // reload is through, per caller
+                            // (`note_changes_for_caller`): the delta from
+                            // the head that caller last saw, which for a
+                            // single-caller surface is `old → new`.
                             // Emit the same change on the mem-change
                             // event channel: subscribers (SSE forwarders
                             // foremost) previously saw only this engine's
@@ -271,22 +272,11 @@ impl Engine {
                         if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == name) {
                             state.last_known_head = Some(new.clone());
                         }
-                        let changes: Vec<crate::ops::ChangeEnvelope> = report
-                            .added
-                            .iter()
-                            .map(|id| crate::ops::ChangeEnvelope::Added {
-                                id: id.clone(),
-                                title: None,
-                                entity_type: None,
-                            })
-                            .collect();
-                        let notice = crate::ops::MemChangedNotice::from_delta(
-                            name.clone(),
-                            String::new(),
-                            new.clone(),
-                            changes,
-                        );
-                        self.pending_mem_changed.push(notice);
+                        // The notice for a head that appeared where
+                        // none was is built per caller once the reload is
+                        // through (`note_changes_for_caller`).
+                        self.appeared_heads
+                            .insert(name.clone(), report.added.clone());
                         self.emit_mem_changed(&crate::engine::events::MemChangedEvent {
                             mem: name.clone(),
                             head: new.clone(),
@@ -357,6 +347,64 @@ impl Engine {
             }
             warnings.push(warning);
         }
+        // The reload is through and nothing of this operation is written
+        // yet: tell the caller what moved since it last looked.
+        let told = self.note_changes_for_caller();
+        if self.callers.catching_up {
+            // A reload on behalf of a notice in the making: the step
+            // that asked for it reads what this reload recorded.
+            return warnings;
+        }
+        if self.current_caller_is_default() {
+            // The default caller. Where it is the single caller of a
+            // surface, a mem this call reloaded has its warning already
+            // and that warning runs between the very heads its notice
+            // names: it stays as it is. Where the default caller shares
+            // the engine and was behind it, its notice runs from an
+            // older head than the reload's warning: the warning built
+            // from the notice takes its place. A mem that moved without
+            // a reload in this call gets its warning here.
+            for told in told {
+                let crate::ops::WarningHint::MemReloaded {
+                    mem: told_mem,
+                    old_head: told_from,
+                    new_head: told_to,
+                    ..
+                } = &told
+                else {
+                    continue;
+                };
+                let same_delta = warnings.iter().any(|w| {
+                    matches!(
+                        w,
+                        crate::ops::WarningHint::MemReloaded { mem, old_head, new_head, .. }
+                            if mem == told_mem && old_head == told_from && new_head == told_to
+                    )
+                });
+                if same_delta {
+                    continue;
+                }
+                let told_mem = told_mem.clone();
+                warnings.retain(|w| {
+                    !matches!(
+                        w,
+                        crate::ops::WarningHint::MemReloaded { mem, .. } if *mem == told_mem
+                    )
+                });
+                warnings.push(told);
+            }
+        } else {
+            // A named caller: the warning is the text form of its
+            // notice and nothing else. What this call's reload moved in
+            // the engine may be more or less than what is news to this
+            // caller (it may have been behind the engine already, or
+            // have come after the change), so the warnings of the
+            // reload give way to the ones built from its notices, which
+            // run from the head it last saw.
+            warnings.retain(|w| !matches!(w, crate::ops::WarningHint::MemReloaded { .. }));
+            warnings.extend(told);
+        }
+        self.appeared_heads.clear();
         warnings
     }
 
@@ -377,7 +425,13 @@ impl Engine {
         match self.reload_one_mem(mem) {
             Ok(_) => {
                 if let Some(state) = self.mounts.get_mut(mount_idx) {
-                    state.last_known_head = Some(new_head.to_string());
+                    let before = state
+                        .last_known_head
+                        .replace(new_head.to_string())
+                        .unwrap_or_default();
+                    // The caller moved the branch itself (a pull, a
+                    // reset): it has seen where it now points.
+                    self.caller_saw_own_write(mem, &before, new_head);
                 }
                 Ok(())
             }
@@ -458,6 +512,8 @@ impl Engine {
         if let Some(state) = self.mounts.get_mut(mount_idx) {
             state.last_known_head = Some(recorded.clone());
         }
+        // The write is the current caller's own: it has seen this head.
+        self.caller_saw_own_write(&mem, &previous, &recorded);
         // Skip emit when no SHA actually advanced — folder backends
         // (and archive backends) carry `last_known_head: None` and
         // pass `write_id = ""` in some paths; the early-return at
@@ -2417,21 +2473,38 @@ pub struct OperationScope<G: EngineHandle> {
 impl<G: EngineHandle> OperationScope<G> {
     /// Open the scope: whatever notices an unscoped caller left on the
     /// engine are discarded first, so this operation starts clean.
-    pub fn begin(mut handle: G) -> Self {
-        handle.engine_mut().pending_mem_changed.clear();
+    pub fn begin(handle: G) -> Self {
+        Self::begin_as(handle, crate::engine::callers::CallerKey::default())
+    }
+
+    /// Open the scope for a named caller. The notices this operation
+    /// hands out describe what moved in each mem since that caller last
+    /// saw it, including what another caller wrote through this same
+    /// engine ([`crate::engine::callers`]). A surface with one caller
+    /// uses [`Self::begin`].
+    pub fn begin_as(mut handle: G, caller: crate::engine::callers::CallerKey) -> Self {
+        let engine = handle.engine_mut();
+        engine.pending_mem_changed.clear();
+        engine.set_current_caller(caller);
         Self {
             inner: Some(handle),
         }
     }
 
     /// Close the scope: the engine handle comes back together with the
-    /// notices this operation's reloads recorded, in order.
+    /// notices this operation recorded for its caller, in order. A
+    /// dropped scope hands out nothing; what its caller was not told by
+    /// a reload of that operation, it is told on a later one.
     pub fn finish(mut self) -> (G, Vec<crate::ops::MemChangedNotice>) {
         let mut handle = self
             .inner
             .take()
             .expect("an operation scope is finished at most once");
+        // An operation that reloaded nothing still tells its caller
+        // what other callers wrote through this engine.
+        handle.engine_mut().bring_caller_up_to_date();
         let notices = std::mem::take(&mut handle.engine_mut().pending_mem_changed);
+        handle.engine_mut().close_caller_scope();
         (handle, notices)
     }
 }
@@ -2459,6 +2532,7 @@ impl<G: EngineHandle> Drop for OperationScope<G> {
     fn drop(&mut self) {
         if let Some(handle) = self.inner.as_mut() {
             handle.engine_mut().pending_mem_changed.clear();
+            handle.engine_mut().close_caller_scope();
         }
     }
 }

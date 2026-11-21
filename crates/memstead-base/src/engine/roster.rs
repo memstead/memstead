@@ -386,6 +386,7 @@ impl Engine {
             self.quarantined.retain(|q| q.mount.mem != mem);
         }
         self.pending_mem_changed.retain(|n| n.mem != mem);
+        self.callers.forget_mem(mem);
         self.labelling_memo = std::cell::OnceCell::new();
         self.recently_unmounted.insert(mem.to_string());
         Ok(())

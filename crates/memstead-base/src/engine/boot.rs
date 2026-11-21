@@ -653,6 +653,10 @@ impl Engine {
                 crate::engine::events::SubscriberRegistry::new(),
             )),
             pending_mem_changed: Vec::new(),
+            callers: Default::default(),
+            caller_synced: false,
+            caller_first_contact: false,
+            appeared_heads: Default::default(),
             completed_commits: completed_at_boot
                 .into_iter()
                 .map(|(_, warning)| warning)

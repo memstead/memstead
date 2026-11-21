@@ -27,7 +27,7 @@ impl McpServer {
         let id = EntityId::canonical(&p.id);
 
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         // Cross-mem forms take the FULL lazy-mount load before answering:
         // `include_relations` renders INCOMING edges, which can originate
         // in any mem, and `include_context` computes the workspace-global
@@ -360,7 +360,7 @@ impl McpServer {
         let offset = scope.offset.unwrap_or(0);
 
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         // Graph-walking forms cross mem boundaries — `related_to` is a
         // BFS over the whole graph and `expand_via` follows edges
         // wherever they lead — so they take the full lazy-mount load
@@ -431,7 +431,7 @@ impl McpServer {
         p: OverviewParams,
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         // Overview's community detection is workspace-global BY CONTRACT
         // (a `mem` filter only scopes which clusters are reported, never
         // the partition), so even a mem-scoped overview takes the full
@@ -510,7 +510,7 @@ impl McpServer {
         // `SCHEMA_NOT_FOUND`, `details.available` naming the schemas
         // the workspace resolves.
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         let drift_warnings = engine.reload_if_stale(None);
         let (engine, mem_changed_notices) = engine.finish();
 
@@ -730,7 +730,7 @@ impl McpServer {
         p: HealthParams,
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         // Health always takes the FULL lazy-mount load, mirroring
         // overview: a `mem` filter scopes what is REPORTED, but the
         // answer's cross-mem components — dangling-link adjudication
@@ -824,7 +824,7 @@ impl McpServer {
         // `include_notes: false` contract.
         let include_notes = p.include_notes;
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         let drift_warnings = engine.reload_if_stale(Some(&p.mem));
         let (engine, mem_changed_notices) = engine.finish();
         let mem_for_anchor = p.mem.clone();
@@ -876,7 +876,7 @@ impl McpServer {
     )]
     pub(super) fn memstead_diff(&self, Parameters(p): Parameters<DiffParams>) -> CallToolResult {
         let unified = self.unified_engine();
-        let engine = crate::lock_engine!(unified);
+        let engine = crate::lock_engine!(unified, self);
         let config = memstead_base::ops::DiffConfig {
             rename_similarity: p
                 .rename_similarity
@@ -904,7 +904,7 @@ impl McpServer {
         Parameters(p): Parameters<ProposalBriefParams>,
     ) -> CallToolResult {
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         // The brief reloads both sides itself and writes nothing; the
         // markdown rides the text channel for a human, the JSON (with
         // the disposition skeleton) rides `structured_content`.

@@ -68,6 +68,7 @@ pub use anchor::{
     resolve_anchor,
 };
 pub use backend::{BackendError, MemBackend};
+pub use engine::callers::{CallerKey, MAX_TRACKED_CALLERS};
 pub use engine::drift::{EngineHandle, OperationScope};
 pub use engine::{
     BackendFactory, BootError, CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs,

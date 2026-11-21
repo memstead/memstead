@@ -24,18 +24,25 @@ pub mod read_mems;
 pub mod server;
 
 /// Acquire an engine mutex on a tool dispatch path and open the
-/// operation scope over it: the guard comes back wrapped in a
-/// `memstead_base::OperationScope`, which derefs to the engine and is
-/// the only channel for the reload notices (`finish` hands them out
-/// with the guard; a dropped scope discards them). A poisoned lock
+/// operation scope over it for the server's caller: the guard comes
+/// back wrapped in a [`server::ToolScope`], which derefs to the engine
+/// and is the channel for the change notices (`finish` hands them out
+/// with the guard; a scope dropped without it leaves them for the
+/// dispatch to add to the response). The
+/// notices are relative to the caller of `$server`, and the client the
+/// engine records for writes it stamps itself is that instance's, so
+/// several server instances over one engine are each told what the
+/// others wrote and never write under another's client. A poisoned lock
 /// (a prior tool call panicked) early-returns the typed
 /// `ENGINE_LOCK_POISONED` envelope instead of panicking the server —
 /// usable only inside functions returning `CallToolResult`.
 #[macro_export]
 macro_rules! lock_engine {
-    ($mutex:expr) => {
+    ($mutex:expr, $server:expr) => {
         match $mutex.lock() {
-            Ok(guard) => ::memstead_base::OperationScope::begin(guard),
+            // What belongs to this instance's caller is set for this
+            // operation: several instances may share the engine.
+            Ok(guard) => $server.open_operation(guard),
             Err(_) => return $crate::error_envelopes::engine_lock_poisoned(),
         }
     };

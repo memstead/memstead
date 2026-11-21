@@ -105,6 +105,38 @@ pub struct McpServer {
     // instead. `OnceLock` encodes write-once + lock-free reads; a second
     // `initialize` hits `set` → `Err` and the override logs the breach.
     client: Arc<OnceLock<ClientId>>,
+    /// Who this server instance serves, as far as change notices go.
+    /// The default key for the one caller of a stdio server; a program
+    /// that serves several callers over one engine gives each instance
+    /// its own ([`Self::for_caller`]), and each is then told what the
+    /// others wrote.
+    caller: memstead_base::CallerKey,
+    /// Whether further instances share this instance's engine
+    /// ([`Self::for_caller`]); set on every instance of the family.
+    shared: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// What one tool call leaves for the dispatch: the notices its
+/// operations recorded, and whether it opened an operation at all. It
+/// belongs to the call, not to the instance: two calls of one caller
+/// may overlap, and neither may take or clear what the other left.
+#[derive(Default)]
+struct CallState {
+    notices: Vec<memstead_base::ops::MemChangedNotice>,
+    operated: bool,
+}
+
+tokio::task_local! {
+    /// The state of the tool call this task is running
+    /// ([`McpServer::call_tool`] sets it for the call's duration).
+    static CALL: std::cell::RefCell<CallState>;
+}
+
+/// Leave notices with the tool call in progress, when there is one (a
+/// tool method called outside the dispatch has none, and the notices
+/// its scope handed out are all there is).
+fn leave_with_call(notices: impl IntoIterator<Item = memstead_base::ops::MemChangedNotice>) {
+    let _ = CALL.try_with(|call| call.borrow_mut().notices.extend(notices));
 }
 
 impl McpServer {
@@ -175,7 +207,131 @@ impl McpServer {
             mutations: Arc::new(mutations),
             plugin: Arc::new(plugin),
             operator_mode: false,
+            caller: memstead_base::CallerKey::default(),
+            shared: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// A further server instance over the engine this one serves, for
+    /// another caller. It shares the engine, the tool filter, the
+    /// token budget and the workspace configuration, and nothing that
+    /// belongs to a caller: it has its own client id, no default role
+    /// or identity and no pinned identity until set on it, and its
+    /// change notices are relative to `caller`. The tool list and every
+    /// tool's parameters are those of this instance.
+    pub fn for_caller(&self, caller: memstead_base::CallerKey) -> Self {
+        self.shared
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        Self {
+            unified_engine: Arc::clone(&self.unified_engine),
+            token_budget: self.token_budget,
+            default_role: memstead_base::vcs::Role::Unspecified,
+            default_identity: None,
+            pin_identity: false,
+            disabled_tools: Arc::clone(&self.disabled_tools),
+            config_source: self.config_source.clone(),
+            client: Arc::new(OnceLock::new()),
+            mutations: Arc::clone(&self.mutations),
+            plugin: Arc::clone(&self.plugin),
+            operator_mode: self.operator_mode,
+            caller,
+            shared: Arc::clone(&self.shared),
+        }
+    }
+
+    /// The caller this instance serves ([`Self::for_caller`]).
+    pub(crate) fn caller_key(&self) -> memstead_base::CallerKey {
+        self.caller.clone()
+    }
+
+    /// Set on the engine, for the operation about to run, what belongs
+    /// to this instance's caller: the client the engine records for the
+    /// writes it stamps itself (mem configuration, the schema pin, the
+    /// version stamp beside an entity write). The handshake sets it once
+    /// on the engine, which is right while one instance serves the
+    /// engine; with several, the last handshake would speak for all. An
+    /// instance that has not shaken hands records no client rather than
+    /// another's, once the engine is shared. The instance a stdio server
+    /// is built with, while it is the only one, leaves the engine as its
+    /// handshake set it.
+    pub(crate) fn bind_engine_to_caller(&self, engine: &mut memstead_base::Engine) {
+        match self.client.get() {
+            Some(client) => {
+                engine.set_actor(Actor::Agent);
+                engine.set_client(Some(client.clone()));
+            }
+            None if !self.caller.is_default()
+                || self.shared.load(std::sync::atomic::Ordering::Relaxed) =>
+            {
+                engine.set_client(None)
+            }
+            None => {}
+        }
+    }
+
+    /// Open an operation of this instance's caller over the locked
+    /// engine ([`crate::lock_engine`]).
+    pub(crate) fn open_operation<'a>(
+        &self,
+        mut guard: std::sync::MutexGuard<'a, memstead_base::Engine>,
+    ) -> ToolScope<'a> {
+        self.bind_engine_to_caller(&mut guard);
+        let _ = CALL.try_with(|call| call.borrow_mut().operated = true);
+        ToolScope {
+            scope: Some(memstead_base::OperationScope::begin_as(
+                guard,
+                self.caller_key(),
+            )),
+        }
+    }
+
+    /// Add to a tool's response the notices its operation recorded when
+    /// the tool did not put them there itself (it returned early, took
+    /// a later error path, or builds its response without them): the
+    /// structured notice under `mem_changed`, and on the text channel
+    /// either the same key, when the text is the JSON body, or the
+    /// `MEM_RELOADED` admonition. A response that carries its notice
+    /// already, and one with no notice to carry, comes back as it was.
+    /// Runs inside the call's state ([`CALL`]).
+    fn deliver_left_over(&self, res: CallToolResult) -> CallToolResult {
+        // A call its tool refused before it reached the engine is the
+        // caller's operation all the same: open and close one, so what
+        // other callers wrote through this engine reaches this response.
+        // A call whose parameters did not parse never reached its tool:
+        // its response has no structured channel to carry a notice, so
+        // the notice waits for the caller's next call.
+        let operated = CALL.try_with(|call| call.borrow().operated).unwrap_or(true);
+        if !operated
+            && res.structured_content.is_some()
+            && let Ok(guard) = self.unified_engine().lock()
+        {
+            drop(self.open_operation(guard));
+        }
+        let notices = CALL
+            .try_with(|call| std::mem::take(&mut call.borrow_mut().notices))
+            .unwrap_or_default();
+        if notices.is_empty() {
+            return res;
+        }
+        let carried = res
+            .structured_content
+            .as_ref()
+            .is_some_and(|sc| sc.get("mem_changed").is_some());
+        if carried {
+            return res;
+        }
+        responses::attach_left_over_notices(res, notices)
+    }
+
+    /// Run one tool method as the dispatch runs a tool call: with a
+    /// call state of its own, and with the notices the tool left out
+    /// added to its response.
+    #[cfg(test)]
+    pub(crate) fn dispatched(&self, tool: impl FnOnce(&Self) -> CallToolResult) -> CallToolResult {
+        CALL.sync_scope(std::cell::RefCell::new(CallState::default()), || {
+            let res = tool(self);
+            self.deliver_left_over(res)
+        })
     }
 
     /// Builder-style setter for the operator-mode posture. Returns
@@ -574,7 +730,19 @@ impl ServerHandler for McpServer {
             return Ok(resp.into());
         }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-        let result = Self::tool_router().call(tcc).await;
+        // The call has a state of its own for its whole duration: what
+        // its operations leave for the response stays with this call,
+        // whatever other calls of the same caller run meanwhile.
+        let result = CALL
+            .scope(std::cell::RefCell::new(CallState::default()), async {
+                match Self::tool_router().call(tcc).await {
+                    Ok(rmcp::model::CallToolResponse::Complete(r)) => Ok(
+                        rmcp::model::CallToolResponse::Complete(self.deliver_left_over(r)),
+                    ),
+                    other => other,
+                }
+            })
+            .await;
         if let Ok(rmcp::model::CallToolResponse::Complete(r)) = &result {
             self.record_friction(&verb, r);
         }
@@ -615,6 +783,63 @@ impl McpServer {
                 code,
                 memstead_base::friction::closed_reason(code, details),
             );
+        }
+    }
+}
+
+/// One tool call's operation over the locked engine. It derefs to the
+/// engine; [`Self::finish`] hands the engine back with the notices the
+/// operation recorded for its caller. Finished or dropped, the notices
+/// are also left with the tool call in progress, and the dispatch adds
+/// them to the response when the tool did not (an early return, a later
+/// error path, a response built without them), so no path of a tool
+/// loses a notice.
+pub struct ToolScope<'a> {
+    scope: Option<memstead_base::OperationScope<std::sync::MutexGuard<'a, memstead_base::Engine>>>,
+}
+
+impl<'a> ToolScope<'a> {
+    pub fn finish(
+        mut self,
+    ) -> (
+        std::sync::MutexGuard<'a, memstead_base::Engine>,
+        Vec<memstead_base::ops::MemChangedNotice>,
+    ) {
+        let (engine, notices) = self
+            .scope
+            .take()
+            .expect("a tool scope is finished at most once")
+            .finish();
+        // The tool means to put them into its response; the dispatch
+        // checks that the response it returns carries them, whichever
+        // path the tool takes from here.
+        leave_with_call(notices.iter().cloned());
+        (engine, notices)
+    }
+}
+
+impl std::ops::Deref for ToolScope<'_> {
+    type Target = memstead_base::Engine;
+    fn deref(&self) -> &memstead_base::Engine {
+        self.scope
+            .as_ref()
+            .expect("a tool scope holds its engine until finished")
+    }
+}
+
+impl std::ops::DerefMut for ToolScope<'_> {
+    fn deref_mut(&mut self) -> &mut memstead_base::Engine {
+        self.scope
+            .as_mut()
+            .expect("a tool scope holds its engine until finished")
+    }
+}
+
+impl Drop for ToolScope<'_> {
+    fn drop(&mut self) {
+        if let Some(scope) = self.scope.take() {
+            let (_engine, notices) = scope.finish();
+            leave_with_call(notices);
         }
     }
 }

@@ -344,7 +344,12 @@ impl Engine {
         // Refresh the head cursor so the next drift probe does not surface
         // MEM_RELOADED for the commit this call just produced.
         if let Some(sha) = mounted.backend.current_head().ok().flatten() {
-            mounted.last_known_head = Some(sha);
+            let before = mounted
+                .last_known_head
+                .replace(sha.clone())
+                .unwrap_or_default();
+            // The config write is the current caller's own.
+            self.caller_saw_own_write(mem_name, &before, &sha);
         }
         Ok((parsed, intervened))
     }

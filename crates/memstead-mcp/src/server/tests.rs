@@ -14257,3 +14257,649 @@ mod an_empty_expected_hash_is_a_missing_one {
         assert_eq!(entity_hash(&server, id), before, "the entity is unchanged");
     }
 }
+
+/// Several server instances over one engine, one per caller: each is
+/// told what the others wrote, and nothing that belongs to a caller
+/// (client id, default identity, pinned identity) crosses over.
+mod callers_over_one_engine {
+    use super::*;
+    use memstead_base::CallerKey;
+    use memstead_base::vcs::ClientId;
+    use memstead_git_branch::test_support::init_real_mem_repo;
+    use memstead_git_branch::workspace_store::engine_from_workspace_root;
+
+    fn create_spec(server: &McpServer, title: &str, identity: Option<&str>) -> CallToolResult {
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("identity".to_string(), "identity body".to_string());
+        sections.insert("purpose".to_string(), "purpose body".to_string());
+        server.memstead_create(Parameters(CreateParams {
+            anchors: None,
+            title: title.to_string(),
+            entity_type: "spec".to_string(),
+            mem: Some("specs".to_string()),
+            sections: Some(sections),
+            metadata: None,
+            relations: None,
+            dry_run: None,
+            note: None,
+            role: None,
+            identity: identity.map(str::to_string),
+        }))
+    }
+
+    fn read_entity(server: &McpServer, id: &str, provenance: bool) -> CallToolResult {
+        server.memstead_entity(Parameters(EntityParams {
+            id: id.to_string(),
+            include_relations: None,
+            include_context: None,
+            sections: None,
+            token_budget: None,
+            chunk: None,
+            include_provenance: provenance.then_some(true),
+        }))
+    }
+
+    fn mem_changed(res: &CallToolResult) -> Option<serde_json::Value> {
+        res.structured_content
+            .as_ref()
+            .and_then(|sc| sc.get("mem_changed").cloned())
+    }
+
+    fn ok(res: &CallToolResult) -> bool {
+        !res.is_error.unwrap_or(false)
+    }
+
+    fn fixture() -> (TempDir, McpServer) {
+        let tmp = TempDir::new().unwrap();
+        init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+        let engine = engine_from_workspace_root(tmp.path()).expect("the engine boots");
+        let server = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
+        assert!(ok(&create_spec(&server, "Seed", None)));
+        (tmp, server)
+    }
+
+    #[test]
+    fn each_instance_is_told_once_what_the_other_wrote() {
+        let (_tmp, base) = fixture();
+        let a = base.for_caller(CallerKey::new("a"));
+        let b = base.for_caller(CallerKey::new("b"));
+
+        // First contact of each: nothing to tell.
+        for server in [&a, &b] {
+            let r = read_entity(server, "specs--seed", false);
+            assert!(ok(&r), "{}", extract_text(&r));
+            assert!(mem_changed(&r).is_none());
+        }
+
+        // A writes: its own response carries no notice.
+        let r = create_spec(&a, "From A", None);
+        assert!(ok(&r), "{}", extract_text(&r));
+        assert!(
+            mem_changed(&r).is_none(),
+            "a writer is not told about its own write"
+        );
+
+        // B's next operation, a read of something else, carries it on
+        // both channels.
+        let r = read_entity(&b, "specs--seed", false);
+        assert!(ok(&r), "{}", extract_text(&r));
+        let notices = mem_changed(&r).expect("B is told");
+        let notices = notices.as_array().unwrap();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0]["mem"], "specs");
+        let ids: Vec<&str> = notices[0]["changes"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|e| e["id"].as_str())
+            .collect();
+        assert_eq!(ids, ["specs--from-a"]);
+        assert!(
+            extract_text(&r).contains("Engine snapshot reloaded"),
+            "the text channel says the mem moved: {}",
+            extract_text(&r)
+        );
+
+        // Once: neither B's next read nor A's carries it again.
+        assert!(mem_changed(&read_entity(&b, "specs--seed", false)).is_none());
+        assert!(mem_changed(&read_entity(&a, "specs--seed", false)).is_none());
+
+        // The other direction, through a write of B's that A is told on
+        // its own next write.
+        assert!(ok(&create_spec(&b, "From B", None)));
+        let r = create_spec(&a, "Second From A", None);
+        assert!(ok(&r), "{}", extract_text(&r));
+        let notices = mem_changed(&r).expect("A is told on its next operation, a write");
+        let text = notices.to_string();
+        assert!(text.contains("specs--from-b"), "{text}");
+        assert!(
+            !text.contains("specs--second-from-a"),
+            "and not about the write it is making: {text}"
+        );
+    }
+
+    /// B's next operation is a tool that does not hand out notices
+    /// itself (it reloads nothing, returns early, builds its response
+    /// without them, or takes them and then leaves by an error path).
+    /// Through the dispatch its response carries the notice all the
+    /// same, and B's operation after it carries none. Closed list:
+    /// every tool that does not call `finish` on its success path, and
+    /// the error paths that follow a `finish`.
+    #[test]
+    fn a_tool_that_hands_out_no_notice_itself_still_carries_it() {
+        let tmp = TempDir::new().unwrap();
+        init_real_mem_repo(
+            tmp.path(),
+            &[("specs", "default@1.0.0"), ("scratch", "default@1.0.0")],
+        );
+        let engine = engine_from_workspace_root(tmp.path()).expect("the engine boots");
+        let base = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
+        assert!(ok(&create_spec(&base, "Seed", None)));
+        let a = base.for_caller(CallerKey::new("a"));
+        let b = base.for_caller(CallerKey::new("b"));
+        for server in [&a, &b] {
+            assert!(mem_changed(&read_entity(server, "specs--seed", false)).is_none());
+        }
+        fn params<T: serde::de::DeserializeOwned>(v: serde_json::Value) -> Parameters<T> {
+            Parameters(serde_json::from_value(v).expect("the parameters parse"))
+        }
+        type Tool = (&'static str, bool, fn(&McpServer) -> CallToolResult);
+        // (name, whether the structured channel carries the notice, call)
+        let tools: [Tool; 14] = [
+            // Calls a tool refuses on sight, before it reaches the
+            // engine.
+            ("check, verdict refused on sight", true, |s| {
+                s.memstead_check(params(serde_json::json!({
+                    "entity": "specs--seed", "verdict": "maybe"
+                })))
+            }),
+            ("mem_set_version, version refused on sight", true, |s| {
+                s.memstead_mem_set_version(params(serde_json::json!({
+                    "name": "specs", "version": "nope"
+                })))
+            }),
+            // Tools that take the notices and then leave by an error
+            // path that does not carry them.
+            ("health, unknown mem", true, |s| {
+                s.memstead_health(params(serde_json::json!({ "mem": "nope" })))
+            }),
+            ("health, chunk out of range", true, |s| {
+                s.memstead_health(params(serde_json::json!({ "chunk": 99 })))
+            }),
+            ("schema, pin with a bad version", true, |s| {
+                s.memstead_schema(params(serde_json::json!({ "name": "default@one" })))
+            }),
+            ("schema, empty pin", true, |s| {
+                s.memstead_schema(params(serde_json::json!({ "name": "@" })))
+            }),
+            ("check", true, |s| {
+                s.memstead_check(params(serde_json::json!({
+                    "entity": "specs--seed", "verdict": "ok"
+                })))
+            }),
+            ("diff", true, |s| {
+                s.memstead_diff(params(serde_json::json!({
+                    "mem": "specs", "ref_a": "refs/heads/specs", "ref_b": "refs/heads/specs"
+                })))
+            }),
+            ("proposal_brief, refused", true, |s| {
+                s.memstead_proposal_brief(params(serde_json::json!({ "fork": "specs" })))
+            }),
+            ("reload of the mem", true, |s| {
+                s.memstead_reload(params(serde_json::json!({ "mem": "specs" })))
+            }),
+            ("reload of every mem", true, |s| {
+                s.memstead_reload(params(serde_json::json!({})))
+            }),
+            ("overview", false, |s| {
+                s.memstead_overview(params(serde_json::json!({})))
+            }),
+            ("mem_create, refused", true, |s| {
+                s.memstead_mem_create(params(serde_json::json!({
+                    "name": "fresh", "location": ".", "schema": "not a pin"
+                })))
+            }),
+            ("mem_delete", true, |s| {
+                s.memstead_mem_delete(params(serde_json::json!({ "name": "scratch" })))
+            }),
+        ];
+        for (n, (name, structured, call)) in tools.into_iter().enumerate() {
+            let title = format!("From A {n}");
+            assert!(ok(&create_spec(&a, &title, None)), "{name}");
+            // As the dispatch runs a tool call.
+            let r = b.dispatched(call);
+            let text = extract_text(&r);
+            if structured {
+                let notices = mem_changed(&r)
+                    .unwrap_or_else(|| panic!("{name}: B is told on this operation: {text}"));
+                assert!(
+                    notices.to_string().contains(&format!("specs--from-a-{n}")),
+                    "{name}: {notices}"
+                );
+            }
+            assert!(
+                text.contains("MEM_RELOADED") || text.contains("mem_changed"),
+                "{name}: the text channel says so too: {text}"
+            );
+            assert!(
+                text.matches("Engine snapshot reloaded").count() <= 1,
+                "{name}: said once: {text}"
+            );
+            let r = b.dispatched(|s| read_entity(s, "specs--seed", false));
+            assert!(mem_changed(&r).is_none(), "{name}: told once");
+            assert!(!extract_text(&r).contains("MEM_RELOADED"), "{name}");
+        }
+    }
+
+    /// The same through the real dispatch: an instance served over a
+    /// transport, tools called with `tools/call`. A tool that hands out
+    /// no notice itself carries it; a call whose parameters do not
+    /// parse is not run and leaves the notice for the next call.
+    #[test]
+    fn the_dispatch_adds_the_notice_and_keeps_it_over_a_call_that_does_not_parse() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let (_tmp, base) = fixture();
+        let a = base.for_caller(CallerKey::new("a"));
+        let b = base.for_caller(CallerKey::new("b"));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let (client_io, server_io) = tokio::io::duplex(1 << 20);
+            let (server_read, server_write) = tokio::io::split(server_io);
+            tokio::spawn(async move {
+                let service = rmcp::ServiceExt::serve(b, (server_read, server_write))
+                    .await
+                    .expect("the instance serves");
+                let _ = service.waiting().await;
+            });
+            let (client_read, mut client_write) = tokio::io::split(client_io);
+            let mut lines = BufReader::new(client_read).lines();
+            let mut next_id = 0u64;
+            macro_rules! request {
+                ($method:expr, $params:expr) => {{
+                    next_id += 1;
+                    let message = serde_json::json!({
+                        "jsonrpc": "2.0", "id": next_id, "method": $method, "params": $params
+                    });
+                    client_write
+                        .write_all(format!("{message}\n").as_bytes())
+                        .await
+                        .unwrap();
+                    loop {
+                        let line = lines.next_line().await.unwrap().expect("a response");
+                        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+                        if value["id"] == next_id {
+                            break value["result"].clone();
+                        }
+                    }
+                }};
+            }
+            macro_rules! call {
+                ($name:expr, $arguments:expr) => {
+                    request!(
+                        "tools/call",
+                        serde_json::json!({ "name": $name, "arguments": $arguments })
+                    )
+                };
+            }
+            request!(
+                "initialize",
+                serde_json::json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": { "name": "client-of-b", "version": "1" }
+                })
+            );
+            client_write
+                .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+                .await
+                .unwrap();
+
+            // First contact of both.
+            assert!(mem_changed(&read_entity(&a, "specs--seed", false)).is_none());
+            let r = call!(
+                "memstead_entity",
+                serde_json::json!({ "id": "specs--seed" })
+            );
+            assert!(r["structuredContent"].get("mem_changed").is_none(), "{r}");
+
+            // A tool that hands out no notice itself.
+            assert!(ok(&create_spec(&a, "From A One", None)));
+            let r = call!(
+                "memstead_check",
+                serde_json::json!({ "entity": "specs--seed", "verdict": "ok" })
+            );
+            let told = r["structuredContent"]["mem_changed"].to_string();
+            assert!(told.contains("specs--from-a-one"), "{r}");
+
+            // A call whose parameters do not parse is not run: no
+            // notice on it, and the next call carries it in full.
+            assert!(ok(&create_spec(&a, "From A Two", None)));
+            let r = call!("memstead_entity", serde_json::json!({ "id": 5 }));
+            assert_eq!(r["isError"], true, "{r}");
+            assert!(!r.to_string().contains("MEM_RELOADED"), "{r}");
+            assert!(
+                r.get("structuredContent").is_none_or(|sc| sc.is_null()),
+                "{r}"
+            );
+            let r = call!(
+                "memstead_entity",
+                serde_json::json!({ "id": "specs--seed" })
+            );
+            let told = r["structuredContent"]["mem_changed"].to_string();
+            assert!(told.contains("specs--from-a-two"), "{r}");
+            assert!(!told.contains("specs--from-a-one"), "told once: {r}");
+
+            // A call a tool refuses on sight is the caller's operation.
+            assert!(ok(&create_spec(&a, "From A Three", None)));
+            let r = call!(
+                "memstead_check",
+                serde_json::json!({ "entity": "specs--seed", "verdict": "maybe" })
+            );
+            assert_eq!(r["isError"], true, "{r}");
+            let told = r["structuredContent"]["mem_changed"].to_string();
+            assert!(told.contains("specs--from-a-three"), "{r}");
+            let r = call!(
+                "memstead_entity",
+                serde_json::json!({ "id": "specs--seed" })
+            );
+            assert!(r["structuredContent"].get("mem_changed").is_none(), "{r}");
+        });
+    }
+
+    /// `memstead_overview` answers in markdown alone, so its
+    /// `MEM_RELOADED` line is all its caller gets: it runs from the head
+    /// that caller last saw, also when the overview's own reload moved
+    /// the engine by less.
+    #[test]
+    fn the_overview_warning_runs_from_the_head_its_caller_last_saw() {
+        let (tmp, base) = fixture();
+        let a = base.for_caller(CallerKey::new("a"));
+        let c = base.for_caller(CallerKey::new("c"));
+        let outside = McpServer::new(
+            engine_from_workspace_root(tmp.path()).expect("a second engine boots"),
+            crate::config::DEFAULT_TOKEN_BUDGET,
+        );
+        for server in [&a, &c] {
+            assert!(mem_changed(&read_entity(server, "specs--seed", false)).is_none());
+        }
+
+        // The engine reloads the first outside write for A.
+        assert!(ok(&create_spec(&outside, "X One", None)));
+        let told = mem_changed(&read_entity(&a, "specs--seed", false)).expect("A is told");
+        let from_head = told[0]["from_head"].as_str().unwrap().to_string();
+        let middle_head = told[0]["to_head"].as_str().unwrap().to_string();
+
+        // C's overview reloads the second: it owes C both.
+        assert!(ok(&create_spec(&outside, "X Two", None)));
+        let r = c.dispatched(|s| {
+            s.memstead_overview(Parameters(
+                serde_json::from_value(serde_json::json!({})).unwrap(),
+            ))
+        });
+        let text = extract_text(&r);
+        assert!(text.contains("MEM_RELOADED"), "{text}");
+        assert!(
+            text.contains(&from_head[..8]),
+            "from the head C last saw ({from_head}): {text}"
+        );
+        assert!(
+            !text.contains(&format!("from {}", &middle_head[..8])),
+            "not from the head the engine stood at ({middle_head}): {text}"
+        );
+        assert_eq!(text.matches("MEM_RELOADED").count(), 1, "{text}");
+
+        // And C is told nothing more afterwards.
+        let r = c.dispatched(|s| read_entity(s, "specs--seed", false));
+        assert!(mem_changed(&r).is_none());
+        assert!(!extract_text(&r).contains("MEM_RELOADED"));
+    }
+
+    /// Two calls of one caller that overlap (the second sent before the
+    /// first has answered): what the dispatch keeps for a response
+    /// belongs to its call, so the notice reaches the caller exactly
+    /// once, on one of the two, and is neither lost nor doubled.
+    #[test]
+    fn overlapping_calls_of_one_caller_neither_lose_nor_double_a_notice() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let (_tmp, base) = fixture();
+        let a = base.for_caller(CallerKey::new("a"));
+        let b = base.for_caller(CallerKey::new("b"));
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let (client_io, server_io) = tokio::io::duplex(1 << 22);
+            let (server_read, server_write) = tokio::io::split(server_io);
+            tokio::spawn(async move {
+                let service = rmcp::ServiceExt::serve(b, (server_read, server_write))
+                    .await
+                    .expect("the instance serves");
+                let _ = service.waiting().await;
+            });
+            let (client_read, mut client_write) = tokio::io::split(client_io);
+            let mut lines = BufReader::new(client_read).lines();
+            let line = |id: u64, method: &str, params: serde_json::Value| {
+                format!(
+                    "{}\n",
+                    serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })
+                )
+            };
+            let call = |id: u64, name: &str, arguments: serde_json::Value| {
+                line(
+                    id,
+                    "tools/call",
+                    serde_json::json!({ "name": name, "arguments": arguments }),
+                )
+            };
+            client_write
+                .write_all(
+                    line(
+                        1,
+                        "initialize",
+                        serde_json::json!({
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {},
+                            "clientInfo": { "name": "client-of-b", "version": "1" }
+                        }),
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            lines.next_line().await.unwrap().expect("the handshake answer");
+            client_write
+                .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+                .await
+                .unwrap();
+            client_write
+                .write_all(call(2, "memstead_entity", serde_json::json!({ "id": "specs--seed" })).as_bytes())
+                .await
+                .unwrap();
+            lines.next_line().await.unwrap().expect("first contact");
+            assert!(mem_changed(&read_entity(&a, "specs--seed", false)).is_none());
+
+            // Closed list of the first of the two overlapping calls: a
+            // tool that takes its notices and leaves by an error path,
+            // one that hands out none itself, one that carries them.
+            let firsts = [
+                ("memstead_health", serde_json::json!({ "chunk": 99 })),
+                (
+                    "memstead_check",
+                    serde_json::json!({ "entity": "specs--seed", "verdict": "ok" }),
+                ),
+                ("memstead_entity", serde_json::json!({ "id": "specs--seed" })),
+            ];
+            let mut id = 2u64;
+            for round in 0..60usize {
+                let (first, arguments) = &firsts[round % firsts.len()];
+                let title = format!("Overlap {round}");
+                assert!(ok(&create_spec(&a, &title, None)));
+                let wanted = format!("specs--overlap-{round}");
+                // Both requests in one write: the second is on its way
+                // before the first has answered.
+                let pair = format!(
+                    "{}{}",
+                    call(id + 1, first, arguments.clone()),
+                    call(id + 2, "memstead_entity", serde_json::json!({ "id": "specs--seed" }))
+                );
+                client_write.write_all(pair.as_bytes()).await.unwrap();
+                let mut told = 0usize;
+                for _ in 0..2 {
+                    let answer = lines.next_line().await.unwrap().expect("an answer");
+                    let value: serde_json::Value = serde_json::from_str(&answer).unwrap();
+                    let notices = value["result"]["structuredContent"]["mem_changed"].to_string();
+                    told += usize::from(notices.contains(&wanted));
+                }
+                assert_eq!(told, 1, "round {round} after {first}: told exactly once");
+                id += 2;
+            }
+        });
+    }
+
+    #[test]
+    fn nothing_that_belongs_to_a_caller_crosses_to_another_instance() {
+        let (_tmp, base) = fixture();
+        let a = base
+            .for_caller(CallerKey::new("a"))
+            .with_default_identity(Some("alice".to_string()))
+            .with_pin_identity(true);
+        let b = base.for_caller(CallerKey::new("b"));
+        a.client
+            .set(ClientId {
+                name: "client-of-a".to_string(),
+                version: "1".to_string(),
+            })
+            .ok();
+
+        // A's pin binds A.
+        let refused = create_spec(&a, "Not Alice", Some("mallory"));
+        assert!(!ok(&refused));
+        assert!(
+            extract_text(&refused).contains("INVALID_IDENTITY"),
+            "{}",
+            extract_text(&refused)
+        );
+        assert!(ok(&create_spec(&a, "By Alice", None)));
+
+        // It does not bind B, and B's write carries neither A's identity
+        // nor A's client.
+        let r = create_spec(&b, "By Bob", Some("bob"));
+        assert!(
+            ok(&r),
+            "a pin on one instance does not bind another: {}",
+            extract_text(&r)
+        );
+        assert!(ok(&create_spec(&b, "By Nobody", None)));
+
+        // What each write recorded, read from the write's own provenance.
+        let provenance = |id: &str| -> String {
+            let r = read_entity(&base, id, true);
+            assert!(ok(&r), "{}", extract_text(&r));
+            r.structured_content
+                .as_ref()
+                .and_then(|sc| sc.get("mutation_provenance"))
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| panic!("{id} carries its provenance"))
+        };
+        let by_alice = provenance("specs--by-alice");
+        assert!(by_alice.contains("alice"), "{by_alice}");
+        assert!(by_alice.contains("client-of-a"), "{by_alice}");
+        for id in ["specs--by-bob", "specs--by-nobody"] {
+            let recorded = provenance(id);
+            assert!(!recorded.contains("alice"), "{id}: {recorded}");
+            assert!(!recorded.contains("client-of-a"), "{id}: {recorded}");
+        }
+        assert!(provenance("specs--by-bob").contains("bob"));
+        assert!(base.client.get().is_none() && b.client.get().is_none());
+    }
+
+    /// The writes the engine stamps itself (a mem's configuration, its
+    /// version) carry the client of the instance they came through, not
+    /// the client of whichever instance shook hands last on the shared
+    /// engine.
+    #[test]
+    fn a_config_write_records_the_client_of_its_own_instance() {
+        let (tmp, base) = fixture();
+        let a = base.for_caller(CallerKey::new("a"));
+        let b = base.for_caller(CallerKey::new("b"));
+        let client = |name: &str| ClientId {
+            name: name.to_string(),
+            version: "1".to_string(),
+        };
+        a.client.set(client("client-of-a")).ok();
+        b.client.set(client("client-of-b")).ok();
+        // What the handshake of B leaves on the shared engine, B having
+        // shaken hands after A.
+        {
+            let unified = base.unified_engine();
+            let mut engine = unified.lock().unwrap();
+            engine.set_client(Some(client("client-of-b")));
+        }
+
+        let registry_tip = || -> String {
+            let repo = gix::open(tmp.path().join("mem-repo").join(".git")).unwrap();
+            let commit = repo
+                .find_reference("refs/heads/__MEMSTEAD")
+                .unwrap()
+                .peel_to_commit()
+                .unwrap();
+            commit.message_raw_sloppy().to_string()
+        };
+
+        let r = a.memstead_mem_set_version(Parameters(crate::lifecycle::MemSetVersionParams {
+            name: "specs".to_string(),
+            version: "0.2.0".to_string(),
+            note: Some("through a".to_string()),
+            role: None,
+            identity: None,
+        }));
+        assert!(ok(&r), "{}", extract_text(&r));
+        let message = registry_tip();
+        assert!(message.contains("client-of-a"), "{message}");
+        assert!(!message.contains("client-of-b"), "{message}");
+
+        let r = b.memstead_mem_set_version(Parameters(crate::lifecycle::MemSetVersionParams {
+            name: "specs".to_string(),
+            version: "0.3.0".to_string(),
+            note: Some("through b".to_string()),
+            role: None,
+            identity: None,
+        }));
+        assert!(ok(&r), "{}", extract_text(&r));
+        let message = registry_tip();
+        assert!(message.contains("client-of-b"), "{message}");
+        assert!(!message.contains("client-of-a"), "{message}");
+
+        // An instance for a named caller that never shook hands records
+        // no client, rather than another instance's.
+        let c = base.for_caller(CallerKey::new("c"));
+        let r = c.memstead_mem_set_version(Parameters(crate::lifecycle::MemSetVersionParams {
+            name: "specs".to_string(),
+            version: "0.4.0".to_string(),
+            note: Some("through c".to_string()),
+            role: None,
+            identity: None,
+        }));
+        assert!(ok(&r), "{}", extract_text(&r));
+        let message = registry_tip();
+        assert!(!message.contains("client-of-"), "{message}");
+
+        // Nor does the instance the others were made from, once it
+        // shares its engine and has not shaken hands itself.
+        let r = base.memstead_mem_set_version(Parameters(crate::lifecycle::MemSetVersionParams {
+            name: "specs".to_string(),
+            version: "0.5.0".to_string(),
+            note: Some("through the first instance".to_string()),
+            role: None,
+            identity: None,
+        }));
+        assert!(ok(&r), "{}", extract_text(&r));
+        let message = registry_tip();
+        assert!(!message.contains("client-of-"), "{message}");
+    }
+}

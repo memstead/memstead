@@ -36,6 +36,8 @@ dirs.workspace = true
 
 [dev-dependencies]
 gix.workspace = true
+# The in-memory transport of the dispatch test.
+tokio = { workspace = true, features = ["io-util"] }
 memstead-git-branch = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 

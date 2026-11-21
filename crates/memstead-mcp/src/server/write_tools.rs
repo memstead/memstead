@@ -34,7 +34,7 @@ impl McpServer {
 
         // Wire JSON matches the `CreateResult` contract.
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         engine.set_role(role);
         engine.set_identity(identity);
         let relations: Vec<memstead_base::ops::RelateArg> = p
@@ -145,7 +145,7 @@ impl McpServer {
 
         // Wire JSON matches the `UpdateResult` contract.
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         engine.set_role(role);
         engine.set_identity(identity);
         let patch_sections: indexmap::IndexMap<String, Vec<memstead_base::ops::PatchArg>> = p
@@ -346,7 +346,7 @@ impl McpServer {
         let mem_for_anchor = ops[0].0.source.mem().to_string();
 
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         let client = self.client.get().cloned();
         engine.set_role(role);
         engine.set_identity(identity);
@@ -586,7 +586,7 @@ impl McpServer {
                 Err(resp) => return *resp,
             };
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         engine.set_role(role);
         engine.set_identity(identity);
         let args = memstead_base::DeleteEntityArgs {
@@ -725,7 +725,7 @@ impl McpServer {
             };
 
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         let _drift = engine.reload_if_stale(Some(id.mem()));
         engine.set_role(role);
         engine.set_identity(identity);
@@ -811,7 +811,7 @@ impl McpServer {
         // Unified outcome exposes `old_path` / `new_path` directly
         // (matching full's `RenameResult` shape).
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         engine.set_role(role);
         engine.set_identity(identity);
         let args = memstead_base::RenameEntityArgs {
@@ -885,7 +885,7 @@ impl McpServer {
                 Err(resp) => return *resp,
             };
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         engine.set_role(role);
         engine.set_identity(identity);
         // An empty token states no hash; the engine refuses the missing
@@ -942,7 +942,7 @@ impl McpServer {
         Parameters(p): Parameters<ReloadParams>,
     ) -> CallToolResult {
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         // Full mode: the additive schema-source + mount-manifest
         // re-scan runs FIRST (so newly registered mems join the
         // content sweep below), then the ordinary workspace-wide
@@ -978,6 +978,11 @@ impl McpServer {
                     payload["refresh"] =
                         serde_json::to_value(&refresh).unwrap_or(serde_json::Value::Null);
                 }
+                // The reports cover what the reload brought in; the
+                // notice covers what another caller wrote through this
+                // engine since this caller last looked.
+                let (_engine, notices) = engine.finish();
+                attach_mem_changed(&mut payload, notices);
                 json_response(&payload)
             }
             // `engine_err_unified` reads `EngineError::code()` for the
@@ -985,7 +990,11 @@ impl McpServer {
             // same typed token the rest of the surface emits for the
             // same fire condition — `MEM_ERROR` for backend wraps,
             // `UNKNOWN_MEM` for missing-mem, etc.
-            Err(e) => engine_err_unified(e, &engine),
+            Err(e) => {
+                let (engine, notices) = engine.finish();
+                let warnings = notices_as_reload_warnings(&notices);
+                attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
+            }
         }
     }
 }

@@ -32,6 +32,7 @@ use crate::workspace::{Mount, WorkspaceSettings};
 pub mod apply_commit;
 pub mod archive;
 pub mod boot;
+pub mod callers;
 pub mod check_ops;
 pub mod checks_transport;
 pub mod conflicts;
@@ -457,6 +458,23 @@ pub struct Engine {
     /// dropped scope clears again, so no operation inherits another's
     /// notice and nothing on the engine hands them out on demand.
     pending_mem_changed: Vec<crate::ops::MemChangedNotice>,
+    /// What each caller last saw of each mem, and who the operation in
+    /// progress is for: the source of the notices above
+    /// ([`callers`]).
+    callers: callers::CallerCursors,
+    /// Whether the operation in progress has brought its caller up to
+    /// date (a reload ran), so that closing the operation may take the
+    /// heads it leaves as seen.
+    caller_synced: bool,
+    /// Whether the operation in progress is its caller's first contact:
+    /// such an operation hands out no notice, however many reloads it
+    /// runs, and leaves the caller's memory at the heads storage holds.
+    caller_first_contact: bool,
+    /// Mems whose head appeared where none was during the reload in
+    /// progress, with the entities that reload brought in: what the
+    /// notice for such a mem lists as added. Filled and emptied inside
+    /// one reload.
+    appeared_heads: std::collections::HashMap<String, Vec<crate::entity::EntityId>>,
     /// Warnings for interrupted commits a load completed, waiting for
     /// the next operation's response. Kept apart from the load warnings
     /// of the reload that did the completing: that reload can still

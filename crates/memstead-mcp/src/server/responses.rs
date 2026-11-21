@@ -279,6 +279,43 @@ pub(super) fn notices_as_reload_warnings(notices: &[MemChangedNotice]) -> Vec<Wa
         .collect()
 }
 
+/// Add the notices a tool did not hand out itself to its finished
+/// response. The structured channel gains `mem_changed`. The text
+/// channel gains the same key when it is the JSON body (the shape a
+/// mutation's success response has), and the `MEM_RELOADED` admonition
+/// otherwise, unless the tool already rendered it.
+pub(super) fn attach_left_over_notices(
+    mut res: CallToolResult,
+    notices: Vec<MemChangedNotice>,
+) -> CallToolResult {
+    let text = res
+        .content
+        .first()
+        .and_then(|c| c.as_text())
+        .map(|t| t.text.clone());
+    match text
+        .as_deref()
+        .map(serde_json::from_str::<serde_json::Value>)
+    {
+        Some(Ok(mut body @ serde_json::Value::Object(_))) => {
+            attach_mem_changed(&mut body, notices.clone());
+            if let Ok(pretty) = serde_json::to_string_pretty(&body) {
+                res.content[0] = rmcp::model::ContentBlock::text(pretty);
+            }
+        }
+        Some(_)
+            if !text
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with("> [!warning] Engine snapshot reloaded") =>
+        {
+            res = prepend_drift_warnings_to_result_text(res, &notices_as_reload_warnings(&notices));
+        }
+        _ => {}
+    }
+    attach_mem_changed_to_result(res, notices)
+}
+
 /// Attach reload drift to an *error* response on the same channel split
 /// a successful response uses: the full per-entity `mem_changed`
 /// notice on `structured_content`, plus the `MEM_RELOADED` admonition

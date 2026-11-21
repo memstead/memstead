@@ -78,7 +78,7 @@ impl McpServer {
                 Err(resp) => return *resp,
             };
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         engine.set_role(role);
         engine.set_identity(identity);
         match engine.set_mem_version(&p.name, new_version, p.note.as_deref()) {
@@ -142,7 +142,7 @@ impl McpServer {
                 Err(resp) => return *resp,
             };
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         engine.set_role(role);
         engine.set_identity(identity);
         let mut warnings: Vec<memstead_base::ops::WarningHint> = Vec::new();
@@ -254,7 +254,7 @@ impl McpServer {
                 Err(resp) => return *resp,
             };
         let unified = self.unified_engine();
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         engine.set_role(role);
         engine.set_identity(identity);
         match engine.set_mem_schema(&p.mem, &target) {
@@ -283,7 +283,7 @@ impl McpServer {
                 Ok(v) => v,
                 Err(resp) => return *resp,
             };
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         // A mem is created on a mem-repo workspace only, as CLI `mem init`
         // has it: in a folder workspace a new mem would be a folder inside
         // another mem's root.
@@ -477,7 +477,7 @@ impl McpServer {
                 Ok(v) => v,
                 Err(resp) => return *resp,
             };
-        let mut engine = crate::lock_engine!(unified);
+        let mut engine = crate::lock_engine!(unified, self);
         // The call's role and identity (or the session's) ride the
         // prune commit like every entity mutation's commit; without
         // this the engine carried whatever the previous call left on it.
