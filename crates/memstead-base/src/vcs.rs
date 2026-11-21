@@ -26,14 +26,25 @@ const PROVENANCE_EMAIL_DOMAIN: &str = "memstead.com";
 pub const IDENTITY_MAX_LEN: usize = 128;
 
 /// Normalise a caller-supplied identity: trim, treat empty /
-/// whitespace-only as absent. Length validation is the surface's job
-/// (typed refusal against [`IDENTITY_MAX_LEN`]); this helper only
-/// canonicalises presence, so "no identity" has exactly one recorded
-/// shape everywhere.
+/// whitespace-only as absent, and make it one line (an identity is a
+/// name or a handle: any run of whitespace inside it, a line break
+/// included, becomes one space, so the value is the same single line
+/// in every record that carries it). Length validation is the
+/// surface's job (typed refusal against [`IDENTITY_MAX_LEN`]); this
+/// helper canonicalises presence and shape, so "no identity" and any
+/// given identity have exactly one recorded form everywhere.
 pub fn normalise_identity(raw: Option<&str>) -> Option<String> {
-    raw.map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
+    let one_line = raw?.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!one_line.is_empty()).then_some(one_line)
+}
+
+/// One line of a batch commit's note record for the entry of `id`:
+/// `<id>: <note>`, with every further line of the note indented by two
+/// spaces. The indent is what keeps the record unambiguous: a line of
+/// one entry's note that happens to begin with another entry's id
+/// cannot be read as that entry's line.
+pub fn batch_note_line(id: &str, note: &str) -> String {
+    format!("{id}: {}", note.replace('\n', "\n  "))
 }
 
 /// Caller categories for the `Actor:` trailer and for picking an author
@@ -428,6 +439,15 @@ pub fn format_commit_message(prose: &str, ctx: &CommitContext<'_>) -> String {
         }
         for (old, new) in &p.renamed {
             trailers.push(format!("Renamed: {old} → {new}"));
+        }
+    }
+    // A trailer is one line. A value with a line break in it (a client
+    // name from a handshake, an identity built by a program that links
+    // the engine) would end its trailer early and start a line a reader
+    // could take for another trailer, so every break becomes a space.
+    for trailer in &mut trailers {
+        if trailer.contains(['\n', '\r']) {
+            *trailer = trailer.replace(['\n', '\r'], " ");
         }
     }
     let note_body = ctx.note.as_deref().map(str::trim).filter(|n| !n.is_empty());

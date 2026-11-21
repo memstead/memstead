@@ -190,6 +190,14 @@ pub fn render_mem_changed_block(notices: &[memstead_base::ops::MemChangedNotice]
             NoticeChanges::Detailed { entries } => {
                 for e in entries {
                     out.push_str(&format!("\n  - {} `{}`", e.action(), e.primary_id()));
+                    // Who wrote it last in the range, and why, where
+                    // that write declared either.
+                    if let Some(identity) = &e.identity {
+                        out.push_str(&format!(" by `{identity}`"));
+                    }
+                    if let Some(note) = &e.note {
+                        out.push_str(&format!(": {note}"));
+                    }
                 }
             }
             NoticeChanges::Ids { entries } => {
@@ -296,4 +304,52 @@ pub fn hash_statement(
         return Ok(refetched_hash(engine, id));
     }
     Ok(memstead_base::ExpectedHash::from_token(explicit))
+}
+
+#[cfg(test)]
+mod tests {
+    /// The markdown block names, per changed entity of a small delta,
+    /// who wrote it last and why, where that write declared either.
+    #[test]
+    fn the_notice_block_names_the_writer_and_the_note_where_declared() {
+        use memstead_base::ops::{ChangeEnvelope, MemChangedNotice, NewestWrite};
+        let updated = |slug: &str| ChangeEnvelope::Updated {
+            id: memstead_base::EntityId::new("specs", slug),
+            title: None,
+            entity_type: None,
+        };
+        let write = |identity: Option<&str>, note: Option<&str>| NewestWrite {
+            identity: identity.map(str::to_string),
+            note: note.map(str::to_string),
+        };
+        let writes = [
+            (
+                "specs--a".to_string(),
+                write(Some("xavier"), Some("tightened it")),
+            ),
+            ("specs--b".to_string(), write(Some("yolanda"), None)),
+            ("specs--c".to_string(), write(None, Some("no name"))),
+        ]
+        .into_iter()
+        .collect();
+        let notice = MemChangedNotice::from_delta_with_writes(
+            "specs".to_string(),
+            "H0".to_string(),
+            "H1".to_string(),
+            vec![updated("a"), updated("b"), updated("c"), updated("d")],
+            &writes,
+        );
+        let block = super::render_mem_changed_block(&[notice]);
+        let lines: Vec<&str> = block.lines().map(str::trim).collect();
+        assert!(
+            lines.contains(&"- updated `specs--a` by `xavier`: tightened it"),
+            "{block}"
+        );
+        assert!(
+            lines.contains(&"- updated `specs--b` by `yolanda`"),
+            "{block}"
+        );
+        assert!(lines.contains(&"- updated `specs--c`: no name"), "{block}");
+        assert!(lines.contains(&"- updated `specs--d`"), "{block}");
+    }
 }

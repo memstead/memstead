@@ -365,12 +365,13 @@ impl Engine {
                         .map(|r| r.changes)
                         .unwrap_or_default(),
                 };
-                crate::ops::MemChangedNotice::from_delta(
-                    mem.clone(),
-                    String::new(),
-                    head.clone(),
-                    changes,
-                )
+                // Who wrote what in a mem whose head appeared: read
+                // from its history from the start, when there is one.
+                let notes = self
+                    .changes_since(&mem, "", None)
+                    .ok()
+                    .and_then(|r| r.notes);
+                self.notice_for(&mem, "", &head, changes, notes.as_deref())
             } else {
                 self.mem_changed_notice(&mem, &prev, &head)
             };

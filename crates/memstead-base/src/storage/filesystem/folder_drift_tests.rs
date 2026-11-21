@@ -171,3 +171,85 @@ fn sibling_folder_write_is_drift_and_self_write_is_not() {
         "the next scope discards what an unscoped reload recorded: {notices:?}"
     );
 }
+
+/// On a folder mem the detailed notice names the newest writer and its
+/// note from the change ledger: the last row that names the entity
+/// inside the notice's range. A write that declared neither yields an
+/// entry with neither key.
+#[test]
+fn a_folder_notice_names_the_newest_writer_and_its_note() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir = tmp.path().join("specs");
+    std::fs::create_dir_all(&dir).unwrap();
+    let seeder = FilesystemBackend::new(dir.clone());
+    MemBackend::write_entity(&seeder, std::path::Path::new("seed.md"), ENTITY.as_bytes()).unwrap();
+    MemBackend::commit(&seeder, "seed", &CommitContext::internal()).unwrap();
+    crate::backend::MemBackend::append_provenance(
+        &seeder,
+        &Provenance::new(
+            std::time::SystemTime::now(),
+            ProvenanceKind::Create,
+            Some("specs--seed".into()),
+            Actor::Cli,
+            None,
+            None,
+        ),
+    )
+    .unwrap();
+
+    let mut engine = folder_engine(dir.clone());
+    assert!(engine.reload_if_stale(None).is_empty());
+    let mut writer = folder_engine(dir);
+    let create = |writer: &mut crate::Engine, title: &str, note: Option<&str>| {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        writer
+            .create_entity(
+                crate::CreateEntityArgs {
+                    mem: "specs".to_string(),
+                    title: title.to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: [
+                        ("identity".to_string(), "i".to_string()),
+                        ("purpose".to_string(), "p".to_string()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    metadata: Default::default(),
+                    relations: Vec::new(),
+                    anchors: Vec::new(),
+                    dry_run: false,
+                },
+                crate::vcs::Actor::Cli,
+                None,
+                note,
+            )
+            .unwrap();
+    };
+    writer.reload_if_stale(None);
+    writer.set_identity(Some("xavier".to_string()));
+    create(&mut writer, "With Both", Some("a folder note"));
+    writer.set_identity(None);
+    create(&mut writer, "With Neither", None);
+
+    let mut op = crate::OperationScope::begin(&mut engine);
+    op.reload_if_stale(None);
+    let (_, notices) = op.finish();
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    let value = serde_json::to_value(&notices[0]).unwrap();
+    assert_eq!(value["changes"]["mode"], "detailed", "{value}");
+    let entry = |id: &str| {
+        value["changes"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == id)
+            .unwrap_or_else(|| panic!("an entry for {id}: {value}"))
+            .clone()
+    };
+    let both = entry("specs--with-both");
+    assert_eq!(both["identity"], "xavier");
+    assert_eq!(both["note"], "a folder note");
+    let neither = entry("specs--with-neither");
+    assert!(neither.get("identity").is_none(), "{neither}");
+    assert!(neither.get("note").is_none(), "{neither}");
+}

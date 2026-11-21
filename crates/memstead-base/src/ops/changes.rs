@@ -530,6 +530,162 @@ pub fn folder_changes_since(
     })
 }
 
+/// The newest write per entity id among `notes`, which run newest
+/// first (the order a git-branch backend's change feed returns them
+/// in): for each id a note names, the identity and note of the first
+/// note that names it. A note names the entity of its subject and
+/// every id its multi-entity trailers list. A batch commit records its
+/// per-entry notes as `<id>: <note>` lines: each entity gets its own
+/// line there and an entity without one gets no note.
+pub fn newest_writes_from_notes(
+    notes: &[crate::ops::agent_notes::CommitNote],
+) -> std::collections::BTreeMap<String, NewestWrite> {
+    let mut writes = std::collections::BTreeMap::new();
+    for note in notes {
+        // The subject of a rename names two ids, `<old> → <new>`: the
+        // write is to the entity under either name.
+        // (A batch's subject names a count, not an id: only what has
+        // the shape of an id is taken.)
+        let subject_ids = note
+            .entity_id
+            .iter()
+            .flat_map(|subject| subject.split(" → "))
+            .filter(|part| part.contains("--") && !part.contains(' '))
+            .map(str::to_string);
+        let named: Vec<String> = subject_ids
+            .chain(note.entity_ids.iter().cloned())
+            .chain(note.created_ids.iter().cloned())
+            .collect();
+        let batch = note
+            .tool_verb
+            .as_deref()
+            .is_some_and(|verb| verb.starts_with("batch"));
+        for id in &named {
+            if writes.contains_key(id) {
+                continue;
+            }
+            let text = match (&note.note, batch) {
+                (Some(joined), true) => batch_entry_note(joined, id, &named),
+                (text, _) => text.clone(),
+            };
+            writes.insert(
+                id.clone(),
+                NewestWrite {
+                    identity: note.identity.clone(),
+                    note: text.map(bounded_note),
+                },
+            );
+        }
+    }
+    writes
+}
+
+/// The note one entity's entry declared in a batch, from the batch
+/// commit's joined note ([`crate::vcs::batch_note_line`]): the text
+/// after `<id>: ` on the line of that id, with the indented lines that
+/// follow it, the indent removed. `None` when the batch has no line for
+/// the id. A record written before the join indented its continuation
+/// lines is read as it was meant where that is unambiguous: an
+/// unindented line that begins no entity's entry continues the entry
+/// above it.
+fn batch_entry_note(joined: &str, id: &str, ids: &[String]) -> Option<String> {
+    let mut mine: Vec<&str> = Vec::new();
+    let mut owner: Option<&str> = None;
+    for line in joined.lines() {
+        // An indented line continues the entry above it, whatever it
+        // says.
+        if let (Some(current), Some(rest)) = (owner, line.strip_prefix("  ")) {
+            if current == id {
+                mine.push(rest);
+            }
+            continue;
+        }
+        let begins = ids.iter().find_map(|candidate| {
+            line.strip_prefix(candidate.as_str())
+                .and_then(|rest| rest.strip_prefix(": "))
+                .map(|rest| (candidate.as_str(), rest))
+        });
+        match begins {
+            Some((candidate, rest)) => {
+                owner = Some(candidate);
+                if candidate == id {
+                    mine.push(rest);
+                }
+            }
+            None if owner == Some(id) => mine.push(line),
+            None => {}
+        }
+    }
+    (!mine.is_empty()).then(|| mine.join("\n"))
+}
+
+/// A note as a notice entry carries it: whole up to the length a write
+/// may declare ([`crate::mem_management::NOTE_MAX_LEN`]), cut there
+/// with an ellipsis when a record holds more, so fifty entries stay a
+/// payload of bounded size.
+fn bounded_note(note: String) -> String {
+    let max = crate::mem_management::NOTE_MAX_LEN;
+    if note.chars().count() <= max {
+        return note;
+    }
+    let mut cut: String = note.chars().take(max).collect();
+    cut.push('…');
+    cut
+}
+
+/// The newest write per entity id in a folder mem's change ledger after
+/// `since` (a ledger timestamp; empty for the whole ledger): the
+/// identity and note of the last row that names the id. A ledger that
+/// cannot be read yields nothing.
+pub fn folder_newest_writes(
+    mem_root: &Path,
+    since: &str,
+) -> std::collections::BTreeMap<String, NewestWrite> {
+    let mut writes = std::collections::BTreeMap::new();
+    let log_path = crate::filesystem::changelog::changelog_path(mem_root);
+    let Ok(raw) = std::fs::read_to_string(&log_path) else {
+        return writes;
+    };
+    let cursor = (!since.is_empty() && since != EMPTY_TREE_SHA).then_some(since);
+    let mut newest_at: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    for line in raw.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        let ts = value.get("ts").and_then(|v| v.as_str()).unwrap_or("");
+        if cursor.is_some_and(|c| ts <= c) {
+            continue;
+        }
+        let Some(entity) = value
+            .get("entity")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        if newest_at.get(entity).is_some_and(|at| ts < at.as_str()) {
+            continue;
+        }
+        newest_at.insert(entity.to_string(), ts.to_string());
+        let text = |key: &str| {
+            value
+                .get(key)
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        };
+        writes.insert(
+            entity.to_string(),
+            NewestWrite {
+                identity: text("identity"),
+                note: text("note").map(bounded_note),
+            },
+        );
+    }
+    writes
+}
+
 /// Whether a ledger timestamp and an entity's `created_date` name the
 /// same instant at the coarser of the two precisions (the ledger
 /// carries milliseconds, a frontmatter date seconds or a bare day).
@@ -584,7 +740,7 @@ pub struct ChangesReport {
 /// (id + change-kind + title + type) before the notice degrades to
 /// id+kind only. Rich detail is the expensive part of the payload; an
 /// id is cheap. Below this threshold the notice is `mode: "detailed"`.
-const NOTICE_DETAILED_MAX: usize = 50;
+pub(crate) const NOTICE_DETAILED_MAX: usize = 50;
 
 /// Max changed-entity count that still lists every changed id inline
 /// (id + change-kind, `mode: "ids"`). The inline id list is exactly
@@ -620,8 +776,9 @@ pub struct NoticeByChange {
 #[serde(tag = "mode", rename_all = "lowercase")]
 pub enum NoticeChanges {
     /// Small delta — full per-entity [`ChangeEnvelope`]s with `title` /
-    /// `entity_type` enrichment.
-    Detailed { entries: Vec<ChangeEnvelope> },
+    /// `entity_type` enrichment, each with who wrote the entity last
+    /// inside the notice's range and why ([`NoticeEntry`]).
+    Detailed { entries: Vec<NoticeEntry> },
     /// Medium delta — every changed entity inline as a [`ChangeEnvelope`]
     /// with `title` / `entity_type` stripped. The id list (and a
     /// rename's `from_id` / `to_id`) stays complete; only rich detail is
@@ -636,6 +793,44 @@ pub enum NoticeChanges {
         by_change: NoticeByChange,
         self_inform: String,
     },
+}
+
+/// Who wrote an entity last inside a range, and why: the declared
+/// identity and the note of the newest write that names the entity.
+/// Either is `None` when that write declared none; a value never comes
+/// from an older write.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NewestWrite {
+    pub identity: Option<String>,
+    pub note: Option<String>,
+}
+
+/// One entry of a notice's `detailed` tier: the change as
+/// `memstead_changes_since` reports it, plus the writer and the note of
+/// the newest write to that entity inside the notice's range, so a
+/// reader that is told a mem moved need not make a second call to learn
+/// by whom and why. Either key is absent from the wire when that write
+/// declared none. The other tiers, and the entries
+/// `memstead_changes_since` returns, carry neither: the walk over the
+/// range's writes is the cost the tiers exist to avoid.
+///
+/// Derefs to its [`ChangeEnvelope`], so a reader of the change itself
+/// reads an entry as it reads an envelope.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct NoticeEntry {
+    #[serde(flatten)]
+    pub change: ChangeEnvelope,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl std::ops::Deref for NoticeEntry {
+    type Target = ChangeEnvelope;
+    fn deref(&self) -> &ChangeEnvelope {
+        &self.change
+    }
 }
 
 /// Non-blocking "the mem moved under you" notice, attached to a
@@ -668,12 +863,51 @@ impl MemChangedNotice {
         mem: String,
         from_head: String,
         to_head: String,
+        changes: Vec<ChangeEnvelope>,
+    ) -> Self {
+        Self::from_delta_with_writes(
+            mem,
+            from_head,
+            to_head,
+            changes,
+            &std::collections::BTreeMap::new(),
+        )
+    }
+
+    /// [`Self::from_delta`] with the newest write per entity id
+    /// ([`NewestWrite`]), which the `detailed` tier carries on each
+    /// entry. An id without an entry in `writes`, and every entry of
+    /// the other tiers, carries neither key. For a rename the write is
+    /// looked up under the id the entity has now, then under the one it
+    /// had.
+    pub fn from_delta_with_writes(
+        mem: String,
+        from_head: String,
+        to_head: String,
         mut changes: Vec<ChangeEnvelope>,
+        writes: &std::collections::BTreeMap<String, NewestWrite>,
     ) -> Self {
         changes.sort_by(|a, b| a.primary_id().cmp(b.primary_id()));
         let n = changes.len();
         let body = if n <= NOTICE_DETAILED_MAX {
-            NoticeChanges::Detailed { entries: changes }
+            NoticeChanges::Detailed {
+                entries: changes
+                    .into_iter()
+                    .map(|change| {
+                        let write = writes.get(change.primary_id()).or_else(|| match &change {
+                            ChangeEnvelope::Renamed { from_id, .. } => {
+                                writes.get(AsRef::<str>::as_ref(from_id))
+                            }
+                            _ => None,
+                        });
+                        NoticeEntry {
+                            identity: write.and_then(|w| w.identity.clone()),
+                            note: write.and_then(|w| w.note.clone()),
+                            change,
+                        }
+                    })
+                    .collect(),
+            }
         } else if n <= NOTICE_IDS_MAX {
             NoticeChanges::Ids {
                 entries: changes
@@ -718,7 +952,8 @@ impl MemChangedNotice {
     /// error-text warning line is reconstructed from the notice itself.
     pub fn entity_count(&self) -> usize {
         match &self.changes {
-            NoticeChanges::Detailed { entries } | NoticeChanges::Ids { entries } => entries.len(),
+            NoticeChanges::Detailed { entries } => entries.len(),
+            NoticeChanges::Ids { entries } => entries.len(),
             NoticeChanges::Counts { by_change, .. } => {
                 by_change.added + by_change.updated + by_change.removed + by_change.renamed
             }
@@ -843,6 +1078,256 @@ mod tests {
                 entity_type: Some("spec".to_string()),
             })
             .collect()
+    }
+
+    /// The detailed tier carries, per entry, the newest write to its
+    /// entity: the identity and note that write declared, each key
+    /// absent when it declared none. Two notices over the same delta
+    /// are byte-identical, and the larger tiers carry neither key.
+    #[test]
+    fn a_detailed_entry_names_the_newest_write_and_drops_what_was_not_declared() {
+        let changes = vec![
+            ChangeEnvelope::Updated {
+                id: EntityId::new("specs", "bbb"),
+                title: Some("B".to_string()),
+                entity_type: Some("spec".to_string()),
+            },
+            ChangeEnvelope::Added {
+                id: EntityId::new("specs", "aaa"),
+                title: Some("A".to_string()),
+                entity_type: Some("spec".to_string()),
+            },
+            ChangeEnvelope::Renamed {
+                from_id: EntityId::new("specs", "old"),
+                to_id: EntityId::new("specs", "new"),
+                title: None,
+                entity_type: None,
+            },
+            ChangeEnvelope::Removed {
+                id: EntityId::new("specs", "zzz"),
+                title: None,
+                entity_type: None,
+            },
+        ];
+        let write = |identity: Option<&str>, note: Option<&str>| NewestWrite {
+            identity: identity.map(str::to_string),
+            note: note.map(str::to_string),
+        };
+        let writes: std::collections::BTreeMap<String, NewestWrite> = [
+            (
+                "specs--aaa".to_string(),
+                write(Some("xavier"), Some("made it")),
+            ),
+            ("specs--bbb".to_string(), write(None, Some("no name"))),
+            // A rename's write is found under the id the entity had.
+            ("specs--old".to_string(), write(Some("yolanda"), None)),
+        ]
+        .into_iter()
+        .collect();
+        let notice = MemChangedNotice::from_delta_with_writes(
+            "specs".to_string(),
+            "H0".to_string(),
+            "H1".to_string(),
+            changes.clone(),
+            &writes,
+        );
+        let value = serde_json::to_value(&notice).unwrap();
+        let entries = value["changes"]["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[0]["id"], "specs--aaa");
+        assert_eq!(entries[0]["action"], "added");
+        assert_eq!(entries[0]["identity"], "xavier");
+        assert_eq!(entries[0]["note"], "made it");
+        assert_eq!(entries[1]["id"], "specs--bbb");
+        assert_eq!(entries[1]["note"], "no name");
+        assert!(entries[1].get("identity").is_none(), "{}", entries[1]);
+        assert_eq!(entries[2]["to_id"], "specs--new");
+        assert_eq!(entries[2]["identity"], "yolanda");
+        assert!(entries[2].get("note").is_none(), "{}", entries[2]);
+        // No write known for the id: neither key, not an empty string.
+        assert_eq!(entries[3]["id"], "specs--zzz");
+        assert!(entries[3].get("identity").is_none() && entries[3].get("note").is_none());
+
+        // The same delta in another order: the same bytes.
+        let mut reversed = changes;
+        reversed.reverse();
+        let again = MemChangedNotice::from_delta_with_writes(
+            "specs".to_string(),
+            "H0".to_string(),
+            "H1".to_string(),
+            reversed,
+            &writes,
+        );
+        assert_eq!(
+            serde_json::to_string(&notice).unwrap(),
+            serde_json::to_string(&again).unwrap()
+        );
+
+        // Past the detailed tier the writes are not carried.
+        let many = added_envelopes(NOTICE_DETAILED_MAX + 1);
+        let all: std::collections::BTreeMap<String, NewestWrite> = many
+            .iter()
+            .map(|e| (e.primary_id().to_string(), write(Some("xavier"), Some("n"))))
+            .collect();
+        let ids = MemChangedNotice::from_delta_with_writes(
+            "specs".to_string(),
+            "H0".to_string(),
+            "H1".to_string(),
+            many,
+            &all,
+        );
+        let json = serde_json::to_string(&ids).unwrap();
+        assert!(json.contains(r#""mode":"ids""#));
+        assert!(
+            !json.contains("identity") && !json.contains("\"note\""),
+            "{json}"
+        );
+    }
+
+    /// The newest write per id among commit notes that run newest
+    /// first: the first note that names an id decides, a rename's
+    /// subject names both ids, and a multi-entity commit names every
+    /// id its trailer lists.
+    #[test]
+    fn the_newest_note_that_names_an_id_decides_its_write() {
+        let note = |subject_id: &str, ids: &[&str], identity: Option<&str>, text: Option<&str>| {
+            crate::ops::agent_notes::CommitNote {
+                mem: "specs".to_string(),
+                sha: "0".repeat(40),
+                subject: format!("memstead: write {subject_id}"),
+                tool_verb: None,
+                entity_id: Some(subject_id.to_string()),
+                note: text.map(str::to_string),
+                actor: None,
+                tool: None,
+                client: None,
+                logical_operation_id: None,
+                role: None,
+                identity: identity.map(str::to_string),
+                entity_ids: ids.iter().map(|s| s.to_string()).collect(),
+                merged_by: None,
+                proposal: None,
+                created_ids: Vec::new(),
+                co_writers: Vec::new(),
+                unattributed_writes: Vec::new(),
+                merge_renames: Vec::new(),
+                timestamp: 0,
+            }
+        };
+        let notes = vec![
+            // Newest: a rename that also rewrote a referrer, no note.
+            note(
+                "specs--bee → specs--bumble",
+                &["specs--aye"],
+                Some("yolanda"),
+                None,
+            ),
+            // Older: an update of the referrer.
+            note("specs--aye", &[], Some("xavier"), Some("older")),
+            note("specs--other", &[], None, Some("only a note")),
+        ];
+        let writes = newest_writes_from_notes(&notes);
+        for id in ["specs--bee", "specs--bumble", "specs--aye"] {
+            assert_eq!(writes[id].identity.as_deref(), Some("yolanda"), "{id}");
+            assert_eq!(writes[id].note, None, "{id}: never the older write's note");
+        }
+        assert_eq!(writes["specs--other"].identity, None);
+        assert_eq!(writes["specs--other"].note.as_deref(), Some("only a note"));
+    }
+
+    /// A batch commit joins its per-entry notes as `<id>: <note>` lines.
+    /// Each entity's entry names its own note, an entity whose batch
+    /// entry declared none gets none, and no entry carries the joined
+    /// text. A note longer than a write may declare is cut.
+    #[test]
+    fn a_batch_gives_each_entity_its_own_note_and_a_note_has_a_bound() {
+        let batch = crate::ops::agent_notes::CommitNote {
+            mem: "specs".to_string(),
+            sha: "0".repeat(40),
+            subject: "memstead: batch-update (3 entities)".to_string(),
+            tool_verb: Some("batch-update".to_string()),
+            entity_id: Some("(3 entities)".to_string()),
+            note: Some(
+                "specs--one: note for one\nand its second line\nspecs--three: Reason: three"
+                    .to_string(),
+            ),
+            actor: None,
+            tool: None,
+            client: None,
+            logical_operation_id: None,
+            role: None,
+            identity: Some("yolanda".to_string()),
+            entity_ids: vec![
+                "specs--one".to_string(),
+                "specs--two".to_string(),
+                "specs--three".to_string(),
+            ],
+            merged_by: None,
+            proposal: None,
+            created_ids: Vec::new(),
+            co_writers: Vec::new(),
+            unattributed_writes: Vec::new(),
+            merge_renames: Vec::new(),
+            timestamp: 0,
+        };
+        let writes = newest_writes_from_notes(std::slice::from_ref(&batch));
+        assert_eq!(
+            writes["specs--one"].note.as_deref(),
+            Some("note for one\nand its second line")
+        );
+        assert_eq!(writes["specs--two"].note, None, "its entry declared none");
+        assert_eq!(
+            writes["specs--three"].note.as_deref(),
+            Some("Reason: three")
+        );
+        for id in ["specs--one", "specs--two", "specs--three"] {
+            assert_eq!(writes[id].identity.as_deref(), Some("yolanda"));
+        }
+
+        // The writer's join and this reader agree, whatever a note's
+        // lines say: a line of one entry's note that begins with another
+        // entry's id, or with its own, stays where it was written.
+        let joined = [
+            crate::vcs::batch_note_line(
+                "specs--one",
+                "first line of one\nspecs--two: planted by one\nspecs--one: and its own id\n\nafter a gap",
+            ),
+            crate::vcs::batch_note_line("specs--three", "said by three"),
+        ]
+        .join("\n");
+        let mut planted = batch.clone();
+        planted.note = Some(joined);
+        let writes = newest_writes_from_notes(std::slice::from_ref(&planted));
+        assert_eq!(
+            writes["specs--one"].note.as_deref(),
+            Some(
+                "first line of one\nspecs--two: planted by one\nspecs--one: and its own id\n\nafter a gap"
+            )
+        );
+        assert_eq!(writes["specs--two"].note, None, "nothing was planted on it");
+        assert_eq!(
+            writes["specs--three"].note.as_deref(),
+            Some("said by three")
+        );
+
+        // A single write's note is carried whole up to the declared
+        // limit and cut beyond it.
+        let limit = crate::mem_management::NOTE_MAX_LEN;
+        let mut single = batch.clone();
+        single.tool_verb = Some("update".to_string());
+        single.entity_id = Some("specs--one".to_string());
+        single.entity_ids = Vec::new();
+        single.note = Some("n".repeat(limit));
+        let whole = newest_writes_from_notes(std::slice::from_ref(&single));
+        assert_eq!(
+            whole["specs--one"].note.as_deref().map(str::len),
+            Some(limit)
+        );
+        single.note = Some("ä".repeat(limit + 40));
+        let cut = newest_writes_from_notes(std::slice::from_ref(&single));
+        let text = cut["specs--one"].note.clone().unwrap();
+        assert_eq!(text.chars().count(), limit + 1);
+        assert!(text.ends_with('…'));
     }
 
     #[test]

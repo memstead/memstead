@@ -555,15 +555,48 @@ impl Engine {
         from_head: &str,
         to_head: &str,
     ) -> crate::ops::MemChangedNotice {
-        let changes = self
-            .changes_since(mem, from_head, None)
-            .map(|r| r.changes)
-            .unwrap_or_default();
-        crate::ops::MemChangedNotice::from_delta(
+        let report = self.changes_since(mem, from_head, None).ok();
+        let (changes, notes) = match report {
+            Some(r) => (r.changes, r.notes),
+            None => (Vec::new(), None),
+        };
+        self.notice_for(mem, from_head, to_head, changes, notes.as_deref())
+    }
+
+    /// Build the notice for a delta of `mem` that starts at `from_head`.
+    /// For a delta small enough for the `detailed` tier, each entry
+    /// names the newest write to its entity in the range: on a
+    /// git-branch mem from the commit notes the change feed returned
+    /// (`notes`), on a folder mem from its change ledger. A larger
+    /// delta reads neither, and a storage kind without a history of
+    /// writes names nobody.
+    pub(in crate::engine) fn notice_for(
+        &self,
+        mem: &str,
+        from_head: &str,
+        to_head: &str,
+        changes: Vec<crate::ops::ChangeEnvelope>,
+        notes: Option<&[crate::ops::agent_notes::CommitNote]>,
+    ) -> crate::ops::MemChangedNotice {
+        let writes = if changes.len() <= crate::ops::changes::NOTICE_DETAILED_MAX {
+            match self.find_mount(mem).map(|m| &m.mount.storage) {
+                Ok(MountStorage::Folder { path }) => {
+                    crate::ops::changes::folder_newest_writes(path, from_head)
+                }
+                Ok(MountStorage::GitBranch { .. }) => {
+                    crate::ops::changes::newest_writes_from_notes(notes.unwrap_or_default())
+                }
+                _ => std::collections::BTreeMap::new(),
+            }
+        } else {
+            std::collections::BTreeMap::new()
+        };
+        crate::ops::MemChangedNotice::from_delta_with_writes(
             mem.to_string(),
             from_head.to_string(),
             to_head.to_string(),
             changes,
+            &writes,
         )
     }
 

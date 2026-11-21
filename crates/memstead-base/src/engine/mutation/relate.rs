@@ -919,7 +919,10 @@ impl Engine {
                 .iter()
                 .zip(notes.iter())
                 .filter(|(p, _)| p.mount_idx == m)
-                .filter_map(|(p, n)| n.as_ref().map(|n| format!("{}: {n}", p.from)))
+                .filter_map(|(p, n)| {
+                    n.as_ref()
+                        .map(|n| crate::vcs::batch_note_line(p.from.as_ref(), n))
+                })
                 .collect();
             let mut ctx = self.commit_context(
                 Some("batch_relate"),

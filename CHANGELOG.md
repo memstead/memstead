@@ -36,6 +36,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   output and the enclosing repository's ignore file; the command
   behaves as before.
 
+- **A change notice names the writer and the note.** In the `detailed`
+  tier of a `mem_changed` notice (up to 50 changed entities) each entry
+  now carries `identity`, the declared identity of the newest write to
+  that entity inside the notice's range, and `note`, that write's note.
+  Either key is absent when that write declared none; a value never
+  comes from an older write. A rename is the newest write of the
+  renamed entity and of every entity whose links it rewrote; a batch
+  gives each of its entities the note its own entry declared, and none
+  where that entry declared none. A note is carried whole up to the 280
+  characters a write may declare and cut there. A reader
+  told that a mem moved no longer needs a second call to learn by whom
+  and why. The `ids` and `counts` tiers and the entries of
+  `memstead_changes_since` are unchanged. On a git-branch mem the two
+  values come from the commit notes of the range, on a folder mem from
+  its change ledger. For a program that links the engine: the entries
+  of `NoticeChanges::Detailed` are `NoticeEntry` values, which deref to
+  the `ChangeEnvelope` they were before.
+
 - **A change notice is relative to the caller.** The `mem_changed`
   notice (and its `MEM_RELOADED` warning) used to describe what the
   engine instance reloaded, so a write made through the same engine by
@@ -53,10 +71,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   agree with its entries and nothing is told twice. A caller is not
   told about its own write, what the report of a reload it asked for
   lists is not told to it again, and a caller seen for the first time
-  is told nothing, about no change that landed before it came. A
-  program that links the engine names the caller when it opens an
-  operation (`OperationScope::begin_as` with a `CallerKey`) and takes
-  the notices when it closes it; over MCP, `McpServer::for_caller` gives
+  is told nothing, about no change that landed before it came. The
+  default caller is no first contact: it counts as present since the
+  engine started, so the first instance of a shared MCP server is told
+  from then on. A program that links the engine names the caller when
+  it opens an operation (`OperationScope::begin_as` with a `CallerKey`)
+  and takes the notices when it closes it; over MCP, `McpServer::for_caller` gives
   a further server instance over the same engine, with its own client id
   and identity settings, and the response of every tool call the server
   runs carries the notice (`memstead_overview`, which answers in
@@ -69,6 +89,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   forgotten caller starts over as a first contact.
 
 ### Fixed
+
+- **A note keeps every line it was written with.** On a git-branch mem
+  a note line shaped like a commit trailer (`Fix: the wording`,
+  `Reason: upstream changed`) ended the note where it stood: the rest
+  was read as trailers and dropped, a note that began with such a line
+  was lost whole, and a line `Identity: <name>`, `Role: <role>` or
+  `Actor: <actor>` in a note was read as that fact of the write, in
+  `memstead_changes_since` with notes and in an entity's provenance
+  alike (a line `Tool: <tool>` likewise, in `memstead_changes_since`
+  with notes). The engine now reads trailers from the last
+  paragraph of a commit message alone, where it writes them, so a note
+  round-trips whatever its lines look like and the recorded writer is
+  only ever the one the write declared. For the same reason a declared
+  identity is one line: a line break or other run of whitespace inside
+  it is recorded as one space (an identity `carol` followed by a line
+  `Role: verifier` used to record a role nobody declared), and every
+  trailer the engine writes is one line whatever its value held. A
+  batch records the further lines of an entry's note indented, so a
+  line that begins with another entry's id stays in the note it was
+  written in. Folder mems were not affected by the note parsing.
 
 - **No MCP tool swallows a change notice.** `memstead_check` and
   `memstead_mem_delete` reloaded a mem another process had written and

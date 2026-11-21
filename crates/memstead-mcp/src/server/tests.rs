@@ -14761,6 +14761,329 @@ mod callers_over_one_engine {
         });
     }
 
+    /// Update an entity through `server`, with the identity and note the
+    /// call declares, and hand back the response.
+    fn update_purpose(
+        server: &McpServer,
+        id: &str,
+        body: &str,
+        identity: Option<&str>,
+        note: Option<&str>,
+    ) -> CallToolResult {
+        let read = read_entity(server, id, false);
+        let hash = read
+            .structured_content
+            .as_ref()
+            .and_then(|sc| sc["_hash"].as_str())
+            .expect("the entity has a hash")
+            .to_string();
+        let mut params = serde_json::json!({
+            "id": id,
+            "expected_hash": hash,
+            "sections": { "purpose": body },
+        });
+        if let Some(identity) = identity {
+            params["identity"] = identity.into();
+        }
+        if let Some(note) = note {
+            params["note"] = note.into();
+        }
+        server.memstead_update(Parameters(serde_json::from_value(params).unwrap()))
+    }
+
+    /// The entry of `id` in the one notice `res` carries.
+    fn notice_entry(res: &CallToolResult, id: &str) -> serde_json::Value {
+        let notices = mem_changed(res).expect("a notice");
+        assert_eq!(notices[0]["changes"]["mode"], "detailed", "{notices}");
+        notices[0]["changes"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == id || e["to_id"] == id)
+            .unwrap_or_else(|| panic!("an entry for {id}: {notices}"))
+            .clone()
+    }
+
+    /// The detailed tier names, per entry, who wrote the entity last
+    /// inside the notice's range and why: the identity and the note of
+    /// the newest write. A write that declared neither yields an entry
+    /// with neither key, never an empty string and never an older
+    /// writer's value.
+    #[test]
+    fn a_detailed_notice_names_the_newest_writer_and_its_note() {
+        let (_tmp, base) = fixture();
+        let a = base.for_caller(CallerKey::new("a"));
+        let b = base.for_caller(CallerKey::new("b"));
+        let reader = base.for_caller(CallerKey::new("reader"));
+        let look = |server: &McpServer| server.dispatched(|s| read_entity(s, "specs--seed", false));
+        assert!(mem_changed(&look(&reader)).is_none());
+
+        // One write, with identity and note.
+        assert!(ok(&update_purpose(
+            &a,
+            "specs--seed",
+            "one",
+            Some("xavier"),
+            Some("first pass")
+        )));
+        let entry = notice_entry(&look(&reader), "specs--seed");
+        assert_eq!(entry["action"], "updated");
+        assert_eq!(entry["identity"], "xavier");
+        assert_eq!(entry["note"], "first pass");
+
+        // Two writes in the range: the newer one's values.
+        assert!(ok(&update_purpose(
+            &a,
+            "specs--seed",
+            "two",
+            Some("xavier"),
+            Some("second pass")
+        )));
+        assert!(ok(&update_purpose(
+            &b,
+            "specs--seed",
+            "three",
+            Some("yolanda"),
+            Some("the last word")
+        )));
+        let entry = notice_entry(&look(&reader), "specs--seed");
+        assert_eq!(entry["identity"], "yolanda");
+        assert_eq!(entry["note"], "the last word");
+
+        // The newest write declared a note and no identity, then an
+        // identity and no note, then neither: the key that was not
+        // declared is absent, whatever an older write declared.
+        assert!(ok(&update_purpose(
+            &a,
+            "specs--seed",
+            "four",
+            Some("xavier"),
+            Some("older")
+        )));
+        assert!(ok(&update_purpose(
+            &b,
+            "specs--seed",
+            "five",
+            None,
+            Some("no name")
+        )));
+        let entry = notice_entry(&look(&reader), "specs--seed");
+        assert_eq!(entry["note"], "no name");
+        assert!(entry.get("identity").is_none(), "{entry}");
+
+        assert!(ok(&update_purpose(
+            &a,
+            "specs--seed",
+            "six",
+            Some("xavier"),
+            Some("older")
+        )));
+        assert!(ok(&update_purpose(
+            &b,
+            "specs--seed",
+            "seven",
+            Some("yolanda"),
+            None
+        )));
+        let entry = notice_entry(&look(&reader), "specs--seed");
+        assert_eq!(entry["identity"], "yolanda");
+        assert!(entry.get("note").is_none(), "{entry}");
+
+        assert!(ok(&update_purpose(
+            &a,
+            "specs--seed",
+            "eight",
+            Some("xavier"),
+            Some("older")
+        )));
+        assert!(ok(&update_purpose(&b, "specs--seed", "nine", None, None)));
+        let entry = notice_entry(&look(&reader), "specs--seed");
+        assert!(entry.get("identity").is_none(), "{entry}");
+        assert!(entry.get("note").is_none(), "{entry}");
+
+        // A note whose lines look like trailers is carried whole, and
+        // cannot name an identity the write did not declare.
+        for (n, (identity, note)) in [
+            (Some("xavier"), "Fix: a colon after a capitalised word"),
+            (Some("xavier"), "first line\nNote: second line"),
+            (Some("xavier"), "Identity: mallory"),
+            (None, "Identity: mallory"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let body = format!("shaped {n}");
+            assert!(ok(&update_purpose(
+                &a,
+                "specs--seed",
+                &body,
+                identity,
+                Some(note)
+            )));
+            let entry = notice_entry(&look(&reader), "specs--seed");
+            assert_eq!(entry["note"], note, "{entry}");
+            match identity {
+                Some(identity) => assert_eq!(entry["identity"], identity, "{entry}"),
+                None => assert!(entry.get("identity").is_none(), "{entry}"),
+            }
+        }
+
+        // Each entry names its own entity's newest write, also beside a
+        // create and under a default identity of the writing instance.
+        let named = base
+            .for_caller(CallerKey::new("named"))
+            .with_default_identity(Some("zora".to_string()));
+        assert!(ok(&update_purpose(
+            &a,
+            "specs--seed",
+            "ten",
+            Some("xavier"),
+            Some("on the seed")
+        )));
+        assert!(ok(&create_spec(&named, "Beside", None)));
+        let res = look(&reader);
+        let seed = notice_entry(&res, "specs--seed");
+        assert_eq!(seed["identity"], "xavier");
+        assert_eq!(seed["note"], "on the seed");
+        let beside = notice_entry(&res, "specs--beside");
+        assert_eq!(beside["action"], "added");
+        assert_eq!(beside["identity"], "zora");
+        assert!(beside.get("note").is_none(), "{beside}");
+    }
+
+    /// A rename is a write to the renamed entity and to every entity
+    /// whose links it rewrote, and a delete is a write to the deleted
+    /// one: their entries name that write, not an older one.
+    #[test]
+    fn a_rename_and_a_delete_are_the_newest_write_of_what_they_touch() {
+        let (_tmp, base) = fixture();
+        let a = base.for_caller(CallerKey::new("a"));
+        let b = base.for_caller(CallerKey::new("b"));
+        let reader = base.for_caller(CallerKey::new("reader"));
+        let look = |server: &McpServer| server.dispatched(|s| read_entity(s, "specs--seed", false));
+        let hash_of = |server: &McpServer, id: &str| {
+            read_entity(server, id, false).structured_content.unwrap()["_hash"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert!(ok(&create_spec(&a, "Bee", None)));
+        let r = a.memstead_create(Parameters(
+            serde_json::from_value(serde_json::json!({
+                "title": "Aye",
+                "entity_type": "spec",
+                "mem": "specs",
+                "sections": { "identity": "i", "purpose": "see [[specs--bee]]" },
+            }))
+            .unwrap(),
+        ));
+        assert!(ok(&r), "{}", extract_text(&r));
+        look(&reader);
+
+        assert!(ok(&update_purpose(
+            &a,
+            "specs--aye",
+            "still see [[specs--bee]]",
+            Some("xavier"),
+            Some("x touched aye")
+        )));
+        let r = b.memstead_rename(Parameters(
+            serde_json::from_value(serde_json::json!({
+                "id": "specs--bee",
+                "new_title": "Bumble",
+                "expected_hash": hash_of(&b, "specs--bee"),
+                "identity": "yolanda",
+                "note": "y renamed bee",
+            }))
+            .unwrap(),
+        ));
+        assert!(ok(&r), "{}", extract_text(&r));
+
+        let res = reader.dispatched(|s| read_entity(s, "specs--aye", false));
+        let renamed = notice_entry(&res, "specs--bumble");
+        assert_eq!(renamed["action"], "renamed");
+        assert_eq!(renamed["from_id"], "specs--bee");
+        assert_eq!(renamed["identity"], "yolanda");
+        assert_eq!(renamed["note"], "y renamed bee");
+        // The rename rewrote Aye's link after xavier's update.
+        let referrer = notice_entry(&res, "specs--aye");
+        assert_eq!(referrer["action"], "updated");
+        assert_eq!(referrer["identity"], "yolanda");
+        assert_eq!(referrer["note"], "y renamed bee");
+
+        // A delete, in a range of its own (the feed pairs a delete and
+        // a rename of one range by similarity).
+        let r = b.memstead_delete(Parameters(
+            serde_json::from_value(serde_json::json!({
+                "id": "specs--seed",
+                "expected_hash": hash_of(&b, "specs--seed"),
+                "note": "gone",
+            }))
+            .unwrap(),
+        ));
+        assert!(ok(&r), "{}", extract_text(&r));
+        let res = reader.dispatched(|s| read_entity(s, "specs--aye", false));
+        let removed = notice_entry(&res, "specs--seed");
+        assert_eq!(removed["action"], "removed");
+        assert_eq!(removed["note"], "gone");
+        assert!(removed.get("identity").is_none(), "{removed}");
+    }
+
+    /// The two keys belong to the detailed tier alone: a notice in the
+    /// `ids` tier carries neither, and the entries of
+    /// `memstead_changes_since` are what they were.
+    #[test]
+    fn the_writer_and_note_stay_out_of_the_larger_tiers_and_of_changes_since() {
+        let (_tmp, base) = fixture();
+        let a = base.for_caller(CallerKey::new("a"));
+        let reader = base.for_caller(CallerKey::new("reader"));
+        let look = |server: &McpServer| server.dispatched(|s| read_entity(s, "specs--seed", false));
+        assert!(mem_changed(&look(&reader)).is_none());
+
+        // 51 writes, each with identity and note: past the detailed tier.
+        for n in 0..51 {
+            let r = a.memstead_create(Parameters(
+                serde_json::from_value(serde_json::json!({
+                    "title": format!("Many {n}"),
+                    "entity_type": "spec",
+                    "mem": "specs",
+                    "sections": { "identity": "i", "purpose": "p" },
+                    "identity": "xavier",
+                    "note": "one of many",
+                }))
+                .unwrap(),
+            ));
+            assert!(ok(&r), "{}", extract_text(&r));
+        }
+        let notices = mem_changed(&look(&reader)).expect("a notice");
+        assert_eq!(notices[0]["changes"]["mode"], "ids", "{notices}");
+        let text = notices.to_string();
+        assert!(
+            !text.contains("xavier") && !text.contains("one of many"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("\"identity\"") && !text.contains("\"note\""),
+            "{text}"
+        );
+
+        // The feed's entries carry neither key.
+        let from_head = notices[0]["from_head"].as_str().unwrap().to_string();
+        let r = reader.memstead_changes_since(Parameters(
+            serde_json::from_value(serde_json::json!({ "mem": "specs", "since": from_head }))
+                .unwrap(),
+        ));
+        assert!(ok(&r), "{}", extract_text(&r));
+        let changes = r.structured_content.as_ref().unwrap()["changes"].clone();
+        assert_eq!(changes.as_array().unwrap().len(), 51);
+        for entry in changes.as_array().unwrap() {
+            assert!(
+                entry.get("identity").is_none() && entry.get("note").is_none(),
+                "{entry}"
+            );
+        }
+    }
+
     #[test]
     fn nothing_that_belongs_to_a_caller_crosses_to_another_instance() {
         let (_tmp, base) = fixture();

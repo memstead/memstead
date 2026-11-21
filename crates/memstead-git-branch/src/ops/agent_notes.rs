@@ -99,11 +99,16 @@ pub struct ParsedCommit {
     pub merge_renames: Vec<String>,
 }
 
-/// Parse one commit body — subject on the first line, optional note
-/// paragraph, then a trailer block. Trailers are recognised as lines
-/// matching `<Capitalized>: <value>`. The note is everything between the
-/// subject (after one blank line) and the first trailer (or end of body
-/// if none).
+/// Parse one commit body — subject on the first line, optional note,
+/// then a trailer block. The trailer block is the message's last
+/// paragraph, when that paragraph begins with a line matching
+/// `<Capitalized>: <value>`: that is where the engine writes it, after
+/// a blank line, whatever the note says. The note is everything between
+/// the subject and that block (the whole body when there is none), so a
+/// note line that is itself shaped like a trailer (`Fix: the wording`,
+/// `Identity: x`) stays part of the note and is never read as a
+/// trailer. A line of the block that is no trailer is skipped (a value
+/// an older engine wrote with a line break in it).
 ///
 /// Body input is the raw commit message including subject — the same
 /// shape `git log --format=%B` returns. Trailing newlines are tolerated.
@@ -122,10 +127,18 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
     // commits a developer typed by hand) leave both fields `None`.
     let (tool_verb, entity_id) = parse_subject(&subject);
 
-    // Walk the body looking for the first trailer line; everything before
-    // it (after stripping leading/trailing blank lines) is the note.
+    // The trailer block is the last paragraph when it begins with a
+    // trailer line; everything before it (after stripping
+    // leading/trailing blank lines) is the note.
     let body_lines: Vec<&str> = lines.collect();
-    let first_trailer_idx = body_lines.iter().position(|l| is_trailer_line(l));
+    let last_paragraph = body_lines
+        .iter()
+        .rposition(|l| l.trim().is_empty())
+        .map_or(0, |blank| blank + 1);
+    let first_trailer_idx = body_lines
+        .get(last_paragraph)
+        .is_some_and(|first| is_trailer_line(first))
+        .then_some(last_paragraph);
 
     let note_slice = match first_trailer_idx {
         Some(idx) => &body_lines[..idx],
@@ -473,6 +486,74 @@ mod tests {
     /// through `format_commit_message` → `parse_commit_message`, and
     /// an identity-less context emits no trailer at all — absence
     /// recorded as absence.
+    /// A note is whatever its writer declared, whatever its lines look
+    /// like: a line shaped like a trailer stays part of the note, and
+    /// the identity is the one the engine wrote into the trailer block,
+    /// never one a note line names.
+    #[test]
+    fn a_note_line_shaped_like_a_trailer_stays_in_the_note() {
+        let round_trip = |note: &str, identity: Option<&str>| {
+            let mut c = ctx();
+            c.note = Some(note.to_string());
+            c.identity = identity.map(str::to_string);
+            let msg = crate::vcs::format_commit_message("memstead: update specs--x", &c);
+            parse_commit_message(&msg)
+        };
+        // Closed list of note shapes: a single trailer-shaped line, a
+        // trailer-shaped line after prose, one before prose, a whole
+        // paragraph of them after a blank line, and the keys the engine
+        // itself writes.
+        for note in [
+            "Fix: a colon after a capitalised word",
+            "first line\nNote: second line",
+            "Reason: first\nthen prose",
+            "prose\n\nReason: b\nSee-Also: c",
+            "Identity: mallory",
+            "Actor: human\nRole: checker\nEntities: specs--a, specs--b",
+        ] {
+            let parsed = round_trip(note, Some("xavier"));
+            assert_eq!(parsed.note.as_deref(), Some(note), "{note:?}");
+            assert_eq!(parsed.identity.as_deref(), Some("xavier"), "{note:?}");
+            assert_eq!(parsed.actor.as_deref(), Some("agent"), "{note:?}");
+            assert!(parsed.entity_ids.is_empty(), "{note:?}");
+            assert_eq!(parsed.role, None, "{note:?}");
+        }
+        // No identity declared: a note line cannot supply one.
+        let parsed = round_trip("Identity: mallory", None);
+        assert_eq!(parsed.identity, None);
+        assert_eq!(parsed.note.as_deref(), Some("Identity: mallory"));
+
+        // A trailer is one line, whatever its value held: an identity
+        // or a client name with a line break in it cannot start a line
+        // a reader takes for another trailer, and the block is read
+        // whole.
+        let mut c = ctx();
+        c.note = Some("line one\nFix: two".to_string());
+        c.identity = Some("carol\nRole: verifier".to_string());
+        c.client = Some(crate::vcs::ClientId {
+            name: "a client\nIdentity: mallory".into(),
+            version: "1".into(),
+        });
+        let parsed = parse_commit_message(&crate::vcs::format_commit_message(
+            "memstead: update specs--x",
+            &c,
+        ));
+        assert_eq!(parsed.note.as_deref(), Some("line one\nFix: two"));
+        assert_eq!(parsed.identity.as_deref(), Some("carol Role: verifier"));
+        assert_eq!(parsed.role, None, "no role was declared");
+        assert_eq!(parsed.actor.as_deref(), Some("agent"));
+        assert_eq!(parsed.tool.as_deref(), Some("memstead_create"));
+
+        // A message an older engine wrote with such a break in the
+        // identity: its block is still read, the stray line skipped.
+        let old = "memstead: update specs--x\n\nline one\n\nTool: update_entity\nActor: cli\nIdentity: alice\nnot a trailer line";
+        let parsed = parse_commit_message(old);
+        assert_eq!(parsed.note.as_deref(), Some("line one"));
+        assert_eq!(parsed.identity.as_deref(), Some("alice"));
+        assert_eq!(parsed.actor.as_deref(), Some("cli"));
+        assert_eq!(parsed.tool.as_deref(), Some("update_entity"));
+    }
+
     #[test]
     fn parser_round_trips_identity_trailer() {
         let mut ctx = crate::vcs::CommitContext {

@@ -1895,6 +1895,11 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "HEAD",
         ],
         "memstead_changes_since" => &[
+            // The change notice a response of any tool may carry: its
+            // key, and the writer its detailed tier names per entry
+            // (`note` is a generic term already).
+            "mem_changed",
+            "identity",
             "write_id",
             // The folder-mem cursor: each ledger entry carries `ts`
             // (RFC3339), and the last one read is the next `since`.
