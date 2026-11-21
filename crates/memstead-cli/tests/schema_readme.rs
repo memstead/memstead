@@ -179,3 +179,149 @@ fn unknown_reference_refuses_typed_and_subcommands_still_route() {
         .failure()
         .stderr(predicates::str::contains("WORKSPACE_NOT_INITIALISED"));
 }
+
+fn run_ok(dir: &std::path::Path, args: &[&str]) -> String {
+    let out = memstead()
+        .current_dir(dir)
+        .args(args)
+        .arg("--quiet")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    String::from_utf8(out).unwrap()
+}
+
+/// What the read of a scaffolded, installed package must name: the
+/// scaffold's entity type and its relationship vocabulary.
+fn assert_summarises_the_scaffold(text: &str, pin: &str) {
+    assert!(text.contains(pin), "names the pin: {text}");
+    assert!(
+        text.contains("## Entity types") && text.contains("`note`"),
+        "{text}"
+    );
+    assert!(
+        text.contains("## Relationships") && text.contains("`REFERENCES`"),
+        "{text}"
+    );
+}
+
+/// A schema that was scaffolded and installed is readable with the verb
+/// that reads a built-in, although the scaffold writes no README: in a
+/// mem-repo workspace, in a folder workspace, and in a workspace that
+/// reaches the package only through the git directory of a git-branch
+/// mount.
+#[test]
+fn an_installed_schema_without_a_readme_is_shown_from_what_it_declares() {
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    // A mem-repo workspace: the package is sealed on the registry ref.
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    run_ok(&repo, &["mem-repo", "init", ".", "--no-gitignore"]);
+    run_ok(&repo, &["schema", "new", "fieldnote"]);
+    assert!(!repo.join("fieldnote").join("README.md").exists());
+    run_ok(&repo, &["schema", "install", "fieldnote"]);
+    let text = run_ok(&repo, &["schema", "fieldnote@0.1.0"]);
+    assert_summarises_the_scaffold(&text, "fieldnote@0.1.0");
+    let json: serde_json::Value =
+        serde_json::from_str(&run_ok(&repo, &["--json", "schema", "fieldnote@0.1.0"])).unwrap();
+    assert_eq!(json["origin"], "workspace");
+    assert!(json["readme"].is_null());
+    assert_summarises_the_scaffold(json["summary"].as_str().unwrap(), "fieldnote@0.1.0");
+
+    // A folder workspace: the package sits in `.memstead/schemas/`.
+    let folder = tmp.path().join("folder");
+    std::fs::create_dir_all(&folder).unwrap();
+    run_ok(
+        &folder,
+        &["init", "--name", "home", "--schema", "default@1.3.0"],
+    );
+    run_ok(&folder, &["schema", "new", "fieldnote"]);
+    run_ok(&folder, &["schema", "install", "fieldnote"]);
+    let text = run_ok(&folder, &["schema", "fieldnote@0.1.0"]);
+    assert_summarises_the_scaffold(&text, "fieldnote@0.1.0");
+
+    // A workspace of engine state only, which reaches the package
+    // through the git directory its one git-branch mount names.
+    let view = tmp.path().join("view");
+    std::fs::create_dir_all(view.join(".memstead").join("state")).unwrap();
+    std::fs::write(
+        view.join(".memstead").join("workspace.toml"),
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    )
+    .unwrap();
+    let gitdir = std::fs::canonicalize(repo.join("mem-repo").join(".git")).unwrap();
+    std::fs::write(
+        view.join(".memstead").join("state").join("mounts.json"),
+        serde_json::json!({
+            "format": "memstead-mounts-3",
+            "mounts": [{
+                "mem": "notes",
+                "schema": "fieldnote@0.1.0",
+                "storage": { "type": "git-branch", "gitdir": gitdir, "branch": "refs/heads/notes" },
+                "capability": "read-only",
+                "lifecycle": "eager",
+                "cross_linkable": true
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let text = run_ok(&view, &["schema", "fieldnote@0.1.0"]);
+    assert_summarises_the_scaffold(&text, "fieldnote@0.1.0");
+}
+
+/// A name and version installed nowhere still refuses, and a package
+/// that carries a README is shown with its README as before.
+#[test]
+fn an_uninstalled_schema_still_refuses_and_a_readme_is_still_shown() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    run_ok(&repo, &["mem-repo", "init", ".", "--no-gitignore"]);
+
+    let out = memstead()
+        .current_dir(&repo)
+        .args(["--json", "schema", "fieldnote@0.1.0", "--quiet"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains("SCHEMA_NOT_FOUND"), "got: {text}");
+
+    // Installed, but another version asked for: still not found.
+    run_ok(&repo, &["schema", "new", "fieldnote"]);
+    std::fs::write(
+        repo.join("fieldnote").join("README.md"),
+        "# fieldnote\n\nA note kept in the field, written by its author.\n",
+    )
+    .unwrap();
+    run_ok(&repo, &["schema", "install", "fieldnote"]);
+    memstead()
+        .current_dir(&repo)
+        .args(["schema", "fieldnote@0.2.0", "--quiet"])
+        .assert()
+        .failure();
+
+    // With a README in the package, the README is what is shown.
+    let text = run_ok(&repo, &["schema", "fieldnote@0.1.0"]);
+    assert!(
+        text.contains("A note kept in the field, written by its author."),
+        "{text}"
+    );
+    assert!(
+        !text.contains("## Entity types"),
+        "the summary is not added: {text}"
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&run_ok(&repo, &["--json", "schema", "fieldnote@0.1.0"])).unwrap();
+    assert!(json["readme"].as_str().is_some());
+    assert!(json["summary"].is_null());
+}

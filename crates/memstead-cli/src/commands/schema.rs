@@ -64,9 +64,13 @@ pub struct Args {
     /// rewritten to the resolved pin: sibling generations of a built-in
     /// carry the README of their first generation verbatim (sealed
     /// bytes, never edited), so the resolved manifest is the one source
-    /// of the identity the reader sees. Markdown by default; `--json`
-    /// carries `schema`, `name`, `version`, `origin` and the rendered
-    /// `readme` (`null` when the package ships none). Unknown names
+    /// of the identity the reader sees. A pin that is no built-in reads
+    /// a package installed in the workspace; one that ships no README
+    /// is summarised from what it declares (its entity types and its
+    /// relationship vocabulary). Markdown by default; `--json` carries
+    /// `schema`, `name`, `version`, `origin`, the rendered `readme`
+    /// (`null` when the package ships none) and `summary` (that
+    /// summary, `null` otherwise). A name and version no store carries
     /// refuse with `SCHEMA_NOT_FOUND`.
     #[arg(value_name = "REF")]
     pub reference: Option<String>,
@@ -209,10 +213,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// `.memstead/schemas/<name>@<version>/` layout and the mem-repo's
 /// `__MEMSTEAD:schemas/` ref — so a workspace-local schema's sealed
 /// README (a contract carrier, not only docs) is readable through the
-/// same sanctioned verb as a built-in's.
+/// same sanctioned verb as a built-in's. An installed package that
+/// ships no README is shown from what it declares (its types and
+/// relationship vocabulary); only a reference no store carries is
+/// refused as not found.
 fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
     let schema_ref = resolve_builtin_read_ref(reference)?;
     let version = schema_ref.version.to_string();
+    // Set only for a workspace-installed package that ships no README.
+    let mut summary: Option<String> = None;
     let (origin, name, ver, readme_bytes) =
         match memstead_schema::builtins::builtin_package(&schema_ref.name, &version) {
             Some(pkg) => {
@@ -235,14 +244,24 @@ fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
                     version.clone(),
                     Some(bytes),
                 ),
-                None => {
-                    return Err(CliError::from_engine_op(
-                        memstead_base::EngineError::unknown_builtin_schema(
-                            &schema_ref.as_display(),
-                        ),
-                    )
-                    .into());
-                }
+                // An installed package need not carry a README (the
+                // scaffold writes none): the package is there and a mem
+                // may be pinned to it, so it is shown from what it
+                // declares instead of being reported as not found.
+                None => match workspace_installed_schema(ctx, &schema_ref) {
+                    Some(schema) => {
+                        summary = Some(package_summary(&schema));
+                        ("workspace", schema_ref.name.clone(), version.clone(), None)
+                    }
+                    None => {
+                        return Err(CliError::from_engine_op(
+                            memstead_base::EngineError::unknown_builtin_schema(
+                                &schema_ref.as_display(),
+                            ),
+                        )
+                        .into());
+                    }
+                },
             },
         };
     let readme = readme_bytes
@@ -264,6 +283,7 @@ fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
             "version": ver,
             "origin": origin,
             "readme": readme,
+            "summary": summary,
         }))?;
         return Ok(());
     }
@@ -273,15 +293,86 @@ fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
     } else {
         "workspace-installed"
     };
-    match readme {
-        Some(text) => print_markdown(&format!(
+    match (readme, summary) {
+        (Some(text), _) => print_markdown(&format!(
             "<!-- {pin}: {label} package README, rendered for this generation -->\n{text}"
         )),
-        None => print_markdown(&format!(
+        (None, Some(text)) => print_markdown(&format!(
+            "<!-- {pin}: {label} package without a README, summarised from what it declares -->\n{text}"
+        )),
+        (None, None) => print_markdown(&format!(
             "`{pin}` is a {label} package that ships no README.\n"
         )),
     }
     Ok(())
+}
+
+/// A schema package installed in the workspace, found where the loader
+/// resolves pins: the filesystem `.memstead/schemas/` layout first, then
+/// the `__MEMSTEAD:schemas/` registry of each git directory the
+/// workspace's git-branch mounts name and of its own mem-repo. `None`
+/// outside a workspace or when no store carries the name and version.
+fn workspace_installed_schema(
+    ctx: &CliContext,
+    schema_ref: &SchemaRef,
+) -> Option<std::sync::Arc<memstead_schema::Schema>> {
+    let (_, root) = ctx.workspace_shape()?;
+    let folder = root.join(".memstead").join("schemas");
+    let (mut schemas, _failed) =
+        memstead_base::engine::boot::load_workspace_schemas_with_failures(Some(folder.as_path()));
+    use memstead_base::WorkspaceStoreAdapter as _;
+    let mounts = memstead_base::FileWorkspaceStore::new()
+        .load(&root)
+        .map(|workspace| workspace.mounts)
+        .unwrap_or_default();
+    schemas
+        .extend(memstead_git_branch::mem_repo_schemas::read_workspace_ref_schemas(&root, &mounts));
+    schemas.into_iter().find(|schema| {
+        let (name, version) = schema.id();
+        name == schema_ref.name && version == schema_ref.version
+    })
+}
+
+/// What a package declares, for a package that ships no README: its
+/// description, its entity types and its relationship vocabulary, each
+/// with the package's own one-line description.
+fn package_summary(schema: &memstead_schema::Schema) -> String {
+    let manifest = &schema.manifest;
+    let mut out = format!("# {}@{}\n\n", manifest.name, schema.version);
+    if !manifest.description.trim().is_empty() {
+        out.push_str(manifest.description.trim());
+        out.push_str("\n\n");
+    }
+    if !manifest.when_to_use.trim().is_empty() {
+        out.push_str(&format!("When to use: {}\n\n", manifest.when_to_use.trim()));
+    }
+    out.push_str("## Entity types\n\n");
+    for name in &manifest.types {
+        match schema.types.get(name) {
+            Some(def) if !def.description.trim().is_empty() => {
+                out.push_str(&format!("- `{name}`: {}\n", one_line(&def.description)))
+            }
+            _ => out.push_str(&format!("- `{name}`\n")),
+        }
+    }
+    out.push_str("\n## Relationships\n\n");
+    for def in &manifest.relationships.definitions {
+        if def.description.trim().is_empty() {
+            out.push_str(&format!("- `{}`\n", def.name));
+        } else {
+            out.push_str(&format!(
+                "- `{}`: {}\n",
+                def.name,
+                one_line(&def.description)
+            ));
+        }
+    }
+    out
+}
+
+/// A description folded onto one line for a list entry.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// The sealed README of a workspace-installed schema package, from the

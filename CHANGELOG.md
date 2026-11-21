@@ -27,6 +27,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **An installed schema is readable without a README.** `memstead
+  schema <name>@<version>` refused `SCHEMA_NOT_FOUND` for a schema that
+  was installed in the workspace and serving a mem, when its package
+  carried no README, which is what `memstead schema new` scaffolds. The
+  read now finds the package where the loader finds it (the workspace's
+  schema folder, the registry of each git directory its git-branch
+  mounts name, its own mem-repo) and summarises a package without a
+  README from what it declares: its entity types and its relationship
+  vocabulary. `--json` carries that text as `summary` (`null` when the
+  package has a README). A name and version installed nowhere still
+  refuse `SCHEMA_NOT_FOUND`.
+
 - **A running engine follows read-only mounts in its roster.** The
   roster reconciliation every operation runs looked at writable mounts
   only. A read-only mount another process added was not served until a
