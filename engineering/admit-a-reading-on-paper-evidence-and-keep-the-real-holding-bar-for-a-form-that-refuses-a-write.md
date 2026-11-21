@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-10T10:43:10Z
-last_modified: 2026-11-10T10:43:10Z
+last_modified: 2026-11-12T22:49:56Z
 status: accepted
 decided_on: 2026-11-10
 deciders: operator, implementing agent
@@ -31,14 +31,17 @@ One thing stood with all four readers: a due date read from the newest confirmin
 - A reading admitted this way names its evidence in its own decision, and it is removed without a deprecation cycle if no holding takes it up; pre-1.0 that costs one schema-language generation.
 - A reading never becomes a gate in a later release by this route. Promotion to a refusal needs the real-holding bar, met on its own.
 - Paper evidence has three parts and all three are required: the engine validates the package, a run in a scratch workspace shows what cannot be expressed, and a reader who did not write the design reviews it against the code. A schema that exists only as text is not evidence.
-- The first candidate is the due reading named above. It has a precondition: the newest check of a kind is defined by the time of the act, where today it is the last line in ledger order.
+- The first candidate was the due reading named above, and it shipped in 0.26.0 as `due.check_kind` (engine a0a534ea; [[engineering--a-due-axis-counts-from-an-engine-stamped-timestamp-with-an-offset-and-waits-for-its-roster-and-the-bundle-overstay-is-such-a-due-date]]). Its evidence, in the three parts: the probe packages validate and the second probe run shows the reading by replay (`docs/proof/schema-probe/2026-11-11/`); an independent grader confirmed the dated, moved and due-now cases with two fault injections; a second confirmed that every built-in generation renders byte-identical without the key and that the reading refuses no write. Its precondition, newest by the time of the act, shipped in the same release ([[engineering--check-state-is-derived-from-engine-recorded-check-acts-never-stamped]]).
 - Cost accepted: readings can accumulate, and each one still costs a parser path, a guide section and an example. The bar against forms on speculation is lower than it was for this one class.
-- The review that prompted this also raised three questions about how a check stands today (a licensing check carried across later edits, independence compared with the first author only, newest by ledger order). They are open work and no part of this decision.
+- The review that prompted this also raised three questions about how a check stands today (a licensing check carried across later edits, independence compared with the first author only, newest by ledger order). They are no part of this decision, and all three were closed in 0.26.0 ([[engineering--gated-transitions-carry-a-floor-and-a-self-check-form-so-the-planning-contract-is-engine-refused]]).
 
 ## Relationships
 - **MOTIVATED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-six-form-constraint-vocabulary]]
 - **REFERENCES**: [[a-schema-declares-what-is-due-and-what-would-resolve-an-open-entity-and-health-reads-both]]
 - **REFERENCES**: [[declare-unhealthy-to-keep-invariants-through-a-six-form-constraint-vocabulary]]
+- **REFERENCES**: [[a-due-axis-counts-from-an-engine-stamped-timestamp-with-an-offset-and-waits-for-its-roster-and-the-bundle-overstay-is-such-a-due-date]]
+- **REFERENCES**: [[check-state-is-derived-from-engine-recorded-check-acts-never-stamped]]
+- **REFERENCES**: [[gated-transitions-carry-a-floor-and-a-self-check-form-so-the-planning-contract-is-engine-refused]]
 
 ## Options
 

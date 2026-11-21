@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T00:46:51Z
-last_modified: 2026-11-11T22:41:21Z
+last_modified: 2026-11-12T22:50:23Z
 status: accepted
 decided_on: 2026-09-02
 deciders: execute-graph-plan loop, evidence-engine bundle
@@ -49,3 +49,4 @@ Landed in engine commit c1423f7 (0.15.0 line) with the CLI coverage declaration,
 
 
 2026-11-11, engine dfd6bfde to aa4c526f: the table gained a constraint scope. Seven rows retire the direction values `incoming` / `outgoing` (now `in` / `out`, one direction type) on `status_propagation` and `transition_requires_checks`, and the relation keys `rel_type` / `rel_types` (now `relationships`; a single name becomes a one-element list) on `status_propagation` and `enum_from_neighbour`. These rows carry no serde sentinel: the loader translates a parsed type document by the table itself (`translate_retired_constraint_spellings`), so sealed content loads with its meaning and authoring content refuses naming the retired spelling, its replacement and `schema migrate`. Two rewrite kinds were added for it (a value rewrite and a rename into a list). The faithfulness proof now also compares each type's constraints, and a run with nothing the rewriter reaches refuses when the authoring read still refuses a retired spelling (a flow-style mapping), instead of reporting nothing to migrate.
+2026-11-11 renderings (checks-and-spelling bundle, plan 02, released in 0.26.0): every surface that renders a schema-language direction or relation set renders the converged spelling, a declared wire change: the schema read over MCP and CLI, the gates brief ("[VERIFIES] (in)"), the health constraints axis, the CONSTRAINT_UNSATISFIED details and the generated type-definition schema all print out / in and relationships. Graph-edge directions outside the schema language (the relations listing's outgoing / incoming keys, context neighbours, retype problems, the incoming key of write responses) are not schema language and keep their spelling. Rejected: aliases or a warning period (operator decision before authoring).
