@@ -735,6 +735,17 @@ pub enum EngineError {
         cause: StaleCause,
         detail: String,
     },
+    /// A write waited for a mem's write lock for as long as the
+    /// workspace allows and another writer still held it. Nothing was
+    /// written and no lock is held. The wait is
+    /// `[mutations] write_lock_timeout_secs` (default 30; `0` waits
+    /// without bound).
+    #[error(
+        "mem {mem}: another writer still held the mem's write lock after {waited_ms} ms, so \
+         nothing was written. Retry; if writes to this mem regularly take longer, raise \
+         `write_lock_timeout_secs` in the workspace's `[mutations]` table (`0` waits without bound)"
+    )]
+    WriteLockTimeout { mem: String, waited_ms: u64 },
     /// `memstead_relate` source is a stub — stubs have no `entity_type`
     /// and cannot author edges. The agent must promote the stub to a
     /// real entity via `memstead_create` (stub adoption preserves any
@@ -1759,6 +1770,7 @@ impl EngineError {
             EngineError::RenamePartialFailure { .. } => "RENAME_PARTIAL_FAILURE",
             EngineError::CommitNotApplied { .. } => "COMMIT_NOT_APPLIED",
             EngineError::StaleView { .. } => "MEM_VIEW_STALE",
+            EngineError::WriteLockTimeout { .. } => "WRITE_LOCK_TIMEOUT",
             EngineError::RelationHasBodyLinks { .. } => "RELATION_HAS_BODY_LINKS",
             EngineError::WikiLinkWithoutRelation { .. } => "WIKILINK_WITHOUT_RELATION",
             EngineError::StubCannotRelate { .. } => "STUB_CANNOT_RELATE",
@@ -2506,6 +2518,10 @@ impl EngineError {
                 "mem": mem,
                 "cause": cause.as_str(),
                 "detail": detail,
+            }),
+            EngineError::WriteLockTimeout { mem, waited_ms } => serde_json::json!({
+                "mem": mem,
+                "waited_ms": waited_ms,
             }),
             EngineError::StubCannotRelate { id }
             | EngineError::StubNotUpdatable { id }

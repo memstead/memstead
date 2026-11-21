@@ -5506,3 +5506,176 @@ fn a_pin_change_on_a_quarantined_read_only_mount_is_refused() {
         .expect("a writable quarantined mem is repinned");
     assert!(engine.quarantine_reason("beta").is_none());
 }
+
+/// The roster fixture's workspace with a `[mutations]` table added, and
+/// a fresh engine booted over it.
+fn lock_timeout_fixture(mutations: &str) -> (TempDir, Engine) {
+    let (tmp, _) = roster_fixture();
+    let toml = tmp.path().join(".memstead").join("workspace.toml");
+    let mut text = std::fs::read_to_string(&toml).unwrap();
+    text.push_str("\n[mutations]\n");
+    text.push_str(mutations);
+    text.push('\n');
+    std::fs::write(&toml, text).unwrap();
+    let engine = Engine::from_workspace_root(tmp.path()).expect("the workspace boots");
+    (tmp, engine)
+}
+
+/// Another writer: its own engine on its own thread takes the write
+/// lock of the named mems, says so, and lets go when told to.
+fn hold_write_lock(
+    root: &Path,
+    mems: &'static [&'static str],
+) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
+    let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+    let root = root.to_path_buf();
+    let handle = std::thread::spawn(move || {
+        let mut other = Engine::from_workspace_root(&root).unwrap();
+        let guard = other.lock_mems_for_write(mems).unwrap();
+        held_tx.send(()).unwrap();
+        let _ = go_rx.recv();
+        drop(guard);
+    });
+    held_rx.recv().unwrap();
+    (go_tx, handle)
+}
+
+/// While another writer holds a mem's write lock, a write under a
+/// deadline refuses `WRITE_LOCK_TIMEOUT` after about that long, names
+/// the mem and the wait, and writes nothing; once the holder lets go
+/// the write lands. A write over two mems that times out on the second
+/// holds neither afterwards.
+#[test]
+fn a_held_write_lock_refuses_the_waiting_write_after_the_deadline() {
+    let (tmp, mut engine) = lock_timeout_fixture("write_lock_timeout_secs = 1");
+    let root = tmp.path();
+    let (go, holder) = hold_write_lock(root, &["beta"]);
+
+    let started = std::time::Instant::now();
+    let err = engine
+        .create_entity_with_ctx(
+            crate::engine::CreateEntityArgs {
+                anchors: Vec::new(),
+                mem: "beta".to_string(),
+                title: "Blocked".to_string(),
+                entity_type: "spec".to_string(),
+                sections: indexmap::IndexMap::from_iter([
+                    ("identity".to_string(), "i".to_string()),
+                    ("purpose".to_string(), "p".to_string()),
+                ]),
+                metadata: indexmap::IndexMap::new(),
+                relations: Vec::new(),
+                dry_run: false,
+            },
+            &crate::vcs::CommitContext::internal(),
+        )
+        .expect_err("the lock is held elsewhere");
+    let waited = started.elapsed();
+    assert_eq!(err.code(), "WRITE_LOCK_TIMEOUT", "{err}");
+    match &err {
+        EngineError::WriteLockTimeout { mem, waited_ms } => {
+            assert_eq!(mem, "beta");
+            assert!(*waited_ms >= 1000, "waited_ms {waited_ms}");
+        }
+        other => panic!("expected WriteLockTimeout, got {other:?}"),
+    }
+    assert_eq!(err.details()["mem"], "beta");
+    assert!(err.details()["waited_ms"].as_u64().unwrap() >= 1000);
+    assert!(
+        waited >= std::time::Duration::from_secs(1) && waited < std::time::Duration::from_secs(10),
+        "waited {waited:?}"
+    );
+    assert!(
+        !root.join("beta").join("blocked.md").exists(),
+        "a refused write leaves the mem as it was"
+    );
+
+    // Two mems, the second one held: the write refuses naming it, and
+    // the first mem's lock is free again, which another writer proves.
+    let err = engine
+        .lock_mems_for_write(&["alpha", "beta"])
+        .map(|_| ())
+        .expect_err("beta is held elsewhere");
+    assert_eq!(err.code(), "WRITE_LOCK_TIMEOUT", "{err}");
+    let third_root = root.to_path_buf();
+    let third = std::thread::spawn(move || {
+        let mut other = Engine::from_workspace_root(&third_root).unwrap();
+        let started = std::time::Instant::now();
+        let result = other.lock_mems_for_write(&["alpha"]).map(|_| ());
+        (result.map_err(|e| e.code().to_string()), started.elapsed())
+    });
+    let (result, took) = third.join().unwrap();
+    assert_eq!(result, Ok(()), "alpha's lock was given back");
+    assert!(
+        took < std::time::Duration::from_millis(900),
+        "took {took:?}"
+    );
+
+    // The holder lets go: the same write lands.
+    go.send(()).unwrap();
+    holder.join().unwrap();
+    assert_eq!(try_create(&mut engine, "beta", "Blocked"), Ok(()));
+    assert!(root.join("beta").join("blocked.md").exists());
+}
+
+/// With the setting at `0` a write waits for the holder as long as it
+/// takes and does not refuse.
+#[test]
+fn a_write_lock_timeout_of_zero_waits_without_bound() {
+    let (tmp, mut engine) = lock_timeout_fixture("write_lock_timeout_secs = 0");
+    assert_eq!(engine.settings().mutations.write_lock_timeout(), None);
+    let (go, holder) = hold_write_lock(tmp.path(), &["beta"]);
+    let releaser = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        go.send(()).unwrap();
+    });
+    let started = std::time::Instant::now();
+    assert_eq!(try_create(&mut engine, "beta", "Patient"), Ok(()));
+    assert!(started.elapsed() >= std::time::Duration::from_millis(1200));
+    releaser.join().unwrap();
+    holder.join().unwrap();
+}
+
+/// The deadline is read from `[mutations] write_lock_timeout_secs`, is
+/// 30 seconds when the key is absent, and a value that is not a
+/// non-negative whole number refuses when the configuration is loaded,
+/// naming the key.
+#[test]
+fn the_write_lock_timeout_is_a_workspace_setting_and_refuses_a_bad_value() {
+    let (_tmp, engine) = roster_fixture();
+    assert_eq!(
+        engine.settings().mutations.write_lock_timeout(),
+        Some(std::time::Duration::from_secs(30)),
+        "absent: thirty seconds"
+    );
+    let (_tmp, engine) = lock_timeout_fixture("write_lock_timeout_secs = 7");
+    assert_eq!(
+        engine.settings().mutations.write_lock_timeout(),
+        Some(std::time::Duration::from_secs(7))
+    );
+
+    for bad in [
+        "write_lock_timeout_secs = -1",
+        "write_lock_timeout_secs = \"soon\"",
+        "write_lock_timeout_secs = 1.5",
+        "write_lock_timeout_secs = true",
+    ] {
+        let (tmp, _) = roster_fixture();
+        let toml = tmp.path().join(".memstead").join("workspace.toml");
+        let mut text = std::fs::read_to_string(&toml).unwrap();
+        text.push_str("\n[mutations]\n");
+        text.push_str(bad);
+        text.push('\n');
+        std::fs::write(&toml, text).unwrap();
+        let err = match Engine::from_workspace_root(tmp.path()) {
+            Ok(_) => panic!("`{bad}` must refuse at load, not fall back to a default"),
+            Err(e) => e,
+        };
+        let message = err.to_string();
+        assert!(
+            message.contains("write_lock_timeout_secs"),
+            "`{bad}`: the refusal names the key: {message}"
+        );
+    }
+}

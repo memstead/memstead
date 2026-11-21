@@ -581,6 +581,9 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
         if let Some(rn) = settings.mutations.require_notes {
             mutations_obj.insert("require_notes".to_string(), serde_json::Value::Bool(rn));
         }
+        if let Some(secs) = settings.mutations.write_lock_timeout_secs {
+            mutations_obj.insert("write_lock_timeout_secs".to_string(), secs.into());
+        }
         let mut plugin_obj = serde_json::Map::new();
         for (k, v) in &settings.plugin {
             plugin_obj.insert(k.clone(), serde_json::Value::String(v.to_string()));
@@ -652,6 +655,16 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
         Some(true) => lines.push("- `require_notes`: `true`".to_string()),
         Some(false) => lines.push("- `require_notes`: `false`".to_string()),
         None => lines.push("- `require_notes`: (unset — best-effort)".to_string()),
+    }
+    match settings.mutations.write_lock_timeout_secs {
+        Some(0) => {
+            lines.push("- `write_lock_timeout_secs`: `0` (a write waits without bound)".to_string())
+        }
+        Some(secs) => lines.push(format!("- `write_lock_timeout_secs`: `{secs}`")),
+        None => lines.push(format!(
+            "- `write_lock_timeout_secs`: (unset, {} seconds)",
+            memstead_base::workspace::MutationsSection::DEFAULT_WRITE_LOCK_TIMEOUT_SECS
+        )),
     }
     lines.push(String::new());
 

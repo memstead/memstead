@@ -7,6 +7,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **A write waits for a mem's lock only so long.** A write that cannot
+  take a mem's write lock within a deadline refuses the new code
+  `WRITE_LOCK_TIMEOUT` (`details.mem`, `details.waited_ms`) and writes
+  nothing, where it used to wait without bound behind a writer that
+  never let go. The deadline is `write_lock_timeout_secs` in the
+  workspace's `[mutations]` table: 30 seconds when absent, `0` to wait
+  without bound as before; a value that is not a non-negative whole
+  number refuses when the workspace is loaded. A write over several
+  mems that times out on one holds none of their locks afterwards.
+  `memstead workspace show` lists the setting. The deadline bounds the
+  write's own wait for the lock. One wait is older and still has no
+  bound: a folder mem that holds an interrupted commit is completed
+  when it is loaded, and that step waits for the lock for as long as
+  another process holds it, so a fresh process stays behind a writer
+  that hung in the middle of its commit.
+
 ### Fixed
 
 - **A running engine follows read-only mounts in its roster.** The

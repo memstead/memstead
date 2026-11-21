@@ -1899,6 +1899,7 @@ fn overview_workspace_policy_surfaces_require_notes() {
         memstead_base::WorkspaceSettings {
             mutations: memstead_base::workspace::MutationsSection {
                 require_notes: Some(true),
+                ..Default::default()
             },
             ..Default::default()
         },
@@ -2206,6 +2207,7 @@ fn health_with_include_config_surfaces_mutations_and_plugin() {
 
     let mutations = crate::config::MutationsSection {
         require_notes: Some(true),
+        ..Default::default()
     };
     let mut plugin = HashMap::new();
     // Any opaque sub-table proves the pass-through — the engine
@@ -10828,6 +10830,7 @@ mod mutation_note {
         memstead_git_branch::test_support::auto_seeded_settings(tmp.path());
         let mutations = crate::config::MutationsSection {
             require_notes: Some(require),
+            ..Default::default()
         };
         // Build a git-branch engine so `memstead_create` /
         // `memstead_update` write to mem-repo and

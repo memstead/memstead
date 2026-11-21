@@ -197,6 +197,7 @@ impl CliError {
         // and the message are the engine's (one value for both surfaces).
         let kind = match &e {
             StaleView { .. }
+            | WriteLockTimeout { .. }
             | CommitNotApplied { .. }
             | MemQuarantined { .. }
             | CheckNotRecorded { .. }

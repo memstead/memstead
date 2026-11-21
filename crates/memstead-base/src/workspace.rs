@@ -414,6 +414,30 @@ pub struct MutationsSection {
     /// `WarningHint { code: "note_missing" }`. The mutation still
     /// succeeds — provenance is best-effort.
     pub require_notes: Option<bool>,
+    /// How many seconds a write waits for a mem's write lock before it
+    /// refuses `WRITE_LOCK_TIMEOUT`. Absent → 30. `0` waits without
+    /// bound. A value that is not a non-negative whole number refuses
+    /// when the configuration is loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_lock_timeout_secs: Option<u64>,
+}
+
+impl MutationsSection {
+    /// The default wait for a mem's write lock, in seconds.
+    pub const DEFAULT_WRITE_LOCK_TIMEOUT_SECS: u64 = 30;
+
+    /// The limit a write waits for a mem's write lock: `None` waits
+    /// without bound (the key set to `0`), otherwise the configured
+    /// seconds or the default.
+    pub fn write_lock_timeout(&self) -> Option<std::time::Duration> {
+        match self
+            .write_lock_timeout_secs
+            .unwrap_or(Self::DEFAULT_WRITE_LOCK_TIMEOUT_SECS)
+        {
+            0 => None,
+            secs => Some(std::time::Duration::from_secs(secs)),
+        }
+    }
 }
 
 /// One `[[mem_management.create]]` rule. Carries a glob `pattern`

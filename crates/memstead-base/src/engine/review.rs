@@ -378,6 +378,7 @@ mod tests {
         engine.set_settings(crate::WorkspaceSettings {
             mutations: crate::workspace::MutationsSection {
                 require_notes: Some(true),
+                ..Default::default()
             },
             ..Default::default()
         });

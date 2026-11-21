@@ -82,6 +82,7 @@ variant_tags!(
         RenamePartialFailure,
         CommitNotApplied,
         StaleView,
+        WriteLockTimeout,
         StubCannotRelate,
         StubNotUpdatable,
         StubNotRenamable,
@@ -768,6 +769,13 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
             EngineError::CommitNotApplied {
                 mem: s("specs"),
                 detail: s("d"),
+            },
+        ),
+        (
+            "WriteLockTimeout".into(),
+            EngineError::WriteLockTimeout {
+                mem: s("specs"),
+                waited_ms: 30_000,
             },
         ),
         (

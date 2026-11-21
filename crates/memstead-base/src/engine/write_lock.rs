@@ -569,10 +569,22 @@ impl Engine {
         locks.sort_by(|a, b| a.1.cmp(&b.1));
         locks.dedup_by(|a, b| a.2 == b.2);
         let mut guard = MemWriteGuard::empty();
+        // How long a write waits for one mem's lock. A holder that never
+        // lets go would otherwise park every later writer of that mem
+        // without bound; past the limit the write refuses, and the
+        // guard gives back whatever it had taken on its way here.
+        let limit = self.settings().mutations.write_lock_timeout();
         for (mem, path, _, read_only) in locks {
             if let Some(path) = &path {
-                match (path_lock::acquire(path), read_only) {
-                    (Ok(()), _) => {}
+                let started = std::time::Instant::now();
+                match (path_lock::acquire_within(path, limit), read_only) {
+                    (Ok(true), _) => {}
+                    (Ok(false), _) => {
+                        return Err(EngineError::WriteLockTimeout {
+                            mem,
+                            waited_ms: started.elapsed().as_millis() as u64,
+                        });
+                    }
                     // A mem mounted read-only may sit where this
                     // process cannot open its lock file. The operation
                     // asked for the lock because it reads the mem and

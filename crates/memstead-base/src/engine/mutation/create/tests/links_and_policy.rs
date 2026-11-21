@@ -885,6 +885,7 @@ fn require_notes_drives_single_note_missing_warning_per_noteless_mutation() {
     engine.set_settings(WorkspaceSettings {
         mutations: MutationsSection {
             require_notes: Some(true),
+            ..Default::default()
         },
         ..Default::default()
     });
