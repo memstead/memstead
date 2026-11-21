@@ -27,7 +27,7 @@ use crate::entity::store_builder::push_entities_into_store;
 use crate::mem::{MemOrigin, MemRouterSnapshot};
 use crate::ops::WarningHint;
 use crate::store::Store;
-use crate::workspace::{Mount, MountCapability, MountStorage, WorkspaceSettings};
+use crate::workspace::{Mount, WorkspaceSettings};
 
 use super::{BootError, Engine, EngineError, MountedBackend};
 
@@ -771,28 +771,10 @@ impl Engine {
 /// runtime router carries the same writable/visible roster regardless
 /// of which backend serves each mem.
 ///
-/// One pass over the mounts:
-/// - Writable mounts ([`MountCapability::Write`]) register via
-///   `add_writable` with the storage's worktree path. Folder mounts
-///   surface `MountStorage::Folder.path`; git-branch mounts surface
-///   `None` (the mem content lives only inside the gitdir).
-///   Archive mounts should never be writable; if one slips through,
-///   it registers with `dir: None`.
-/// - Read-only folder / git-branch mounts also register via
-///   `add_writable` with `dir: None`, then are *visible-only* —
-///   `is_writable` returns `false` because we follow up with a
-///   `remove_writable` (no-op for archives because archives are
-///   registered as `add_read_only`).
-///
-/// Actually we keep it simple: writable mounts go through
-/// `add_writable`; read-only mounts go through `add_read_only` with
-/// a synthesized archive-style path. For folder/git-branch read-only
-/// mounts we use the path the storage offers as the archive_path
-/// argument — semantically wrong but the router treats
-/// `add_read_only` data as opaque for visibility tracking. The two
-/// callers that care (`archive_path_for_mem`, `dir_for_mem`)
-/// branch on backend type at the handler level rather than reading
-/// these synthesized paths.
+/// One pass over the mounts through
+/// [`MemRouterSnapshot::add_mount`], the one rule boot and runtime
+/// registration share: writable mounts take the writable slot,
+/// read-only mounts the read-only slot whatever their storage.
 ///
 /// Origin is `MemOrigin::ExplicitToml` for every mount built from
 /// `Workspace.mounts` — the file-adapter case. `RuntimeCreated`
@@ -801,37 +783,7 @@ impl Engine {
 pub(crate) fn build_mem_router_from_mounts(mounts: &[MountedBackend]) -> MemRouterSnapshot {
     let mut router = MemRouterSnapshot::new();
     for m in mounts {
-        match m.mount.capability {
-            MountCapability::Write => {
-                let dir: Option<PathBuf> = match &m.mount.storage {
-                    MountStorage::Folder { path } => Some(path.clone()),
-                    MountStorage::GitBranch { .. } => None,
-                    MountStorage::Archive { .. } => None,
-                    // In-memory mounts have no on-disk working dir —
-                    // they register writable with `dir: None`, the same
-                    // shape mem-repo-backed mounts use.
-                    MountStorage::InMemory => None,
-                };
-                router.add_writable(m.mount.mem.clone(), dir, MemOrigin::ExplicitToml);
-            }
-            MountCapability::ReadOnly => match &m.mount.storage {
-                MountStorage::Archive { path } => {
-                    router.add_read_only(m.mount.mem.clone(), path.clone());
-                }
-                MountStorage::Folder { path } => {
-                    router.add_read_only(m.mount.mem.clone(), path.clone());
-                }
-                MountStorage::GitBranch { gitdir, .. } => {
-                    router.add_read_only(m.mount.mem.clone(), gitdir.clone());
-                }
-                // A read-only in-memory mount has no on-disk read
-                // source to register. The engine never produces this
-                // configuration (in-memory mounts are created writable
-                // for ephemeral sessions); handled here only to keep
-                // the match total.
-                MountStorage::InMemory => {}
-            },
-        }
+        router.add_mount(&m.mount, MemOrigin::ExplicitToml);
     }
     router
 }

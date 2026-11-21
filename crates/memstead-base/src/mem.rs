@@ -228,6 +228,39 @@ impl MemRouterSnapshot {
         self.read_only_archives.insert(name, archive_path);
     }
 
+    /// Register one mount under the rule every registration path
+    /// shares, boot and runtime alike. A writable mount takes the
+    /// writable slot, with its working directory when it is a folder. A
+    /// read-only mount takes the read-only slot whatever its storage:
+    /// an archive with its file, a folder with its path, a git-branch
+    /// mount with its git directory (the slot's path is opaque for
+    /// visibility; the callers that need a real archive path branch on
+    /// the backend). A read-only in-memory mount has no read source and
+    /// is not registered; the engine never produces one.
+    pub(crate) fn add_mount(&mut self, mount: &crate::workspace::Mount, origin: MemOrigin) {
+        use crate::workspace::{MountCapability, MountStorage};
+        match mount.capability {
+            MountCapability::Write => {
+                let dir = match &mount.storage {
+                    MountStorage::Folder { path } => Some(path.clone()),
+                    MountStorage::GitBranch { .. }
+                    | MountStorage::Archive { .. }
+                    | MountStorage::InMemory => None,
+                };
+                self.add_writable(mount.mem.clone(), dir, origin);
+            }
+            MountCapability::ReadOnly => match &mount.storage {
+                MountStorage::Archive { path } | MountStorage::Folder { path } => {
+                    self.add_read_only(mount.mem.clone(), path.clone());
+                }
+                MountStorage::GitBranch { gitdir, .. } => {
+                    self.add_read_only(mount.mem.clone(), gitdir.clone());
+                }
+                MountStorage::InMemory => {}
+            },
+        }
+    }
+
     /// Remove a read-only mem from the router. Returns `true` when the
     /// entry was present. Mirror of [`Self::remove_writable`] for the
     /// uninstall path: writable entries are not affected, and `visible`
@@ -337,6 +370,62 @@ pub fn is_writable(mem: &str, router: Option<&MemRouterSnapshot>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The one registration rule: a read-only mount is visible and
+    /// never writable, whatever its storage; a writable mount is both.
+    #[test]
+    fn add_mount_keeps_a_read_only_mount_out_of_the_writable_slot() {
+        use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
+        let mount = |mem: &str, storage: MountStorage, capability: MountCapability| Mount {
+            mem: mem.to_string(),
+            schema: None,
+            storage,
+            capability,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let branch = || MountStorage::GitBranch {
+            gitdir: PathBuf::from("/elsewhere/mem-repo/.git"),
+            branch: "notes".to_string(),
+        };
+        let folder = || MountStorage::Folder {
+            path: PathBuf::from("/work/notes"),
+        };
+        let archive = || MountStorage::Archive {
+            path: PathBuf::from("/cache/notes.mem"),
+        };
+
+        for (name, storage) in [
+            ("branch", branch()),
+            ("folder", folder()),
+            ("archive", archive()),
+        ] {
+            let mut router = MemRouterSnapshot::new();
+            router.add_mount(
+                &mount(name, storage, MountCapability::ReadOnly),
+                MemOrigin::ExplicitToml,
+            );
+            assert!(router.is_visible(name), "{name} must be visible");
+            assert!(!router.is_writable(name), "{name} must not be writable");
+            assert!(
+                router.remove_read_only(name),
+                "{name} sits in the read-only slot"
+            );
+            assert!(!router.is_visible(name));
+        }
+
+        let mut router = MemRouterSnapshot::new();
+        router.add_mount(
+            &mount("branch", branch(), MountCapability::Write),
+            MemOrigin::ExplicitToml,
+        );
+        router.add_mount(
+            &mount("folder", folder(), MountCapability::Write),
+            MemOrigin::ExplicitToml,
+        );
+        assert!(router.is_writable("branch") && router.is_writable("folder"));
+    }
 
     #[test]
     fn empty_router_allows_nothing() {

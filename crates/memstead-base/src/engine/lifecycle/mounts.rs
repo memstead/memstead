@@ -380,9 +380,7 @@ impl Engine {
 
         // Step 6: push the MountedBackend.
         let last_known_head = backend.current_head().ok().flatten();
-        let mem_name_for_router = mount.mem.clone();
-        let storage_for_router = mount.storage.clone();
-        let mount_capability_for_router = mount.capability;
+        let mount_for_router = mount.clone();
         self.mounts.push(MountedBackend {
             mount,
             backend: backend.into(),
@@ -399,28 +397,13 @@ impl Engine {
             strays: Default::default(),
         });
 
-        // Step 7: COW snapshot swap on mem_router, branched on the
-        // mount's capability — a read-only archive mount registers in
-        // the router's read-only slot (so `is_writable` stays false
-        // and `archive_path_for_mem` resolves), everything else in the
-        // writable slot. Folder mounts surface their on-disk path;
-        // other backends register with `dir: None` (mem-repo-backed
-        // mounts have no working tree).
-        match (&mount_capability_for_router, &storage_for_router) {
-            (crate::workspace::MountCapability::ReadOnly, MountStorage::Archive { path }) => {
-                Arc::make_mut(&mut self.mem_router)
-                    .add_read_only(mem_name_for_router, path.clone());
-            }
-            _ => {
-                let dir: Option<PathBuf> = match &storage_for_router {
-                    MountStorage::Folder { path } => Some(path.clone()),
-                    MountStorage::GitBranch { .. }
-                    | MountStorage::Archive { .. }
-                    | MountStorage::InMemory => None,
-                };
-                Arc::make_mut(&mut self.mem_router).add_writable(mem_name_for_router, dir, origin);
-            }
-        }
+        // Step 7: COW snapshot swap on mem_router, under the same rule
+        // boot applies (`MemRouterSnapshot::add_mount`): a read-only
+        // mount takes the read-only slot whatever its storage, so
+        // `is_writable` stays false for a read-only git-branch or
+        // folder mount registered while the engine runs, exactly as for
+        // one it booted with.
+        Arc::make_mut(&mut self.mem_router).add_mount(&mount_for_router, origin);
 
         // Step 8: invalidate dependent memos.
         if run_global_passes {
