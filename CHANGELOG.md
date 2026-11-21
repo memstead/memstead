@@ -25,6 +25,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   another process holds it, so a fresh process stays behind a writer
   that hung in the middle of its commit.
 
+- **Laying a mem-repo is a library function.** A program that links
+  the engine crates lays a mem-repo with
+  `memstead_git_branch::init_mem_repo(<workspace>)`, with no `memstead`
+  binary involved, so it never runs a binary whose version differs from
+  the crates it links. The function creates `mem-repo/` with its `main`
+  and registry refs and the minimum `.memstead/workspace.toml`, and
+  refuses a workspace that already holds a mem-repo without changing
+  anything. `memstead mem-repo init` is that function plus its own
+  output and the enclosing repository's ignore file; the command
+  behaves as before.
+
 ### Fixed
 
 - **An installed schema is readable without a README.** `memstead

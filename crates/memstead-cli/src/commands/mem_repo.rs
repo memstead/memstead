@@ -6,30 +6,14 @@
 //! (optionally) an outer-repo `.gitignore` append so a surrounding git
 //! repo does not see the new `mem-repo/` as a gitlink.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand};
-use gix::object::tree::EntryKind;
 
 use crate::CliError;
 use crate::outer_gitignore::{OuterRepoOutcome, apply_outer_gitignore};
 use crate::output::ExitKind;
 use crate::setup::CliContext;
-
-const README_TEMPLATE: &str = include_str!("../../templates/mem-repo-readme.md");
-
-/// Engine-required minimum for `.memstead/workspace.toml`. The two-layer
-/// file adapter loader treats `format` + `[persistence_adapter]` as
-/// the only mandatory keys; everything else (mem_management,
-/// cross_mem_links, mutations, plugin.*) is operator-opt-in and
-/// defaults to deny/empty. Matches the same baseline `memstead init`
-/// writes for filesystem-mem, keeping the two workspace shapes symmetric.
-const DEFAULT_WORKSPACE_TOML: &str = "\
-format = \"memstead-git-branch-2\"\n\
-\n\
-[persistence_adapter]\n\
-name = \"file-two-layer\"\n";
 
 /// Subcommands under `memstead mem-repo`.
 #[derive(Subcommand, Debug)]
@@ -296,84 +280,17 @@ pub(crate) fn run_init(
     workspace_path: &Path,
     skip_outer_gitignore: bool,
 ) -> anyhow::Result<InitOutcome> {
-    fs::create_dir_all(workspace_path)
-        .map_err(|e| generic_error(format!("create workspace directory: {e}")))?;
-
-    let workspace = fs::canonicalize(workspace_path)
-        .map_err(|e| generic_error(format!("canonicalize workspace path: {e}")))?;
-
-    let mem_repo_root = workspace.join("mem-repo");
-    if mem_repo_root.exists() {
-        return Err(CliError::from_workspace_create(
-            memstead_base::workspace_create::WorkspaceCreateError::MemRepoExists {
-                path: mem_repo_root.clone(),
-            },
-            "Delete or move the existing mem-repo before re-running `mem-repo init`.",
-        )
-        .into());
-    }
-
-    fs::create_dir_all(&mem_repo_root)
-        .map_err(|e| generic_error(format!("create mem-repo directory: {e}")))?;
-
-    gix::init(&mem_repo_root).map_err(|e| generic_error(format!("init mem-repo gitdir: {e}")))?;
-
-    let repo = gix::open(mem_repo_root.join(".git"))
-        .map_err(|e| generic_error(format!("open mem-repo gitdir: {e}")))?;
-
-    // `main` carries operator-facing docs only (README.md). Schemas and
-    // per-mem configs live on the unified `__MEMSTEAD` registry ref.
-    let mut editor = repo
-        .empty_tree()
-        .edit()
-        .map_err(|e| generic_error(format!("init main tree editor: {e}")))?;
-
-    let readme_blob = repo
-        .write_blob(README_TEMPLATE.as_bytes())
-        .map_err(|e| generic_error(format!("write README blob: {e}")))?
-        .detach();
-    editor
-        .upsert("README.md", EntryKind::Blob, readme_blob)
-        .map_err(|e| generic_error(format!("upsert README.md: {e}")))?;
-
-    let main_tree = editor
-        .write()
-        .map_err(|e| generic_error(format!("write main tree: {e}")))?
-        .detach();
-
-    let actor = init_signature();
-    let mut buf = gix::date::parse::TimeBuf::default();
-    let actor_ref = actor.to_ref(&mut buf);
-    repo.commit_as(
-        actor_ref,
-        actor_ref,
-        "refs/heads/main",
-        "mem-repo init: initial main commit",
-        main_tree,
-        Vec::<gix::ObjectId>::new(),
-    )
-    .map_err(|e| generic_error(format!("commit main: {e}")))?;
-
-    // Seed the unified `__MEMSTEAD` registry ref with an empty tree. Schemas
-    // (`__MEMSTEAD:schemas/<name>/...`) and per-mem configs
-    // (`__MEMSTEAD:mems/<mem>/config.json`) are upserted by subsequent
-    // engine writes; the empty seed lets the engine's reader resolve
-    // the ref without surfacing a bootstrap error.
-    let empty_tree = repo.empty_tree().id().detach();
-    let mut buf = gix::date::parse::TimeBuf::default();
-    let actor_ref = actor.to_ref(&mut buf);
-    repo.commit_as(
-        actor_ref,
-        actor_ref,
-        "refs/heads/__MEMSTEAD",
-        "mem-repo init: seed __MEMSTEAD",
-        empty_tree,
-        Vec::<gix::ObjectId>::new(),
-    )
-    .map_err(|e| generic_error(format!("commit __MEMSTEAD: {e}")))?;
-
-    materialise_main_worktree(&mem_repo_root)?;
-    write_default_workspace_toml(&workspace)?;
+    // The laying itself is the library's; a program that links the
+    // engine calls the same function with no binary involved.
+    let laid = memstead_git_branch::init_mem_repo(workspace_path).map_err(|e| match e {
+        memstead_git_branch::MemRepoInitError::Exists(exists) => {
+            anyhow::Error::from(CliError::from_workspace_create(
+                exists,
+                "Delete or move the existing mem-repo before re-running `mem-repo init`.",
+            ))
+        }
+        memstead_git_branch::MemRepoInitError::Failed(msg) => generic_error(msg),
+    })?;
 
     // Outer-repo gitignore append: walk up from the workspace root
     // itself looking for an enclosing `.git/`, append `mem-repo/` to
@@ -386,45 +303,14 @@ pub(crate) fn run_init(
     let gitignore = if skip_outer_gitignore {
         OuterRepoOutcome::Skipped
     } else {
-        apply_outer_gitignore(&workspace, &mem_repo_root)?
+        apply_outer_gitignore(&laid.workspace_root, &laid.mem_repo_dir)?
     };
 
     Ok(InitOutcome {
-        mem_repo_dir: mem_repo_root,
-        workspace_toml: workspace
-            .join(memstead_base::WORKSPACE_STORE_DIR)
-            .join("workspace.toml"),
+        mem_repo_dir: laid.mem_repo_dir,
+        workspace_toml: laid.workspace_toml,
         gitignore,
     })
-}
-
-/// Write `README.md` to the working tree. Mirrors the just-committed
-/// `main` tree so a human inspecting `<workspace>/mem-repo/` sees
-/// the file immediately. Schemas and per-mem configs live on the
-/// `__MEMSTEAD` registry ref and are not surfaced via the worktree.
-fn materialise_main_worktree(mem_repo_root: &Path) -> anyhow::Result<()> {
-    fs::write(mem_repo_root.join("README.md"), README_TEMPLATE)
-        .map_err(|e| generic_error(format!("write working-tree README.md: {e}")))?;
-    Ok(())
-}
-
-/// Materialise the minimum-viable `.memstead/workspace.toml`. Required by
-/// every subsequent CLI / MCP command — without the file the
-/// workspace-store loader bails with `StoreError::NotInitialised` and
-/// the freshly-init'd workspace is unusable. Idempotent: a
-/// pre-existing file is left untouched so operator-authored content
-/// survives a re-init under the same workspace path.
-fn write_default_workspace_toml(workspace_root: &Path) -> anyhow::Result<()> {
-    let memstead_dir = workspace_root.join(memstead_base::WORKSPACE_STORE_DIR);
-    fs::create_dir_all(&memstead_dir)
-        .map_err(|e| generic_error(format!("create .memstead directory: {e}")))?;
-    let toml_path = memstead_dir.join("workspace.toml");
-    if toml_path.exists() {
-        return Ok(());
-    }
-    fs::write(&toml_path, DEFAULT_WORKSPACE_TOML)
-        .map_err(|e| generic_error(format!("write .memstead/workspace.toml: {e}")))?;
-    Ok(())
 }
 
 /// Result of a successful `mem-repo init`. Useful in tests for
@@ -434,17 +320,6 @@ pub(crate) struct InitOutcome {
     pub mem_repo_dir: PathBuf,
     pub workspace_toml: PathBuf,
     pub gitignore: OuterRepoOutcome,
-}
-
-fn init_signature() -> gix::actor::Signature {
-    gix::actor::Signature {
-        name: "memstead-cli mem-repo init".into(),
-        email: "mem-repo-init@memstead".into(),
-        time: gix::date::Time {
-            seconds: 0,
-            offset: 0,
-        },
-    }
 }
 
 fn generic_error(msg: String) -> anyhow::Error {
@@ -460,6 +335,7 @@ fn generic_error(msg: String) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::TempDir;
 
     #[test]

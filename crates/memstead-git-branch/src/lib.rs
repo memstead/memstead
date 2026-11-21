@@ -52,6 +52,7 @@ pub mod discover;
 pub mod entity;
 pub mod mem_cache;
 pub mod mem_repo_config;
+pub mod mem_repo_init;
 pub mod mem_repo_schemas;
 pub mod ops;
 pub mod repair;
@@ -70,6 +71,7 @@ use memstead_schema::SchemaRef;
 pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};
 pub use graph::{ClusterInfo, LouvainOutput};
 pub use mem::{MemOrigin, MemRouterSnapshot};
+pub use mem_repo_init::{MemRepoInit, MemRepoInitError, init_mem_repo};
 pub use ops::agent_notes::{AgentNotesReport, CommitNote};
 pub use ops::changes::{
     ChangeEnvelope, ChangesReport, EMPTY_TREE_SHA, RENAME_SIMILARITY_DEFAULT,
