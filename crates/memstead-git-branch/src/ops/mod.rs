@@ -9,4 +9,5 @@ pub mod branch_reset;
 pub mod changes;
 pub mod diff;
 pub mod export;
+pub(crate) mod ref_scope;
 pub mod transport;

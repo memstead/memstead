@@ -68,11 +68,16 @@ pub struct ChangesReport {
 }
 
 /// Compute [`ChangesReport`] for `mem_name`, whose gix repository lives
-/// at `git_dir`. `since` is any gix-resolvable commit spec (commit SHA,
-/// ref name, `HEAD~1`, …) plus the empty-tree sentinel.
+/// at `git_dir`. `since` is the empty-tree sentinel, or a commit of the
+/// mem's own history: the tip of the branch this call reads or an
+/// ancestor of it, given as a hash, as the branch's name or as `HEAD`,
+/// with `~n` and `^n` steps (`HEAD~1`).
 ///
 /// Error policy:
-/// - Unknown `since` ref → [`VcsError::ObjectNotFound`].
+/// - A `since` that names no commit of that history →
+///   [`VcsError::ObjectNotFound`]. A cursor that names nothing and one
+///   that names a commit elsewhere in the git directory (another mem's
+///   branch, a history that was replaced) get the same answer.
 /// - Empty repository (no HEAD) + non-sentinel `since` → same.
 /// - Empty repository + sentinel `since` → empty report (`head` echoes
 ///   the sentinel). Matches the "nothing committed yet, nothing to diff"
@@ -117,15 +122,15 @@ pub fn changes_since(
         },
         None => repo.head_commit().map_err(|_| ()),
     };
-    let (head_sha, head_tree) = match head_lookup {
+    let (head_sha, head_tree, head_id) = match head_lookup {
         Ok(c) => {
             let sha = c.id.to_hex().to_string();
             let tree = c
                 .tree()
                 .map_err(|e| VcsError::Git(format!("head tree: {e}")))?;
-            (sha, tree)
+            (sha, tree, Some(c.id))
         }
-        Err(()) => (EMPTY_TREE_SHA.to_string(), repo.empty_tree()),
+        Err(()) => (EMPTY_TREE_SHA.to_string(), repo.empty_tree(), None),
     };
 
     // Walk the commit range (since, head] via `agent_notes_since` to
@@ -140,21 +145,22 @@ pub fn changes_since(
         crate::ops::agent_notes::agent_notes_since(mem_name, git_dir, &resolve_since, head_ref)?;
     let rename_map = build_authoritative_rename_map(&notes_report.notes);
 
-    // Resolve `since`. The canonical empty-tree SHA bypasses rev_parse —
-    // git itself special-cases that hash, and gix may not have the tree
-    // object physically present in a fresh odb.
+    // Resolve `since`. The canonical empty-tree SHA is no commit and is
+    // answered here — git itself special-cases that hash, and gix may
+    // not have the tree object physically present in a fresh odb.
     let since_tree = if resolve_since == EMPTY_TREE_SHA {
         repo.empty_tree()
     } else {
-        let id = repo
-            .rev_parse_single(resolve_since.as_str())
-            .map_err(|e| VcsError::ObjectNotFound(format!("{since}: {e}")))?;
-        let object = id
-            .object()
-            .map_err(|e| VcsError::ObjectNotFound(format!("{since}: {e}")))?;
-        let commit = object
-            .try_into_commit()
-            .map_err(|_| VcsError::ObjectNotFound(format!("{since} is not a commit")))?;
+        // The cursor is the mem's own history: the tip this call reads
+        // or an ancestor of it. Anything else is not found, with no
+        // word on whether it exists elsewhere in the git directory
+        // (see `ops::ref_scope`).
+        let commit = head_id
+            .and_then(|tip| {
+                crate::ops::ref_scope::RefScope::of_history(head_ref, tip)
+                    .resolve(&repo, resolve_since.as_str())
+            })
+            .ok_or_else(|| VcsError::ObjectNotFound(since.to_string()))?;
         commit
             .tree()
             .map_err(|e| VcsError::Git(format!("since tree: {e}")))?

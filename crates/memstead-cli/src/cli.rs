@@ -341,7 +341,12 @@ pub enum Command {
     /// returned, or the canonical empty-tree hash
     /// `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync);
     /// on a folder mem pass an RFC3339 timestamp (the `ts` of the last
-    /// ledger entry you read, or empty for a first sync).
+    /// ledger entry you read, or empty for a first sync). A commit
+    /// cursor must lie in the mem's own history, its branch tip or an
+    /// ancestor of it: a commit of another mem in the same git
+    /// directory, and a cursor kept from a history that was replaced
+    /// since, refuse `INVALID_CURSOR` as a cursor that names nothing
+    /// does.
     Changes(commands::changes::Args),
 
     /// Record a check: "entity E checked, verdict ok | failed, via

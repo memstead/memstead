@@ -44,19 +44,20 @@ use crate::EMPTY_TREE_SHA;
 /// Normalise a caller-supplied ref against the mount's declared
 /// branch, shared by `memstead_diff` and `memstead_changes_since`.
 ///
-/// Rewrites a leading `HEAD` *token* — the whole ref (`HEAD`) or the base
-/// of a revspec (`HEAD~5`, `HEAD^`, `HEAD^{tree}`, `HEAD@{1}`) — to the
-/// mount's declared branch ref, preserving the suffix, so resolution
-/// targets the selected mem's branch tip rather than the mem-repo
-/// gitdir's symbolic HEAD (which points at the dummy default branch).
-/// The anchor is the DECLARED branch, never a ref derived from the mem
-/// name — the two differ on namespaced mounts. gix already parses the
-/// revspec suffix; this only re-anchors the `HEAD` base. A ref that
-/// merely *starts with* `HEAD` (e.g. `HEADER`, `HEAD-foo`) is left
-/// alone — the character after `HEAD` must be a revspec operator
-/// (`~ ^ : @`) or end-of-string. Targeted at the per-mem entry point
-/// only: mem-less callers (cross-mem diffs naming a peer branch) pass
-/// fully-qualified refs that don't begin with the `HEAD` token.
+/// Rewrites a leading `HEAD` *token* — the whole ref (`HEAD`) or the
+/// anchor of a longer one (`HEAD~5`, `HEAD^`) — to the mount's declared
+/// branch ref, preserving what follows, so resolution targets the
+/// selected mem's branch tip rather than the mem-repo gitdir's symbolic
+/// HEAD (which points at the dummy default branch). The anchor is the
+/// DECLARED branch, never a ref derived from the mem name — the two
+/// differ on namespaced mounts. This only re-anchors the `HEAD` token;
+/// what follows it is read by [`crate::ops::ref_scope`], which takes
+/// parent steps and nothing else, so a form such as `HEAD^{tree}` or
+/// `HEAD@{1}` is re-anchored here and refused there. A ref that merely
+/// *starts with* `HEAD` (e.g. `HEADER`, `HEAD-foo`) is left alone — the
+/// character after `HEAD` must be one of `~ ^ : @` or end-of-string. A
+/// diff across mems names the peer by its branch, which does not begin
+/// with the `HEAD` token.
 ///
 /// The empty-tree sentinel is handled inside `resolve_tree` so callers see
 /// a single dispatch.
@@ -69,8 +70,13 @@ pub(crate) fn normalise_ref_for_branch(branch: &str, raw: &str) -> String {
     raw.to_string()
 }
 
-/// Resolve a ref to its tree, returning a typed-marker error
-/// (`UNKNOWN_REF:<raw>`) when `rev_parse` refuses.
+/// Resolve a ref to its tree and the hash it stands for, returning a
+/// typed-marker error (`UNKNOWN_REF:<raw>`) when the ref is not one
+/// `scope` resolves (see [`crate::ops::ref_scope`]). A ref that names
+/// nothing, a ref anchored outside the histories in scope and a
+/// revision syntax the scope does not read get the one answer, so a
+/// caller cannot tell what a git directory holds beyond the mems its
+/// workspace mounts.
 ///
 /// The canonical empty-tree SHA (`4b825dc642cb6eb9a060e54bf8d69288fbee4904`)
 /// short-circuits to `repo.empty_tree()`. Matches
@@ -79,28 +85,28 @@ pub(crate) fn normalise_ref_for_branch(branch: &str, raw: &str) -> String {
 /// tree-only SHAs that are not the canonical sentinel continue to
 /// refuse with `UNKNOWN_REF` — the sentinel handling is keyed on
 /// the literal hash, not on "is it a tree".
-fn resolve_tree<'r>(repo: &'r gix::Repository, raw: &str) -> Result<gix::Tree<'r>, BackendError> {
+fn resolve_tree<'r>(
+    repo: &'r gix::Repository,
+    raw: &str,
+    scope: &crate::ops::ref_scope::RefScope,
+) -> Result<(gix::Tree<'r>, String), BackendError> {
     if raw == EMPTY_TREE_SHA {
-        return Ok(repo.empty_tree());
+        return Ok((repo.empty_tree(), EMPTY_TREE_SHA.to_string()));
     }
-    let id = repo
-        .rev_parse_single(raw)
-        .map_err(|_| BackendError::Other(format!("UNKNOWN_REF: {raw}")))?;
-    let object = id
-        .object()
-        .map_err(|_| BackendError::Other(format!("UNKNOWN_REF: {raw}")))?;
-    let commit = object
-        .try_into_commit()
-        .map_err(|_| BackendError::Other(format!("UNKNOWN_REF: {raw} is not a commit")))?;
-    commit
+    let commit = scope
+        .resolve(repo, raw)
+        .ok_or_else(|| BackendError::Other(format!("UNKNOWN_REF: {raw}")))?;
+    let sha = commit.id.to_string();
+    let tree = commit
         .tree()
-        .map_err(|e| BackendError::Other(format!("tree({raw}): {e}")))
+        .map_err(|e| BackendError::Other(format!("tree({raw}): {e}")))?;
+    Ok((tree, sha))
 }
 
+/// The hash a ref resolves to, with no rule on where it points: for the
+/// tests of this module, which name refs of their own fixture.
+#[cfg(test)]
 fn sha_for(repo: &gix::Repository, raw: &str) -> Result<String, BackendError> {
-    if raw == EMPTY_TREE_SHA {
-        return Ok(EMPTY_TREE_SHA.to_string());
-    }
     let id = repo
         .rev_parse_single(raw)
         .map_err(|_| BackendError::Other(format!("UNKNOWN_REF: {raw}")))?;
@@ -150,9 +156,17 @@ fn peek_meta(raw: &Option<String>) -> (Option<String>, Option<String>) {
 /// known gaps (rename, ripple) that will surface as handover items.
 /// `branch` is the mount's declared branch; a bare `HEAD` token in
 /// either ref re-anchors onto it.
+///
+/// Each ref must name the empty tree, or be anchored in the history of
+/// `branch` or of one of `readable` (the declared branches of the other
+/// mems the caller's workspace mounts in this git directory): at one of
+/// those branches by name, at `HEAD`, or at a commit hash of those
+/// histories, with `~n` and `^n` steps from there. Any other ref
+/// refuses `UNKNOWN_REF`, as a ref that names nothing does.
 pub fn diff_two_refs(
     gitdir: &Path,
     branch: &str,
+    readable: &[String],
     mem: &str,
     ref_a: &str,
     ref_b: &str,
@@ -172,10 +186,11 @@ pub fn diff_two_refs(
     // entry point.
     let normalised_a = normalise_ref_for_branch(branch, ref_a);
     let normalised_b = normalise_ref_for_branch(branch, ref_b);
-    let tree_a = resolve_tree(&repo, &normalised_a)?;
-    let tree_b = resolve_tree(&repo, &normalised_b)?;
-    let resolved_a_sha = sha_for(&repo, &normalised_a)?;
-    let resolved_b_sha = sha_for(&repo, &normalised_b)?;
+    let mut branches: Vec<String> = vec![branch.to_string()];
+    branches.extend(readable.iter().cloned());
+    let scope = crate::ops::ref_scope::RefScope::of_branches(&repo, &branches);
+    let (tree_a, resolved_a_sha) = resolve_tree(&repo, &normalised_a, &scope)?;
+    let (tree_b, resolved_b_sha) = resolve_tree(&repo, &normalised_b, &scope)?;
 
     let mut platform = tree_a
         .changes()
@@ -298,7 +313,17 @@ pub fn diff_two_refs(
     // entries into `Renamed`; for any `Renamed` entry where the notes
     // record a multi-step chain, fill `rename_chain` with the
     // intermediates.
-    apply_agent_notes_renames(gitdir, mem, ref_a, ref_b, &mut entries, config);
+    // The walk gets the two commits the refs resolved to, never the
+    // refs as the caller spelled them: nothing resolves a caller's ref
+    // a second time, outside the scope.
+    apply_agent_notes_renames(
+        gitdir,
+        mem,
+        &resolved_a_sha,
+        &resolved_b_sha,
+        &mut entries,
+        config,
+    );
 
     // Schema-strictness pass: entries whose markdown body fails the
     // cheap parse check (missing / malformed frontmatter) get demoted
@@ -348,13 +373,15 @@ fn apply_agent_notes_renames(
     entries: &mut Vec<EntityDiff>,
     config: &DiffConfig,
 ) {
-    let report = match crate::ops::agent_notes::agent_notes_since(mem, gitdir, ref_a, Some(ref_b)) {
+    // The two refs arrive as the hashes they resolved to, and are read
+    // as object ids: no name is looked up here.
+    let report = match crate::ops::agent_notes::agent_notes_between(mem, gitdir, ref_a, ref_b) {
         Ok(r) => r,
         // The notes walker may refuse with `ObjectNotFound` for
-        // unrelated refs — that's expected and not fatal. The diff
-        // already includes the rev_parse errors via the resolve_tree
-        // call above, so a notes-walk refusal here is just "no chain
-        // data" and the gix-similarity result stands.
+        // unrelated refs — that's expected and not fatal. Both refs
+        // were resolved in scope by the `resolve_tree` calls above, so
+        // a notes-walk refusal here is just "no chain data" and the
+        // gix-similarity result stands.
         Err(_) => return,
     };
 

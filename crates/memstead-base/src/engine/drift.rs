@@ -616,7 +616,15 @@ impl Engine {
     ///    - Git-branch mounts call the registered
     ///      [`GitBranchOps::changes_since`] hook (real tree-diff with
     ///      rename detection); missing hook = git-branch ops not wired
-    ///      and the report comes back empty.
+    ///      and the report comes back empty. The cursor is the empty
+    ///      tree or a commit of the mem's own history (its branch tip
+    ///      or an ancestor), given as a hash, as the mem's branch or as
+    ///      `HEAD`, with `~n` and `^n` parent steps. A cursor anchored
+    ///      anywhere else (another mem's branch or commit in the same
+    ///      git directory, a history that was replaced since) is
+    ///      refused `INVALID_CURSOR` exactly as a cursor that names
+    ///      nothing is, so a workspace learns nothing of mems it does
+    ///      not mount.
     ///    - Archive mounts return an empty report.
     /// 4. Enriches each envelope's `title` / `entity_type` from the
     ///    in-memory store (best-effort — `Removed` envelopes always
@@ -2369,18 +2377,29 @@ impl Engine {
     /// the git-branch ops are wired.
     ///
     /// `mem` selects the storage context (the gitdir, for
-    /// git-branch mounts). `ref_a` / `ref_b` are arbitrary refs the
-    /// underlying git layer accepts — branch names, commit SHAs, tag
-    /// names — so cross-mem diffs work via fully-qualified refs
-    /// (the other mount's declared branch) without a separate API. A
-    /// bare `HEAD` token re-anchors onto this mem's declared branch.
+    /// git-branch mounts). Each of `ref_a` / `ref_b` names the empty
+    /// tree, or is anchored in the history of a mem this workspace
+    /// mounts in that git directory (the named mem, or a mounted peer,
+    /// which is what keeps a diff across mems working by the peer's
+    /// branch name): at such a mem's branch by name, at `HEAD`, which
+    /// means this mem's declared branch, or at a commit hash of those
+    /// histories, full or abbreviated, with `~n` and `^n` parent steps
+    /// from there. No other revision syntax is read.
+    ///
+    /// A git directory can hold mems the workspace does not mount. A
+    /// ref anchored in one of them (its branch by name, a hash out of
+    /// its history, a form that starts at its branch and walks into a
+    /// mounted history, as a fork's does) refuses `UNKNOWN_REF` exactly
+    /// as a ref that names nothing does, and no object outside the
+    /// mounted histories is read to tell: what the workspace does not
+    /// mount does not exist for its callers, not even by name.
     ///
     /// Refusal codes:
     /// - [`EngineError::UnknownMem`] (`UNKNOWN_MEM`) — no mount
     ///   for `mem`.
     /// - [`EngineError::UnknownRef`] (`UNKNOWN_REF`) — either ref
-    ///   does not resolve. Surfaces verbatim from the git layer's
-    ///   `rev_parse` refusal.
+    ///   names no commit in the history of a mem this workspace
+    ///   mounts in the git directory.
     /// - [`EngineError::RenameSimilarityOutOfRange`] (`INVALID_INPUT`)
     ///   — `config.rename_similarity` outside `[0.1, 1.0]`.
     /// - [`EngineError::InvalidInput`] (`INVALID_INPUT`) — mem is
@@ -2414,23 +2433,47 @@ impl Engine {
             }
             MountStorage::GitBranch { gitdir, branch } => match self.git_branch_ops.as_ref() {
                 Some(hook) => {
-                    (hook.diff)(gitdir, branch, mem, ref_a, ref_b, &config).map_err(|e| match e {
-                        // Map the standard backend-side "ref not found" shape into the
-                        // typed engine-level refusal. The git-branch dispatcher uses
-                        // `BackendError::Other` with a leading marker so the engine can
-                        // recover the typed code without re-parsing the message.
-                        BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
-                            let raw = msg.trim_start_matches("UNKNOWN_REF:").trim().to_string();
-                            EngineError::UnknownRef(raw)
-                        }
-                        other => EngineError::Backend(other),
-                    })
+                    let readable = self.branches_mounted_in(gitdir, branch);
+                    (hook.diff)(gitdir, branch, &readable, mem, ref_a, ref_b, &config).map_err(
+                        |e| match e {
+                            // Map the standard backend-side "ref not found" shape into the
+                            // typed engine-level refusal. The git-branch dispatcher uses
+                            // `BackendError::Other` with a leading marker so the engine can
+                            // recover the typed code without re-parsing the message.
+                            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
+                                let raw = msg.trim_start_matches("UNKNOWN_REF:").trim().to_string();
+                                EngineError::UnknownRef(raw)
+                            }
+                            other => EngineError::Backend(other),
+                        },
+                    )
                 }
                 None => Err(EngineError::Backend(BackendError::Other(
                     "git-branch diff hook not installed (git-branch ops not wired)".to_string(),
                 ))),
             },
         }
+    }
+}
+
+impl Engine {
+    /// The declared branches of the other mems this workspace mounts in
+    /// `gitdir`, under either capability: the histories a ref given to
+    /// a read verb may lie in beside the named mem's own (`own`).
+    fn branches_mounted_in(&self, gitdir: &std::path::Path, own: &str) -> Vec<String> {
+        let canonical = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        let here = canonical(gitdir);
+        self.mounts
+            .iter()
+            .filter_map(|m| match &m.mount.storage {
+                MountStorage::GitBranch { gitdir, branch }
+                    if branch != own && canonical(gitdir) == here =>
+                {
+                    Some(branch.clone())
+                }
+                _ => None,
+            })
+            .collect()
     }
 }
 

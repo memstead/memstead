@@ -305,7 +305,10 @@ fn collect_note(slice: &[&str]) -> Option<String> {
 /// (matches `git log` default).
 ///
 /// `since` may be the canonical empty-tree SHA — in which case every
-/// reachable commit is returned. Empty repos / empty refs return an
+/// reachable commit is returned. Otherwise it must name the tip of the
+/// branch this call walks or an ancestor of it; any other cursor is
+/// [`VcsError::ObjectNotFound`], whether it names nothing or a commit
+/// elsewhere in the git directory. Empty repos / empty refs return an
 /// empty report with `head` echoing the empty-tree sentinel.
 ///
 /// `head_ref` follows the same convention as
@@ -341,8 +344,6 @@ pub fn agent_notes_since(
             });
         }
     };
-    let head_sha = head_commit.id.to_hex().to_string();
-
     // Resolve `since` to an ObjectId for the walker's `with_hidden`
     // boundary. The empty-tree sentinel means "no boundary" — walk every
     // reachable commit. Unknown / unreachable since refs surface as
@@ -350,20 +351,70 @@ pub fn agent_notes_since(
     let hidden: Vec<gix::ObjectId> = if since == EMPTY_TREE_SHA {
         Vec::new()
     } else {
-        let id = repo
-            .rev_parse_single(since)
-            .map_err(|e| VcsError::ObjectNotFound(format!("{since}: {e}")))?;
-        // Resolve through to a commit so unreachable refs surface here
-        // rather than at walk time.
-        let object = id
-            .object()
-            .map_err(|e| VcsError::ObjectNotFound(format!("{since}: {e}")))?;
-        object
-            .try_into_commit()
-            .map_err(|_| VcsError::ObjectNotFound(format!("{since} is not a commit")))?;
-        vec![id.detach()]
+        // The cursor is a commit of the history this call walks: the
+        // tip or an ancestor of it. Anything else is not found, whether
+        // it names nothing or a commit elsewhere in the git directory
+        // (see `ops::ref_scope`).
+        let commit = crate::ops::ref_scope::RefScope::of_history(head_ref, head_commit.id)
+            .resolve(&repo, since)
+            .ok_or_else(|| VcsError::ObjectNotFound(since.to_string()))?;
+        vec![commit.id]
     };
 
+    walk_notes(&repo, git_dir, mem_name, since, &head_commit, hidden)
+}
+
+/// The notes between two commits a caller has already resolved: from
+/// `since_sha` (exclusive) to `head_sha` (inclusive), both given as
+/// full commit hashes, or the empty-tree hash for "from the beginning"
+/// and for a head with no commit. Nothing here looks a name up: the
+/// hashes are read as object ids, so a ref that happens to be spelled
+/// like one of them is never consulted. `since_sha` must be `head_sha`
+/// or an ancestor of it, otherwise [`VcsError::ObjectNotFound`].
+pub(crate) fn agent_notes_between(
+    mem_name: &str,
+    git_dir: &Path,
+    since_sha: &str,
+    head_sha: &str,
+) -> Result<AgentNotesReport, VcsError> {
+    let repo = gix::open(git_dir)?;
+    let head_commit = gix::ObjectId::from_hex(head_sha.as_bytes())
+        .ok()
+        .filter(|_| head_sha != EMPTY_TREE_SHA)
+        .and_then(|id| repo.find_object(id).ok())
+        .and_then(|object| object.try_into_commit().ok());
+    let Some(head_commit) = head_commit else {
+        let memstead_ref = read_memstead_ref(git_dir)?;
+        return Ok(AgentNotesReport {
+            mem: mem_name.to_string(),
+            since: since_sha.to_string(),
+            head: EMPTY_TREE_SHA.to_string(),
+            notes: Vec::new(),
+            memstead_ref,
+        });
+    };
+    let hidden: Vec<gix::ObjectId> = if since_sha == EMPTY_TREE_SHA {
+        Vec::new()
+    } else {
+        let commit = crate::ops::ref_scope::RefScope::of_history(None, head_commit.id)
+            .resolve(&repo, since_sha)
+            .ok_or_else(|| VcsError::ObjectNotFound(since_sha.to_string()))?;
+        vec![commit.id]
+    };
+    walk_notes(&repo, git_dir, mem_name, since_sha, &head_commit, hidden)
+}
+
+/// One [`CommitNote`] per commit from `head_commit` back to the commits
+/// in `hidden` (exclusive), newest first.
+fn walk_notes(
+    repo: &gix::Repository,
+    git_dir: &Path,
+    mem_name: &str,
+    since: &str,
+    head_commit: &gix::Commit<'_>,
+    hidden: Vec<gix::ObjectId>,
+) -> Result<AgentNotesReport, VcsError> {
+    let head_sha = head_commit.id.to_hex().to_string();
     let walk = repo
         .rev_walk([head_commit.id])
         .with_hidden(hidden)

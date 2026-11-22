@@ -7,6 +7,60 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Security
+
+- **A ref given to `diff` or `changes-since` stays inside the mems the
+  workspace mounts.** Several mems lie as branches in one git
+  directory, and a workspace may mount some of them and not others.
+  `memstead_diff` and `memstead_changes_since` (on the CLI,
+  `memstead changes`) take a mem, which selects the git directory, and
+  resolved their refs as arbitrary revisions of that directory. A
+  caller in a workspace that mounts a mem `alpha` and not a mem `gamma`
+  of the same directory could read `gamma` through `alpha`: a diff
+  between gamma's tip and its parent, or with gamma's branch name as a
+  ref, returned gamma's entity text and titles, and `changes-since`
+  with a cursor that named gamma's branch or tip listed gamma's entity
+  ids under alpha's prefix, as the sources of renames or as removals
+  (an id carries the slug of the title an entity was created with).
+  Every other read verb and
+  every write refused the mem the workspace does not mount. Measured on
+  0.27.0 and 0.26.1. Now `changes-since` takes as its cursor the
+  empty-tree hash or a commit that is the tip or an ancestor of the
+  named mem's own branch, in every workspace. `diff` takes as either
+  ref the empty-tree hash or a commit that is the tip or an ancestor of
+  the branch of a mem the workspace mounts in that git directory: the
+  named mem, or a mounted peer under either capability, so a diff
+  between two mounted mems still works by the peer's branch name. The
+  rule is on where a ref is anchored as well as on where it arrives. A
+  ref starts at the branch of a mem in scope (short or fully qualified
+  name), at `HEAD`, which means the named mem's branch, or at a commit
+  hash, full or abbreviated, of a history in scope, and may step to
+  parents from there with `~n` and `^n`. A ref anchored anywhere else
+  is refused also when its walk would arrive inside a mounted history:
+  a fork shares its early commits with the mem it was forked from, and
+  serving `<fork>~3` would tell a workspace that does not mount the
+  fork that it exists. The two verbs no longer hand a caller's ref to a
+  general revision parser, so no other revision syntax is read (tags,
+  `@{…}`, `^{…}`, ranges, `<rev>:<path>`, `:/<text>`), a hash is looked
+  up among the commits of the histories in scope alone, and no object
+  outside them is read. Every ref that is not served refuses exactly as
+  a ref that names nothing does, `UNKNOWN_REF` from `diff` and
+  `INVALID_CURSOR` from `changes-since`, with the same details and the
+  same message apart from the echoed ref: what a workspace does not
+  mount does not exist for its callers, not even by the name of its
+  branch. Three things a caller may meet. A cursor kept from a history
+  that was replaced since (a restore, a `branch-reset`) is no ancestor
+  any more and refuses `INVALID_CURSOR`; start again from the
+  empty-tree hash. A diff against a ref outside the mounted mems (the
+  trunk `main`, the registry ref, a remote-tracking ref) refuses
+  `UNKNOWN_REF`. And a tag or any revision form beyond parent steps
+  refuses too, where it used to resolve.
+  For a program that links the crates: the commit-note reader
+  `agent_notes_since` applies the cursor rule against the branch it is
+  handed, the empty-tree hash stays good there, and `diff_two_refs`
+  and the engine's diff hook take the branches that are readable
+  beside the mem's own. None of these is on the library surface.
+
 ### Fixed
 
 - **A quarantined mount leaves the roster by `mem unregister`.** A mem

@@ -22,7 +22,8 @@ pub struct Args {
     /// hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a
     /// fresh-client first sync); on a folder mem an RFC3339 timestamp
     /// (the `ts` of the last entry you received, or empty for a first
-    /// sync).
+    /// sync). A commit SHA must be the mem's branch tip or an ancestor
+    /// of it; any other commit refuses `INVALID_CURSOR`.
     #[arg(long)]
     pub since: String,
 

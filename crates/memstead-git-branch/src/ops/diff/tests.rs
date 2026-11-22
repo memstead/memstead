@@ -44,6 +44,7 @@ fn diff_unknown_ref_returns_unknown_ref_marker() {
     let err = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         "no-such-ref",
         "no-such-other",
@@ -110,6 +111,7 @@ fn diff_bare_head_resolves_on_namespaced_declared_branch() {
     let diff = diff_two_refs(
         &gitdir,
         "team/specs",
+        &[],
         "specs",
         EMPTY_TREE_SHA,
         "HEAD",
@@ -143,6 +145,7 @@ fn diff_head_revspec_anchors_on_mem_branch() {
     let diff = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         "HEAD~1",
         "HEAD",
@@ -194,6 +197,7 @@ fn diff_added_modified_deleted_surface() {
     let diff = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         &sha_a,
         "refs/heads/specs",
@@ -260,6 +264,7 @@ fn diff_include_content_false_strips_bodies() {
     let diff = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         &sha_seed,
         "refs/heads/specs",
@@ -325,6 +330,7 @@ fn diff_populates_title_and_type_with_content_on() {
     let diff = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         sha_empty,
         "refs/heads/specs",
@@ -401,6 +407,7 @@ fn diff_rename_chain_collapses_multi_step_engine_authored_renames() {
     let diff = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         &sha_seed,
         "refs/heads/specs",
@@ -482,6 +489,7 @@ fn diff_ripple_lists_incoming_wikilinks_on_each_side() {
     let diff = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         &sha_a,
         "refs/heads/specs",
@@ -549,6 +557,7 @@ fn ripple_survives_frontmatter_that_looks_like_a_fence() {
     let diff = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         &sha_a,
         "refs/heads/specs",
@@ -600,7 +609,16 @@ fn diff_include_ripple_false_leaves_ripple_empty() {
         include_ripple: false,
         ..DiffConfig::default()
     };
-    let diff = diff_two_refs(&gitdir, "specs", "specs", &sha_a, "refs/heads/specs", &cfg).unwrap();
+    let diff = diff_two_refs(
+        &gitdir,
+        "specs",
+        &[],
+        "specs",
+        &sha_a,
+        "refs/heads/specs",
+        &cfg,
+    )
+    .unwrap();
     for entry in &diff.entries {
         let ripple = match entry {
             EntityDiff::Added { ripple, .. }
@@ -642,6 +660,7 @@ fn diff_invalid_entity_surfaces_for_missing_frontmatter() {
     let diff = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         &sha_a,
         "refs/heads/specs",
@@ -765,6 +784,7 @@ fn diff_resolves_refs_to_sha_in_response() {
     let diff = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         "refs/heads/specs",
         "refs/heads/specs",
@@ -798,6 +818,7 @@ fn diff_accepts_empty_tree_sentinel_for_ref_a() {
     let diff = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         EMPTY_TREE_SHA,
         "refs/heads/specs",
@@ -843,6 +864,7 @@ fn diff_refuses_arbitrary_tree_sha_with_unknown_ref() {
     let err = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         &tree_sha,
         "refs/heads/specs",
@@ -892,6 +914,7 @@ fn diff_resolves_bare_head_to_mem_branch_tip() {
     let via_head = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         &sha_a,
         "HEAD",
@@ -901,6 +924,7 @@ fn diff_resolves_bare_head_to_mem_branch_tip() {
     let via_explicit = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         &sha_a,
         "refs/heads/specs",
@@ -935,6 +959,7 @@ fn diff_empty_tree_sentinel_and_bare_head_compose() {
     let diff = diff_two_refs(
         &gitdir,
         "specs",
+        &[],
         "specs",
         EMPTY_TREE_SHA,
         "HEAD",

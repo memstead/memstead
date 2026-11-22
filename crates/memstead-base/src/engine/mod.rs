@@ -678,14 +678,18 @@ pub type GitBranchExportToBytesFn = fn(
 
 /// `Engine::diff` dispatch for git-branch mounts. Walks the two refs
 /// inside the workspace's mem-repo gitdir, produces a per-entity
-/// [`crate::ops::Diff`]. Refs are arbitrary `gix::rev_parse_single`
-/// inputs — branch names, commit SHAs, tag names. Resolves each
-/// independently so cross-branch (cross-mem) diffs work uniformly.
-/// `branch` is the mount's declared branch; a bare `HEAD` token in
-/// either ref re-anchors onto it.
+/// [`crate::ops::Diff`]. A ref names the empty tree, or is anchored in
+/// the history of `branch` or of one of `readable`, the declared
+/// branches of the other mems the workspace mounts in the same git
+/// directory: at one of those branches by name, at `HEAD`, or at a
+/// commit hash of those histories, with `~n` and `^n` parent steps;
+/// any other ref refuses `UNKNOWN_REF`, as a ref that names nothing
+/// does. `branch` is the mount's declared branch; a
+/// bare `HEAD` token in either ref re-anchors onto it.
 pub type GitBranchDiffFn = fn(
     gitdir: &Path,
     branch: &str,
+    readable: &[String],
     mem: &str,
     ref_a: &str,
     ref_b: &str,

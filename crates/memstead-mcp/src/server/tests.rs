@@ -9709,6 +9709,203 @@ fn memstead_mem_delete_of_a_quarantined_mount_names_the_unregister() {
     assert!(!holder.exists(), "nothing is laid where the storage was");
 }
 
+/// One git directory holds two mems and the workspace mounts one. The
+/// two read tools that take a ref refuse a ref into the other mem as
+/// they refuse a ref that names nothing, and nothing of the other mem
+/// is in the reply: not its text, not its titles.
+#[test]
+fn the_ref_taking_tools_stay_inside_the_mounted_mems() {
+    use memstead_base::mem_management::{MemMountParams, MountSource, mount_mem};
+
+    let tmp = TempDir::new().unwrap();
+    let store = tmp.path().join("store");
+    let view = tmp.path().join("view");
+    memstead_git_branch::test_support::init_real_mem_repo(
+        &store,
+        &[("alpha", "default@1.0.0"), ("gamma", "default@1.0.0")],
+    );
+    {
+        let engine =
+            memstead_git_branch::workspace_store::engine_from_workspace_root(&store).unwrap();
+        let server = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
+        for (mem, title) in [("alpha", "Alpha One"), ("gamma", "Gamma One")] {
+            let created = server.memstead_create(Parameters(CreateParams {
+                anchors: None,
+                mem: Some(mem.to_string()),
+                title: title.to_string(),
+                entity_type: "spec".to_string(),
+                sections: Some(IndexMap::from_iter([
+                    ("identity".to_string(), format!("identity of {title}")),
+                    ("purpose".to_string(), format!("purpose of {title}")),
+                ])),
+                metadata: None,
+                relations: None,
+                dry_run: None,
+                note: None,
+                role: None,
+                identity: None,
+            }));
+            assert!(
+                !created.is_error.unwrap_or(false),
+                "{}",
+                extract_text(&created)
+            );
+        }
+    }
+    let gitdir = std::fs::canonicalize(store.join("mem-repo").join(".git")).unwrap();
+    memstead_git_branch::lay_workspace_marker(&view).unwrap();
+    {
+        let mut engine =
+            memstead_git_branch::workspace_store::engine_from_workspace_root(&view).unwrap();
+        mount_mem(
+            &mut engine,
+            MemMountParams {
+                name: "alpha".to_string(),
+                source: MountSource::Branch {
+                    branch: "alpha".to_string(),
+                    gitdir: Some(gitdir.clone()),
+                },
+                capability: memstead_base::MountCapability::Write,
+                schema: None,
+                note: None,
+                operator_mode: true,
+                actor: memstead_base::vcs::Actor::Cli,
+                client: None,
+            },
+        )
+        .unwrap();
+    }
+    let gamma_tip =
+        memstead_git_branch::ops::transport::resolve_ref_in_gitdir(&gitdir, "refs/heads/gamma")
+            .unwrap()
+            .unwrap();
+    let engine = memstead_git_branch::workspace_store::engine_from_workspace_root(&view).unwrap();
+    let server = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
+    let whole = |result: &CallToolResult| -> String {
+        format!(
+            "{} {}",
+            extract_text(result),
+            result
+                .structured_content
+                .as_ref()
+                .map(|v| v.to_string())
+                .unwrap_or_default()
+        )
+    };
+
+    let diff = |ref_a: &str, ref_b: &str| {
+        server.memstead_diff(Parameters(DiffParams {
+            mem: "alpha".to_string(),
+            ref_a: ref_a.to_string(),
+            ref_b: ref_b.to_string(),
+            rename_similarity: None,
+            include_content: true,
+            include_ripple: true,
+        }))
+    };
+    let nothing = diff("no-such-branch", "HEAD");
+    assert_eq!(nothing.is_error, Some(true));
+    let nothing = nothing.structured_content.expect("an envelope");
+    assert_eq!(nothing["code"], "UNKNOWN_REF", "{nothing}");
+    let keys = |envelope: &serde_json::Value| -> Vec<String> {
+        let mut keys: Vec<String> = envelope["details"]
+            .as_object()
+            .map(|o| o.keys().cloned().collect())
+            .unwrap_or_default();
+        keys.sort();
+        keys
+    };
+    let changes_since = |since: &str| {
+        server.memstead_changes_since(Parameters(ChangesSinceParams {
+            mem: "alpha".to_string(),
+            since: since.to_string(),
+            rename_similarity: None,
+            include_notes: true,
+        }))
+    };
+    let no_cursor = changes_since("no-such-branch")
+        .structured_content
+        .expect("an envelope");
+    assert_eq!(no_cursor["code"], "INVALID_CURSOR", "{no_cursor}");
+    for outside in [
+        "gamma".to_string(),
+        "refs/heads/gamma".to_string(),
+        gamma_tip.clone(),
+        format!("{gamma_tip}~1"),
+        "refs/heads/__MEMSTEAD".to_string(),
+        "main".to_string(),
+        "gamma^{tree}".to_string(),
+        gamma_tip[..12].to_string(),
+    ] {
+        for result in [diff(&outside, "HEAD"), diff("HEAD", &outside)] {
+            assert_eq!(result.is_error, Some(true), "{outside}: {}", whole(&result));
+            assert!(
+                !whole(&result).contains("Gamma One"),
+                "{outside}: {}",
+                whole(&result)
+            );
+            let envelope = result.structured_content.expect("an envelope");
+            assert_eq!(envelope["code"], "UNKNOWN_REF", "{outside}: {envelope}");
+            assert_eq!(
+                envelope["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .replace(outside.as_str(), "<ref>"),
+                nothing["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .replace("no-such-branch", "<ref>"),
+                "{outside}: no different from a ref that names nothing"
+            );
+            assert_eq!(keys(&envelope), keys(&nothing), "{outside}");
+        }
+        let changes = changes_since(&outside);
+        assert_eq!(
+            changes.is_error,
+            Some(true),
+            "{outside}: {}",
+            whole(&changes)
+        );
+        assert!(
+            !whole(&changes).to_lowercase().contains("gamma-one")
+                && !whole(&changes).contains("Gamma One"),
+            "{outside}: {}",
+            whole(&changes)
+        );
+        let envelope = changes.structured_content.expect("an envelope");
+        assert_eq!(envelope["code"], "INVALID_CURSOR", "{outside}: {envelope}");
+        assert_eq!(keys(&envelope), keys(&no_cursor), "{outside}");
+        assert_eq!(
+            envelope["message"]
+                .as_str()
+                .unwrap_or_default()
+                .replace(outside.as_str(), "<cursor>"),
+            no_cursor["message"]
+                .as_str()
+                .unwrap_or_default()
+                .replace("no-such-branch", "<cursor>"),
+            "{outside}: no different from a cursor that names nothing"
+        );
+    }
+
+    // What the tools keep serving: the mem's own history.
+    let own = diff(memstead_base::ops::EMPTY_TREE_SHA, "HEAD");
+    assert!(!own.is_error.unwrap_or(false), "{}", whole(&own));
+    assert!(whole(&own).contains("Alpha One"));
+    let first_sync = server.memstead_changes_since(Parameters(ChangesSinceParams {
+        mem: "alpha".to_string(),
+        since: memstead_base::ops::EMPTY_TREE_SHA.to_string(),
+        rename_similarity: None,
+        include_notes: false,
+    }));
+    assert!(
+        !first_sync.is_error.unwrap_or(false),
+        "{}",
+        whole(&first_sync)
+    );
+    assert!(whole(&first_sync).contains("alpha--alpha-one"));
+}
+
 /// The session's declared role and identity ride the one commit a
 /// lifecycle tool produces, the create's seed commit and the delete's
 /// prune commit on the schema-and-config ref, exactly as they ride

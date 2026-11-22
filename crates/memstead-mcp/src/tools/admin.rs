@@ -56,11 +56,11 @@ pub struct ReloadParams {
 #[serde(deny_unknown_fields)]
 pub struct DiffParams {
     #[schemars(
-        description = "Mem that selects the storage context (the gitdir, for git-branch mounts). `ref_a` / `ref_b` are arbitrary refs resolved inside that gitdir; cross-mem diffs work via fully-qualified refs (`refs/heads/<other-mem>`). Folder / archive mounts refuse the call with `INVALID_INPUT` — they carry no git refs to diff."
+        description = "Mem that selects the storage context (the gitdir, for git-branch mounts). `ref_a` / `ref_b` resolve inside that gitdir and must lie in the history of a mem this workspace mounts there: this mem, or a mounted peer by its branch (`refs/heads/<other-mem>`). Folder / archive mounts refuse the call with `INVALID_INPUT` — they carry no git refs to diff."
     )]
     pub mem: String,
     #[schemars(
-        description = "First ref to diff. Branch name (`main`), full ref (`refs/heads/specs`), commit SHA, or tag. Unknown refs refuse with `UNKNOWN_REF` and `details.ref` carrying the raw input."
+        description = "First ref to diff. The empty-tree hash, or one of `HEAD`, a commit SHA (full or abbreviated) of a mounted mem's history, the branch of a mounted mem (`specs`, `refs/heads/specs`), each optionally followed by `~n` / `^n` parent steps (`HEAD~1`). No other revision syntax is read. Any other ref refuses with `UNKNOWN_REF` and `details.ref` carrying the ref (a `HEAD` form re-anchored onto the mem's branch)."
     )]
     pub ref_a: String,
     #[schemars(description = "Second ref to diff. Same input shape as `ref_a`.")]
@@ -104,7 +104,7 @@ pub struct ChangesSinceParams {
     #[schemars(description = "Writable mem name. Call memstead_health for the list.")]
     pub mem: String,
     #[schemars(
-        description = "Change cursor to diff against. Backend-specific, and never a mutation's `write_id`: on a git-branch mem a commit SHA (pass the `head` a prior call returned, or the canonical git empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` to get every entity as `added` on a fresh-client first sync); on a folder mem an RFC3339 timestamp (the `ts` of the last entry you received, or empty for a first sync)."
+        description = "Change cursor to diff against. Backend-specific, and never a mutation's `write_id`: on a git-branch mem a commit SHA of the mem's own history (pass the `head` a prior call returned, or the canonical git empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` to get every entity as `added` on a fresh-client first sync; any other commit refuses `INVALID_CURSOR`); on a folder mem an RFC3339 timestamp (the `ts` of the last entry you received, or empty for a first sync)."
     )]
     pub since: String,
     #[schemars(

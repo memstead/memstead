@@ -149,11 +149,24 @@ impl Engine {
             include_content: true,
             include_ripple: false,
         };
-        let fork_diff = run_diff(&ops, &gitdir, &fork_branch, fork, &base, &fork_tip, &config)?;
+        // Both mems are mounted here, and a fork's base may lie in the
+        // history of either.
+        let both = [fork_branch.clone(), target_branch.clone()];
+        let fork_diff = run_diff(
+            &ops,
+            &gitdir,
+            &fork_branch,
+            &both,
+            fork,
+            &base,
+            &fork_tip,
+            &config,
+        )?;
         let target_diff = run_diff(
             &ops,
             &gitdir,
             &target_branch,
+            &both,
             &target,
             &ancestor,
             &target_tip,
@@ -689,17 +702,20 @@ pub(crate) fn resolve_sha(
 }
 
 /// The two-tree walk between two refs of one branch's mem, ids under
-/// `mem`.
+/// `mem`. `readable` are the branches whose history the refs may lie
+/// in, beside `branch` itself.
+#[allow(clippy::too_many_arguments)]
 fn run_diff(
     ops: &crate::engine::GitBranchOps,
     gitdir: &Path,
     branch: &str,
+    readable: &[String],
     mem: &str,
     ref_a: &str,
     ref_b: &str,
     config: &DiffConfig,
 ) -> Result<crate::ops::Diff, EngineError> {
-    (ops.diff)(gitdir, branch, mem, ref_a, ref_b, config).map_err(|e| match e {
+    (ops.diff)(gitdir, branch, readable, mem, ref_a, ref_b, config).map_err(|e| match e {
         BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
             EngineError::UnknownRef(msg.trim_start_matches("UNKNOWN_REF:").trim().to_string())
         }

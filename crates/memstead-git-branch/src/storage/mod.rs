@@ -464,15 +464,19 @@ fn branch_reset_dispatch(
     crate::ops::branch_reset::branch_reset_in_gitdir(gitdir, branch, target_sha, expected_head)
 }
 
+// Signature (arity included) is pinned by the `GitBranchOps.diff`
+// fn-pointer contract declared in memstead-base.
+#[allow(clippy::too_many_arguments)]
 fn diff_dispatch(
     gitdir: &std::path::Path,
     branch: &str,
+    readable: &[String],
     mem: &str,
     ref_a: &str,
     ref_b: &str,
     config: &memstead_base::ops::DiffConfig,
 ) -> Result<memstead_base::ops::Diff, memstead_base::backend::BackendError> {
-    crate::ops::diff::diff_two_refs(gitdir, branch, mem, ref_a, ref_b, config)
+    crate::ops::diff::diff_two_refs(gitdir, branch, readable, mem, ref_a, ref_b, config)
 }
 
 #[allow(clippy::too_many_arguments)]
