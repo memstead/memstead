@@ -36,6 +36,57 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   output and the enclosing repository's ignore file; the command
   behaves as before.
 
+- **`memstead mem mount` mounts a mem that already exists as a
+  branch.** `memstead mem mount <name>` takes exactly one of
+  `--branch <branch>` (a branch of this workspace's own mem-repo, or of
+  the mem-repo whose git directory `--gitdir <path>` names) and
+  `--remote <remote>`
+  (the mem's branch is fetched from that remote and mounted from the
+  local branch created at its tip), plus `--capability write|read-only`
+  (default `read-only`) and `--schema <name>@<version>`. A mount lays
+  no storage and no seed commit: it serves the branch as it is, with
+  its history, so a later `pull` fast-forwards. That makes two things
+  one command each. A workspace that mounts mems of another workspace's
+  mem-repo no longer has its roster file written by hand:
+  `--new-workspace` makes the current directory a workspace of engine
+  state only. Through a read-only mount no ref, no object and no
+  registry entry is ever written into the git directory it names, and
+  the unregister of a mount of another mem-repo leaves no tombstone
+  there (what is written through a write mount lands there, as it
+  must). Lock files follow the rule of every mount: an operation that
+  takes a mem's lock lays that mem's lock file under `memstead-locks/`
+  of its git directory when it is not there yet, also for a mem
+  mounted read-only, whose lock is what holds it still against a
+  writer elsewhere. The mount itself, reads, a refused write that names
+  the mem or a qualified entity id, and the unregister of a read-only
+  mount take no lock of the mounted mem, so they lay nothing there and
+  work on a git directory that is not writable. And a mem pushed alone from another store, which
+  arrives without its registry entry, is adopted with `--remote` and
+  `--schema`, where the route used to be `mem init`, `fetch` and
+  `branch-reset` with a throwaway seed. The schema pin and
+  configuration are read from the registry of the git directory that
+  holds the branch; where it has no entry for the mem, `--schema` names
+  the pin (a mount never guesses one and never re-pins), and for a
+  branch of the workspace's own mem-repo the entry is written there,
+  taken from the fetched copy of the remote's registry when that lists
+  the mem. The name is admitted by the workspace's
+  `[[mem_management.create]]` rules as for `mem init`, unless operator
+  mode is declared. A mount that is refused mounts nothing and leaves
+  no branch, no registry entry and no roster row behind: what can
+  refuse it on its inputs is judged before any of the three is written,
+  a registry entry that stood before the call is never removed, and
+  with `--new-workspace` no workspace is left behind. What a refused
+  `--remote` mount does leave is its fetch, which comes first because
+  the remote's registry may name the pin: the remote-tracking refs and
+  the fetched objects stay in the workspace's own mem-repo. Removal is `memstead mem unregister <name>`, which
+  now also removes a read-only mount of a branch or a folder: the
+  roster row goes and nothing is written to the storage it named. A
+  running engine in the workspace serves a mounted mem from its next
+  operation on and stops serving it after the unregister. The verb is
+  CLI-only: mounting is administration. `pull --all` names the new verb
+  for a mem the remote's registry lists and this workspace does not
+  mount.
+
 - **A change notice names the writer and the note.** In the `detailed`
   tier of a `mem_changed` notice (up to 50 changed entities) each entry
   now carries `identity`, the declared identity of the newest write to
@@ -89,6 +140,53 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   forgotten caller starts over as a first contact.
 
 ### Fixed
+
+- **A running engine mounts a roster row whose schema lives in the
+  row's own mem-repo.** When another process added a mount of a mem
+  from another mem-repo, pinned to a schema only that mem-repo has
+  installed, a running engine quarantined the mem with
+  `SCHEMA_NOT_FOUND` until it was restarted: it read the
+  schema registries of the mems it already served before it mounted
+  the new row. It now reads the registries of the rows it is about to
+  mount as well.
+
+- **A running engine follows a roster row that names another storage
+  or pin under an unchanged name.** The roster reconciliation compared
+  a row with the mount it served by name and capability alone. A name
+  taken off the roster and put back onto another branch, another git
+  directory or another pin between two operations of a running engine
+  kept being served from the old storage, and a write through it
+  landed in the store the roster no longer named. A row whose storage
+  or pin changed is now a mount to take down and bring up again,
+  reported with `MEM_ROSTER_CHANGED` like a capability change.
+
+- **A quarantined mount is tried again whenever the roster is
+  written.** A running engine kept a mem quarantined until that mem was
+  reloaded by name, also after the cause was gone and the mem had been
+  unregistered and mounted again. Every write of the roster file, one
+  that leaves its rows as they were included, now makes a running
+  engine try its quarantined rows again on its next operation, and so
+  does a reload of the whole workspace with `full`. A row that comes
+  back is reported as added; one
+  that fails again for the storage and pin it had is not reported
+  again.
+
+- **A write into a mem mounted read-only refuses before any lock is
+  taken.** An entity write into a read-only mount (create, update,
+  relate, delete, rename, retype) and `mem set-schema` took write locks
+  before they refused `READ_ONLY_MOUNT`, which laid a lock file where
+  the mem lives, and refused `MEM_VIEW_STALE` instead where that
+  directory is not writable. They now refuse first. A call that names
+  its entity by a bare slug is the exception: which mem carries the
+  slug is read under the workspace's locks, as before.
+
+- **`mem list` and `mem unregister` work in a workspace of engine
+  state only.** A workspace whose mems all live in other git
+  directories has no `mem-repo/` of its own; `mem list` failed there
+  with `MEM_ERROR` and `mem unregister` refused
+  `UNSUPPORTED_WORKSPACE_SHAPE`. `mem list` now lists the mems of any
+  workspace shape, and `mem unregister` removes a branch mount in
+  either.
 
 - **A note keeps every line it was written with.** On a git-branch mem
   a note line shaped like a commit trailer (`Fix: the wording`,

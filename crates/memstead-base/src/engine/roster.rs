@@ -55,6 +55,47 @@ pub struct RosterChange {
     pub failures: Vec<crate::ops::RefreshFailure>,
 }
 
+/// What makes a roster row the mount it is: under one name, a row with
+/// another capability, storage or pin is another mount.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RowIdentity {
+    capability: crate::workspace::MountCapability,
+    storage: crate::workspace::MountStorage,
+    schema: Option<memstead_schema::SchemaRef>,
+}
+
+impl RowIdentity {
+    fn of(mount: &crate::workspace::Mount) -> Self {
+        use crate::workspace::MountStorage;
+        // One spelling per place: the row a verb built and the row the
+        // roster file gives back name the same directory in two ways.
+        let canonical = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        let storage = match &mount.storage {
+            MountStorage::Folder { path } => MountStorage::Folder {
+                path: canonical(path),
+            },
+            MountStorage::GitBranch { gitdir, branch } => MountStorage::GitBranch {
+                gitdir: canonical(gitdir),
+                branch: crate::workspace::branch_full_ref(branch),
+            },
+            MountStorage::Archive { path } => MountStorage::Archive {
+                path: canonical(path),
+            },
+            MountStorage::InMemory => MountStorage::InMemory,
+        };
+        Self {
+            capability: mount.capability,
+            storage,
+            schema: mount.schema.clone(),
+        }
+    }
+
+    /// Same storage and pin, whatever the capability.
+    fn same_place_as(&self, other: &Self) -> bool {
+        self.storage == other.storage && self.schema == other.schema
+    }
+}
+
 impl RosterChange {
     /// Whether anything at all changed or failed.
     pub fn is_empty(&self) -> bool {
@@ -160,6 +201,14 @@ impl Engine {
             return self.apply_roster(now).map(Some);
         };
         if cached.hash == now.hash {
+            // The same rows, written again (a name taken off the roster
+            // and put back unchanged between two operations): nothing
+            // moved for the mems that serve, and a quarantined row is
+            // tried again, as after any write of the roster.
+            let written_again = cached.modified != now.modified;
+            if written_again && !self.quarantined.is_empty() {
+                return self.apply_roster(now).map(Some);
+            }
             self.roster_fingerprint = Some(now);
             return Ok(None);
         }
@@ -203,16 +252,42 @@ impl Engine {
         // mount another process added or withdrew is membership like a
         // writable one, and a row whose capability changed is a mount to
         // take down and bring up again under the new capability.
-        let manifest: BTreeMap<String, crate::workspace::MountCapability> = workspace
+        // A row is the same mount only while its capability, its storage
+        // and its pin stand: a name unregistered and mounted again onto
+        // another branch, another git directory or another pin between
+        // two operations is another mount under an old name, and serving
+        // the old one would read and write a store the roster no longer
+        // names.
+        let manifest: BTreeMap<String, RowIdentity> = workspace
             .mounts
             .iter()
-            .map(|m| (m.mem.clone(), m.capability))
+            .map(|m| (m.mem.clone(), RowIdentity::of(m)))
             .collect();
-        let mounted: BTreeMap<String, crate::workspace::MountCapability> = self
+        let mounted: BTreeMap<String, RowIdentity> = self
             .mounts
             .iter()
-            .map(|m| (m.mount.mem.clone(), m.mount.capability))
+            .map(|m| (m.mount.mem.clone(), RowIdentity::of(&m.mount)))
             .collect();
+        // Every quarantined row the roster still names is tried again:
+        // the roster was written, and what kept the row out of service
+        // (a git directory that was away, a schema not yet installed)
+        // may be gone. One whose row names the storage and pin it had
+        // and that fails again is no news and is not reported again;
+        // one that now names another storage or pin is another mount.
+        let mut retried_in_place: BTreeSet<String> = BTreeSet::new();
+        let mut requeued: BTreeSet<String> = BTreeSet::new();
+        for q in &self.quarantined {
+            if let Some(row) = manifest.get(&q.mount.mem) {
+                requeued.insert(q.mount.mem.clone());
+                if row.same_place_as(&RowIdentity::of(&q.mount)) {
+                    retried_in_place.insert(q.mount.mem.clone());
+                }
+            }
+        }
+        if !requeued.is_empty() {
+            self.quarantined
+                .retain(|q| !requeued.contains(&q.mount.mem));
+        }
         let quarantined_now: BTreeSet<String> = self
             .quarantined
             .iter()
@@ -223,10 +298,11 @@ impl Engine {
         let mut all_applied = true;
 
         // The schema catalogue first: a mem that arrived may pin a schema
-        // installed since boot, and a cold mount resolves against the
-        // catalogue as it stands.
+        // installed since boot, or one installed in the git directory it
+        // arrives from, and a cold mount resolves against the catalogue
+        // as it stands.
         let mut schema_report = crate::ops::FullRefreshReport::default();
-        self.refresh_schema_sources(&mut schema_report);
+        self.refresh_schema_sources_for(&mut schema_report, &workspace.mounts);
         change.failures.extend(schema_report.failures);
 
         // Removals first, each atomic: the mems the roster no longer
@@ -234,15 +310,15 @@ impl Engine {
         // latter are mounted again below, so a capability change is
         // reported the way it happened, under removed and under added.
         let mut remounting: BTreeSet<String> = BTreeSet::new();
-        for (name, capability) in &mounted {
-            let roster_capability = manifest.get(name);
-            if roster_capability == Some(capability) {
+        for (name, identity) in &mounted {
+            let roster_identity = manifest.get(name);
+            if roster_identity == Some(identity) {
                 continue;
             }
             match self.unmount_mem(name) {
                 Ok(()) => {
                     change.removed.push(name.clone());
-                    if roster_capability.is_some() {
+                    if roster_identity.is_some() {
                         remounting.insert(name.clone());
                     }
                 }
@@ -267,11 +343,6 @@ impl Engine {
             self.quarantined
                 .retain(|q| !gone_quarantined.contains(&q.mount.mem));
             change.removed.extend(gone_quarantined);
-        }
-        for q in &mut self.quarantined {
-            if let Some(capability) = manifest.get(&q.mount.mem) {
-                q.mount.capability = *capability;
-            }
         }
 
         // Additions: cold mount under the boot quarantine rules.
@@ -298,7 +369,9 @@ impl Engine {
                     let (code, message) =
                         super::boot::instantiate_failure_reason(&mount, e.code(), e.to_string());
                     self.quarantine_mount(mount, &code, message);
-                    change.quarantined.push(name);
+                    if !retried_in_place.contains(&name) {
+                        change.quarantined.push(name);
+                    }
                     continue;
                 }
             };
@@ -311,7 +384,9 @@ impl Engine {
             {
                 let (code, message) = super::boot::missing_storage_reason(&mount);
                 self.quarantine_mount(mount, &code, message);
-                change.quarantined.push(name);
+                if !retried_in_place.contains(&name) {
+                    change.quarantined.push(name);
+                }
                 continue;
             }
             match self.register_writable_mem_batched(
@@ -326,7 +401,9 @@ impl Engine {
                 }
                 Err(e) => {
                     self.quarantine_mount(mount, e.code(), e.to_string());
-                    change.quarantined.push(name);
+                    if !retried_in_place.contains(&name) {
+                        change.quarantined.push(name);
+                    }
                 }
             }
         }

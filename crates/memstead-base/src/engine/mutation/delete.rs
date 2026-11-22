@@ -120,7 +120,7 @@ impl Engine {
         // referrers are in no view at all. So the delete locks every
         // writable mount, reloads every mem and loads the deferred ones
         // before it reads a referrer.
-        let (_write_lock, reloaded) = self.lock_workspace_for_write_if(true)?;
+        let (_write_lock, reloaded) = self.lock_workspace_for_entity_write(true, &args.id)?;
         // A bare slug is resolved under the lock, against the reloaded
         // view: which mem carries a slug is a fact about every mem.
         let (resolved, short_hint) = self.resolve_entity_id(&args.id)?;

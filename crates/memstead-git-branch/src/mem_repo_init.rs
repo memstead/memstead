@@ -137,6 +137,23 @@ pub fn init_mem_repo(workspace_path: &Path) -> Result<MemRepoInit, MemRepoInitEr
     // The minimum-viable `.memstead/workspace.toml`, required by every
     // later command. A pre-existing file is left untouched so
     // operator-authored content survives.
+    let workspace_toml = lay_workspace_marker(&workspace)?;
+
+    Ok(MemRepoInit {
+        workspace_root: workspace,
+        mem_repo_dir: mem_repo_root,
+        workspace_toml,
+    })
+}
+
+/// Make `workspace` a workspace: lay the minimum `.memstead/workspace.toml`
+/// every command needs, and nothing else. A file that is already there
+/// is left as it is. This is all a workspace of engine state only
+/// holds before its first mount: a workspace whose mems live in other
+/// git directories has no `mem-repo/` of its own.
+pub fn lay_workspace_marker(workspace: &Path) -> Result<PathBuf, MemRepoInitError> {
+    let failed =
+        |what: &str, e: &dyn std::fmt::Display| MemRepoInitError::Failed(format!("{what}: {e}"));
     let memstead_dir = workspace.join(memstead_base::WORKSPACE_STORE_DIR);
     fs::create_dir_all(&memstead_dir).map_err(|e| failed("create .memstead directory", &e))?;
     let workspace_toml = memstead_dir.join("workspace.toml");
@@ -144,12 +161,7 @@ pub fn init_mem_repo(workspace_path: &Path) -> Result<MemRepoInit, MemRepoInitEr
         fs::write(&workspace_toml, DEFAULT_WORKSPACE_TOML)
             .map_err(|e| failed("write .memstead/workspace.toml", &e))?;
     }
-
-    Ok(MemRepoInit {
-        workspace_root: workspace,
-        mem_repo_dir: mem_repo_root,
-        workspace_toml,
-    })
+    Ok(workspace_toml)
 }
 
 fn init_signature() -> gix::actor::Signature {

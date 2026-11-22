@@ -71,7 +71,7 @@ use memstead_schema::SchemaRef;
 pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};
 pub use graph::{ClusterInfo, LouvainOutput};
 pub use mem::{MemOrigin, MemRouterSnapshot};
-pub use mem_repo_init::{MemRepoInit, MemRepoInitError, init_mem_repo};
+pub use mem_repo_init::{MemRepoInit, MemRepoInitError, init_mem_repo, lay_workspace_marker};
 pub use ops::agent_notes::{AgentNotesReport, CommitNote};
 pub use ops::changes::{
     ChangeEnvelope, ChangesReport, EMPTY_TREE_SHA, RENAME_SIMILARITY_DEFAULT,

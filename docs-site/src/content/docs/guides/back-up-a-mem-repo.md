@@ -104,16 +104,16 @@ mkdir restored && cd restored
 memstead mem-repo init --remote git@github.com:you/mem-backup.git
 memstead pull --all       # schemas and mem configs arrive; each unmounted mem is named
 memstead workspace allow-create --schema '*' knowledge
-memstead mem init knowledge --schema widgets@0.1.0 --reattach
-memstead pull --all       # the mem's branch and its check records
+memstead mem mount knowledge --remote origin --capability write
+memstead pull --all       # the mem's check records
 memstead status           # your entities are back
 ```
 
-`--reattach` mounts the mem against the config the backup already
-holds instead of writing a fresh one, so the schema-and-config ref
-keeps the backup's history and the next `push --all` from this
-machine fast-forwards. The pin to pass is the one `pull --all`
-printed for the mem.
+`mem mount --remote` fetches the mem's branch and mounts it as it is,
+under the config the backup already holds: no seed commit and no fresh
+config, so the schema-and-config ref keeps the backup's history and the
+next `push --all` from this machine fast-forwards. The mount is
+read-only unless `--capability write` says otherwise.
 
 If the mem was published as an archive instead, `memstead install` is
 the simpler recovery; this flow is for live workspaces with history.
@@ -177,8 +177,8 @@ created a mem (or otherwise changed different files on it), `pull --all`
 merges the two histories file by file and pushes nothing for you; run
 `push --all` afterwards. The other machine's new mem then shows under
 `unmounted_on_remote`; mount it with
-`memstead mem init <name> --schema <pin> --reattach`, then run
-`pull --all` once more to bring in its branch. When both machines
+`memstead mem mount <name> --remote origin --capability write`, which
+fetches its branch. When both machines
 changed the same file, `pull --all` refuses `LOCAL_DIVERGENCE` naming it.
 
 ## 5. Fork a mem at a recorded ancestor

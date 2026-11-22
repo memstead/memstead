@@ -359,10 +359,9 @@ fn run_pull_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
                 );
             } else {
                 println!(
-                    "mem `{}` is on the remote but not mounted here: mount it with \
-                     `memstead mem init {} --schema {schema} --reattach`, then run \
-                     `memstead pull --all` again",
-                    u.branch, u.branch
+                    "mem `{}` (schema {schema}) is on the remote but not mounted here: mount \
+                     it with `memstead mem mount {} --remote {} --capability write`",
+                    u.branch, u.branch, remote
                 );
             }
         }

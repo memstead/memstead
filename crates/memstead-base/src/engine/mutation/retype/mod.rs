@@ -115,7 +115,8 @@ impl Engine {
         // mount, reloads every mem and loads the deferred ones before it
         // walks an edge, so the CAS compare and the edge walk run
         // against current truth everywhere.
-        let (_write_lock, reloaded) = self.lock_workspace_for_write_if(!args.dry_run)?;
+        let (_write_lock, reloaded) =
+            self.lock_workspace_for_entity_write(!args.dry_run, &args.id)?;
         // A bare slug is resolved under the lock, against the reloaded
         // view: which mem carries a slug is a fact about every mem.
         let (resolved, short_hint) = self.resolve_entity_id(&args.id)?;

@@ -817,6 +817,315 @@ write_rules: []
         assert_eq!(engine.unknown_mem_error("notes").code(), "MEM_UNMOUNTED");
     }
 
+    /// A running engine in a workspace of engine state only serves a
+    /// mem another process mounts with the mount verb from its next
+    /// operation on, also when the mem is pinned to a schema that only
+    /// the mem-repo it lives in has installed, and stops serving it
+    /// after the unregister. Nothing restarts.
+    #[test]
+    fn a_running_engine_follows_a_mount_and_its_unregister() {
+        use memstead_base::mem_management::{
+            MemDeleteParams, MemMountParams, MountSource, delete_mem, mount_mem,
+        };
+        use memstead_base::schema_source::SchemaSource as _;
+
+        let tmp = TempDir::new().unwrap();
+        let holder = tmp.path().join("holder");
+        let view = tmp.path().join("view");
+        crate::test_support::init_real_mem_repo(&holder, &[("notes", "refsrc@0.1.0")]);
+        let holder_gitdir = std::fs::canonicalize(holder.join("mem-repo").join(".git")).unwrap();
+        crate::mem_repo_schemas::GitBranchSchemaSource::for_gitdir(&holder_gitdir)
+            .write_schema(
+                "refsrc",
+                "0.1.0",
+                &[
+                    ("schema.yaml".to_string(), REFSRC_MANIFEST.to_vec()),
+                    ("types/doc.yaml".to_string(), REFSRC_DOC.to_vec()),
+                ],
+            )
+            .unwrap();
+        crate::lay_workspace_marker(&view).unwrap();
+
+        // The long-lived engine: nothing mounted yet.
+        let mut running = engine_from_workspace_root(&view).unwrap();
+        assert!(running.reload_if_stale(None).is_empty());
+        assert!(running.mem_names().is_empty());
+
+        // Another process mounts the holder's mem, read-only.
+        let mount = |capability| MemMountParams {
+            name: "notes".to_string(),
+            source: MountSource::Branch {
+                branch: "notes".to_string(),
+                gitdir: Some(holder_gitdir.clone()),
+            },
+            capability,
+            schema: None,
+            note: None,
+            operator_mode: true,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
+        };
+        let unregister = || MemDeleteParams {
+            name: "notes".to_string(),
+            delete_files: false,
+            note: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
+            operator_mode: true,
+            detach_incoming: false,
+        };
+        {
+            let mut other = engine_from_workspace_root(&view).unwrap();
+            let mounted =
+                mount_mem(&mut other, mount(memstead_base::MountCapability::ReadOnly)).unwrap();
+            assert_eq!(mounted.schema_ref, "refsrc@0.1.0");
+            assert!(!mounted.config_written && !mounted.fetched);
+        }
+
+        // The running engine's next operation serves it, read-only,
+        // under the schema the holder's mem-repo has installed.
+        let codes: Vec<String> = running
+            .reload_if_stale(None)
+            .iter()
+            .map(|w| w.code().to_string())
+            .collect();
+        assert!(codes.iter().any(|c| c == "MEM_ROSTER_CHANGED"), "{codes:?}");
+        assert_eq!(running.mem_names(), ["notes"]);
+        assert!(running.quarantined_mems().is_empty());
+        assert!(!running.mem_router().is_writable("notes"));
+
+        // Unregistered by another process: gone from the next operation.
+        {
+            let mut other = engine_from_workspace_root(&view).unwrap();
+            let gone = delete_mem(&mut other, unregister()).unwrap();
+            assert!(gone.deleted_from_router && !gone.files_deleted);
+        }
+        running.reload_if_stale(None);
+        assert!(running.mem_names().is_empty());
+        assert_eq!(running.unknown_mem_error("notes").code(), "MEM_UNMOUNTED");
+
+        // Mounted again with capability write: followed as a write mount.
+        {
+            let mut other = engine_from_workspace_root(&view).unwrap();
+            mount_mem(&mut other, mount(memstead_base::MountCapability::Write)).unwrap();
+        }
+        running.reload_if_stale(None);
+        assert!(running.mem_router().is_writable("notes"));
+    }
+
+    /// A name that is unregistered and mounted again onto another git
+    /// directory between two operations of a running engine, under the
+    /// same capability, is another mount: the running engine serves the
+    /// store the roster names now, says the roster changed, and writes
+    /// there, not into the store it served before.
+    #[test]
+    fn a_running_engine_follows_a_name_mounted_onto_another_store() {
+        use memstead_base::mem_management::{
+            MemDeleteParams, MemMountParams, MountSource, delete_mem, mount_mem,
+        };
+
+        let tmp = TempDir::new().unwrap();
+        let view = tmp.path().join("view");
+        let mut gitdirs = Vec::new();
+        for (dir, title) in [("first", "Alpha"), ("second", "Beta")] {
+            let holder = tmp.path().join(dir);
+            crate::test_support::init_real_mem_repo(&holder, &[("notes", "default@1.0.0")]);
+            let mut engine = engine_from_workspace_root(&holder).unwrap();
+            operate(&mut engine, "holder", None, Some(("notes", title)));
+            gitdirs.push(std::fs::canonicalize(holder.join("mem-repo").join(".git")).unwrap());
+        }
+        crate::lay_workspace_marker(&view).unwrap();
+        let mount = |gitdir: &std::path::Path| MemMountParams {
+            name: "notes".to_string(),
+            source: MountSource::Branch {
+                branch: "notes".to_string(),
+                gitdir: Some(gitdir.to_path_buf()),
+            },
+            capability: memstead_base::MountCapability::Write,
+            schema: None,
+            note: None,
+            operator_mode: true,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
+        };
+        let serves = |engine: &Engine, id: &str| {
+            engine
+                .get_entity(&memstead_base::EntityId(id.into()))
+                .is_some()
+        };
+        let tip = |gitdir: &std::path::Path| {
+            crate::ops::transport::resolve_ref_in_gitdir(gitdir, "refs/heads/notes")
+                .unwrap()
+                .unwrap()
+        };
+
+        {
+            let mut other = engine_from_workspace_root(&view).unwrap();
+            mount_mem(&mut other, mount(&gitdirs[0])).unwrap();
+        }
+        let mut running = engine_from_workspace_root(&view).unwrap();
+        running.reload_if_stale(None);
+        assert!(serves(&running, "notes--alpha") && !serves(&running, "notes--beta"));
+
+        // Unregistered and mounted onto the second store, with no
+        // operation of the running engine in between.
+        {
+            let mut other = engine_from_workspace_root(&view).unwrap();
+            delete_mem(
+                &mut other,
+                MemDeleteParams {
+                    name: "notes".to_string(),
+                    delete_files: false,
+                    note: None,
+                    actor: memstead_base::vcs::Actor::Cli,
+                    client: None,
+                    operator_mode: true,
+                    detach_incoming: false,
+                },
+            )
+            .unwrap();
+            mount_mem(&mut other, mount(&gitdirs[1])).unwrap();
+        }
+        let codes: Vec<String> = running
+            .reload_if_stale(None)
+            .iter()
+            .map(|w| w.code().to_string())
+            .collect();
+        assert!(codes.iter().any(|c| c == "MEM_ROSTER_CHANGED"), "{codes:?}");
+        assert!(
+            serves(&running, "notes--beta") && !serves(&running, "notes--alpha"),
+            "the running engine serves the store the roster names now"
+        );
+
+        // A write through the running engine lands in the second store.
+        let (first_before, second_before) = (tip(&gitdirs[0]), tip(&gitdirs[1]));
+        operate(&mut running, "writer", None, Some(("notes", "Gamma")));
+        assert_eq!(
+            tip(&gitdirs[0]),
+            first_before,
+            "the first store is not written"
+        );
+        assert_ne!(
+            tip(&gitdirs[1]),
+            second_before,
+            "the write landed in the second"
+        );
+
+        // A further reconciliation over the unchanged roster moves nothing.
+        let quiet: Vec<String> = running
+            .reload_if_stale(None)
+            .iter()
+            .map(|w| w.code().to_string())
+            .collect();
+        assert!(
+            !quiet.iter().any(|c| c == "MEM_ROSTER_CHANGED"),
+            "{quiet:?}"
+        );
+    }
+
+    /// A mount that a running engine holds quarantined (its git
+    /// directory was away) is served again from the engine's next
+    /// operation once the directory is back and the name was
+    /// unregistered and mounted again, which leaves the roster's rows
+    /// exactly as they were: every write of the roster makes a running
+    /// engine try its quarantined rows again.
+    #[test]
+    fn a_running_engine_tries_a_quarantined_mount_again_when_the_roster_is_written() {
+        use memstead_base::mem_management::{
+            MemDeleteParams, MemMountParams, MountSource, delete_mem, mount_mem,
+        };
+
+        let tmp = TempDir::new().unwrap();
+        let view = tmp.path().join("view");
+        let holder = tmp.path().join("holder");
+        let away = tmp.path().join("holder-away");
+        crate::test_support::init_real_mem_repo(&holder, &[("notes", "default@1.0.0")]);
+        {
+            let mut engine = engine_from_workspace_root(&holder).unwrap();
+            operate(&mut engine, "holder", None, Some(("notes", "Alpha")));
+        }
+        let gitdir = std::fs::canonicalize(holder.join("mem-repo").join(".git")).unwrap();
+        crate::lay_workspace_marker(&view).unwrap();
+        let mount = || MemMountParams {
+            name: "notes".to_string(),
+            source: MountSource::Branch {
+                branch: "notes".to_string(),
+                gitdir: Some(gitdir.clone()),
+            },
+            capability: memstead_base::MountCapability::ReadOnly,
+            schema: None,
+            note: None,
+            operator_mode: true,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
+        };
+        let codes = |engine: &mut Engine| -> Vec<String> {
+            engine
+                .reload_if_stale(None)
+                .iter()
+                .map(|w| w.code().to_string())
+                .collect()
+        };
+        let mut running = engine_from_workspace_root(&view).unwrap();
+        codes(&mut running);
+
+        // The mount is added while its git directory is away: the
+        // running engine quarantines it.
+        {
+            let mut other = engine_from_workspace_root(&view).unwrap();
+            mount_mem(&mut other, mount()).unwrap();
+        }
+        std::fs::rename(&holder, &away).unwrap();
+        codes(&mut running);
+        assert!(running.mem_names().is_empty());
+        assert_eq!(running.quarantined_mems().len(), 1);
+
+        // A roster that is not written leaves the quarantine alone,
+        // also once the directory is back.
+        std::fs::rename(&away, &holder).unwrap();
+        let quiet = codes(&mut running);
+        assert!(
+            !quiet.iter().any(|c| c == "MEM_ROSTER_CHANGED"),
+            "{quiet:?}"
+        );
+        assert_eq!(running.quarantined_mems().len(), 1);
+
+        // Unregistered and mounted again by another process: the same
+        // row, written again.
+        let before = std::fs::read(view.join(".memstead/state/mounts.json")).unwrap();
+        {
+            let mut other = engine_from_workspace_root(&view).unwrap();
+            delete_mem(
+                &mut other,
+                MemDeleteParams {
+                    name: "notes".to_string(),
+                    delete_files: false,
+                    note: None,
+                    actor: memstead_base::vcs::Actor::Cli,
+                    client: None,
+                    operator_mode: true,
+                    detach_incoming: false,
+                },
+            )
+            .unwrap();
+            mount_mem(&mut other, mount()).unwrap();
+        }
+        assert_eq!(
+            std::fs::read(view.join(".memstead/state/mounts.json")).unwrap(),
+            before,
+            "the roster's bytes are as they were"
+        );
+        let told = codes(&mut running);
+        assert!(told.iter().any(|c| c == "MEM_ROSTER_CHANGED"), "{told:?}");
+        assert_eq!(running.mem_names(), ["notes"]);
+        assert!(running.quarantined_mems().is_empty());
+        assert!(
+            running
+                .get_entity(&memstead_base::EntityId("notes--alpha".into()))
+                .is_some()
+        );
+    }
+
     fn caller_fixture() -> (TempDir, std::path::PathBuf) {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("ws");

@@ -382,12 +382,50 @@ pub fn delete_mem(
     // is in the view the guard reads, and no write lands in the mem
     // while it is being removed. The mem itself may be unreadable;
     // that is often why it is deleted.
-    let (_write_lock, _reloaded) = engine
-        .lock_workspace_for_mem_operation(&params.name)
-        .map_err(FullEngineError::from)?;
+    // A read-only mount that only leaves the roster is the exception:
+    // nothing is written to its storage, so its own lock is not taken
+    // and no lock file is laid where it lives. The question is asked on
+    // the reconciled roster and again under the locks; a mount that
+    // became writable in between gets the full lock.
+    let _ = engine.settle_roster_before_locking();
+    let leaves_roster_only = |engine: &crate::Engine| {
+        !params.delete_files && engine.is_removable_read_mount(&params.name)
+    };
+    let beside = leaves_roster_only(engine);
+    let mut held = if beside {
+        engine.lock_workspace_beside_read_mount(&params.name)
+    } else {
+        engine.lock_workspace_for_mem_operation(&params.name)
+    }
+    .map_err(FullEngineError::from)?;
+    if beside && !leaves_roster_only(engine) {
+        drop(held);
+        held = engine
+            .lock_workspace_for_mem_operation(&params.name)
+            .map_err(FullEngineError::from)?;
+    }
+    let (_write_lock, _reloaded) = held;
 
     // ---- Step 1: resolve name ----
-    if !engine.mem_router().is_writable(&params.name) {
+    // A read-only mount of a branch or a folder is removed by the
+    // router-only form too: the roster row goes and nothing is written
+    // to the storage it named, which this workspace only ever read. (An
+    // installed archive is `memstead uninstall`'s to remove.)
+    let read_only_mount = !params.delete_files && {
+        let is_removable = |m: &crate::workspace::Mount| {
+            m.capability == crate::workspace::MountCapability::ReadOnly
+                && matches!(
+                    m.storage,
+                    crate::workspace::MountStorage::GitBranch { .. }
+                        | crate::workspace::MountStorage::Folder { .. }
+                )
+        };
+        engine.mount(&params.name).is_some_and(is_removable)
+            || engine
+                .quarantine_reason(&params.name)
+                .is_some_and(|q| is_removable(&q.mount))
+    };
+    if !read_only_mount && !engine.mem_router().is_writable(&params.name) {
         // A config on `__MEMSTEAD` with no content branch and no mount
         // is what a create that failed inside its seed commit used to
         // leave behind (before the rollback existed). Nothing outside
@@ -606,6 +644,42 @@ pub fn delete_mem(
         }
     }
 
+    // ---- Step 4 for a read-only mount: the roster row, nothing else ----
+    if read_only_mount {
+        let mount_record = engine.mount(&params.name).cloned();
+        engine.unregister_read_mount(&params.name)?;
+        if let Err(e) = engine.persist_state() {
+            if let Some(mount) = mount_record {
+                let factory = engine.backend_factory();
+                if let Ok(restored) = factory(&mount) {
+                    let _ = engine.register_read_mount(
+                        mount,
+                        restored,
+                        crate::mem::MemOrigin::ExplicitToml,
+                    );
+                }
+            }
+            return Err(e.into());
+        }
+        let mut warnings: Vec<crate::ops::WarningHint> = Vec::new();
+        if engine.settings().mutations.require_notes.unwrap_or(false)
+            && params.note.as_deref().is_none_or(|n| n.trim().is_empty())
+        {
+            warnings.push(crate::ops::WarningHint::NoteMissing {
+                tool: "memstead_mem_delete".to_string(),
+            });
+        }
+        return Ok(MemDeleteResponse {
+            name: params.name,
+            deleted_from_router: true,
+            files_deleted: false,
+            warnings,
+            allowlist_entries_removed: Vec::new(),
+            detached_referrers,
+            pruned_orphan_config: None,
+        });
+    }
+
     // ---- Step 4: router unregister ----
     // Returns the backend handle so step 5 can drive backend-side
     // cleanup without re-resolving the mount through the router
@@ -621,7 +695,7 @@ pub fn delete_mem(
     // In the other order a failure left storage gone under a roster
     // entry that still named it.
     if let Err(e) = engine.persist_state() {
-        if let Some(mount) = mount_record {
+        if let Some(mount) = mount_record.clone() {
             let factory = engine.backend_factory();
             if let Ok(restored) = factory(&mount) {
                 let _ = engine.register_writable_mem(
@@ -648,7 +722,23 @@ pub fn delete_mem(
     // re-init flow (operator must pass `--reattach` explicitly).
     // The warning surfaces the missed write so the operator can
     // intervene if needed.
-    if !params.delete_files {
+    //
+    // A mem mounted from a git directory that is not this workspace's
+    // own mem-repo is not retired by this workspace ceasing to mount
+    // it: its registry entry belongs to the workspace that holds it,
+    // which still serves it, and gets no tombstone.
+    let foreign_storage = mount_record.as_ref().is_some_and(|m| match &m.storage {
+        crate::workspace::MountStorage::GitBranch { gitdir, .. } => {
+            let own = engine
+                .workspace_root()
+                .map(|root| root.join("mem-repo").join(".git"));
+            let canonical =
+                |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+            own.is_none_or(|own| canonical(&own) != canonical(gitdir))
+        }
+        _ => false,
+    });
+    if !params.delete_files && !foreign_storage {
         match backend.read_mem_config() {
             Ok(Some(bytes)) => {
                 match serde_json::from_slice::<memstead_schema::config::MemConfig>(&bytes) {

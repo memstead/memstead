@@ -942,8 +942,10 @@ const WRITE_HELPERS: &[&str] = &[
     "lock_whole_workspace_except",
     "lock_workspace_for_mem_operation",
     "lock_workspace_for_mems_operation",
+    "lock_workspace_beside_read_mount",
     "lock_on_a_settled_roster",
     "lock_workspace_for_write_if",
+    "lock_workspace_for_entity_write",
     "commit_staged",
     "commit_staged_pinned",
     "append_record",
@@ -1116,7 +1118,7 @@ const VERBS: &[(&str, &[Verb])] = &[
         &[Verb::Update, Verb::BatchUpdate],
     ),
     (
-        "engine/write_lock.rs::lock_workspace_for_write_if",
+        "engine/write_lock.rs::lock_workspace_for_entity_write",
         &[Verb::Delete, Verb::DeleteStub, Verb::Retype, Verb::Rename],
     ),
     // Every verb can end up here: the ones above always, the others
@@ -1291,6 +1293,16 @@ const NOT_VERBS: &[(&str, &str)] = &[
         "the lock of an operation on one mem as a whole",
     ),
     (
+        "engine/write_lock.rs::lock_workspace_for_write_if",
+        "the lock of an operation that reads every mem and is no entity verb (a merge \
+         resolution, a proposal merge, a mem sweep, a fork, a mem rename)",
+    ),
+    (
+        "engine/write_lock.rs::lock_workspace_beside_read_mount",
+        "the lock under which a read-only mount leaves the roster: every other mem's, \
+         not its own",
+    ),
+    (
         "engine/lifecycle/schema.rs::install_schema",
         "writes a schema, not a mem's entities",
     ),
@@ -1305,6 +1317,10 @@ const NOT_VERBS: &[(&str, &str)] = &[
     (
         "mem_management/lifecycle.rs::create_mem",
         "the creation of a mem",
+    ),
+    (
+        "mem_management/mount.rs::mount_mem",
+        "the mount of a mem that exists as a branch: a registry entry and a roster row, no entity",
     ),
     (
         "mem_management/lifecycle.rs::delete_mem",

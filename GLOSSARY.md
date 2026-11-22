@@ -179,7 +179,7 @@ The workspace store is logical, not physical. Its content is fixed; the form on 
   └── ...
   ```
 
-  Two halves of the store live in separate files: `workspace.toml` carries operator-curated config (mem management rules, cross-mem permissions, mutation policy, plugin hooks); `state/mounts.json` carries engine-managed mount records. The split mirrors two different update frequencies and two different authors — operator edits rules rarely (via `memstead workspace allow-create / grant-cross-link / set-mutations / show`; hand-editing is the fallback for batch edits and `[plugin.*]` sections the CLI does not own); engine writes mount records on every `mount add` / `mount remove`. Keeping them separate avoids merge-conflicts between operator intent and agent state mutations.
+  Two halves of the store live in separate files: `workspace.toml` carries operator-curated config (mem management rules, cross-mem permissions, mutation policy, plugin hooks); `state/mounts.json` carries engine-managed mount records. The split mirrors two different update frequencies and two different authors — operator edits rules rarely (via `memstead workspace allow-create / grant-cross-link / set-mutations / show`; hand-editing is the fallback for batch edits and `[plugin.*]` sections the CLI does not own); engine writes mount records whenever a mem is mounted or unmounted (`memstead mem init`, `mem mount`, `mem unregister`, `install` and their kin). Keeping them separate avoids merge-conflicts between operator intent and agent state mutations.
 
   Pipeline configs sit alongside as the `projections/` directory under `.memstead/`.
 

@@ -522,6 +522,19 @@ impl Engine {
     /// Re-scan the schema sources additively into `report`
     /// (`schemas_added`, `schema_removals_skipped`, per-source failures).
     pub(crate) fn refresh_schema_sources(&mut self, report: &mut crate::ops::FullRefreshReport) {
+        self.refresh_schema_sources_for(report, &[]);
+    }
+
+    /// [`Self::refresh_schema_sources`], reading also the registries of
+    /// the git directories `arriving` names: the rows a roster gained
+    /// that are not mounted yet. A mem that arrives from another
+    /// mem-repo pins what that mem-repo has installed, and its cold
+    /// mount resolves against the catalogue as it stands.
+    pub(crate) fn refresh_schema_sources_for(
+        &mut self,
+        report: &mut crate::ops::FullRefreshReport,
+        arriving: &[crate::workspace::Mount],
+    ) {
         let Some(root) = self.workspace_root.clone() else {
             return;
         };
@@ -540,8 +553,17 @@ impl Engine {
         }
         if let Some(ops) = self.git_branch_ops() {
             // Every registry the workspace reads from: the mounts' git
-            // directories as well as its own mem-repo.
-            for gitdir in self.schema_registry_gitdirs() {
+            // directories, those of the rows about to be mounted, and
+            // its own mem-repo.
+            let gitdirs = crate::workspace::schema_registry_gitdirs(
+                self.mounts
+                    .iter()
+                    .map(|m| &m.mount)
+                    .chain(self.quarantined.iter().map(|q| &q.mount))
+                    .chain(arriving.iter()),
+                self.workspace_root(),
+            );
+            for gitdir in gitdirs {
                 match (ops.read_ref_schemas)(&gitdir) {
                     Ok(mut s) => fresh.append(&mut s),
                     Err(e) => {

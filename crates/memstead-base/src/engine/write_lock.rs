@@ -203,6 +203,31 @@ impl Engine {
         Ok((guard, warnings))
     }
 
+    /// [`Self::lock_workspace_for_write_if`] for a verb that names the
+    /// entity it writes (a delete, a rename, a retype). When the id
+    /// names a mem that is mounted read-only the write is refused here,
+    /// before any lock is taken, so the refusal lays nothing where that
+    /// mem lives. A bare slug names no mem and is resolved under the
+    /// locks as before.
+    pub(in crate::engine) fn lock_workspace_for_entity_write(
+        &mut self,
+        writes: bool,
+        id: &crate::EntityId,
+    ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
+        let mut warnings = self.roster_before_locking();
+        if writes {
+            let mem = id.mem();
+            if self.mounts.iter().any(|m| {
+                m.mount.mem == mem && m.mount.capability != crate::workspace::MountCapability::Write
+            }) {
+                return Err(EngineError::ReadOnlyMount(mem.to_string()));
+            }
+        }
+        let (guard, reloaded) = self.lock_whole_workspace(writes)?;
+        warnings.extend(reloaded);
+        Ok((guard, warnings))
+    }
+
     /// [`Self::lock_workspace_for_write_if`] for an operation on the
     /// mem `subject` as a whole (its deletion): `subject` itself may be
     /// unreadable or out of service, which is often why it is being
@@ -224,22 +249,63 @@ impl Engine {
         subjects: &[&str],
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
         let mut warnings = self.roster_before_locking();
-        let (guard, reloaded) = self.lock_whole_workspace_except(true, subjects)?;
+        let (guard, reloaded) = self.lock_whole_workspace_except(true, subjects, None)?;
         warnings.extend(reloaded);
         Ok((guard, warnings))
+    }
+
+    /// [`Self::lock_workspace_for_mem_operation`] for taking a
+    /// read-only mount of `subject` off the roster: every other mem's
+    /// lock is held and every mem is read under it, and the subject's
+    /// own lock is not taken. Nothing is written to the subject's
+    /// storage, which this workspace only ever read and may not be able
+    /// to write to, so no lock file is laid where it lives.
+    pub fn lock_workspace_beside_read_mount(
+        &mut self,
+        subject: &str,
+    ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
+        let mut warnings = self.roster_before_locking();
+        let (guard, reloaded) =
+            self.lock_whole_workspace_except(true, &[subject], Some(subject))?;
+        warnings.extend(reloaded);
+        Ok((guard, warnings))
+    }
+
+    /// Whether `mem` is a read-only mount of a branch or a folder: the
+    /// mounts `memstead mem unregister` takes off the roster without
+    /// touching their storage.
+    pub fn is_removable_read_mount(&self, mem: &str) -> bool {
+        self.mounts.iter().any(|m| {
+            m.mount.mem == mem
+                && m.mount.capability == crate::workspace::MountCapability::ReadOnly
+                && matches!(
+                    m.mount.storage,
+                    crate::workspace::MountStorage::GitBranch { .. }
+                        | crate::workspace::MountStorage::Folder { .. }
+                )
+        })
+    }
+
+    /// The roster as it stands, reconciled ahead of a decision that is
+    /// taken before any lock (which lock form a verb needs).
+    pub fn settle_roster_before_locking(&mut self) -> Vec<crate::ops::WarningHint> {
+        self.roster_before_locking()
     }
 
     fn lock_whole_workspace(
         &mut self,
         writes: bool,
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
-        self.lock_whole_workspace_except(writes, &[])
+        self.lock_whole_workspace_except(writes, &[], None)
     }
 
+    /// `tolerated` are mems that may be unreadable without refusing the
+    /// operation; `unlocked` is one whose own lock is not taken.
     fn lock_whole_workspace_except(
         &mut self,
         writes: bool,
         tolerated: &[&str],
+        unlocked: Option<&str>,
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
         // Every mount that has a write lock, the ones this engine mounts
         // read-only included: another process may mount the same
@@ -253,6 +319,7 @@ impl Engine {
                     m.mount.capability == crate::workspace::MountCapability::Write
                         || m.backend.write_lock_path().is_some()
                 })
+                .filter(|m| Some(m.mount.mem.as_str()) != unlocked)
                 .map(|m| m.mount.mem.clone())
                 .collect()
         })?;
@@ -359,6 +426,19 @@ impl Engine {
     ) -> Result<(MemWriteGuard, Vec<crate::ops::WarningHint>), EngineError> {
         let nested = COVERED.with(|c| !c.borrow().is_empty());
         let mut warnings = self.roster_before_locking();
+        // A write into a mem mounted read-only is refused before any
+        // lock is taken: the refusal lays nothing where the mem lives,
+        // its lock file included.
+        if writes {
+            for mem in written {
+                if self.mounts.iter().any(|m| {
+                    m.mount.mem == mem.as_ref()
+                        && m.mount.capability != crate::workspace::MountCapability::Write
+                }) {
+                    return Err(EngineError::ReadOnlyMount(mem.as_ref().to_string()));
+                }
+            }
+        }
         if !nested && reads_workspace(self) {
             let (guard, reloaded) = self.lock_whole_workspace(writes)?;
             warnings.extend(reloaded);

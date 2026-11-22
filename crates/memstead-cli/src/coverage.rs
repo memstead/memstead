@@ -293,6 +293,7 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         no_verdict("mem init", MUTATION),
         no_verdict("mem fork", MUTATION),
         no_verdict("proposal merge", MUTATION),
+        no_verdict("mem mount", MUTATION),
         no_verdict("mem unregister", MUTATION),
         no_verdict("mem delete", MUTATION),
         no_verdict("mem rename", MUTATION),

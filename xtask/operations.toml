@@ -78,6 +78,11 @@ name = "push"
 cli = "push"
 
 [[operation]]
+name = "mem-mount"
+cli = "mem mount"
+rationale = "mounting a branch that already exists (of this mem-repo, of another git directory, or fetched from a remote) is workspace administration: it decides what a workspace serves and with which capability, which an agent working inside that workspace does not decide for itself, so the MCP slot stays blank on purpose"
+
+[[operation]]
 name = "mem-fork"
 cli = "mem fork"
 rationale = "a fork is a lineage act on the mem-repo (a branch at a recorded ancestor, a config carrying its origin, a fetch from a declared remote): transport and lineage stay on the script and human side beside fetch, pull and push, so the MCP slot stays blank on purpose"

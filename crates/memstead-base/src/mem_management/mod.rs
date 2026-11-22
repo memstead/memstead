@@ -25,8 +25,10 @@
 
 pub mod fork;
 pub mod lifecycle;
+pub mod mount;
 pub use fork::*;
 pub use lifecycle::*;
+pub use mount::*;
 
 use std::path::Path;
 

@@ -29,6 +29,16 @@ impl Engine {
         target: &memstead_schema::SchemaRef,
     ) -> Result<crate::engine::SetSchemaOutcome, EngineError> {
         use crate::engine::{SetSchemaOutcome, SetSchemaResult};
+        // A mem mounted read-only refuses before any lock is taken, as
+        // an entity write into it does: the refusal lays nothing where
+        // the mem lives. (A quarantined mem is not mounted and goes on
+        // to its repair path below.)
+        let _ = self.settle_roster_before_locking();
+        if self.mounts.iter().any(|m| {
+            m.mount.mem == mem && m.mount.capability != crate::workspace::MountCapability::Write
+        }) {
+            return Err(EngineError::ReadOnlyMount(mem.to_string()));
+        }
         // A pin switch waits for a write in progress in any mem; the
         // subject may be unreadable (a repin is how it is repaired).
         let (_write_lock, _) = self.lock_workspace_for_mem_operation(mem)?;

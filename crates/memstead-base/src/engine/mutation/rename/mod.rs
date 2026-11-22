@@ -166,7 +166,7 @@ impl Engine {
         // deferred ones before it looks for a referrer; a referrer in a
         // mem that was never loaded is rewritten like any other, and no
         // peer's rewrite is computed from a view older than its lock.
-        let (_write_lock, reloaded) = self.lock_workspace_for_write_if(true)?;
+        let (_write_lock, reloaded) = self.lock_workspace_for_entity_write(true, &args.id)?;
         // A bare slug is resolved under the lock, against the reloaded
         // view: which mem carries a slug is a fact about every mem.
         let (resolved, short_hint) = self.resolve_entity_id(&args.id)?;

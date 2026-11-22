@@ -63,6 +63,16 @@ pub enum MemAction {
     /// The name obeys the create rules like `mem init`; every refusal
     /// lands nothing.
     Fork(ForkArgs),
+    /// Mount a mem that already exists as a branch, with a chosen
+    /// capability: a branch of this workspace's own mem-repo
+    /// (`--branch`), of another mem-repo's git directory (`--branch`
+    /// with `--gitdir`), or of a configured remote, fetched first
+    /// (`--remote`). Lays no storage and no seed commit: the mount
+    /// serves the branch as it is, with its history. Writes nothing
+    /// into a git directory other than this workspace's own mem-repo.
+    /// A running engine in the workspace serves the mem from its next
+    /// operation on. Remove the mount with `memstead mem unregister`.
+    Mount(MountArgs),
     /// Router-only removal — unregisters the mem from the workspace
     /// but leaves its stored content in place for archive workflows.
     /// Cross-mem grants pointing at the unregistered mem stay valid
@@ -439,6 +449,95 @@ impl From<StorageArg> for mem_management::StorageKind {
             StorageArg::GitBranch => mem_management::StorageKind::GitBranch,
         }
     }
+}
+
+/// The access a mount gives.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CapabilityArg {
+    /// Entities read; every write refuses `READ_ONLY_MOUNT`.
+    ReadOnly,
+    /// Entities read and written.
+    Write,
+}
+
+/// `memstead mem mount <name>` arguments. Exactly one of `--branch`
+/// and `--remote` names where the branch comes from.
+///
+/// The mem's schema pin and configuration are read from the registry
+/// of the git directory that holds the branch. Where that registry has
+/// no entry for the mem, `--schema` names the pin: for a branch of
+/// this workspace's own mem-repo the entry is then written there (from
+/// the fetched copy of the remote's registry when that lists the mem);
+/// for a branch of another git directory nothing is written there and
+/// the pin is kept on the mount.
+///
+/// Refuses `MEM_NAME_COLLISION` for a name already mounted,
+/// `UNKNOWN_REF` for a branch that does not exist, `UNKNOWN_REMOTE`
+/// for a remote that is not configured, `INVALID_INPUT` when no
+/// registry entry and no `--schema` name the pin or when the git
+/// directory is no mem-repo, and `MEM_PATH_NOT_ALLOWED`
+/// when the workspace's `[[mem_management.create]]` rules do not admit
+/// the name. A refusal leaves the mount roster as it was.
+#[derive(Args, Debug)]
+#[command(group(
+    clap::ArgGroup::new("mount_source")
+        .required(true)
+        .args(["branch", "remote"])
+))]
+pub struct MountArgs {
+    /// Name the mem is mounted under.
+    pub name: String,
+
+    /// A branch that exists already: a short name (`notes`) or a full
+    /// ref (`refs/heads/notes`), in this workspace's own mem-repo or
+    /// in the git directory `--gitdir` names.
+    #[arg(long)]
+    pub branch: Option<String>,
+
+    /// The git directory of the mem-repo that holds the branch, when
+    /// it is not this workspace's own: another workspace's
+    /// `<workspace>/mem-repo/.git`. A relative path is taken from the
+    /// current directory. The mount itself, of either capability, lays
+    /// nothing there, and through a read-only mount no ref and no
+    /// object is ever written there; an operation that takes the mem's
+    /// lock lays its lock file under `memstead-locks/`.
+    #[arg(long, requires = "branch")]
+    pub gitdir: Option<PathBuf>,
+
+    /// A configured remote of this workspace's own mem-repo: the mem's
+    /// branch is fetched from it and mounted from the local branch
+    /// created at its tip, so a later `memstead pull` fast-forwards.
+    #[arg(long, conflicts_with = "gitdir")]
+    pub remote: Option<String>,
+
+    /// The access the mount gives.
+    #[arg(long, value_enum, default_value = "read-only")]
+    pub capability: CapabilityArg,
+
+    /// Schema pin (`name@x.y.z`) for a mem no registry has an entry
+    /// for. Refused when it contradicts the entry that exists: a mount
+    /// never re-pins.
+    #[arg(long)]
+    pub schema: Option<String>,
+
+    /// Optional provenance note (≤280 chars), carried by the registry
+    /// entry's commit when the mount writes one. Under `require_notes`
+    /// a missing note warns `NOTE_MISSING`.
+    #[arg(long)]
+    pub note: Option<String>,
+
+    /// Bypass the workspace `[[mem_management.create]]` allowlist for
+    /// this invocation. Also settable via `MEMSTEAD_OPERATOR_MODE=1`.
+    #[arg(long = "operator-mode")]
+    pub operator_mode: bool,
+
+    /// Make the current directory a workspace when it is none yet: a
+    /// workspace of engine state only, whose mems live in other git
+    /// directories and which has no `mem-repo/` of its own. Lays the
+    /// workspace's marker and nothing else, and takes it away again
+    /// when the mount is refused.
+    #[arg(long = "new-workspace")]
+    pub new_workspace: bool,
 }
 
 /// `memstead mem delete <name>` arguments — full destruction. The
@@ -825,6 +924,128 @@ pub fn run_delete(ctx: &CliContext, args: DeleteArgs) -> anyhow::Result<()> {
     )
 }
 
+pub fn run_mount(ctx: &CliContext, args: MountArgs) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| generic_error(format!("determine current directory: {e}")))?;
+    let mut laid: Option<(PathBuf, Option<PathBuf>)> = None;
+    if find_workspace_root(&cwd).is_none() {
+        if !args.new_workspace {
+            return Err(crate::setup::workspace_not_initialised_error(&format!(
+                "no workspace found above {}. `memstead mem mount` runs inside a workspace; \
+                 pass `--new-workspace` to make this directory one that holds engine state \
+                 only (its mems live in other git directories)",
+                cwd.display(),
+            ))
+            .into());
+        }
+        // What this call lays for the new workspace goes again when the
+        // mount is refused: a refused command leaves no workspace behind.
+        let state_dir = cwd.join(".memstead");
+        let state_dir_stood = state_dir.exists();
+        let marker = memstead_git_branch::lay_workspace_marker(&cwd)
+            .map_err(|e| generic_error(format!("mem mount: {e}")))?;
+        laid = Some((marker, (!state_dir_stood).then_some(state_dir)));
+    }
+    let outcome = mount_in_workspace(ctx, args, &cwd);
+    if outcome.is_err()
+        && let Some((marker, state_dir)) = laid
+    {
+        match state_dir {
+            Some(dir) => {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+            None => {
+                let _ = std::fs::remove_file(marker);
+            }
+        }
+    }
+    outcome
+}
+
+fn mount_in_workspace(
+    ctx: &CliContext,
+    args: MountArgs,
+    cwd: &std::path::Path,
+) -> anyhow::Result<()> {
+    let schema = args
+        .schema
+        .as_deref()
+        .map(memstead_base::EngineError::parse_schema_pin)
+        .transpose()
+        .map_err(|e| anyhow::Error::from(CliError::from_engine_op(e)))?;
+    let source = match (args.branch, args.remote) {
+        (Some(branch), None) => mem_management::MountSource::Branch {
+            branch,
+            // Relative to where the operator stands, not to the root.
+            gitdir: args
+                .gitdir
+                .map(|p| if p.is_absolute() { p } else { cwd.join(p) }),
+        },
+        (None, Some(remote)) => mem_management::MountSource::Remote { remote },
+        _ => {
+            return Err(invalid_input_error(
+                "pass exactly one of `--branch` and `--remote`".to_string(),
+            ));
+        }
+    };
+    let params = mem_management::MemMountParams {
+        name: args.name,
+        source,
+        capability: match args.capability {
+            CapabilityArg::ReadOnly => memstead_base::MountCapability::ReadOnly,
+            CapabilityArg::Write => memstead_base::MountCapability::Write,
+        },
+        schema,
+        note: args.note,
+        operator_mode: resolve_operator_mode(args.operator_mode),
+        actor: memstead_base::vcs::Actor::Cli,
+        client: Some(crate::setup::cli_client_id()),
+    };
+    // Either workspace shape: a workspace of engine state only mounts
+    // mems of other git directories.
+    let mut engine = ctx.cli_engine()?.into_base();
+    let response =
+        mem_management::mount_mem(&mut engine, params).map_err(full_engine_err_to_cli)?;
+    if ctx.json {
+        crate::output::print_json(&serde_json::json!({
+            "name": response.name,
+            "gitdir": response.gitdir,
+            "branch": response.branch,
+            "capability": response.capability,
+            "schema_ref": response.schema_ref,
+            "head": response.head,
+            "fetched": response.fetched,
+            "config_written": response.config_written,
+            "warnings": response
+                .warnings
+                .iter()
+                .map(|w| serde_json::json!({"code": w.code(), "message": w.message()}))
+                .collect::<Vec<_>>(),
+        }))?;
+    } else {
+        let mut out = format!(
+            "# Mounted `{}` ({})\n\n- Branch: `{}` at `{}`\n- Git directory: `{}`\n- Schema: `{}`",
+            response.name,
+            response.capability,
+            response.branch,
+            response.head,
+            response.gitdir,
+            response.schema_ref,
+        );
+        if response.fetched {
+            out.push_str("\n- Fetched from the remote; `memstead pull` brings it up to date");
+        }
+        if response.config_written {
+            out.push_str("\n- Registry entry written into this workspace's mem-repo");
+        }
+        for w in &response.warnings {
+            out.push_str(&format!("\n\n> [!warning] {}: {}", w.code(), w.message()));
+        }
+        crate::output::print_markdown(&out);
+    }
+    Ok(())
+}
+
 pub fn run_unregister(ctx: &CliContext, args: UnregisterArgs) -> anyhow::Result<()> {
     run_delete_inner(
         ctx,
@@ -882,8 +1103,18 @@ fn run_delete_inner(
         operator_mode,
         detach_incoming,
     };
+    // A branch mount is unregistered in either workspace shape: a
+    // workspace of engine state only has nothing but such mounts.
+    let is_branch_mount = |e: &memstead_base::Engine| {
+        let branch = |m: &memstead_base::Mount| {
+            matches!(m.storage, memstead_base::MountStorage::GitBranch { .. })
+        };
+        e.mount(&name).is_some_and(branch)
+            || e.quarantine_reason(&name).is_some_and(|q| branch(&q.mount))
+    };
     let mut engine = match ctx.cli_engine()? {
         CliEngine::MemRepo(e) => e,
+        CliEngine::Filesystem(e) if !delete_files && is_branch_mount(&e) => e,
         CliEngine::Filesystem(_) => {
             return Err(crate::setup::unsupported_shape_error(
                 &workspace_root,
@@ -1682,8 +1913,12 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
         role: Default::default(),
         identity: None,
     };
-    let engine = crate::setup::full_engine(&setup_ctx)
-        .map_err(|e| generic_error(format!("mem list: could not initialize engine: {e}")))?;
+    // A read: every workspace shape lists its mems, one that holds
+    // engine state only included.
+    let engine = setup_ctx
+        .cli_engine()
+        .map_err(|e| generic_error(format!("mem list: could not initialize engine: {e}")))?
+        .into_base();
 
     let mut rows: Vec<serde_json::Value> = Vec::new();
     for name in engine.mem_names() {
