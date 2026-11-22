@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-05T08:17:31Z
-last_modified: 2026-09-05T08:17:31Z
+last_modified: 2026-11-22T16:32:36Z
 status: accepted
 decided_on: 2026-09-04
 deciders: operator, engine team
@@ -28,6 +28,7 @@ The 2026-09-04 census counted the lean flavour among the apparatus with no shipp
 ## Relationships
 - **SUPERSEDES**: [[split-engine-into-lean-and-full-flavours]]
 - **MOTIVATED_BY**: [[engine:storage-backend]]
+- **REFERENCES**: [[the-engine-crates-state-one-supported-library-surface]]
 
 ## Options
 
@@ -35,3 +36,7 @@ The 2026-09-04 census counted the lean flavour among the apparatus with no shipp
 - Keep memstead-engine as a crate but drop the feature: rejected, a crate whose only reason was a flavour split outlives its reason; the layering rule that matters (no gix in the kernel) is about memstead-git-branch.
 - Keep the folder-only server as the default for quickstart workspaces: rejected, two servers is the flavour split under another name; the full engine already mounts folder workspaces.
 - Remove the feature but leave the cfg sites as no-ops: rejected, 212 dead attributes are the residue class the census counted.
+
+## Notes
+
+2026-11-22 amendment: the consequences name memstead-base as the crate a consumer depends on. That says where the code lives and is no promise about it. Since 0.27.0 the one supported surface for a program that links the engine is the module `memstead_mcp::library` ([[the-engine-crates-state-one-supported-library-surface]]); memstead-base and every other item of the crates are internal and may change in any release.
