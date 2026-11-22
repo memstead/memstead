@@ -12,7 +12,7 @@ Use it for software specs, ADRs, decision logs, ontologies, research notes, or a
 
 Memstead sits next to the agent-memory tools but works differently. Agent memory is what an agent gathers from its own sessions, automatically. A mem gathers nothing by itself: every entity in it is a deliberate write, by your agent or by you, and a write the schema refuses never lands. The tool-by-tool comparison is in [PRIOR_ART.md](PRIOR_ART.md#the-2026-agent-memory-category).
 
-> **Status: pre-1.0.** APIs, schemas, file formats, CLI flags, and the wire shape of MCP tools and HTTP endpoints may change without notice. Not yet stable. Back up your data before exercising mutation operations. See [LICENSING.md](LICENSING.md) for per-folder licenses and [SECURITY.md](SECURITY.md) for vulnerability disclosure.
+> **Status: pre-1.0.** APIs, schemas, file formats, CLI flags, and the wire shape of MCP tools and HTTP endpoints may change without notice. The one stated exception is the library surface of the crates, the module `memstead_mcp::library`, which changes only in a minor release (see the Quickstart). Not yet stable. Back up your data before exercising mutation operations. See [LICENSING.md](LICENSING.md) for per-folder licenses and [SECURITY.md](SECURITY.md) for vulnerability disclosure.
 
 ## Quickstart
 
