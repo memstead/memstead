@@ -301,7 +301,8 @@ pub enum EngineError {
     #[error(
         "mem '{mem}' is quarantined — it failed to attach at boot and serves nothing until \
          repaired: [{reason_code}] {reason_message}. After repairing, run memstead_reload \
-         (or `memstead reload`) to bring it back into service."
+         (or `memstead reload`) to bring it back into service; to take it off the roster \
+         instead, run `memstead mem unregister {mem}`."
     )]
     MemQuarantined {
         mem: String,
@@ -3047,7 +3048,7 @@ fn stale_view_message(mem: &str, cause: StaleCause, detail: &str) -> String {
             "mem `{mem}` changed in storage and could not be reloaded before this write ({detail}) — nothing was written; the next operation retries the reload, resend the write then"
         ),
         StaleCause::OutOfService => format!(
-            "mem `{mem}` is out of service ({detail}) — it is in no view, so a write that reads it cannot be planned; nothing was written; repair the mem and reload it, or remove it, then resend the write"
+            "mem `{mem}` is out of service ({detail}) — it is in no view, so a write that reads it cannot be planned; nothing was written; repair the mem and reload it, or take it off the roster with `memstead mem unregister {mem}`, then resend the write"
         ),
         StaleCause::LockUnavailable => format!(
             "mem `{mem}`'s write lock cannot be taken here ({detail}) — its content cannot be held still for a write that reads it; nothing was written; make the lock file reachable or unmount the mem, then resend the write"

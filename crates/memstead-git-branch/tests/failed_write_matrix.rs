@@ -1327,6 +1327,10 @@ const NOT_VERBS: &[(&str, &str)] = &[
         "the deletion of a mem",
     ),
     (
+        "mem_management/lifecycle.rs::stamp_unregistered",
+        "the unregister's marker in the mem's config, written after the roster row is gone; a failure is a warning",
+    ),
+    (
         "mem_management/lifecycle.rs::rename_mem",
         "the renaming of a mem",
     ),

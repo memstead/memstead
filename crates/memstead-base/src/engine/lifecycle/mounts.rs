@@ -119,23 +119,12 @@ impl Engine {
             // this machine's cache lacks, say) is unregistered too: it
             // has no backend to hand back, but leaving its roster entry
             // would let the next state write resurrect it.
-            // A mount quarantined at boot is absent from the merge
-            // baseline (so a state write never drops it by accident);
-            // removing it on purpose enters it there, so the merge
-            // reads the removal as ours.
-            if let Some(q) = self.quarantined.iter().find(|q| {
+            if self.quarantined.iter().any(|q| {
                 q.mount.mem == mem_name
                     && q.mount.capability == crate::workspace::MountCapability::ReadOnly
             }) {
-                let mut baseline = self.mounts_baseline.borrow_mut();
-                if !baseline.iter().any(|m| m.mem == mem_name) {
-                    baseline.push(q.mount.clone());
-                }
+                self.unregister_quarantined_mount(mem_name);
             }
-            self.quarantined.retain(|q| {
-                !(q.mount.mem == mem_name
-                    && q.mount.capability == crate::workspace::MountCapability::ReadOnly)
-            });
             return Ok(None);
         };
         let mount = self.mounts.remove(idx);
@@ -151,6 +140,46 @@ impl Engine {
         self.invalidate_communities();
         self.invalidate_search_indexes();
         Ok(Some(mount.backend))
+    }
+
+    /// Take a quarantined mount off this engine's roster, whatever its
+    /// capability: the mem is in no view, so there is no backend, no
+    /// entity and no router entry to remove, only the retained mount
+    /// record. Returns that record, or `None` when no quarantined mount
+    /// carries the name. Nothing is written until the caller asks for a
+    /// state write.
+    ///
+    /// A mount quarantined at boot is absent from the merge baseline
+    /// (so a state write never drops it by accident); removing it on
+    /// purpose enters it there, so the merge reads the removal as ours.
+    pub fn unregister_quarantined_mount(
+        &mut self,
+        mem_name: &str,
+    ) -> Option<crate::engine::QuarantinedMem> {
+        let idx = self
+            .quarantined
+            .iter()
+            .position(|q| q.mount.mem == mem_name)?;
+        let out = self.quarantined.remove(idx);
+        let mut baseline = self.mounts_baseline.borrow_mut();
+        if !baseline.iter().any(|m| m.mem == mem_name) {
+            baseline.push(out.mount.clone());
+        }
+        Some(out)
+    }
+
+    /// Put back a quarantined mount [`Self::unregister_quarantined_mount`]
+    /// took off, when the state write that should have recorded the
+    /// removal failed: the roster file still names the mem, and so does
+    /// this engine again.
+    pub fn restore_quarantined_mount(&mut self, out: crate::engine::QuarantinedMem) {
+        if !self
+            .quarantined
+            .iter()
+            .any(|q| q.mount.mem == out.mount.mem)
+        {
+            self.quarantined.push(out);
+        }
     }
 
     /// Append a typed load-time warning from outside the engine's own

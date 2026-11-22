@@ -247,9 +247,12 @@ pub struct MemDeleteResponse {
     /// [`MemDeleteParams::detach_incoming`] — one entry per source
     /// entity, `rel_types` aggregating every detached edge type. The
     /// referrers' files are untouched; their edges resolve to stubs
-    /// until a same-name re-creation re-adopts them. Always empty
-    /// when `detach_incoming` was `false` (the refusal fires
-    /// instead).
+    /// until a same-name re-creation re-adopts them. For a mount in
+    /// service the list is empty when `detach_incoming` was `false`
+    /// (the refusal fires instead). The unregister of a quarantined
+    /// mount fills it without the flag: what points into a mem that is
+    /// out of service points at nothing already, so those entities are
+    /// reported and never a reason to refuse.
     pub detached_referrers: Vec<crate::ReferrerInfo>,
     /// The `__MEMSTEAD:mems/<name>/config.json` blob an operator-mode
     /// delete pruned for a name that was NOT registered and had no
@@ -387,18 +390,51 @@ pub fn delete_mem(
     // and no lock file is laid where it lives. The question is asked on
     // the reconciled roster and again under the locks; a mount that
     // became writable in between gets the full lock.
+    // A quarantined mount that only leaves the roster is the other
+    // exception. It is in no view and has no lock to take, and every
+    // other mem that is out of service is tolerated beside it: what
+    // such a mem holds is unread either way, the removal judges nothing
+    // by it, and refusing would leave two quarantined mounts each
+    // barring the other's removal.
     let _ = engine.settle_roster_before_locking();
+    // Destroying the storage of a mount that is out of service needs
+    // content nobody can read. It is refused the way every operation is
+    // that names a quarantined mem (`MEM_QUARANTINED`, which names the
+    // unregister as the way to remove it), and before any lock: the
+    // answer does not depend on what else is out of service, and the
+    // refusal lays nothing anywhere.
+    if params.delete_files
+        && engine.mount(&params.name).is_none()
+        && engine.quarantine_reason(&params.name).is_some()
+    {
+        return Err(engine.unknown_mem_error(&params.name).into());
+    }
     let leaves_roster_only = |engine: &crate::Engine| {
         !params.delete_files && engine.is_removable_read_mount(&params.name)
     };
+    let out_of_service_beside = |engine: &crate::Engine| -> Option<Vec<String>> {
+        (!params.delete_files && removable_quarantined(engine, &params.name).is_some()).then(|| {
+            engine
+                .quarantined_mems()
+                .iter()
+                .map(|q| q.mount.mem.clone())
+                .collect()
+        })
+    };
     let beside = leaves_roster_only(engine);
+    let tolerated = out_of_service_beside(engine);
     let mut held = if beside {
         engine.lock_workspace_beside_read_mount(&params.name)
+    } else if let Some(names) = tolerated.as_ref() {
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        engine.lock_workspace_for_mems_operation(&names)
     } else {
         engine.lock_workspace_for_mem_operation(&params.name)
     }
     .map_err(FullEngineError::from)?;
-    if beside && !leaves_roster_only(engine) {
+    if (beside && !leaves_roster_only(engine))
+        || (tolerated.is_some() && removable_quarantined(engine, &params.name).is_none())
+    {
         drop(held);
         held = engine
             .lock_workspace_for_mem_operation(&params.name)
@@ -411,21 +447,22 @@ pub fn delete_mem(
     // router-only form too: the roster row goes and nothing is written
     // to the storage it named, which this workspace only ever read. (An
     // installed archive is `memstead uninstall`'s to remove.)
-    let read_only_mount = !params.delete_files && {
-        let is_removable = |m: &crate::workspace::Mount| {
-            m.capability == crate::workspace::MountCapability::ReadOnly
-                && matches!(
-                    m.storage,
-                    crate::workspace::MountStorage::GitBranch { .. }
-                        | crate::workspace::MountStorage::Folder { .. }
-                )
-        };
-        engine.mount(&params.name).is_some_and(is_removable)
-            || engine
-                .quarantine_reason(&params.name)
-                .is_some_and(|q| is_removable(&q.mount))
-    };
-    if !read_only_mount && !engine.mem_router().is_writable(&params.name) {
+    let read_only_mount = !params.delete_files && engine.is_removable_read_mount(&params.name);
+    // A mount the roster names and no view holds. Its row leaves the
+    // roster like any other. Destroying its storage was refused above;
+    // a mount that went out of service while this call waited for the
+    // locks gets the same answer here.
+    let out_of_service = removable_quarantined(engine, &params.name);
+    if params.delete_files
+        && engine.mount(&params.name).is_none()
+        && engine.quarantine_reason(&params.name).is_some()
+    {
+        return Err(engine.unknown_mem_error(&params.name).into());
+    }
+    if !read_only_mount
+        && out_of_service.is_none()
+        && !engine.mem_router().is_writable(&params.name)
+    {
         // A config on `__MEMSTEAD` with no content branch and no mount
         // is what a create that failed inside its seed commit used to
         // leave behind (before the rollback existed). Nothing outside
@@ -579,7 +616,11 @@ pub fn delete_mem(
     // is just as broken as a storage-destruction with stale edges —
     // either way, surviving entities point at a mem the engine no
     // longer routes to.
-    {
+    //
+    // A quarantined mem is not judged by it: what points into it points
+    // at stubs since it went out of service, and its removal reports
+    // those entities instead (Step 4 for a quarantined mount).
+    if out_of_service.is_none() {
         use std::collections::BTreeSet;
 
         // Source-id is grouped via a `Vec` of `(EntityId, BTreeSet<rel_type>)`
@@ -642,6 +683,61 @@ pub fn delete_mem(
                 .into());
             }
         }
+    }
+
+    // ---- Step 4 for a quarantined mount: the roster row ----
+    // Nothing of the mem's content is needed: no lock of the mem, no
+    // entity read. Entities of other mems that point into it point at
+    // nothing since it went out of service; they are reported, never a
+    // reason to refuse, because with the storage gone no caller could
+    // ever satisfy that refusal.
+    if out_of_service.is_some() {
+        detached_referrers = referrers_into(engine, &params.name);
+        let Some(taken) = engine.unregister_quarantined_mount(&params.name) else {
+            return Err(engine.unknown_mem(&params.name.clone()).into());
+        };
+        if let Err(e) = engine.persist_state() {
+            engine.restore_quarantined_mount(taken);
+            return Err(e.into());
+        }
+        // The marker rule of a mount in service: a write mount whose
+        // registry entry is this workspace's to keep gets it, when the
+        // storage is there to read and write. Storage that is missing
+        // gets nothing written, and a mount of another git directory
+        // gets no marker.
+        if taken.mount.capability == crate::workspace::MountCapability::Write
+            && !is_foreign_storage(engine, &taken.mount)
+            && storage_is_present(&taken.mount)
+        {
+            let factory = engine.backend_factory();
+            match factory(&taken.mount) {
+                Ok(backend) => stamp_unregistered(backend.as_ref(), &params.name, &delete_ctx),
+                Err(e) => tracing::warn!(
+                    mem = %params.name,
+                    error = %e,
+                    "delete_mem: unregister succeeded but the storage could not be \
+                     opened for the tombstone write; re-init will require an \
+                     explicit --reattach flag"
+                ),
+            }
+        }
+        let mut warnings: Vec<crate::ops::WarningHint> = Vec::new();
+        if engine.settings().mutations.require_notes.unwrap_or(false)
+            && params.note.as_deref().is_none_or(|n| n.trim().is_empty())
+        {
+            warnings.push(crate::ops::WarningHint::NoteMissing {
+                tool: "memstead_mem_delete".to_string(),
+            });
+        }
+        return Ok(MemDeleteResponse {
+            name: params.name,
+            deleted_from_router: true,
+            files_deleted: false,
+            warnings,
+            allowlist_entries_removed: Vec::new(),
+            detached_referrers,
+            pruned_orphan_config: None,
+        });
     }
 
     // ---- Step 4 for a read-only mount: the roster row, nothing else ----
@@ -727,63 +823,11 @@ pub fn delete_mem(
     // own mem-repo is not retired by this workspace ceasing to mount
     // it: its registry entry belongs to the workspace that holds it,
     // which still serves it, and gets no tombstone.
-    let foreign_storage = mount_record.as_ref().is_some_and(|m| match &m.storage {
-        crate::workspace::MountStorage::GitBranch { gitdir, .. } => {
-            let own = engine
-                .workspace_root()
-                .map(|root| root.join("mem-repo").join(".git"));
-            let canonical =
-                |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-            own.is_none_or(|own| canonical(&own) != canonical(gitdir))
-        }
-        _ => false,
-    });
+    let foreign_storage = mount_record
+        .as_ref()
+        .is_some_and(|m| is_foreign_storage(engine, m));
     if !params.delete_files && !foreign_storage {
-        match backend.read_mem_config() {
-            Ok(Some(bytes)) => {
-                match serde_json::from_slice::<memstead_schema::config::MemConfig>(&bytes) {
-                    Ok(mut cfg) => {
-                        cfg.unregistered_at = Some(now_iso_utc());
-                        match serde_json::to_vec_pretty(&cfg) {
-                            Ok(mut new_bytes) => {
-                                new_bytes.push(b'\n');
-                                if let Err(e) = backend.write_mem_config(&new_bytes, &delete_ctx) {
-                                    tracing::warn!(
-                                        mem = %params.name,
-                                        error = %e,
-                                        "delete_mem: unregister succeeded but tombstone \
-                                         write failed — re-init will require an explicit \
-                                         --reattach flag"
-                                    );
-                                }
-                            }
-                            Err(e) => tracing::warn!(
-                                mem = %params.name,
-                                error = %e,
-                                "delete_mem: tombstone serialize failed",
-                            ),
-                        }
-                    }
-                    Err(e) => tracing::warn!(
-                        mem = %params.name,
-                        error = %e,
-                        "delete_mem: tombstone-write skipped — config blob did not \
-                         parse as MemConfig",
-                    ),
-                }
-            }
-            Ok(None) => {
-                // No on-disk config blob (folder backend with no
-                // `.memstead/config.json`, or git-branch mount whose
-                // `__MEMSTEAD:mems/.../config.json` was never written).
-                // Nothing to stamp.
-            }
-            Err(e) => tracing::warn!(
-                mem = %params.name,
-                error = %e,
-                "delete_mem: tombstone-read skipped — backend read_mem_config errored",
-            ),
-        }
+        stamp_unregistered(backend.as_ref(), &params.name, &delete_ctx);
     }
 
     // ---- Step 5: optional disk delete ----
@@ -976,6 +1020,148 @@ pub fn delete_mem(
         detached_referrers,
         pruned_orphan_config: None,
     })
+}
+
+/// The quarantined mount `name`, when `memstead mem unregister` takes
+/// it off the roster: a mount of a branch or a folder, of either
+/// capability, that the roster names and no view holds. (An installed
+/// archive is `memstead uninstall`'s to remove.)
+fn removable_quarantined(
+    engine: &crate::Engine,
+    name: &str,
+) -> Option<crate::engine::QuarantinedMem> {
+    if engine.mount(name).is_some() {
+        return None;
+    }
+    engine
+        .quarantine_reason(name)
+        .filter(|q| {
+            matches!(
+                q.mount.storage,
+                crate::workspace::MountStorage::GitBranch { .. }
+                    | crate::workspace::MountStorage::Folder { .. }
+            )
+        })
+        .cloned()
+}
+
+/// Whether `mount` names a git directory that is not this workspace's
+/// own mem-repo. Its registry entry belongs to the workspace that
+/// holds it, which still serves it, so this workspace ceasing to mount
+/// it writes no tombstone there.
+fn is_foreign_storage(engine: &crate::Engine, mount: &crate::workspace::Mount) -> bool {
+    match &mount.storage {
+        crate::workspace::MountStorage::GitBranch { gitdir, .. } => {
+            let own = engine
+                .workspace_root()
+                .map(|root| root.join("mem-repo").join(".git"));
+            let canonical =
+                |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+            own.is_none_or(|own| canonical(&own) != canonical(gitdir))
+        }
+        _ => false,
+    }
+}
+
+/// Whether the place `mount` names is on disk. A quarantined mount
+/// whose storage is gone gets nothing written where it was.
+fn storage_is_present(mount: &crate::workspace::Mount) -> bool {
+    match &mount.storage {
+        crate::workspace::MountStorage::GitBranch { gitdir, .. } => gitdir.is_dir(),
+        crate::workspace::MountStorage::Folder { path } => path.is_dir(),
+        _ => false,
+    }
+}
+
+/// The entities of writable mems that hold an edge into `mem`, one
+/// [`crate::ReferrerInfo`] per source entity, read from the sources'
+/// own edges: for a mem that is out of service, whose entities are in
+/// no store to walk from.
+fn referrers_into(engine: &crate::Engine, mem: &str) -> Vec<crate::ReferrerInfo> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let store = engine.store();
+    let mut by_source: BTreeMap<String, (String, BTreeSet<String>)> = BTreeMap::new();
+    for entity in store.all_entities() {
+        if entity.mem == mem || !engine.mem_router().is_writable(&entity.mem) {
+            continue;
+        }
+        for edge in store.outgoing(&entity.id) {
+            if edge.target.mem() == mem {
+                by_source
+                    .entry(entity.id.to_string())
+                    .or_insert_with(|| (entity.mem.clone(), BTreeSet::new()))
+                    .1
+                    .insert(edge.rel_type.clone());
+            }
+        }
+    }
+    by_source
+        .into_iter()
+        .map(|(from_id, (from_mem, rel_types))| crate::ReferrerInfo {
+            from_id,
+            rel_types: rel_types.into_iter().collect(),
+            mem: from_mem,
+        })
+        .collect()
+}
+
+/// Stamp a mem's surviving config with the `unregistered_at` marker, so
+/// a later `memstead mem init <same-name>` recognises the residue as
+/// deliberate operator state (the reattach path) and not as crash
+/// residue (`MEM_STORAGE_RESIDUE_DETECTED`).
+///
+/// Failures are not fatal: the unregister has landed, and a missing
+/// marker only means the re-init needs an explicit `--reattach`.
+fn stamp_unregistered(
+    backend: &dyn crate::MemBackend,
+    mem: &str,
+    ctx: &crate::vcs::CommitContext<'_>,
+) {
+    match backend.read_mem_config() {
+        Ok(Some(bytes)) => {
+            match serde_json::from_slice::<memstead_schema::config::MemConfig>(&bytes) {
+                Ok(mut cfg) => {
+                    cfg.unregistered_at = Some(now_iso_utc());
+                    match serde_json::to_vec_pretty(&cfg) {
+                        Ok(mut new_bytes) => {
+                            new_bytes.push(b'\n');
+                            if let Err(e) = backend.write_mem_config(&new_bytes, ctx) {
+                                tracing::warn!(
+                                    mem = %mem,
+                                    error = %e,
+                                    "delete_mem: unregister succeeded but tombstone \
+                                     write failed — re-init will require an explicit \
+                                     --reattach flag"
+                                );
+                            }
+                        }
+                        Err(e) => tracing::warn!(
+                            mem = %mem,
+                            error = %e,
+                            "delete_mem: tombstone serialize failed",
+                        ),
+                    }
+                }
+                Err(e) => tracing::warn!(
+                    mem = %mem,
+                    error = %e,
+                    "delete_mem: tombstone-write skipped — config blob did not \
+                     parse as MemConfig",
+                ),
+            }
+        }
+        Ok(None) => {
+            // No on-disk config blob (folder backend with no
+            // `.memstead/config.json`, or git-branch mount whose
+            // `__MEMSTEAD:mems/.../config.json` was never written).
+            // Nothing to stamp.
+        }
+        Err(e) => tracing::warn!(
+            mem = %mem,
+            error = %e,
+            "delete_mem: tombstone-read skipped — backend read_mem_config errored",
+        ),
+    }
 }
 
 /// Prune the config blob of `name` on `__MEMSTEAD` when, and only when,

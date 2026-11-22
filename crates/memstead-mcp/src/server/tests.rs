@@ -9646,6 +9646,69 @@ fn memstead_mem_delete_path_not_allowed_emits_structured_envelope() {
     assert_eq!(details["reason"], "no_allowlist_configured");
 }
 
+/// Over MCP a mem deletion is always the storage-destroying form, so a
+/// quarantined mount is refused there as every operation is that names
+/// a mem out of service. The refusal names the command that takes the
+/// mount off the roster, and the roster keeps its row.
+#[test]
+fn memstead_mem_delete_of_a_quarantined_mount_names_the_unregister() {
+    use memstead_base::mem_management::{MemMountParams, MountSource, mount_mem};
+
+    let tmp = TempDir::new().unwrap();
+    let holder = tmp.path().join("holder");
+    let view = tmp.path().join("view");
+    memstead_git_branch::test_support::init_real_mem_repo(&holder, &[("notes", "default@1.0.0")]);
+    let gitdir = std::fs::canonicalize(holder.join("mem-repo").join(".git")).unwrap();
+    memstead_git_branch::lay_workspace_marker(&view).unwrap();
+    {
+        let mut engine =
+            memstead_git_branch::workspace_store::engine_from_workspace_root(&view).unwrap();
+        mount_mem(
+            &mut engine,
+            MemMountParams {
+                name: "notes".to_string(),
+                source: MountSource::Branch {
+                    branch: "notes".to_string(),
+                    gitdir: Some(gitdir),
+                },
+                capability: memstead_base::MountCapability::Write,
+                schema: None,
+                note: None,
+                operator_mode: true,
+                actor: memstead_base::vcs::Actor::Cli,
+                client: None,
+            },
+        )
+        .unwrap();
+    }
+    std::fs::remove_dir_all(&holder).unwrap();
+    let engine = memstead_git_branch::workspace_store::engine_from_workspace_root(&view).unwrap();
+    assert_eq!(engine.quarantined_mems().len(), 1);
+    let server = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
+
+    let result = server.memstead_mem_delete(Parameters(TlsMemDeleteParams {
+        role: None,
+        identity: None,
+        name: "notes".to_string(),
+        note: None,
+    }));
+    assert_eq!(result.is_error, Some(true));
+    let envelope = result
+        .structured_content
+        .expect("error must carry structured envelope");
+    assert_eq!(envelope["code"], "MEM_QUARANTINED", "{envelope}");
+    assert!(
+        envelope["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("`memstead mem unregister notes`"),
+        "{envelope}"
+    );
+    let roster = std::fs::read_to_string(view.join(".memstead/state/mounts.json")).unwrap();
+    assert!(roster.contains("notes"), "{roster}");
+    assert!(!holder.exists(), "nothing is laid where the storage was");
+}
+
 /// The session's declared role and identity ride the one commit a
 /// lifecycle tool produces, the create's seed commit and the delete's
 /// prune commit on the schema-and-config ref, exactly as they ride

@@ -80,13 +80,22 @@ pub enum MemAction {
     /// <same name>` re-attaches against the preserved storage. Refuses
     /// with `MEM_HAS_INCOMING_REFS` when entities in other mems still
     /// link into this one — remove those incoming cross-mem references
-    /// first (mirrors `mem delete`'s precondition).
+    /// first (mirrors `mem delete`'s precondition). A mount that is out
+    /// of service (quarantined) leaves the roster the same way, whatever
+    /// its capability and whatever put it out of service: nothing of its
+    /// content is read or locked, storage that is gone gets nothing
+    /// written, and entities of other mems in service that point into
+    /// it are reported as detached referrers and are no reason to
+    /// refuse.
     Unregister(UnregisterArgs),
     /// Storage-destroying removal — unregisters the mem AND deletes
     /// its stored content. Refuses with `MEM_REFERENCED_BY_POLICY`
     /// when any other writable mem has a `cross_mem_links` grant
     /// pointing at the target (revoke the grant first). For router-only
-    /// removal that keeps the storage, use `memstead mem unregister`.
+    /// removal that keeps the storage, use `memstead mem unregister`,
+    /// which is also what removes a quarantined mount: destroying a mem
+    /// that is out of service refuses `MEM_QUARANTINED`, whatever else
+    /// in the workspace is out of service.
     Delete(DeleteArgs),
     /// Rename a mem: `<old> <new>`, complete across every surface
     /// that carries the name — entity-id prefixes, cross-mem edges and
@@ -610,9 +619,12 @@ pub struct UnregisterArgs {
     /// Name of the mem to unregister.
     pub name: String,
 
-    /// Optional provenance note (≤280 chars). An unregister produces
-    /// no commit (the branch and its config blob stay), so the note
-    /// has no commit to ride; under `require_notes` a missing note
+    /// Optional provenance note (≤280 chars). The one thing an
+    /// unregister may write to storage is the `unregistered_at` marker
+    /// in the mem's registry entry, and on a mem-repo the note rides
+    /// that commit; where no marker is written (a read-only mount, a
+    /// mount of another git directory, storage that is gone) the note
+    /// has no commit to ride. Under `require_notes` a missing note
     /// warns `NOTE_MISSING`.
     #[arg(long)]
     pub note: Option<String>,
@@ -1141,8 +1153,9 @@ fn run_delete_inner(
             // Surface scrubbed `.memstead/workspace.toml` entries so the
             // agent sees every policy side effect in one round-trip.
             "allowlist_entries_removed": &response.allowlist_entries_removed,
-            // Referrers deliberately left dangling under
-            // `--detach-incoming` — empty without the flag.
+            // Referrers left dangling: under `--detach-incoming`, or by
+            // the unregister of a quarantined mount, which reports them
+            // without the flag. Empty otherwise.
             "detached_referrers": response
                 .detached_referrers
                 .iter()

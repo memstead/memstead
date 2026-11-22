@@ -1126,6 +1126,82 @@ write_rules: []
         );
     }
 
+    /// A running engine holds a write mount quarantined (its git
+    /// directory is gone). Another process takes the mount off the
+    /// roster with the unregister; the running engine stops reporting
+    /// the mem as quarantined on its next operation.
+    #[test]
+    fn a_running_engine_drops_a_quarantined_mount_another_process_unregistered() {
+        use memstead_base::mem_management::{
+            MemDeleteParams, MemMountParams, MountSource, delete_mem, mount_mem,
+        };
+
+        let tmp = TempDir::new().unwrap();
+        let view = tmp.path().join("view");
+        let holder = tmp.path().join("holder");
+        crate::test_support::init_real_mem_repo(&holder, &[("notes", "default@1.0.0")]);
+        {
+            let mut engine = engine_from_workspace_root(&holder).unwrap();
+            operate(&mut engine, "holder", None, Some(("notes", "Alpha")));
+        }
+        let gitdir = std::fs::canonicalize(holder.join("mem-repo").join(".git")).unwrap();
+        crate::lay_workspace_marker(&view).unwrap();
+        {
+            let mut other = engine_from_workspace_root(&view).unwrap();
+            mount_mem(
+                &mut other,
+                MemMountParams {
+                    name: "notes".to_string(),
+                    source: MountSource::Branch {
+                        branch: "notes".to_string(),
+                        gitdir: Some(gitdir.clone()),
+                    },
+                    capability: memstead_base::MountCapability::Write,
+                    schema: None,
+                    note: None,
+                    operator_mode: true,
+                    actor: memstead_base::vcs::Actor::Cli,
+                    client: None,
+                },
+            )
+            .unwrap();
+        }
+        std::fs::remove_dir_all(&holder).unwrap();
+        let mut running = engine_from_workspace_root(&view).unwrap();
+        running.reload_if_stale(None);
+        assert!(running.mem_names().is_empty());
+        assert_eq!(running.quarantined_mems().len(), 1);
+
+        {
+            let mut other = engine_from_workspace_root(&view).unwrap();
+            let removed = delete_mem(
+                &mut other,
+                MemDeleteParams {
+                    name: "notes".to_string(),
+                    delete_files: false,
+                    note: None,
+                    actor: memstead_base::vcs::Actor::Cli,
+                    client: None,
+                    operator_mode: true,
+                    detach_incoming: false,
+                },
+            )
+            .expect("a quarantined write mount leaves the roster");
+            assert!(removed.deleted_from_router && !removed.files_deleted);
+        }
+        let roster = std::fs::read_to_string(view.join(".memstead/state/mounts.json")).unwrap();
+        assert!(!roster.contains("notes"), "{roster}");
+        assert!(!holder.exists(), "nothing is laid where the storage was");
+
+        running.reload_if_stale(None);
+        assert!(
+            running.quarantined_mems().is_empty(),
+            "{:?}",
+            running.quarantined_mems()
+        );
+        assert!(running.mem_names().is_empty());
+    }
+
     fn caller_fixture() -> (TempDir, std::path::PathBuf) {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("ws");

@@ -7,6 +7,41 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **A quarantined mount leaves the roster by `mem unregister`.** A mem
+  that cannot be brought into service is quarantined, and while one
+  mount is quarantined every verb that reads the whole workspace (an
+  entity delete, rename or retype, the delete or unregister of another
+  mem) refuses `MEM_VIEW_STALE` with cause `out_of_service`. Taking the
+  mount off the roster was the way out and worked for a read-only mount
+  only: for a write mount `memstead mem unregister <name>` refused
+  `UNKNOWN_MEM`, and with the storage gone for good (a removed disk, a
+  deleted checkout) nothing but a hand edit of the roster file freed the
+  workspace. The unregister now removes a quarantined mount of a branch
+  or a folder under either capability, whatever put it out of service.
+  It reads none of the mem's entities and does not take the mem's write
+  lock. The roster row goes. A write mount whose storage is still there
+  and is this workspace's to keep (a branch of its own mem-repo, or a
+  folder) gets the `unregistered_at` marker in the mem's config that a
+  mount in service gets, so `memstead mem init <name>` reattaches a
+  branch without a recovery flag; that marker is the one write. A mount
+  of another git directory gets nothing written there, and storage that
+  is missing gets nothing written at all. Entities of other writable mems
+  that hold edges into the removed mem are no reason to refuse: they
+  pointed at nothing since the mem went out of service, and the reply
+  lists them as `detached_referrers` (those of mems in service; what
+  another quarantined mem holds is unread). Other mounts that are quarantined
+  at the same time do not bar the removal, so two of them can be
+  removed one after the other. The delete rules apply as for a mount in
+  service. A storage-destroying deletion (`memstead mem delete`, and
+  `memstead_mem_delete` over MCP, which is always that form) of a
+  quarantined mount stays refused and destroys nothing; it now refuses
+  `MEM_QUARANTINED`, the code an entity read or a write gets that
+  names a quarantined mem, before any lock is taken and whatever else
+  in the workspace is out of service. Both refusals a quarantined mount causes name
+  `memstead mem unregister <mem>` in their message.
+
 ## [0.27.0] - 2026-11-22
 
 ### Added
