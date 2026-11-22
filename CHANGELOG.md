@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-22
+
 ### Added
 
 - **A write waits for a mem's lock only so long.** A write that cannot
@@ -7661,7 +7663,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.26.1...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/memstead/memstead/compare/v0.26.1...v0.27.0
 [0.26.1]: https://github.com/memstead/memstead/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/memstead/memstead/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/memstead/memstead/compare/v0.24.0...v0.25.0
