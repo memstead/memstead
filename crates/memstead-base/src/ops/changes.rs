@@ -258,6 +258,31 @@ pub fn folder_changes_since(
     since: &str,
     store: Option<StoreLookup<'_>>,
 ) -> Result<BackendChanges, BackendError> {
+    folder_changes(mem_root, mem, since, store, None)
+}
+
+/// [`folder_changes_since`] for a caller that has the workspace's
+/// settings at hand, which is the engine: while a commit of the mem is
+/// decided and not applied, the feed waits for the mem's write lock no
+/// longer than `lock_wait` (the workspace's write-lock deadline, `None`
+/// for no bound). Without it the wait is that setting's default.
+pub fn folder_changes_since_within(
+    mem_root: &Path,
+    mem: &str,
+    since: &str,
+    store: Option<StoreLookup<'_>>,
+    lock_wait: Option<std::time::Duration>,
+) -> Result<BackendChanges, BackendError> {
+    folder_changes(mem_root, mem, since, store, Some(lock_wait))
+}
+
+fn folder_changes(
+    mem_root: &Path,
+    mem: &str,
+    since: &str,
+    store: Option<StoreLookup<'_>>,
+    lock_wait: Option<Option<std::time::Duration>>,
+) -> Result<BackendChanges, BackendError> {
     if !since.is_empty()
         && since != EMPTY_TREE_SHA
         && crate::filesystem::changelog::parse_rfc3339_utc(since).is_none()
@@ -270,7 +295,10 @@ pub fn folder_changes_since(
     // The ledger is a file a commit appends to: while a commit of this
     // mem is cut off, the feed is not read, like every other read that
     // goes to the mem's files.
-    crate::storage::filesystem::refuse_cut_off_commit(mem_root)?;
+    match lock_wait {
+        Some(limit) => crate::storage::filesystem::refuse_cut_off_commit_within(mem_root, limit)?,
+        None => crate::storage::filesystem::refuse_cut_off_commit(mem_root)?,
+    }
     let log_path = crate::filesystem::changelog::changelog_path(mem_root);
     let raw = match std::fs::read_to_string(&log_path) {
         Ok(s) => s,

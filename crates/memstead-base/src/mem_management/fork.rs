@@ -474,8 +474,7 @@ pub fn fork_mem(
         cross_linkable: true,
         migration_target: None,
     };
-    let factory = engine.backend_factory();
-    let backend = match factory(&mount) {
+    let backend = match engine.instantiate_backend(&mount) {
         Ok(b) => b,
         Err(e) => {
             roll_back(
@@ -798,8 +797,8 @@ fn resolve_local_source(
             .into());
         }
     };
-    let factory = engine.backend_factory();
-    let backend = factory(&mount)
+    let backend = engine
+        .instantiate_backend(&mount)
         .map_err(|e| crate::EngineError::Mem(format!("source backend instantiate: {e}")))?;
     let bytes = backend
         .read_mem_config()

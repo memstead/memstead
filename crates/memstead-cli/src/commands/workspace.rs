@@ -657,9 +657,11 @@ fn show(ctx: &CliContext, _args: ShowArgs) -> anyhow::Result<()> {
         None => lines.push("- `require_notes`: (unset — best-effort)".to_string()),
     }
     match settings.mutations.write_lock_timeout_secs {
-        Some(0) => {
-            lines.push("- `write_lock_timeout_secs`: `0` (a write waits without bound)".to_string())
-        }
+        Some(0) => lines.push(
+            "- `write_lock_timeout_secs`: `0` (a write, and a load behind an unapplied \
+                 commit, wait without bound)"
+                .to_string(),
+        ),
         Some(secs) => lines.push(format!("- `write_lock_timeout_secs`: `{secs}`")),
         None => lines.push(format!(
             "- `write_lock_timeout_secs`: (unset, {} seconds)",

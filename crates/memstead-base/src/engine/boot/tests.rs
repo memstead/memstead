@@ -5740,3 +5740,304 @@ fn the_callers_the_engine_remembers_are_capped_and_a_forgotten_one_starts_over()
         "nothing from before its return: {listed}"
     );
 }
+
+/// The workspace's write-lock deadline reaches every backend the engine
+/// serves, for the wait of a load and of a direct read: the configured
+/// seconds, the default when the key is absent, no bound for `0`, and
+/// the new value when the settings change.
+#[test]
+fn the_write_lock_deadline_reaches_every_backend_the_engine_serves() {
+    let waits = |engine: &Engine| -> Vec<Option<Option<std::time::Duration>>> {
+        engine
+            .mounts
+            .iter()
+            .map(|m| m.backend.lock_wait())
+            .collect()
+    };
+    let secs = |n: u64| Some(Some(std::time::Duration::from_secs(n)));
+
+    let (_tmp, mut engine) = lock_timeout_fixture("write_lock_timeout_secs = 7");
+    assert_eq!(waits(&engine), vec![secs(7), secs(7)]);
+    // Every backend the engine builds after boot comes from one place,
+    // and carries the deadline from there.
+    let mount = engine.mounts[0].mount.clone();
+    assert_eq!(
+        engine.instantiate_backend(&mount).unwrap().lock_wait(),
+        secs(7)
+    );
+    let mut settings = engine.settings().clone();
+    settings.mutations.write_lock_timeout_secs = Some(3);
+    engine.set_settings(settings);
+    assert_eq!(waits(&engine), vec![secs(3), secs(3)]);
+    assert_eq!(
+        engine.instantiate_backend(&mount).unwrap().lock_wait(),
+        secs(3)
+    );
+
+    let (_tmp, engine) = lock_timeout_fixture("");
+    assert_eq!(
+        waits(&engine),
+        vec![secs(crate::workspace::MutationsSection::DEFAULT_WRITE_LOCK_TIMEOUT_SECS); 2]
+    );
+    let (_tmp, engine) = lock_timeout_fixture("write_lock_timeout_secs = 0");
+    assert_eq!(waits(&engine), vec![Some(None), Some(None)]);
+}
+
+/// A backend a caller built itself and hands to a mount registration
+/// is told the workspace's deadline like one the engine builds.
+#[test]
+fn a_backend_handed_to_a_mount_registration_is_told_the_deadline() {
+    let (tmp, mut engine) = lock_timeout_fixture("write_lock_timeout_secs = 7");
+    let wait_of = |engine: &Engine, mem: &str| {
+        engine
+            .mounts
+            .iter()
+            .find(|m| m.mount.mem == mem)
+            .map(|m| m.backend.lock_wait())
+    };
+    let mount = engine
+        .mounts
+        .iter()
+        .find(|m| m.mount.mem == "beta")
+        .unwrap()
+        .mount
+        .clone();
+    engine.unregister_writable_mem("beta").unwrap();
+    let backend = Box::new(crate::storage::filesystem::FilesystemBackend::new(
+        tmp.path().join("beta"),
+    ));
+    assert_eq!(
+        backend.lock_wait(),
+        Some(Some(std::time::Duration::from_secs(
+            crate::workspace::MutationsSection::DEFAULT_WRITE_LOCK_TIMEOUT_SECS
+        ))),
+        "nobody told it yet"
+    );
+    engine
+        .register_writable_mem(mount, backend, crate::mem::MemOrigin::ExplicitToml)
+        .unwrap();
+    assert_eq!(
+        wait_of(&engine, "beta"),
+        Some(Some(Some(std::time::Duration::from_secs(7))))
+    );
+}
+
+/// A mem is out of service because another process holds its write
+/// lock over a commit it has not applied. A schema pin switch is the
+/// repair verb of a quarantined mem and writes the mem's config: it
+/// takes the mem's write lock first, and while that lock is held
+/// elsewhere it refuses `WRITE_LOCK_TIMEOUT` with nothing changed, in
+/// the mem's files or on the roster. Once the lock is free the same
+/// call repairs the mem.
+#[test]
+fn a_pin_switch_on_a_quarantined_mem_does_not_write_beside_the_lock_holder() {
+    let (tmp, first) = lock_timeout_fixture("write_lock_timeout_secs = 1");
+    drop(first);
+    let root = tmp.path();
+    let mem = root.join("alpha");
+    let staged = std::fs::read_to_string(mem.join("one.md"))
+        .unwrap()
+        .replace("# One", "# Late");
+    std::fs::write(mem.join("late.md.tmp"), staged).unwrap();
+    let (go, holder) = hold_write_lock(root, &["alpha"]);
+    std::fs::write(
+        mem.join(".memstead").join("commit.json"),
+        r#"{"v":1,"ops":[{"op":"upsert","path":"late.md","tmp":"late.md.tmp"}],"ledger":[]}"#,
+    )
+    .unwrap();
+    let mut engine = Engine::from_workspace_root(root).expect("the workspace boots");
+    assert_eq!(engine.quarantined[0].reason_code, "COMMIT_NOT_APPLIED");
+
+    let files = |dir: &Path| -> Vec<(std::path::PathBuf, Vec<u8>)> {
+        let mut found = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    found.push((path.clone(), std::fs::read(&path).unwrap()));
+                }
+            }
+        }
+        found.sort();
+        found
+    };
+    let before = files(&mem);
+    let roster = std::fs::read(root.join(".memstead").join("state").join("mounts.json")).ok();
+    let pin = SchemaRef::new("default", semver::Version::new(1, 0, 0));
+    let started = std::time::Instant::now();
+    let refused = engine
+        .set_mem_schema("alpha", &pin)
+        .expect_err("the mem's lock is held elsewhere");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(refused.code(), "WRITE_LOCK_TIMEOUT", "{refused}");
+    assert_eq!(files(&mem), before, "nothing of the mem was written");
+    assert_eq!(
+        std::fs::read(root.join(".memstead").join("state").join("mounts.json")).ok(),
+        roster,
+        "the roster is as it was"
+    );
+    assert_eq!(engine.quarantined[0].reason_code, "COMMIT_NOT_APPLIED");
+
+    go.send(()).unwrap();
+    holder.join().unwrap();
+    engine
+        .set_mem_schema("alpha", &pin)
+        .expect("with the lock free the repair brings the mem back");
+    assert!(engine.quarantined.is_empty());
+    assert!(
+        engine
+            .get_entity(&crate::EntityId("alpha--late".into()))
+            .is_some()
+    );
+}
+
+/// An engine that already serves a folder mem meets a commit another
+/// process decided and did not apply, with that process still holding
+/// the mem's write lock. The reload before the next operation waits no
+/// longer than the deadline, the operation is refused, and the engine
+/// keeps serving the state it had. Once the lock is free the next
+/// operation completes the commit and serves it.
+#[test]
+fn a_running_engine_waits_for_a_held_lock_no_longer_than_the_deadline() {
+    let (tmp, mut engine) = lock_timeout_fixture("write_lock_timeout_secs = 1");
+    let root = tmp.path();
+    let mem = root.join("alpha");
+    let staged = std::fs::read_to_string(mem.join("one.md"))
+        .unwrap()
+        .replace("# One", "# Late");
+    std::fs::write(mem.join("late.md.tmp"), staged).unwrap();
+    let (go, holder) = hold_write_lock(root, &["alpha"]);
+    std::fs::write(
+        mem.join(".memstead").join("commit.json"),
+        r#"{"v":1,"ops":[{"op":"upsert","path":"late.md","tmp":"late.md.tmp"}],"ledger":[]}"#,
+    )
+    .unwrap();
+
+    let started = std::time::Instant::now();
+    let warnings = engine.reload_if_stale(Some("alpha"));
+    let waited = started.elapsed();
+    assert!(waited < std::time::Duration::from_secs(4), "{waited:?}");
+    let codes: Vec<&str> = warnings.iter().map(|w| w.code()).collect();
+    assert!(
+        engine
+            .get_entity(&crate::EntityId("alpha--late".into()))
+            .is_none(),
+        "the unapplied commit is not served: {codes:?}"
+    );
+    assert!(
+        engine
+            .get_entity(&crate::EntityId("alpha--one".into()))
+            .is_some(),
+        "the state the engine had is"
+    );
+    assert!(mem.join(".memstead").join("commit.json").exists());
+
+    // The readers that go to the mem's files beside the view: the change
+    // feed refuses with the mem's typed condition under the workspace's
+    // deadline, and the export refuses a mem that is whole only in part.
+    let started = std::time::Instant::now();
+    let feed = engine
+        .changes_since("alpha", "", None)
+        .expect_err("the feed is not read over an unapplied commit");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(feed.code(), "COMMIT_NOT_APPLIED", "{feed}");
+    assert!(feed.to_string().contains("alpha"), "{feed}");
+    assert!(feed.to_string().contains("wait of 1 s"), "{feed}");
+    assert!(
+        engine.export_mem_to_bytes("alpha").is_err(),
+        "a mem with part of a commit in place is not exported"
+    );
+
+    go.send(()).unwrap();
+    holder.join().unwrap();
+    engine.reload_if_stale(Some("alpha"));
+    assert!(
+        engine
+            .get_entity(&crate::EntityId("alpha--late".into()))
+            .is_some(),
+        "the next reload completes the commit"
+    );
+    assert!(!mem.join(".memstead").join("commit.json").exists());
+}
+
+/// A mem that a boot put out of service behind a held lock comes back
+/// with a reload. The backend that reload builds waits the workspace's
+/// deadline like the one the boot built, also for the reload's own load,
+/// and holds that deadline afterwards.
+#[test]
+fn a_mem_that_comes_back_by_reload_waits_and_holds_the_workspace_deadline() {
+    let (tmp, first) = lock_timeout_fixture("write_lock_timeout_secs = 1");
+    drop(first);
+    let root = tmp.path();
+    let mem = root.join("alpha");
+    let staged = std::fs::read_to_string(mem.join("one.md"))
+        .unwrap()
+        .replace("# One", "# Late");
+    std::fs::write(mem.join("late.md.tmp"), staged).unwrap();
+    let (go, holder) = hold_write_lock(root, &["alpha"]);
+    std::fs::write(
+        mem.join(".memstead").join("commit.json"),
+        r#"{"v":1,"ops":[{"op":"upsert","path":"late.md","tmp":"late.md.tmp"}],"ledger":[]}"#,
+    )
+    .unwrap();
+
+    // The boot waits the deadline once and puts the mem out of service.
+    let started = std::time::Instant::now();
+    let mut engine = Engine::from_workspace_root(root).expect("the workspace boots");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(engine.quarantined.len(), 1);
+    assert_eq!(engine.quarantined[0].reason_code, "COMMIT_NOT_APPLIED");
+    assert!(
+        engine.quarantined[0].reason_message.contains("wait of 1 s"),
+        "{}",
+        engine.quarantined[0].reason_message
+    );
+
+    // The reload under the lock that is still held waits the same
+    // deadline, not the default.
+    let started = std::time::Instant::now();
+    let refused = engine
+        .reload_one_mem("alpha")
+        .expect_err("the lock is still held");
+    let waited = started.elapsed();
+    assert!(
+        waited < std::time::Duration::from_secs(4),
+        "the reload waited {waited:?}"
+    );
+    assert!(refused.to_string().contains("wait of 1 s"), "{refused}");
+
+    go.send(()).unwrap();
+    holder.join().unwrap();
+    engine
+        .reload_one_mem("alpha")
+        .expect("the reload completes the commit and brings the mem back");
+    assert!(engine.quarantined.is_empty());
+    assert!(
+        engine
+            .get_entity(&crate::EntityId("alpha--late".into()))
+            .is_some()
+    );
+    for m in &engine.mounts {
+        assert_eq!(
+            m.backend.lock_wait(),
+            Some(Some(std::time::Duration::from_secs(1))),
+            "{}",
+            m.mount.mem
+        );
+    }
+}

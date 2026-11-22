@@ -62,6 +62,13 @@ impl Engine {
     pub fn set_settings(&mut self, settings: WorkspaceSettings) {
         self.settings = settings;
         self.create_rule_set_memo = OnceCell::new();
+        // Every backend this engine serves waits for its mem's write
+        // lock, in a load and in a direct read, no longer than the
+        // workspace's deadline as it stands now.
+        let limit = self.settings.mutations.write_lock_timeout();
+        for mount in &self.mounts {
+            mount.backend.set_lock_wait(limit);
+        }
     }
 
     /// Replace the backend factory. Full consumers call this once at boot

@@ -220,7 +220,12 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     let mut instantiate_quarantine: Vec<memstead_base::engine::QuarantinedMem> = Vec::new();
     for mount in workspace.mounts {
         match crate::storage::instantiate_full_backend(&mount) {
-            Ok(backend) => mounts.push((mount, backend)),
+            Ok(backend) => {
+                // Before the first load: a load waits for the mem's
+                // write lock no longer than the workspace says.
+                backend.set_lock_wait(settings.mutations.write_lock_timeout());
+                mounts.push((mount, backend))
+            }
             Err(e) => {
                 let (reason_code, reason_message) =
                     memstead_base::engine::boot::instantiate_failure_reason(

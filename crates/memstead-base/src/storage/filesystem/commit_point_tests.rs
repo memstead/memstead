@@ -1140,3 +1140,349 @@ fn a_commit_decided_between_a_loads_look_and_its_sweep_is_completed_not_swept() 
         "nothing is left for a later load"
     );
 }
+
+/// Another process: its own thread takes the mem's write lock, says so,
+/// and lets go when told to (or when the sender is dropped).
+fn hold_write_lock(root: &Path) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+    let lock = FilesystemBackend::new(root.to_path_buf()).lock_file();
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
+    let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+    let handle = std::thread::spawn(move || {
+        path_lock::acquire(&lock).unwrap();
+        held_tx.send(()).unwrap();
+        let _ = go_rx.recv();
+        path_lock::release(&lock);
+    });
+    held_rx.recv().unwrap();
+    (go_tx, handle)
+}
+
+/// A mem root holding a commit that is decided and not applied: the
+/// commit under test, cut off right after its commit point.
+fn cut_off_commit(control: &Control) -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    seed(tmp.path());
+    let io = FaultIo::new();
+    let backend = FilesystemBackend::with_io(tmp.path().to_path_buf(), io.clone());
+    stage(&backend);
+    io.reset();
+    io.arm_fail_from(control.commit_point + 1);
+    let result = backend.commit("under test", &CommitContext::internal());
+    assert!(
+        matches!(result, Err(BackendError::CommitNotApplied { .. })),
+        "{result:?}"
+    );
+    assert!(tmp.path().join(COMMIT_RECORD_REL).exists());
+    tmp
+}
+
+fn not_applied(result: &Result<impl std::fmt::Debug, BackendError>) -> String {
+    match result {
+        Err(BackendError::CommitNotApplied { detail }) => detail.clone(),
+        other => panic!("expected the commit-not-applied condition, got {other:?}"),
+    }
+}
+
+/// A backend starts with the default of the workspace's write-lock
+/// deadline, and takes the limit an engine hands it, without bound
+/// included.
+#[test]
+fn a_backend_waits_the_default_until_it_is_told_otherwise() {
+    let tmp = TempDir::new().unwrap();
+    let backend = FilesystemBackend::new(tmp.path().to_path_buf());
+    assert_eq!(
+        MemBackend::lock_wait(&backend),
+        Some(Some(Duration::from_secs(
+            crate::workspace::MutationsSection::DEFAULT_WRITE_LOCK_TIMEOUT_SECS
+        )))
+    );
+    backend.set_lock_wait(Some(Duration::from_secs(7)));
+    assert_eq!(
+        MemBackend::lock_wait(&backend),
+        Some(Some(Duration::from_secs(7)))
+    );
+    backend.set_lock_wait(None);
+    assert_eq!(MemBackend::lock_wait(&backend), Some(None));
+}
+
+/// One reader of the closed list, by name, on the backend it is handed.
+type Reader = (
+    &'static str,
+    fn(&FilesystemBackend) -> Result<(), BackendError>,
+);
+
+/// The readers that start with the whole-check, directly or through
+/// another of them.
+const READERS: [Reader; 6] = [
+    ("read_entity", |b| {
+        b.read_entity(Path::new("notes/old.md")).map(|_| ())
+    }),
+    ("entity_exists", |b| {
+        b.entity_exists(Path::new("gone.md")).map(|_| ())
+    }),
+    ("list_entities", |b| b.list_entities().map(|_| ())),
+    ("read_all_entities", |b| b.read_all_entities().map(|_| ())),
+    ("read_anchors_sidecar", |b| {
+        b.read_anchors_sidecar().map(|_| ())
+    }),
+    ("read_provenance", |b| b.read_provenance(None).map(|_| ())),
+];
+
+/// While another process holds the mem's write lock over a commit that
+/// is decided and not applied, a load waits no longer than its limit:
+/// it returns the commit-not-applied condition, names the wait and the
+/// setting, and touches nothing. So does every direct read, each on a
+/// backend of its own as a fresh process builds it. Once the lock is
+/// free the next load completes the commit.
+#[test]
+fn a_load_and_every_read_wait_for_a_held_lock_no_longer_than_the_limit() {
+    let control = control(seed);
+    let tmp = cut_off_commit(&control);
+    let root = tmp.path();
+    let before = tree(root);
+    let limit = Duration::from_millis(300);
+    let told = || {
+        let backend = FilesystemBackend::new(root.to_path_buf());
+        backend.set_lock_wait(Some(limit));
+        backend
+    };
+    let (release, holder) = hold_write_lock(root);
+
+    let backend = told();
+    let started = std::time::Instant::now();
+    let detail = not_applied(&backend.complete_interrupted_commit());
+    let waited = started.elapsed();
+    assert!(waited >= limit, "{waited:?}");
+    assert!(waited < limit + Duration::from_secs(2), "{waited:?}");
+    assert!(detail.contains("0.3 s"), "{detail}");
+    assert!(
+        detail.contains("`write_lock_timeout_secs` in the workspace's `[mutations]` table sets"),
+        "{detail}"
+    );
+
+    for (name, read) in READERS {
+        let backend = told();
+        let started = std::time::Instant::now();
+        let detail = not_applied(&read(&backend));
+        let waited = started.elapsed();
+        assert!(waited >= limit, "{name}: {waited:?}");
+        assert!(
+            waited < limit + Duration::from_secs(2),
+            "{name}: {waited:?}"
+        );
+        assert!(
+            detail.contains("write_lock_timeout_secs"),
+            "{name}: {detail}"
+        );
+    }
+    assert_eq!(tree(root), before, "nothing was moved or removed");
+
+    // The lock is free: the next load completes the commit, and the
+    // reads serve it.
+    drop(release);
+    holder.join().unwrap();
+    let backend = told();
+    assert!(backend.complete_interrupted_commit().unwrap().is_some());
+    assert_eq!(tree(root), control.after);
+    for (name, read) in READERS {
+        read(&backend).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+    }
+}
+
+/// A wait that ran out is not repeated at once. On the backend whose
+/// load just waited out its limit, every read that follows within that
+/// limit looks at the lock once and answers, so an operation that loads
+/// and then reads pays the wait once. After as long again as the limit
+/// the next call waits anew.
+#[test]
+fn a_wait_that_ran_out_is_not_repeated_within_the_limit() {
+    let control = control(seed);
+    let tmp = cut_off_commit(&control);
+    let root = tmp.path();
+    let limit = Duration::from_millis(1500);
+    let backend = FilesystemBackend::new(root.to_path_buf());
+    backend.set_lock_wait(Some(limit));
+    let (release, holder) = hold_write_lock(root);
+
+    let started = std::time::Instant::now();
+    let detail = not_applied(&backend.complete_interrupted_commit());
+    assert!(started.elapsed() >= limit);
+    assert!(detail.contains("for the whole wait of 1.5 s"), "{detail}");
+
+    // A call that waited for nothing itself says so.
+    let started = std::time::Instant::now();
+    for (name, read) in READERS {
+        let detail = not_applied(&read(&backend));
+        assert!(detail.contains("1.5 s"), "{name}: {detail}");
+        assert!(detail.contains("ran out a moment ago"), "{name}: {detail}");
+        assert!(!detail.contains("whole wait"), "{name}: {detail}");
+    }
+    not_applied(&backend.complete_interrupted_commit());
+    let all = started.elapsed();
+    assert!(
+        all < Duration::from_millis(700),
+        "seven calls within the limit answered in {all:?}"
+    );
+
+    // Past the window the next call waits again.
+    std::thread::sleep(limit.saturating_sub(started.elapsed()) + Duration::from_millis(100));
+    let started = std::time::Instant::now();
+    not_applied(&backend.list_entities());
+    assert!(started.elapsed() >= limit, "{:?}", started.elapsed());
+
+    // A lock that comes free is taken by the one look.
+    drop(release);
+    holder.join().unwrap();
+    assert!(backend.complete_interrupted_commit().unwrap().is_some());
+    assert_eq!(tree(root), control.after);
+}
+
+/// The export of a folder mem walks the mem's directory itself, and
+/// refuses a mem that holds a commit which is decided and not applied:
+/// part of that commit may be in place. Once a load has completed the
+/// commit the export no longer meets that condition.
+#[test]
+fn the_export_refuses_a_mem_whose_commit_is_not_applied() {
+    let control = control(seed);
+    let tmp = cut_off_commit(&control);
+    let root = tmp.path();
+    let config = memstead_schema::config::parse_mem_config(&serde_json::json!({
+        "format": 1,
+        "schema": "default@1.0.0",
+    }))
+    .unwrap();
+    let export =
+        || crate::ops::export::export_mem_to_bytes(root, &config, None, None, "held", None, None);
+    let before = tree(root);
+    let refused = match export() {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("a mem with a commit that is not applied was exported"),
+    };
+    assert!(refused.contains("cut off"), "{refused}");
+    assert_eq!(tree(root), before, "the export touched nothing");
+
+    assert!(
+        FilesystemBackend::new(root.to_path_buf())
+            .complete_interrupted_commit()
+            .unwrap()
+            .is_some()
+    );
+    if let Err(e) = export() {
+        assert!(!e.to_string().contains("cut off"), "{e}");
+    }
+}
+
+/// A reader that has no workspace to ask says so: its wait is the
+/// default, and its message does not credit the workspace's setting.
+#[test]
+fn a_backend_nobody_told_names_its_wait_as_the_default() {
+    let tmp = TempDir::new().unwrap();
+    let backend = FilesystemBackend::new(tmp.path().to_path_buf());
+    let (limit, told) = backend.lock_wait_limit();
+    assert_eq!(limit, default_lock_wait());
+    assert!(!told);
+    let detail = not_applied(&Err::<(), _>(backend.lock_wait_passed(LockWait {
+        limit: limit.unwrap(),
+        told,
+        looked_once: false,
+    })));
+    assert!(detail.contains("30 s"), "{detail}");
+    assert!(detail.contains("no workspace to ask"), "{detail}");
+    assert!(!detail.contains("sets that wait"), "{detail}");
+}
+
+/// Without a limit the load waits for as long as the lock is held, and
+/// completes the commit once it is free.
+#[test]
+fn a_load_without_a_limit_waits_until_the_lock_is_free() {
+    let control = control(seed);
+    let tmp = cut_off_commit(&control);
+    let root = tmp.path().to_path_buf();
+    let (release, holder) = hold_write_lock(&root);
+
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let load_root = root.clone();
+    let load = std::thread::spawn(move || {
+        let backend = FilesystemBackend::new(load_root);
+        backend.set_lock_wait(None);
+        let completed = backend.complete_interrupted_commit();
+        done_tx.send(()).unwrap();
+        completed
+    });
+    assert!(
+        done_rx.recv_timeout(Duration::from_millis(700)).is_err(),
+        "the load is still waiting"
+    );
+    drop(release);
+    holder.join().unwrap();
+    let completed = load.join().unwrap().unwrap();
+    assert!(completed.is_some(), "the load completed the commit");
+    assert_eq!(tree(&root), control.after);
+}
+
+/// A writer that is alive finishes its own commit while the load waits:
+/// the load goes through with the commit applied and completes nothing
+/// itself.
+#[test]
+fn a_writer_that_finishes_within_the_limit_lets_the_load_through() {
+    let control = control(seed);
+    let tmp = cut_off_commit(&control);
+    let root = tmp.path().to_path_buf();
+    let lock = FilesystemBackend::new(root.clone()).lock_file();
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
+    let writer_root = root.clone();
+    let writer = std::thread::spawn(move || {
+        path_lock::acquire(&lock).unwrap();
+        held_tx.send(()).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        // The writer finishes its commit under its own lock.
+        let own = FilesystemBackend::new(writer_root);
+        let completed = own.complete_interrupted_commit().unwrap();
+        path_lock::release(&lock);
+        completed
+    });
+    held_rx.recv().unwrap();
+
+    let backend = FilesystemBackend::new(root.clone());
+    backend.set_lock_wait(Some(Duration::from_secs(10)));
+    let started = std::time::Instant::now();
+    let completed = backend.complete_interrupted_commit().unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(completed, None, "the load completed nothing itself");
+    assert!(writer.join().unwrap().is_some(), "the writer did");
+    assert_eq!(tree(&root), control.after);
+    assert!(
+        backend
+            .read_entity(Path::new("notes/old.md"))
+            .unwrap()
+            .is_some()
+    );
+}
+
+/// A mem with no commit record is loaded and read while its lock is
+/// held, at once: nothing waits where there is nothing to wait for.
+#[test]
+fn a_whole_mem_is_loaded_and_read_under_a_held_lock_without_waiting() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    seed(root);
+    let before = tree(root);
+    let (release, holder) = hold_write_lock(root);
+    let backend = FilesystemBackend::new(root.to_path_buf());
+    backend.set_lock_wait(Some(Duration::from_secs(10)));
+
+    let started = std::time::Instant::now();
+    assert_eq!(backend.complete_interrupted_commit().unwrap(), None);
+    assert!(
+        backend
+            .read_entity(Path::new("notes/old.md"))
+            .unwrap()
+            .is_some()
+    );
+    assert!(!backend.list_entities().unwrap().is_empty());
+    backend.read_provenance(None).unwrap();
+    assert!(started.elapsed() < Duration::from_secs(2));
+    drop(release);
+    holder.join().unwrap();
+    assert_eq!(tree(root), before);
+}

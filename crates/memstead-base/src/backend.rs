@@ -231,6 +231,22 @@ pub trait MemBackend: Send + Sync {
         Ok(None)
     }
 
+    /// How long a load or a direct read of this backend waits for the
+    /// mem's write lock while a decided commit is unapplied in storage:
+    /// the workspace's write-lock deadline, `None` to wait without
+    /// bound. The engine hands it to every backend it serves, before
+    /// the first load and whenever the setting changes. The default
+    /// ignores it: a backend whose commit is one indivisible step never
+    /// waits there.
+    fn set_lock_wait(&self, _limit: Option<std::time::Duration>) {}
+
+    /// The wait [`Self::set_lock_wait`] governs, as it stands: `None`
+    /// for a backend that never waits there, `Some(None)` for a wait
+    /// without bound, `Some(Some(limit))` otherwise.
+    fn lock_wait(&self) -> Option<Option<std::time::Duration>> {
+        None
+    }
+
     /// Read provenance entries since `cursor` (opaque,
     /// backend-defined: a commit SHA for git-branch, an RFC-3339
     /// timestamp for folder, ignored for archive). `None` cursor

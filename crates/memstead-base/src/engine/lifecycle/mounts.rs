@@ -339,6 +339,9 @@ impl Engine {
         // targeting the new mem resolve correctly during this
         // load.
         let mut completed = None;
+        // A mount registered at runtime loads under the workspace's
+        // write-lock deadline like one mounted at boot.
+        backend.set_lock_wait(self.settings.mutations.write_lock_timeout());
         let read = collect_source_entries(&mount.mem, backend.as_ref(), &mut completed);
         self.load_warnings.extend(completed);
         let read = read?;

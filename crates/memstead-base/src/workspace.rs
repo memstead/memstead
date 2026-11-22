@@ -415,9 +415,13 @@ pub struct MutationsSection {
     /// succeeds — provenance is best-effort.
     pub require_notes: Option<bool>,
     /// How many seconds a write waits for a mem's write lock before it
-    /// refuses `WRITE_LOCK_TIMEOUT`. Absent → 30. `0` waits without
-    /// bound. A value that is not a non-negative whole number refuses
-    /// when the configuration is loaded.
+    /// refuses `WRITE_LOCK_TIMEOUT`. The same limit bounds the wait of
+    /// a load, and of a direct read, of a folder mem that holds a
+    /// commit which is decided and not applied while another process
+    /// holds the mem's write lock: past it the mem is not served and
+    /// the condition is `COMMIT_NOT_APPLIED`. Absent → 30. `0` waits
+    /// without bound. A value that is not a non-negative whole number
+    /// refuses when the configuration is loaded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub write_lock_timeout_secs: Option<u64>,
 }

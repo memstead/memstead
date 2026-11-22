@@ -360,7 +360,7 @@ impl Engine {
             if remounting.contains(&name) {
                 self.recently_unmounted.remove(&name);
             }
-            let backend = match (self.backend_factory)(&mount) {
+            let backend = match self.instantiate_backend(&mount) {
                 Ok(b) => b,
                 Err(e) => {
                     // Boot's reason for a mount that cannot be

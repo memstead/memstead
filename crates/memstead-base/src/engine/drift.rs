@@ -679,8 +679,24 @@ impl Engine {
         };
         let backend_changes = match &m.mount.storage {
             MountStorage::Folder { path } => {
-                match crate::ops::folder_changes_since(path, mem, since, store_ref) {
+                match crate::ops::folder_changes_since_within(
+                    path,
+                    mem,
+                    since,
+                    store_ref,
+                    self.settings.mutations.write_lock_timeout(),
+                ) {
                     Ok(c) => c,
+                    // A commit of the mem is decided and not applied, and
+                    // its writer kept the lock past the workspace's
+                    // deadline: the mem's own typed condition, named
+                    // with the mem.
+                    Err(BackendError::CommitNotApplied { detail }) => {
+                        return Err(EngineError::CommitNotApplied {
+                            mem: mem.to_string(),
+                            detail,
+                        });
+                    }
                     // Lift the backend's typed bad-`since` marker, parallel
                     // to the git arm's COMMIT_NOT_FOUND lift below: the
                     // folder cursor is a timestamp, and anything else —

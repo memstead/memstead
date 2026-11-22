@@ -405,6 +405,11 @@ pub fn export_mem_to_bytes(
     if !mem_dir.is_dir() {
         return Err(MemExportError::DirNotFound(mem_dir.display().to_string()));
     }
+    // The export walks the mem's directory itself. While a commit of
+    // the mem is decided and not applied, part of it may be in place:
+    // such a mem is not exported, as it is not read anywhere else.
+    crate::storage::filesystem::refuse_cut_off_commit(mem_dir)
+        .map_err(|e| MemExportError::Io(std::io::Error::other(e.to_string())))?;
 
     let mut md_files = Vec::new();
     collect_markdown(mem_dir, &mut md_files)?;

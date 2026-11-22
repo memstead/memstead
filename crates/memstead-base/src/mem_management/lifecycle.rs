@@ -118,8 +118,7 @@ pub(super) fn residue_probe_for_workspace(
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
     };
-    let factory = engine.backend_factory();
-    let backend = match factory(&probe_mount) {
+    let backend = match engine.instantiate_backend(&probe_mount) {
         Ok(b) => b,
         Err(_) => return ResidueProbe::None,
     };
@@ -709,8 +708,7 @@ pub fn delete_mem(
             && !is_foreign_storage(engine, &taken.mount)
             && storage_is_present(&taken.mount)
         {
-            let factory = engine.backend_factory();
-            match factory(&taken.mount) {
+            match engine.instantiate_backend(&taken.mount) {
                 Ok(backend) => stamp_unregistered(backend.as_ref(), &params.name, &delete_ctx),
                 Err(e) => tracing::warn!(
                     mem = %params.name,
@@ -745,15 +743,14 @@ pub fn delete_mem(
         let mount_record = engine.mount(&params.name).cloned();
         engine.unregister_read_mount(&params.name)?;
         if let Err(e) = engine.persist_state() {
-            if let Some(mount) = mount_record {
-                let factory = engine.backend_factory();
-                if let Ok(restored) = factory(&mount) {
-                    let _ = engine.register_read_mount(
-                        mount,
-                        restored,
-                        crate::mem::MemOrigin::ExplicitToml,
-                    );
-                }
+            if let Some(mount) = mount_record
+                && let Ok(restored) = engine.instantiate_backend(&mount)
+            {
+                let _ = engine.register_read_mount(
+                    mount,
+                    restored,
+                    crate::mem::MemOrigin::ExplicitToml,
+                );
             }
             return Err(e.into());
         }
@@ -791,15 +788,11 @@ pub fn delete_mem(
     // In the other order a failure left storage gone under a roster
     // entry that still named it.
     if let Err(e) = engine.persist_state() {
-        if let Some(mount) = mount_record.clone() {
-            let factory = engine.backend_factory();
-            if let Ok(restored) = factory(&mount) {
-                let _ = engine.register_writable_mem(
-                    mount,
-                    restored,
-                    crate::mem::MemOrigin::ExplicitToml,
-                );
-            }
+        if let Some(mount) = mount_record.clone()
+            && let Ok(restored) = engine.instantiate_backend(&mount)
+        {
+            let _ =
+                engine.register_writable_mem(mount, restored, crate::mem::MemOrigin::ExplicitToml);
         }
         return Err(e.into());
     }
@@ -1206,8 +1199,7 @@ fn prune_orphan_config(
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
     };
-    let factory = engine.backend_factory();
-    let Ok(backend) = factory(&probe_mount) else {
+    let Ok(backend) = engine.instantiate_backend(&probe_mount) else {
         return Ok(None);
     };
     if !matches!(backend.read_mem_config(), Ok(Some(_))) {
@@ -1801,8 +1793,7 @@ pub fn create_mem(
                         lifecycle: crate::workspace::MountLifecycle::Eager,
                         cross_linkable: true,
                     };
-                    let factory = engine.backend_factory();
-                    let backend = factory(&mount).map_err(|e| {
+                    let backend = engine.instantiate_backend(&mount).map_err(|e| {
                         crate::EngineError::Mem(format!("reattach backend instantiate: {e}"))
                     })?;
                     // Clear the tombstone if one was present, so a
@@ -1994,8 +1985,7 @@ pub fn create_mem(
                         lifecycle: crate::workspace::MountLifecycle::Eager,
                         cross_linkable: true,
                     };
-                    let factory = engine.backend_factory();
-                    let backend = factory(&mount).map_err(|e| {
+                    let backend = engine.instantiate_backend(&mount).map_err(|e| {
                         crate::EngineError::Mem(format!("reattach backend instantiate: {e}"))
                     })?;
                     // Clear the tombstone if one was present, so a
@@ -2070,7 +2060,7 @@ pub fn create_mem(
     }
 
     // ---- Step 5: instantiate backend + seed commit + register ----
-    // Backend instantiation routes through `engine.backend_factory()`.
+    // Backend instantiation routes through `engine.instantiate_backend()`.
     // Full consumers install
     // `memstead_git_branch::storage::instantiate_full_backend` at boot so
     // the same call site produces git-branch backends when the mount
@@ -2091,8 +2081,8 @@ pub fn create_mem(
         cross_linkable: true,
         migration_target: None,
     };
-    let factory = engine.backend_factory();
-    let backend = factory(&mount)
+    let backend = engine
+        .instantiate_backend(&mount)
         .map_err(|e| crate::EngineError::Mem(format!("instantiate backend: {e}")))?;
     // For git-branch mounts, write the per-mem config blob to the
     // workspace's `__MEMSTEAD` ref before sealing the per-mem branch.
@@ -2457,7 +2447,8 @@ fn rename_mode(
             // simply unknown.
             let flipped_by_this_rename = engine.mem_router().is_writable(&params.new)
                 && engine.mount(&params.new).is_some_and(|m| {
-                    (engine.backend_factory())(m)
+                    engine
+                        .instantiate_backend(m)
                         .ok()
                         .and_then(|b| b.read_mem_config().ok().flatten())
                         .and_then(|bytes| {
@@ -2682,8 +2673,8 @@ pub fn rename_mem(
             // backend handle from the factory reads and writes the
             // same storage the mounted one does (git-branch handles
             // are cheap ref wrappers, folder handles are paths).
-            let factory = engine.backend_factory();
-            let backend_ref = factory(&mount)
+            let backend_ref = engine
+                .instantiate_backend(&mount)
                 .map_err(|e| crate::EngineError::Mem(format!("instantiate backend: {e}")))?;
             let config_bytes = backend_ref
                 .read_mem_config()
@@ -2770,8 +2761,8 @@ pub fn rename_mem(
             cross_linkable: mount.cross_linkable,
             migration_target: mount.migration_target.clone(),
         };
-        let factory = engine.backend_factory();
-        let backend = factory(&new_mount)
+        let backend = engine
+            .instantiate_backend(&new_mount)
             .map_err(|e| crate::EngineError::Mem(format!("instantiate backend: {e}")))?;
         let origin = crate::MemOrigin::RuntimeCreated {
             at: std::time::SystemTime::now(),

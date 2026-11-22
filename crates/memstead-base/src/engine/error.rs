@@ -709,16 +709,19 @@ pub enum EngineError {
         mems: Vec<PartialMem>,
     },
     /// A folder mem's commit is decided and not yet applied: its commit
-    /// record is durable, an error cut off the move of its files into
-    /// place, and completing it at once failed as well (the fault
-    /// persists). The write is neither failed nor finished, so no
-    /// existing code reports it truthfully: resending the call would
-    /// write twice, and the store does not show the write yet. The
-    /// next operation on the mem completes the commit before it does
-    /// anything else and names the completed files in an
-    /// `INTERRUPTED_COMMIT_COMPLETED` warning.
+    /// record is durable and its files are not all in place. Two ways
+    /// lead here. A writer's own commit was cut off by an error and
+    /// completing it at once failed as well: the write is neither
+    /// failed nor finished, resending it would write twice, and the
+    /// store does not show it yet. Or a load, or a direct read, found
+    /// another process's unapplied commit and that process kept the
+    /// mem's write lock past the workspace's write-lock deadline: the
+    /// mem is not served. Either way the next load of the mem that can
+    /// take the lock completes the commit before anything else and
+    /// names the completed files in an `INTERRUPTED_COMMIT_COMPLETED`
+    /// warning.
     #[error(
-        "the write to mem `{mem}` is decided and not yet applied ({detail}) — do not resend it; the next operation on the mem completes it first"
+        "mem `{mem}` holds a commit that is decided and not yet applied ({detail}) — a write that got this answer must not be sent again; the next load of the mem completes the commit first"
     )]
     CommitNotApplied { mem: String, detail: String },
     /// The engine's view of a mem cannot take this write, so nothing was
@@ -1794,6 +1797,9 @@ impl EngineError {
             EngineError::Validation(v) => v.code(),
             EngineError::ParseAfterWrite(_) => "PARSE_ERROR",
             EngineError::Parse(_) => "PARSE_ERROR",
+            // The one storage condition that has a code of its own,
+            // also where a path did not name the mem beside it.
+            EngineError::Backend(BackendError::CommitNotApplied { .. }) => "COMMIT_NOT_APPLIED",
             EngineError::Backend(_) => "MEM_ERROR",
             EngineError::SchemaNotFound { .. } => "SCHEMA_NOT_FOUND",
             EngineError::EmbeddedSchemaInvalid { .. } => "EMBEDDED_SCHEMA_INVALID",

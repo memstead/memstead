@@ -73,7 +73,7 @@ impl Engine {
             cross_linkable: false,
             migration_target: None,
         };
-        (self.backend_factory())(&mount)
+        self.instantiate_backend(&mount)
             .map_err(|e| EngineError::Mem(format!("checks transport backend: {e}")))
     }
 

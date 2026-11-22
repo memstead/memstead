@@ -587,6 +587,21 @@ impl Engine {
         self.backend_factory
     }
 
+    /// A backend for `mount`, built by the installed factory and told
+    /// what the engine tells every backend it serves: how long a load
+    /// or a direct read may wait for the mem's write lock, which is the
+    /// workspace's write-lock deadline. Every backend the engine builds
+    /// after boot comes from here, so none is served, or loaded, under
+    /// a limit the workspace did not set.
+    pub fn instantiate_backend(
+        &self,
+        mount: &crate::workspace::Mount,
+    ) -> Result<Box<dyn crate::backend::MemBackend>, crate::workspace_store::InstantiateError> {
+        let backend = (self.backend_factory)(mount)?;
+        backend.set_lock_wait(self.settings.mutations.write_lock_timeout());
+        Ok(backend)
+    }
+
     /// Git-branch ops bundle currently installed on this engine.
     /// `None` on engines without the git-branch crate, which see no mem-repo
     /// mounts. Returned by value because [`super::GitBranchOps`] is

@@ -389,7 +389,8 @@ pub fn mount_mem(
                 bytes
             }
         };
-        let written = (engine.backend_factory())(&mount)
+        let written = engine
+            .instantiate_backend(&mount)
             .map_err(|e| crate::EngineError::Mem(e.to_string()))
             .and_then(|backend| {
                 backend

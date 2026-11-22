@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use memstead_schema::Schema;
 
-use crate::backend::MemBackend;
+use crate::backend::{BackendError, MemBackend};
 use crate::engine_fallback_type;
 use crate::entity::loader::parse_entries;
 use crate::entity::source::{SourceEntry, SourceReadError};
@@ -719,7 +719,12 @@ impl Engine {
         let mut instantiate_quarantine: Vec<crate::engine::QuarantinedMem> = Vec::new();
         for mount in workspace.mounts {
             match instantiate_local_backend(&mount) {
-                Ok(backend) => mounts.push((mount, backend)),
+                Ok(backend) => {
+                    // Before the first load: a load waits for the mem's
+                    // write lock no longer than the workspace says.
+                    backend.set_lock_wait(settings.mutations.write_lock_timeout());
+                    mounts.push((mount, backend))
+                }
                 Err(e) => instantiate_quarantine.push(crate::engine::QuarantinedMem {
                     reason_code: e.code().to_string(),
                     reason_message: e.to_string(),
@@ -1144,18 +1149,32 @@ pub(super) fn collect_source_entries(
     backend: &dyn MemBackend,
     completed: &mut Option<WarningHint>,
 ) -> Result<SourceRead, EngineError> {
-    *completed = backend.complete_interrupted_commit()?.map(|commit| {
-        WarningHint::InterruptedCommitCompleted {
+    // A commit that is decided and cannot be completed now (another
+    // process holds the mem's write lock past the workspace's deadline,
+    // or a step of the completion failed) is the mem's own typed
+    // condition, named with the mem: the caller, or the quarantine
+    // roster of a boot, reads `COMMIT_NOT_APPLIED` and not a generic
+    // storage failure.
+    let named = |e: BackendError| match e {
+        BackendError::CommitNotApplied { detail } => EngineError::CommitNotApplied {
+            mem: mem.to_string(),
+            detail,
+        },
+        other => EngineError::from(other),
+    };
+    *completed = backend
+        .complete_interrupted_commit()
+        .map_err(named)?
+        .map(|commit| WarningHint::InterruptedCommitCompleted {
             mem: mem.to_string(),
             files: commit.files,
-        }
-    });
+        });
     // One backend pass for the whole mem: the git-branch backend
     // answers with a single tree walk, where the per-path route
     // re-inflated the root tree once per entity (quadratic in the
     // mem size — the boot cost the sizing curve reported as
     // super-linear).
-    let reads = backend.read_all_entities()?;
+    let reads = backend.read_all_entities().map_err(named)?;
     let mut entries: Vec<SourceEntry> = Vec::with_capacity(reads.len());
     let mut errors: Vec<SourceReadError> = Vec::new();
     let mut unread: Vec<String> = Vec::new();

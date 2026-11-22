@@ -166,7 +166,7 @@ impl Engine {
         });
         if on_disk
             && !held_by_a_mutation
-            && let Ok(fresh) = (self.backend_factory)(&state.mount)
+            && let Ok(fresh) = self.instantiate_backend(&state.mount)
         {
             self.mounts[idx].backend = Arc::from(fresh);
             self.mounts[idx].strays = Default::default();

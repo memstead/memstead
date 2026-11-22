@@ -37,7 +37,7 @@ pub use branch_reset::{BranchResetOutcome, StrandedCrossMemRef};
 pub use changes::{
     BackendChanges, ChangeEnvelope, ChangesReport, EMPTY_TREE_SHA, MemChangedNotice, NewestWrite,
     NoticeByChange, NoticeChanges, NoticeEntry, RENAME_SIMILARITY_DEFAULT, RENAME_SIMILARITY_MAX,
-    RENAME_SIMILARITY_MIN, StoreLookup, folder_changes_since,
+    RENAME_SIMILARITY_MIN, StoreLookup, folder_changes_since, folder_changes_since_within,
 };
 pub use commit_envelope::{CommitEnvelope, EntityChange};
 pub use diff::{Diff, DiffConfig, EntityDiff, IncomingRipple};

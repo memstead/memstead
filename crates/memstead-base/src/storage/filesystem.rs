@@ -170,6 +170,35 @@ pub struct FilesystemBackend {
     /// This backend has synced the mem root since it was built, so the
     /// name of `.memstead/` is durable.
     meta_named: std::sync::atomic::AtomicBool,
+    /// How long a load or a direct read waits for the mem's write lock
+    /// while a commit record is on disk, as an engine handed it over
+    /// (the workspace's write-lock deadline; the inner `None` waits
+    /// without bound). `None` until then: a backend nobody told waits
+    /// that setting's default.
+    lock_wait: Mutex<Option<Option<std::time::Duration>>>,
+    /// When a wait for the write lock last ran out. For as long again
+    /// as the limit, the next load or read looks at the lock once and
+    /// answers: one operation that loads and then reads pays the wait
+    /// once, not once per step.
+    lock_wait_spent: Mutex<Option<std::time::Instant>>,
+}
+
+/// A wait for the mem's write lock that ran out: how long it was,
+/// whether an engine had set that limit, and whether this call waited
+/// it or looked once because a wait had run out a moment before.
+#[derive(Clone, Copy)]
+struct LockWait {
+    limit: std::time::Duration,
+    told: bool,
+    looked_once: bool,
+}
+
+/// The wait a backend starts with, before an engine hands it the
+/// workspace's setting: that setting's default.
+fn default_lock_wait() -> Option<std::time::Duration> {
+    Some(std::time::Duration::from_secs(
+        crate::workspace::MutationsSection::DEFAULT_WRITE_LOCK_TIMEOUT_SECS,
+    ))
 }
 
 impl FilesystemBackend {
@@ -182,6 +211,8 @@ impl FilesystemBackend {
             io: Box::new(RealIo),
             removal_sync_owed: Mutex::new(None),
             meta_named: std::sync::atomic::AtomicBool::new(false),
+            lock_wait: Mutex::new(None),
+            lock_wait_spent: Mutex::new(None),
         }
     }
 
@@ -195,6 +226,8 @@ impl FilesystemBackend {
             io: Box::new(io),
             removal_sync_owed: Mutex::new(None),
             meta_named: std::sync::atomic::AtomicBool::new(false),
+            lock_wait: Mutex::new(None),
+            lock_wait_spent: Mutex::new(None),
         }
     }
 
@@ -218,6 +251,88 @@ impl FilesystemBackend {
 
     fn record_path(&self) -> PathBuf {
         self.root.join(COMMIT_RECORD_REL)
+    }
+
+    /// The limit of a wait for the mem's write lock in front of a
+    /// commit record (see [`MemBackend::set_lock_wait`]), and whether
+    /// an engine set it or it is the default of a backend nobody told.
+    fn lock_wait_limit(&self) -> (Option<std::time::Duration>, bool) {
+        match self.lock_wait.lock().map(|told| *told) {
+            Ok(Some(limit)) => (limit, true),
+            _ => (default_lock_wait(), false),
+        }
+    }
+
+    /// Wait for the mem's write lock in front of a commit record, no
+    /// longer than the limit. `Ok(None)`: the lock is held now and needs
+    /// one release. `Ok(Some(limit))`: the limit passed, or passed a
+    /// moment ago, with the lock still held elsewhere.
+    ///
+    /// A wait that ran out is not repeated at once. For as long again
+    /// as the limit, a further call looks at the lock once and answers,
+    /// so an operation that loads the mem and then reads it pays the
+    /// wait once. A lock that came free in the meantime is taken by that
+    /// one look.
+    fn wait_for_write_lock(&self, lock: &Path) -> std::io::Result<Option<LockWait>> {
+        let (limit, told) = self.lock_wait_limit();
+        let spent_recently = limit.is_some_and(|limit| {
+            self.lock_wait_spent
+                .lock()
+                .ok()
+                .and_then(|at| *at)
+                .is_some_and(|at| at.elapsed() < limit)
+        });
+        let wait = if spent_recently {
+            Some(std::time::Duration::ZERO)
+        } else {
+            limit
+        };
+        if path_lock::acquire_within(lock, wait)? {
+            return Ok(None);
+        }
+        if !spent_recently && let Ok(mut spent) = self.lock_wait_spent.lock() {
+            *spent = Some(std::time::Instant::now());
+        }
+        Ok(Some(LockWait {
+            limit: limit.unwrap_or_default(),
+            told,
+            looked_once: spent_recently,
+        }))
+    }
+
+    /// What a load or a read says when the mem's write lock stayed held
+    /// past the limit over a commit record: the commit is decided and
+    /// not applied, nothing of the mem is served, and the next load
+    /// after the lock is free completes it.
+    fn lock_wait_passed(&self, wait: LockWait) -> BackendError {
+        let whose = if wait.told {
+            "`write_lock_timeout_secs` in the workspace's `[mutations]` table sets that wait, \
+             `0` waits without bound"
+        } else {
+            "the default wait of a reader that has no workspace to ask; \
+             `write_lock_timeout_secs` does not reach it"
+        };
+        // A call inside the span after a wait that ran out waited for
+        // nothing itself, and says so.
+        let waited = if wait.looked_once {
+            format!(
+                "another process holds its write lock; a wait of {} s for that lock ran out a \
+                 moment ago and is not repeated yet",
+                wait.limit.as_secs_f64()
+            )
+        } else {
+            format!(
+                "another process held its write lock for the whole wait of {} s",
+                wait.limit.as_secs_f64()
+            )
+        };
+        BackendError::CommitNotApplied {
+            detail: format!(
+                "the mem holds a commit that is decided and not applied, and {waited} \
+                 ({whose}); nothing of the mem was read; loading the mem completes the commit \
+                 once the lock is free"
+            ),
+        }
     }
 
     /// Create `dir` and every missing directory above it, noting each
@@ -541,8 +656,18 @@ impl FilesystemBackend {
                     .to_string(),
             });
         }
-        if path_lock::acquire(&lock).is_ok() {
-            path_lock::release(&lock);
+        // A live writer finishes its own commit and the record is gone
+        // by the time it lets go. The wait is the workspace's write-lock
+        // deadline: a writer that stopped inside its commit and still
+        // holds the lock must not hold a reader for ever.
+        match self.wait_for_write_lock(&lock) {
+            Ok(None) => path_lock::release(&lock),
+            Ok(Some(wait)) => {
+                if self.io.exists(&record).map_err(BackendError::Io)? {
+                    return Err(self.lock_wait_passed(wait));
+                }
+            }
+            Err(_) => {}
         }
         if !self.io.exists(&record).map_err(BackendError::Io)? {
             return Ok(());
@@ -705,6 +830,18 @@ impl FilesystemBackend {
 /// costs one existence check and is not touched.
 pub(crate) fn refuse_cut_off_commit(root: &Path) -> Result<(), BackendError> {
     FilesystemBackend::new(root.to_path_buf()).ensure_whole()
+}
+
+/// [`refuse_cut_off_commit`] for a reader the engine calls with its
+/// workspace's settings at hand: the wait for the mem's write lock is
+/// the workspace's write-lock deadline, `None` for no bound.
+pub(crate) fn refuse_cut_off_commit_within(
+    root: &Path,
+    limit: Option<std::time::Duration>,
+) -> Result<(), BackendError> {
+    let backend = FilesystemBackend::new(root.to_path_buf());
+    backend.set_lock_wait(limit);
+    backend.ensure_whole()
 }
 
 /// Normalise a mem-relative path to a forward-slash key. Rejects
@@ -972,14 +1109,25 @@ impl crate::backend::MemBackend for FilesystemBackend {
         self.commit_staged_set(staged.ops, &staged.records)
     }
 
+    fn set_lock_wait(&self, limit: Option<std::time::Duration>) {
+        if let Ok(mut wait) = self.lock_wait.lock() {
+            *wait = Some(limit);
+        }
+    }
+
+    fn lock_wait(&self) -> Option<Option<std::time::Duration>> {
+        Some(self.lock_wait_limit().0)
+    }
+
     /// Recovery writes, so it excludes a live writer first: the record
     /// it applies and the temps it removes belong to a writer that is
     /// gone only if no one holds the mem's write lock. A record on disk
-    /// waits for that lock (a live writer finishes its own commit and
-    /// the record is gone by then); leftover temps are removed only if
-    /// the lock is free at once, since they are invisible to readers
-    /// and a load must not wait on hygiene. A mem with nothing to
-    /// recover is not touched at all, lock file included.
+    /// waits for that lock, no longer than the workspace's write-lock
+    /// deadline (a live writer finishes its own commit and the record
+    /// is gone by then); leftover temps are removed only if the lock is
+    /// free at once, since they are invisible to readers and a load
+    /// must not wait on hygiene. A mem with nothing to recover is not
+    /// touched at all, lock file included.
     fn complete_interrupted_commit(&self) -> Result<Option<CompletedCommit>, BackendError> {
         // A commit of this backend that is applied except for the sync
         // of its record's removal: make the sync good, and that commit
@@ -1020,8 +1168,26 @@ impl crate::backend::MemBackend for FilesystemBackend {
             }
             // A lock that cannot be taken (a read-only location) is not
             // a reason to serve the mem half applied: the completion
-            // below then fails with its own error.
-            let locked = path_lock::acquire(&lock).is_ok();
+            // below then fails with its own error. A lock another
+            // process keeps past the workspace's write-lock deadline
+            // ends the wait: the commit is that process's to finish or
+            // a later load's, and this load serves nothing of the mem.
+            let locked = match self.wait_for_write_lock(&lock) {
+                Ok(None) => true,
+                Ok(Some(wait)) => {
+                    // The holder may have finished its commit while
+                    // this load waited out the last moment.
+                    if !self
+                        .io
+                        .exists(&self.record_path())
+                        .map_err(BackendError::Io)?
+                    {
+                        return Ok(None);
+                    }
+                    return Err(self.lock_wait_passed(wait));
+                }
+                Err(_) => false,
+            };
             let result = self.complete_decided_commit();
             if locked {
                 path_lock::release(&lock);

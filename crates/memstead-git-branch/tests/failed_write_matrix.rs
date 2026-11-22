@@ -97,6 +97,8 @@ methods! {
     ReadProvenance => "read_provenance",
     CurrentHead => "current_head",
     WriteLockPath => "write_lock_path",
+    SetLockWait => "set_lock_wait",
+    LockWait => "lock_wait",
     ReadMemConfig => "read_mem_config",
     ReadArchiveProvenance => "read_archive_provenance",
     ReadArchiveChecks => "read_archive_checks",
@@ -344,6 +346,16 @@ impl MemBackend for FaultBackend {
         self.faults.enter(Method::WriteLockPath);
         self.inner.write_lock_path()
     }
+    fn set_lock_wait(&self, limit: Option<std::time::Duration>) {
+        // Infallible by signature: recorded, never failed.
+        self.faults.enter(Method::SetLockWait);
+        self.inner.set_lock_wait(limit)
+    }
+    fn lock_wait(&self) -> Option<Option<std::time::Duration>> {
+        // Infallible by signature: recorded, never failed.
+        self.faults.enter(Method::LockWait);
+        self.inner.lock_wait()
+    }
     fn read_mem_config(&self) -> Result<Option<Vec<u8>>, BackendError> {
         self.gate(Method::ReadMemConfig)?;
         self.inner.read_mem_config()
@@ -445,6 +457,14 @@ fn every_listed_method_is_gated_by_the_wrapper() {
             // Infallible by signature: recorded, never failed.
             Method::WriteLockPath => {
                 backend.write_lock_path();
+                faults.fired()
+            }
+            Method::SetLockWait => {
+                backend.set_lock_wait(backend.lock_wait().flatten());
+                faults.fired()
+            }
+            Method::LockWait => {
+                backend.lock_wait();
                 faults.fired()
             }
             Method::ReadMemConfig => backend.read_mem_config().is_err(),
@@ -886,6 +906,8 @@ impl Method {
             | Method::ReadProvenance
             | Method::CurrentHead
             | Method::WriteLockPath
+            | Method::SetLockWait
+            | Method::LockWait
             | Method::ReadMemConfig
             | Method::ReadArchiveProvenance
             | Method::ReadArchiveChecks
@@ -2008,12 +2030,15 @@ fn view(engine: &Engine, hashes: bool) -> BTreeMap<String, String> {
 ///   engine reload the mem instead of trusting the head, and the call
 ///   goes on from the reloaded view; after the commit it only decides
 ///   which cursor is recorded for the engine's own write.
-/// - `write_lock_path`: infallible by signature.
+/// - `write_lock_path`, `set_lock_wait`, `lock_wait`: infallible by
+///   signature.
 /// - `discard_pending`: called on exits only; on a successful call
 ///   nothing is staged and its failure has nothing to leave behind.
 const ABSORBED: &[Method] = &[
     Method::CurrentHead,
     Method::WriteLockPath,
+    Method::SetLockWait,
+    Method::LockWait,
     Method::DiscardPending,
 ];
 
@@ -2171,7 +2196,10 @@ fn run_matrix(kind: Kind) {
         }
         for &method in Method::ALL {
             // Infallible by signature: there is no failure to inject.
-            if method == Method::WriteLockPath {
+            if matches!(
+                method,
+                Method::WriteLockPath | Method::SetLockWait | Method::LockWait
+            ) {
                 continue;
             }
             let calls = control.log.iter().filter(|(m, _)| *m == method).count();

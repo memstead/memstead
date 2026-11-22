@@ -151,12 +151,21 @@ impl Engine {
     /// with its refreshed reason — the pin switch itself is durable
     /// either way. The booted path's conformance gate cannot run over
     /// an unloaded mem; findings surface on the post-reattach health.
+    ///
+    /// The pin switch writes into the mem's storage, and a write holds
+    /// the mem's write lock. The caller's workspace lock covers the
+    /// mems in service and not this one, so the lock is taken here,
+    /// before anything is repinned: a mem can be out of service because
+    /// another process holds that very lock over a commit it has not
+    /// applied, and the repair must not write beside that writer. When
+    /// the lock cannot be had the call refuses `WRITE_LOCK_TIMEOUT` and
+    /// has changed nothing, neither in storage nor on the roster.
     pub(super) fn set_schema_on_quarantined(
         &mut self,
         mem: &str,
         target: &memstead_schema::SchemaRef,
     ) -> Result<crate::engine::SetSchemaOutcome, EngineError> {
-        use crate::engine::{SetSchemaOutcome, SetSchemaResult};
+        use crate::storage::path_lock;
         // The capability gate of the ordinary branch, judged on the
         // roster as it stands: a pin change is a write, and a mount the
         // roster gives read-only refuses it in quarantine as it does in
@@ -195,14 +204,67 @@ impl Engine {
         let Some(q_idx) = self.quarantined.iter().position(|q| q.mount.mem == mem) else {
             return Err(self.unknown_mem_error(mem));
         };
-        // Repin the retained mount and, where a backend can be
-        // instantiated, the authoritative backend config (shared
-        // value-level bump — same writer as the ordinary branch).
+        let backend = self
+            .instantiate_backend(&self.quarantined[q_idx].mount)
+            .ok();
+        let lock = backend.as_ref().and_then(|b| b.write_lock_path());
+        let mut held = None;
+        if let Some(path) = lock {
+            // This thread holds the locks of the mems in service, taken
+            // in one sorted order, and this lock is outside that set: a
+            // writer of this mem may be waiting for one of those. So it
+            // is looked at once and not waited for; with no other lock
+            // held the wait is the workspace's write-lock deadline.
+            let started = std::time::Instant::now();
+            let taken = if path_lock::holds_another(&path) {
+                path_lock::try_acquire(&path)
+            } else {
+                path_lock::acquire_within(&path, self.settings().mutations.write_lock_timeout())
+            };
+            match taken {
+                Ok(true) => held = Some(path),
+                Ok(false) => {
+                    return Err(EngineError::WriteLockTimeout {
+                        mem: mem.to_string(),
+                        waited_ms: started.elapsed().as_millis() as u64,
+                    });
+                }
+                // A lock file that cannot be opened: storage that is
+                // gone or may not be written. The pin lands on the
+                // roster alone, and the reattach below names the cause.
+                Err(_) => {}
+            }
+        }
+        let writable = held.is_some()
+            || backend
+                .as_ref()
+                .is_some_and(|b| b.write_lock_path().is_none());
+        let outcome =
+            self.repin_quarantined(mem, target, q_idx, backend.as_deref().filter(|_| writable));
+        if let Some(path) = held {
+            path_lock::release(&path);
+        }
+        outcome
+    }
+
+    /// The writes of [`Self::set_schema_on_quarantined`], under the
+    /// mem's write lock where its storage has one: repin the retained
+    /// mount and, where a backend is given, the authoritative backend
+    /// config (shared value-level bump, the same writer as the ordinary
+    /// branch), persist the mount state, then re-attempt the attach.
+    fn repin_quarantined(
+        &mut self,
+        mem: &str,
+        target: &memstead_schema::SchemaRef,
+        q_idx: usize,
+        backend: Option<&dyn crate::backend::MemBackend>,
+    ) -> Result<crate::engine::SetSchemaOutcome, EngineError> {
+        use crate::engine::{SetSchemaOutcome, SetSchemaResult};
         self.quarantined[q_idx].mount.schema = Some(target.clone());
         self.quarantined[q_idx].mount.migration_target = None;
-        if let Ok(backend) = (self.backend_factory)(&self.quarantined[q_idx].mount) {
+        if let Some(backend) = backend {
             let ctx = self.session_commit_context(Some("set_mem_schema"), None);
-            let _ = bump_backend_schema_pin(backend.as_ref(), target, &ctx);
+            let _ = bump_backend_schema_pin(backend, target, &ctx);
         }
         self.persist_state()?;
         // Re-attempt the attach. A failure keeps the quarantine with its
@@ -259,7 +321,7 @@ impl Engine {
             this.quarantined[q_idx].reason_message = e.to_string();
         };
 
-        let backend = match (self.backend_factory)(&mount) {
+        let backend = match self.instantiate_backend(&mount) {
             Ok(b) => b,
             Err(e) => {
                 let err = EngineError::Mem(e.to_string());

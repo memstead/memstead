@@ -63,6 +63,79 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A load waits for a folder mem's lock only so long.** 0.27.0
+  bounded a write's wait for a mem's write lock and named one wait it
+  left without bound: a folder mem that holds a commit which is decided
+  and not applied is completed when it is loaded, and that step waited
+  for the mem's write lock for as long as another process held it. A
+  fresh `memstead` process therefore hung behind a writer that had
+  stopped between its commit point and the end of its commit, and so
+  did every direct read of such a mem's storage. Both waits are now
+  bounded by the same setting, `write_lock_timeout_secs` in the
+  workspace's `[mutations]` table: 30 seconds when absent, `0` to wait
+  without bound as before. When the limit passes with the commit still
+  unapplied, nothing of the mem is served and nothing in it is touched.
+  A fresh process puts the mem out of service as it does any mem that
+  fails to load: it is quarantined with the reason `COMMIT_NOT_APPLIED`,
+  whose message names the wait and the setting, an operation that names
+  the mem refuses `MEM_QUARANTINED` with that reason, and the other mems
+  of the workspace are served. An engine that already serves the mem
+  waits no longer than the limit in its reload and keeps serving the
+  state it had; the change feed of such a mem (`memstead changes`,
+  `memstead_changes_since`) refuses `COMMIT_NOT_APPLIED` under the same
+  limit, and so does an explicit `reload` of the mem. A direct read of
+  storage returns that condition to the engine. The change feed and the
+  reload report it as `COMMIT_NOT_APPLIED` and no longer as `MEM_ERROR`;
+  a read that has a code of its own keeps that code and carries the
+  condition in its text or details: the export of a folder mem
+  (`MEM_ERROR`), the conflict read (`INVALID_INPUT`), the anchors read
+  (`ANCHORS_SIDECAR_UNREADABLE`), and the provenance parts of an entity
+  read, which is answered with them marked unreadable
+  (`ANCHORS_SIDECAR_UNREADABLE`, `PROPOSAL_RECORD_UNREADABLE`, an
+  `unavailable` note on the mutation provenance). The next load after
+  the lock is free completes the commit and reports it
+  (`INTERRUPTED_COMMIT_COMPLETED`), as before; a mem that a boot put out
+  of service comes back with the next process, or with `reload` in a
+  running one, and that reload waits the workspace's limit too. A
+  writer that is alive is not disturbed: a commit it finishes within
+  the limit lets the load through, and the lock is never broken. A mem
+  with no unapplied commit is loaded and read under a held lock at
+  once, as before. A wait that ran out is not repeated at once: for as
+  long again as the limit, a further load or read through the same
+  backend looks at the lock once and answers, and its refusal says that
+  it did not wait itself. An engine reloads and reads a mem it serves
+  through one backend, so an operation that reloads and then reads
+  pays the wait once and not once per step. The change feed and each
+  `reload` of a mem that is out of service read through a backend of
+  their own and wait the limit anew, so one call of the change feed on
+  a served mem can take twice the limit. The engine hands the limit to
+  every backend it builds or is handed, at boot and when a mem is
+  mounted or brought back, and to all of them when it takes up changed
+  settings; a running server takes up an edited `workspace.toml` at a
+  workspace-wide `reload`. A reader that walks a folder mem's directory
+  with no workspace to ask (publish, the export of a folder mem,
+  conflict reads) waits the default of 30 seconds whatever the
+  workspace sets, and its refusal says that this is the default and
+  that the setting does not reach it. The export of a folder mem now
+  refuses while a commit of the mem is unapplied, where it could pack a
+  mem with part of a commit in place. A schema
+  pin switch on a quarantined mem (`memstead mem set-schema`,
+  `memstead_mem_set_schema`), the repair verb of such a mem, wrote the
+  mem's config without taking the mem's write lock, which now matters
+  because a lock held by a live writer can be what put the mem out of
+  service. It takes that lock first and refuses `WRITE_LOCK_TIMEOUT`
+  with nothing changed, in the mem or on the roster, while another
+  process holds it: after one look when the workspace has other mems in
+  service, whose locks the call already holds, and after the limit
+  otherwise. The load now names the mem in this refusal, so the quarantine
+  roster reads `COMMIT_NOT_APPLIED` where it read `MEM_ERROR`, and the
+  refusal's text speaks of a commit the mem holds, since it is no
+  longer only a writer's answer. `memstead workspace show` says for `0`
+  that a load waits without bound too. For a program that links the crates: the storage
+  trait gained `set_lock_wait` and `lock_wait`, with defaults that do
+  nothing, since a backend whose commit is one indivisible step never
+  waits there. Git-branch mems have no such step and are not touched.
+
 - **A quarantined mount leaves the roster by `mem unregister`.** A mem
   that cannot be brought into service is quarantined, and while one
   mount is quarantined every verb that reads the whole workspace (an
