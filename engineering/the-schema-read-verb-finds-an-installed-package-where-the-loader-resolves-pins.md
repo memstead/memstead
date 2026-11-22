@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-22T13:15:47Z
-last_modified: 2026-11-22T13:15:47Z
+last_modified: 2026-11-22T18:00:39Z
 status: accepted
 decided_on: 2026-11-21
 deciders: operator (shared-engine bundle, go of 2026-11-21), implementing agent
@@ -21,6 +21,9 @@ At 0.26.1 a schema that was scaffolded, installed and pinned could not be read b
 - The command that reads a built-in schema reads an installed one, whoever wrote the package.
 - A reader of the JSON form finds `summary` on every read and must take null for a package that shows its README.
 - The summary is derived from declarations and says less than a README an author would write.
+
+## Relationships
+- **DERIVED_FROM**: [[resolve-an-archive-backed-mounts-schema-from-its-own-archive-the-folder-tier-stays-the-authoring-tier]]
 
 ## Options
 
