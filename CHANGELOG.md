@@ -169,6 +169,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   imports nothing of the engine crates but that module uses every item
   by name, so a removal or a rename stops the build.
 
+### Security
+
+- **url 2.5.9.** Bumped for RUSTSEC-2026-0592 (url 2.5.8, a stack
+  overflow in `Url::origin()` on nested `blob:` URLs), which the RustSec
+  audit named on the release commit. The crate arrives through the
+  CLI's HTTP client, and the engine never calls `Url::origin()`.
+  Lockfile only.
+
 ### Fixed
 
 - **A running engine mounts a roster row whose schema lives in the
