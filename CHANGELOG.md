@@ -29,7 +29,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the engine crates lays a mem-repo with
   `memstead_git_branch::init_mem_repo(<workspace>)`, with no `memstead`
   binary involved, so it never runs a binary whose version differs from
-  the crates it links. The function creates `mem-repo/` with its `main`
+  the crates it links. The supported path to it is the library surface,
+  `memstead_mcp::library::init_mem_repo` (see "Library surface" below). The function creates `mem-repo/` with its `main`
   and registry refs and the minimum `.memstead/workspace.toml`, and
   refuses a workspace that already holds a mem-repo without changing
   anything. `memstead mem-repo init` is that function plus its own
@@ -138,6 +139,33 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   before, with the one correction listed under Fixed. The engine
   remembers up to 1024 callers and forgets the least recently used; a
   forgotten caller starts over as a first contact.
+
+### Library surface
+
+- **The crates state one supported library surface, and a promise about
+  it.** A program that links the engine as a library builds on the
+  module `memstead_mcp::library`, which re-exports a closed list:
+  booting an engine from a workspace root
+  (`engine_from_workspace_root`); building the MCP server over an
+  engine it owns (`McpServer::new`) and a further instance over the
+  same engine for another caller (`McpServer::for_caller` with a
+  `CallerKey`, made by `CallerKey::new`); setting a default identity and pinning an identity
+  (`McpServer::with_default_identity`, `McpServer::with_pin_identity`);
+  filtering tools (`McpServer::new_with_filter`) and listing them
+  (`McpServer::filtered_tool_list`); the default token budget
+  (`DEFAULT_TOKEN_BUDGET`); laying a mem-repo (`init_mem_repo`);
+  mounting a mem that exists as a branch (`mount_mem`) and
+  unregistering a mem (`delete_mem`); and the engine-crate types those
+  signatures name. Of `McpServer` and `Engine` the promise covers the
+  methods named here and no others. The promise: before 1.0 the library surface changes only in a
+  minor release, with a changelog entry under this heading, and never
+  in a patch release. Everything else in the crates is internal and may
+  change in any release, as before; the crate READMEs say so and name
+  the module as the one exception. An item joins the list only by an
+  entry under this heading. The engine still ships no transport beyond
+  the stdio binary: a program that links it brings its own. A test that
+  imports nothing of the engine crates but that module uses every item
+  by name, so a removal or a rename stops the build.
 
 ### Fixed
 

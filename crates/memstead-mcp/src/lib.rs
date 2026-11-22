@@ -11,6 +11,10 @@
 //!
 //! The binary entry point ([`main.rs`](main.rs)) stays thin: argument
 //! parsing, logging, then delegation into this crate.
+//!
+//! A program that links the engine as a library builds on [`library`],
+//! the one supported library surface of the engine crates, and on
+//! nothing else here.
 
 pub mod coverage;
 pub mod descriptions;
@@ -19,6 +23,7 @@ pub mod error_envelopes;
 pub mod tools;
 
 pub mod config;
+pub mod library;
 pub mod lifecycle;
 pub mod read_mems;
 pub mod server;
