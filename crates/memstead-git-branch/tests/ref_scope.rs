@@ -404,10 +404,16 @@ fn diff_keeps_serving_the_histories_the_workspace_mounts() {
 }
 
 fn git(gitdir: &Path, args: &[&str]) {
+    // An annotated tag and a commit need an identity, and a machine
+    // with no git configuration (a CI runner) has none to offer.
     let out = std::process::Command::new("git")
         .arg("--git-dir")
         .arg(gitdir)
         .args(args)
+        .env("GIT_AUTHOR_NAME", "memstead-test")
+        .env("GIT_AUTHOR_EMAIL", "test@memstead.invalid")
+        .env("GIT_COMMITTER_NAME", "memstead-test")
+        .env("GIT_COMMITTER_EMAIL", "test@memstead.invalid")
         .output()
         .unwrap();
     assert!(
