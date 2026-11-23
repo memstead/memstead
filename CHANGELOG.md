@@ -46,9 +46,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   names, and a create into a read-only mount answers `READ_ONLY_MOUNT`
   wherever the mount stands on the roster. A workspace that holds only
   folder mems keeps its shape and its refusals. A view still hosts no
-  mem of its own: `memstead mem init` and `memstead_mem_create` refuse
-  there as before (now `INVALID_INPUT`, naming the way: create the mem
-  in the workspace that holds the git directory and mount it).
+  mem of its own: `memstead mem init` refuses there as before (now
+  `INVALID_INPUT`, naming the way: create the mem in the workspace that
+  holds the git directory and mount it), and `memstead_mem_create`
+  refuses `UNSUPPORTED_WORKSPACE_SHAPE` as before.
 
 - **A strict health read fails on a mem that is out of service.**
   `memstead health --strict` exited 0 on a workspace with a quarantined
