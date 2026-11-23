@@ -109,6 +109,12 @@ fn git_ok(gitdir: &Path, args: &[&str]) {
     );
 }
 
+/// The pack a user runs by hand beside a running engine, as the backup
+/// guide gives it: git's `gc` at its default prune grace, leaving the
+/// refs unpacked. A pack that packs the refs deletes a branch's ref
+/// file under a reader, which is a different promise and not this one.
+const PACK: &[&str] = &["-c", "gc.packRefs=false", "gc", "--quiet"];
+
 /// The loose objects of a git directory, and its pack files.
 fn objects(gitdir: &Path) -> (usize, usize) {
     let mut loose = 0;
@@ -184,8 +190,9 @@ fn reads_back(engine: &mut Engine, mem: &str, written: &Written, when: &str) {
 /// One engine that stays up writes a few hundred entities, with updates
 /// and a rename among them. Its git directory is packed under it at
 /// each point of the closed list: between two operations; several times
-/// from outside while the engine is inside a burst of writes; and after
-/// the refs were packed. After each pack the same engine reads back
+/// from outside while the engine is inside a burst of writes, by the
+/// command the backup guide gives; and after the refs were packed
+/// between two operations. After each pack the same engine reads back
 /// everything it wrote with the hash it got, and writes on; a second
 /// engine on the same git directory and a fresh one agree.
 #[test]
@@ -234,7 +241,7 @@ fn a_running_engine_loses_nothing_when_its_git_directory_is_packed_under_it() {
     let outside = gitdir.clone();
     let packer = std::thread::spawn(move || {
         for _ in 0..5 {
-            git_ok(&outside, &["gc", "--quiet"]);
+            git_ok(&outside, PACK);
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     });
@@ -392,6 +399,12 @@ fn a_store_packs_itself_past_gits_default_threshold() {
     );
     let (loose, _) = objects(&gitdir);
     assert!(loose < 6700, "{loose} loose objects after the pack");
+    // The engine's pack leaves the refs unpacked: the branch is still a
+    // ref file, which a reader never finds deleted under it.
+    assert!(
+        gitdir.join("refs").join("heads").join("alpha").is_file(),
+        "the branch's ref file is where it was"
+    );
 
     // As many commits again: the store stays bounded.
     let mut most_loose = 0;

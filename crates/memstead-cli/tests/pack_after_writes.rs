@@ -222,6 +222,10 @@ fn a_git_that_fails_does_not_fail_the_write() {
     let calls = fs::read_to_string(&log).expect("git was asked to pack");
     assert!(calls.contains("gc --auto"), "{calls}");
     assert!(
+        calls.contains("gc.packRefs=false"),
+        "the engine's pack leaves the refs unpacked: {calls}"
+    );
+    assert!(
         !calls.contains("prune"),
         "no expiry of the engine's own: {calls}"
     );
@@ -265,5 +269,30 @@ fn below_the_threshold_and_in_a_folder_mem_no_git_process_is_started() {
             .unwrap_or_default()
             .contains("gc --auto"),
         "over the threshold a write into the git directory asks git"
+    );
+}
+
+/// The log and the lock file of an earlier pack are git's to judge. A
+/// log left long ago does not keep the engine from asking: git ignores
+/// it past its expiry and packs.
+#[cfg(unix)]
+#[test]
+fn a_stale_log_of_an_earlier_pack_does_not_switch_the_pack_off() {
+    let root = TempDir::new().unwrap();
+    let (ws, gitdir) = workspace(root.path());
+    seed_the_bucket(&gitdir);
+    let log = gitdir.join("gc.log");
+    fs::write(&log, "warning: left by a pack long ago\n").unwrap();
+    let touched = StdCommand::new("touch")
+        .args(["-t", "202001010000"])
+        .arg(&log)
+        .status()
+        .expect("touch runs");
+    assert!(touched.success());
+    let (succeeded, printed) = run(&ws, None, &spec_args("notes", "First"));
+    assert!(succeeded, "{printed}");
+    assert!(
+        pack_files(&gitdir) >= 1,
+        "git packed past the stale log of an earlier run"
     );
 }

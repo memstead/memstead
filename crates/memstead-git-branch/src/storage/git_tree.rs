@@ -681,8 +681,16 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
             break match commit_result {
                 Ok(id) => id,
                 // The commit object is stored before the ref moves, so
-                // a commit that lost that race has changed nothing.
-                Err(e) if attempt < OBJECT_WRITE_ATTEMPTS && lost_to_a_pack(&e) => {
+                // a commit that lost that race has changed nothing. The
+                // same holds when the ref could not be locked for the
+                // edit: a pack that packs the refs holds that lock for
+                // a moment. A ref that moved is neither, and is the
+                // conflict handled below.
+                Err(e)
+                    if attempt < OBJECT_WRITE_ATTEMPTS
+                        && !is_ref_cas_conflict(&e)
+                        && (lost_to_a_pack(&e) || ref_edit_was_blocked(&e)) =>
+                {
                     continue 'attempt;
                 }
                 Err(e) if is_ref_cas_conflict(&e) => {
@@ -1235,6 +1243,16 @@ fn commit_note_to_provenance(
 /// (`ReferenceOutOfDate`), or a ref the writer expected absent now
 /// exists (`MustNotExist`). gix 0.89 carries the cause inside its one
 /// error type; any other cause is not a CAS conflict.
+/// Whether a commit failed because its ref could not be prepared for
+/// the edit: the lock on the ref, or on `packed-refs`, was held by
+/// another process past the library's short wait. Call it only for a
+/// failure that is no compare-and-swap conflict, which the library
+/// reports under the same heading.
+fn ref_edit_was_blocked<E: std::fmt::Display + std::fmt::Debug>(e: &E) -> bool {
+    const CAUSE: &str = "Could not prepare reference edit";
+    e.to_string().contains(CAUSE) || format!("{e:?}").contains(CAUSE)
+}
+
 fn is_ref_cas_conflict(e: &gix::Error) -> bool {
     use gix::refs::file::transaction::prepare::{MustNotExist, ReferenceOutOfDate};
     e.downcast_any_ref::<ReferenceOutOfDate>().is_some()
@@ -1251,6 +1269,14 @@ const GIT_GC_AUTO_DEFAULT: i64 = 6700;
 /// the write stops waiting here and the pack runs on.
 const PACK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How often one process asks git to pack one git directory. A pack
+/// that is under way, or one git declines for now, would otherwise be
+/// asked for again by every write past the threshold.
+const PACK_PAUSE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// When this process last asked git to pack each git directory.
+static LAST_PACK: Mutex<Option<HashMap<PathBuf, std::time::Instant>>> = Mutex::new(None);
+
 /// Start git's automatic maintenance for the git directory of `repo`
 /// once enough loose objects have gathered there.
 ///
@@ -1259,16 +1285,24 @@ const PACK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 /// by the engine would keep every object loose. The pack itself is
 /// `git gc --auto`, run by the `git` binary: git's configuration of
 /// that directory decides whether and how (`gc.auto`, with `0` to
-/// switch it off; `gc.autoDetach`; `gc.pruneExpire`), and the engine
-/// passes no setting of its own. An object a write has stored and not
-/// yet referenced is protected by git's prune grace, which is why no
-/// expiry is given here.
+/// switch it off; `gc.autoDetach`; `gc.pruneExpire`). An object a write
+/// has stored and not yet referenced is protected by git's prune grace,
+/// which is why no expiry is given here.
+///
+/// The engine passes one setting of its own, `gc.packRefs=false`. A
+/// pack that also packs the refs deletes each branch's ref file once
+/// its value stands in `packed-refs`, and the git library reads
+/// `packed-refs` before it looks for the ref file: a read that falls
+/// between the two sees the branch where it stood at the pack before,
+/// and a write planned on that is refused. A mem-repo has a handful of
+/// refs, so leaving them unpacked costs nothing.
 ///
 /// The decision to start a process at all is cheap and is git's own
 /// estimate: the loose objects whose hash begins with `17` stand for
-/// one in 256. No process is started below the threshold, while another
-/// maintenance run holds its lock, or while git's log of a failed run
-/// says it will not run again yet.
+/// one in 256. No process is started below the threshold. Whether a
+/// pack is already under way, or was tried and is not to be tried again
+/// yet, is git's to judge; this process only does not ask more often
+/// than every few seconds.
 ///
 /// Nothing here is a write's failure: no `git` on the path, a `git`
 /// that fails, a pack that takes long. The commit has landed.
@@ -1299,16 +1333,17 @@ fn pack_if_due(repo: &gix::Repository) {
     if loose <= threshold {
         return;
     }
-    // A run that is under way holds `gc.pid`; a run that failed or left
-    // too much loose leaves `gc.log`, and git refuses to run again
-    // while that file is fresh. Starting git would change nothing.
-    if gitdir.join("gc.pid").exists() || gitdir.join("gc.log").exists() {
-        return;
+    if let Ok(mut last) = LAST_PACK.lock() {
+        let last = last.get_or_insert_with(HashMap::new);
+        if last.get(gitdir).is_some_and(|at| at.elapsed() < PACK_PAUSE) {
+            return;
+        }
+        last.insert(gitdir.to_path_buf(), std::time::Instant::now());
     }
     let child = std::process::Command::new("git")
         .arg("--git-dir")
         .arg(gitdir)
-        .args(["gc", "--auto", "--quiet"])
+        .args(["-c", "gc.packRefs=false", "gc", "--auto", "--quiet"])
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
