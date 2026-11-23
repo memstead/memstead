@@ -374,6 +374,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .next()
                 .map(String::from)
                 .unwrap_or_default();
+            // A workspace that mounts no mem has none to create into.
+            if workspace_mem.is_empty() && payload.mem.is_none() {
+                return Err(CliError::from_engine_with_hint(
+                    memstead_base::EngineError::NoWritableMem,
+                    &crate::setup::one_mem_hint(""),
+                )
+                .into());
+            }
             if let Some(requested) = payload.mem.as_deref()
                 && requested != workspace_mem
             {

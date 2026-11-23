@@ -73,13 +73,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **A view with no mount left says so.** A workspace made with
   `memstead mem mount --new-workspace` reads as the shape made for one
   folder mem once its last mount was taken off. Its refusals spoke to
-  a folder workspace that has a mem: the cross-link grant, the dump and
-  `mem unregister` advised to migrate with `mem-repo init` or to use
-  the folder verbs "here instead", and a create that named a mem
-  answered `UNKNOWN_MEM` with "A filesystem workspace holds one mem"
-  and an empty name. They now say that the workspace mounts no mem and
-  name `memstead mem mount`, which brings one back. The commands
-  themselves still refuse there until a mem is mounted.
+  a folder workspace that has a mem: the cross-link grant and the dump
+  advised to migrate with `mem-repo init` or to use the folder verbs
+  "here instead", `mem unregister` said only that it runs on mem-repo
+  workspaces, a create that named a mem answered `UNKNOWN_MEM` with "A
+  filesystem workspace holds one mem" and an empty name, and a create
+  or a `changes` that named none answered `UNKNOWN_MEM` for an empty
+  name. The refusals now say that the workspace mounts no mem and name
+  `memstead mem mount`, which brings one back; a call that names no mem
+  answers `NO_WRITABLE_MEM`. The commands themselves still refuse there
+  until a mem is mounted.
+
+- **`workspace dump` reads a mount's own branch.** A mount whose name
+  differs from its branch (`memstead mem mount other --branch notes`)
+  failed the dump with `MEM_ERROR`, "find ref refs/heads/other": the
+  snapshot token was looked up under the mem's name. It is read from
+  the branch the mount names.
 
 - **A leftover whose schema pin resolves nowhere is refused before
   anything is written.** A create that routes to a reattach (after a

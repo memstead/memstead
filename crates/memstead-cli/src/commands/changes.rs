@@ -235,6 +235,14 @@ fn run_filesystem(
         .next()
         .map(String::from)
         .unwrap_or_default();
+    // A workspace that mounts no mem has none to report on.
+    if workspace_mem.is_empty() && args.mem.is_none() {
+        return Err(CliError::from_engine_with_hint(
+            memstead_base::EngineError::NoWritableMem,
+            &crate::setup::one_mem_hint(""),
+        )
+        .into());
+    }
     if let Some(name) = args.mem.as_deref()
         && name != workspace_mem
     {

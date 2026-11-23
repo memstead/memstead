@@ -299,6 +299,26 @@ fn a_view_with_no_mount_left_says_so() {
         printed.contains("This workspace mounts no mem"),
         "{printed}"
     );
+    // A create that names no mem has none to fall back on, and says so
+    // without an empty name.
+    let printed = refused(
+        &view,
+        &[
+            "create",
+            "--title",
+            "Nowhere",
+            "--type",
+            "spec",
+            "--metadata",
+            "level=M0",
+            "--section",
+            "identity=i",
+            "--section",
+            "purpose=p",
+        ],
+        "NO_WRITABLE_MEM",
+    );
+    assert!(!printed.contains("unknown mem"), "{printed}");
     assert!(!printed.contains("holds one mem"), "{printed}");
 
     let gitdir = store.join("mem-repo/.git").canonicalize().unwrap();
@@ -319,6 +339,26 @@ fn a_view_with_no_mount_left_says_so() {
     );
     ok(&view, &spec("notes", "Back Again"));
     ok(&view, &["workspace", "dump"]);
+
+    // A mount may carry another name than its branch; the dump reads
+    // the mount's branch.
+    ok(
+        &view,
+        &[
+            "mem",
+            "mount",
+            "other",
+            "--branch",
+            "facts",
+            "--gitdir",
+            gitdir.to_str().unwrap(),
+            "--capability",
+            "read-only",
+            "--operator-mode",
+        ],
+    );
+    let dump = ok(&view, &["workspace", "dump"]);
+    assert!(dump.contains("\"other\""), "{dump}");
 }
 
 /// A workspace that holds one folder mem is still the filesystem shape:

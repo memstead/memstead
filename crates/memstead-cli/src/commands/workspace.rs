@@ -25,8 +25,6 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use memstead_git_branch::mem_repo_config::branch_ref_for_mem_at_gitdir;
-
 use crate::CliError;
 use crate::output::{ExitKind, print_json};
 use crate::setup::{CliContext, find_workspace_root, workspace_not_initialised_error};
@@ -904,11 +902,13 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
         };
         let storage = mount.map(|m| &m.storage);
         let snapshot_token: Option<String> = match storage {
-            Some(memstead_base::MountStorage::GitBranch { .. }) => {
+            Some(memstead_base::MountStorage::GitBranch { branch, .. }) => {
                 let gitdir = engine
                     .gitdir_for(name)
                     .map_err(|e| CliError::from_engine_with_hint(e, "(workspace dump)"))?;
-                Some(read_branch_head_oid(&gitdir, name).map_err(|e| {
+                // The mount's own branch, not one derived from the mem's
+                // name: a mount may carry another name than its branch.
+                Some(read_branch_head_oid(&gitdir, branch).map_err(|e| {
                     CliError::from_engine_op(memstead_base::EngineError::Mem(format!(
                         "workspace dump: snapshot token for mem '{name}': {e}"
                     )))
@@ -1007,13 +1007,12 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
 /// `mem_name` is the leaf; the helper walks `__MEMSTEAD:mems/` to find
 /// the hierarchical branch ref (`refs/heads/<path>/<leaf>`) and reads
 /// the oid from there.
-fn read_branch_head_oid(gitdir: &Path, mem_name: &str) -> Result<String, String> {
+fn read_branch_head_oid(gitdir: &Path, branch_ref: &str) -> Result<String, String> {
     if !gitdir.is_dir() {
         return Err(format!("gitdir not found at {}", gitdir.display()));
     }
     let repo = gix::open(gitdir).map_err(|e| format!("gix open: {e}"))?;
-    let branch_ref = branch_ref_for_mem_at_gitdir(gitdir, mem_name);
-    let reference = memstead_git_branch::vcs::RefRead::fresh_ref(&repo, &branch_ref)
+    let reference = memstead_git_branch::vcs::RefRead::fresh_ref(&repo, branch_ref)
         .map_err(|e| format!("find ref {branch_ref}: {e}"))?
         .ok_or_else(|| format!("find ref {branch_ref}: no such ref"))?;
     let oid = reference
