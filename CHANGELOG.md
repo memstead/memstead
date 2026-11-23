@@ -81,12 +81,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   lock outlasts the repetition the reply is as before, and its warning
   names the way that works: `memstead mem init <name> --reattach`
   brings the mem back onto the roster, and a delete then removes it
-  whole. The refusal `mem init` gives for a leftover branch
+  whole; both calls need what the first delete needed, a rule of the
+  workspace's allowlists that covers the name or operator mode, and
+  the warning says so. The refusal `mem init` gives for a leftover branch
   (`MEM_STORAGE_RESIDUE_DETECTED`) names the CLI's flags, `--reattach`
   and `--force-overwrite`, beside the recovery values, and no longer
   says that a mem delete removes such a branch; neither does the help
-  of `--hard-cleanup-first` or the description of `recovery` on
-  `memstead_mem_create`. A delete of a name that is off the roster
+  of `--hard-cleanup-first`, the description of `recovery` on
+  `memstead_mem_create` or that tool's own description. A delete of a name that is off the roster
   still answers `UNKNOWN_MEM` and destroys nothing.
 
 - **A write that meets a pack is done again, not refused.** A `git gc`

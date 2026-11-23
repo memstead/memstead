@@ -135,6 +135,10 @@ fn a_ref_locked_for_long_leaves_a_branch_and_names_the_way_out() {
         "the warning names the way out: {printed}"
     );
     assert!(
+        printed.contains("or operator mode"),
+        "and what both calls need: {printed}"
+    );
+    assert!(
         !printed.contains("rerun delete"),
         "and no longer a rerun that refuses: {printed}"
     );

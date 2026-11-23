@@ -777,7 +777,10 @@ impl fmt::Display for WarningHint {
                          To remove what is left, bring the mem back with \
                          `memstead mem init {mem} --reattach` (over MCP: \
                          `memstead_mem_create` with `recovery: reattach`) \
-                         and delete it again."
+                         and delete it again. Both calls need what the \
+                         first delete needed: a rule of the workspace's \
+                         create and delete allowlists that covers the \
+                         name, or operator mode."
                 ),
                 ("backend_prune_failed", _, None) => write!(
                     f,
