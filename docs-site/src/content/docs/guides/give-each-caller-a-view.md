@@ -93,8 +93,9 @@ Where the pin switch stays on, it moves a mem only to a schema the
 store can resolve: a built-in one, or one installed in the store. A
 schema installed in the view alone refuses `SCHEMA_NOT_FOUND`, because
 a pin is written where the mem lives and the store would lose the mem.
-A move to a schema that is not built in is made in the store, or from
-a view that has the same schema installed itself.
+From a view a mem moves to a built-in schema, to one that another mem
+mounted from the same store pins, or to one the view has installed
+itself and the store holds too. Any other move is made in the store.
 
 ## 4. What a view is not
 
