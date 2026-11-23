@@ -278,6 +278,7 @@ impl CliError {
             | MemNameCollision { .. }
             | ProcessMemNotEligible { .. }
             | SchemaNotFound { .. }
+            | SchemaNotWhereTheMemLives { .. }
             | EmbeddedSchemaInvalid { .. }
             | SchemaPackageInvalid { .. }
             | InvalidInput { .. }

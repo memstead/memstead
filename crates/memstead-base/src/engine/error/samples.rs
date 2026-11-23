@@ -103,6 +103,7 @@ variant_tags!(
         Parse,
         Backend,
         SchemaNotFound,
+        SchemaNotWhereTheMemLives,
         EmbeddedSchemaInvalid,
         SchemaPackageInvalid,
         SchemaResolverInit,
@@ -947,6 +948,14 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
                     status: None,
                 }],
                 install_hint: Some(s("memstead schema install")),
+            },
+        ),
+        (
+            "SchemaNotWhereTheMemLives".into(),
+            EngineError::SchemaNotWhereTheMemLives {
+                mem: s("specs"),
+                pin: s("nope@1.0.0"),
+                gitdir: s("/store/mem-repo/.git"),
             },
         ),
         (

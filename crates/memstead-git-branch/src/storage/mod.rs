@@ -115,21 +115,18 @@ fn write_schema_dispatch(
         })
 }
 
-/// Dispatcher for `Engine::full_refresh`: re-read every schema sealed
-/// on the `__MEMSTEAD:schemas/` ref so an out-of-band install becomes
+/// Dispatcher for `Engine::full_refresh`: re-read the schemas the
+/// workspace takes from one registry so an out-of-band install becomes
 /// resolvable warm. Absent ref/subtree resolves to empty.
 fn read_ref_schemas_dispatch(
-    gitdir: &std::path::Path,
+    registry: &memstead_base::SchemaRegistry,
 ) -> Result<Vec<std::sync::Arc<memstead_schema::Schema>>, memstead_base::backend::BackendError> {
-    use memstead_base::schema_source::SchemaSource as _;
-    crate::mem_repo_schemas::GitBranchSchemaSource::for_gitdir(gitdir)
-        .read_schemas()
-        .map_err(|e| {
-            memstead_base::backend::BackendError::Other(format!(
-                "schema re-read from __MEMSTEAD ref at {}: {e}",
-                gitdir.display(),
-            ))
-        })
+    crate::mem_repo_schemas::read_registry_schemas(registry).map_err(|e| {
+        memstead_base::backend::BackendError::Other(format!(
+            "schema re-read from __MEMSTEAD ref at {}: {e}",
+            registry.gitdir.display(),
+        ))
+    })
 }
 
 /// Dispatcher for the authoring-drift health axis: read one file from

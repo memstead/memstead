@@ -392,6 +392,9 @@ fn workspace_installed_readme(ctx: &CliContext, schema_ref: &SchemaRef) -> Optio
     }
     // Every registry the workspace resolves pins from: the git
     // directories its git-branch mounts name, then its own mem-repo.
+    // A package the workspace does not resolve has no README here:
+    // from another git directory it takes what its mounts pin.
+    workspace_installed_schema(ctx, schema_ref)?;
     use memstead_base::WorkspaceStoreAdapter as _;
     let mounts = memstead_base::FileWorkspaceStore::new()
         .load(&root)

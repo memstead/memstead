@@ -467,42 +467,161 @@ pub struct DeleteRuleSetting {
 /// schema. Consumed by the create-rule allowlist parser.
 pub const SCHEMA_WILDCARD: &str = "*";
 
-/// The git directories whose `__MEMSTEAD:schemas/` registry a workspace
-/// resolves schema pins from: the git directory of every git-branch
-/// mount, in mount order, then the workspace's own `mem-repo/.git` when
-/// it exists. Each directory appears once (compared after
-/// canonicalisation, so a mount that names the workspace's own mem-repo
-/// through another spelling does not double).
+/// The git directory `mount` lives in, when that is not the workspace's
+/// own `mem-repo/.git`: a branch of another workspace's mem-repo, or
+/// any git-branch mount of a workspace that has no root or no mem-repo
+/// of its own. `None` for a mount of the workspace's own mem-repo and
+/// for every other storage. Compared after canonicalisation.
+pub fn lives_in_another_git_directory<'a>(
+    mount: &'a Mount,
+    workspace_root: Option<&std::path::Path>,
+) -> Option<&'a std::path::Path> {
+    let MountStorage::GitBranch { gitdir, .. } = &mount.storage else {
+        return None;
+    };
+    let canonical = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let own = workspace_root.map(|root| root.join("mem-repo").join(".git"));
+    own.is_none_or(|own| canonical(&own) != canonical(gitdir))
+        .then_some(gitdir.as_path())
+}
+
+/// Refuse a pin switch whose target the mem's own git directory cannot
+/// resolve. A pin is written into the configuration that lives with
+/// the mem; for a mem mounted from another git directory that is
+/// another workspace's registry, and a schema only the asking
+/// workspace holds would leave the mem unresolvable wherever else it
+/// is mounted. A built-in target and a target installed in that
+/// directory pass; `registry_holds` answers the latter for the
+/// directory it is given. A mount of the workspace's own mem-repo and
+/// every other storage pass unasked.
+pub fn pin_is_held_where_the_mem_lives(
+    mount: &Mount,
+    workspace_root: Option<&std::path::Path>,
+    target: &SchemaRef,
+    builtins: &[std::sync::Arc<memstead_schema::Schema>],
+    registry_holds: impl FnOnce(&std::path::Path) -> bool,
+) -> Result<(), crate::engine::EngineError> {
+    let Some(gitdir) = lives_in_another_git_directory(mount, workspace_root) else {
+        return Ok(());
+    };
+    let built_in = builtins.iter().any(|schema| {
+        let (name, version) = schema.id();
+        name == target.name && version == target.version
+    });
+    if built_in || registry_holds(gitdir) {
+        return Ok(());
+    }
+    Err(crate::engine::EngineError::SchemaNotWhereTheMemLives {
+        mem: mount.mem.clone(),
+        pin: target.as_display(),
+        gitdir: gitdir.display().to_string(),
+    })
+}
+
+/// One `__MEMSTEAD:schemas/` registry a workspace resolves schema pins
+/// from, and how much of it the workspace takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaRegistry {
+    /// The git directory whose `__MEMSTEAD` ref carries the registry.
+    pub gitdir: PathBuf,
+    /// `None` for the workspace's own `mem-repo/.git`: every schema
+    /// installed there resolves. `Some` for any other git directory:
+    /// the workspace takes only the schemas that the mems it mounts
+    /// from there pin, one entry per such mount.
+    pub mounted: Option<Vec<MountedPins>>,
+}
+
+/// What one mount of another git directory contributes to the schemas
+/// its workspace takes from that directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountedPins {
+    /// The mount's branch as a short name: the key of the mem's
+    /// configuration on the registry ref (`mems/<branch>/config.json`),
+    /// whose pin counts beside the roster's.
+    pub branch: String,
+    /// The pins the roster row carries: its `schema` and its
+    /// `migration_target`, where set.
+    pub pins: Vec<SchemaRef>,
+}
+
+/// The registries a workspace resolves schema pins from: the git
+/// directory of every git-branch mount, in mount order, then the
+/// workspace's own `mem-repo/.git` when it exists. Each directory
+/// appears once (compared after canonicalisation, so a mount that names
+/// the workspace's own mem-repo through another spelling does not
+/// double).
 ///
 /// A git-branch mem's schema is sealed on the registry of the
 /// repository that holds the mem, which is the mount's git directory
 /// and need not be the mounting workspace's `mem-repo/`: a workspace
 /// may consist of engine state only and mount mems that live in
-/// another workspace's mem-repo. Every reader of the registry (boot,
-/// full refresh, below-boot repair, export, health) walks this list,
-/// so the place a schema is installed into is a place it is read from.
-/// On a name-and-version collision between two registries the earlier
-/// directory wins.
+/// another workspace's mem-repo. From such a directory the workspace
+/// takes what its mounts pin and nothing else ([`SchemaRegistry`]): a
+/// schema that only a mem it does not mount pins is a statement about
+/// that mem, and the workspace was not given the mem. Its own mem-repo
+/// it reads whole, so the place a schema is installed into is a place
+/// it is read from. On a name-and-version collision between two
+/// registries the earlier directory wins.
+pub fn schema_registries<'a>(
+    mounts: impl IntoIterator<Item = &'a Mount>,
+    workspace_root: Option<&std::path::Path>,
+) -> Vec<SchemaRegistry> {
+    let canonical = |gitdir: &PathBuf| gitdir.canonicalize().unwrap_or_else(|_| gitdir.clone());
+    let own = workspace_root
+        .map(|root| root.join("mem-repo").join(".git"))
+        .filter(|gitdir| gitdir.is_dir());
+    let own_key = own.as_ref().map(canonical);
+    let mut index: HashMap<PathBuf, usize> = HashMap::new();
+    let mut out: Vec<SchemaRegistry> = Vec::new();
+    for mount in mounts {
+        let MountStorage::GitBranch { gitdir, branch } = &mount.storage else {
+            continue;
+        };
+        let key = canonical(gitdir);
+        let is_own = own_key.as_ref() == Some(&key);
+        let at = *index.entry(key).or_insert_with(|| {
+            out.push(SchemaRegistry {
+                gitdir: gitdir.clone(),
+                mounted: (!is_own).then(Vec::new),
+            });
+            out.len() - 1
+        });
+        if let Some(mounted) = out[at].mounted.as_mut() {
+            mounted.push(MountedPins {
+                branch: branch_short_name(branch).to_string(),
+                pins: mount
+                    .schema
+                    .iter()
+                    .chain(mount.migration_target.iter())
+                    .cloned()
+                    .collect(),
+            });
+        }
+    }
+    if let (Some(gitdir), Some(key)) = (own, own_key)
+        && !index.contains_key(&key)
+    {
+        out.push(SchemaRegistry {
+            gitdir,
+            mounted: None,
+        });
+    }
+    out
+}
+
+/// The git directories of [`schema_registries`], for a reader that
+/// fetches the files of a schema the workspace has already resolved
+/// (an export, a health axis). A reader that resolves a name a caller
+/// gave reads through [`schema_registries`] instead, which says how
+/// much of each directory the workspace takes.
 pub fn schema_registry_gitdirs<'a>(
     mounts: impl IntoIterator<Item = &'a Mount>,
     workspace_root: Option<&std::path::Path>,
 ) -> Vec<PathBuf> {
-    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-    let mut out: Vec<PathBuf> = Vec::new();
-    let own = workspace_root
-        .map(|root| root.join("mem-repo").join(".git"))
-        .filter(|gitdir| gitdir.is_dir());
-    let mounted = mounts.into_iter().filter_map(|m| match &m.storage {
-        MountStorage::GitBranch { gitdir, .. } => Some(gitdir.clone()),
-        _ => None,
-    });
-    for gitdir in mounted.chain(own) {
-        let key = gitdir.canonicalize().unwrap_or_else(|_| gitdir.clone());
-        if seen.insert(key) {
-            out.push(gitdir);
-        }
-    }
-    out
+    schema_registries(mounts, workspace_root)
+        .into_iter()
+        .map(|registry| registry.gitdir)
+        .collect()
 }
 
 #[cfg(test)]
@@ -747,5 +866,241 @@ mod tests {
             .filter(|m| matches!(&m.storage, MountStorage::GitBranch { gitdir, .. } if gitdir == std::path::Path::new("/work/mem-repo/.git")))
             .count();
         assert_eq!(shared_gitdir_mounts, 2);
+    }
+
+    fn branch_mount(mem: &str, gitdir: &std::path::Path, branch: &str) -> Mount {
+        Mount {
+            mem: mem.into(),
+            schema: None,
+            storage: MountStorage::GitBranch {
+                gitdir: gitdir.to_path_buf(),
+                branch: branch.into(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        }
+    }
+
+    /// A workspace root with a `mem-repo/.git` of its own, and the git
+    /// directory of another workspace's mem-repo beside it.
+    fn own_and_other(tmp: &std::path::Path) -> (PathBuf, PathBuf, PathBuf) {
+        let root = tmp.join("workspace");
+        let own = root.join("mem-repo").join(".git");
+        let other = tmp.join("store").join("mem-repo").join(".git");
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        (root, own, other)
+    }
+
+    /// The workspace's own mem-repo is read whole (`mounted: None`),
+    /// also when a mount names it through another spelling, and it
+    /// appears once.
+    #[test]
+    fn schema_registries_reads_the_own_mem_repo_whole_under_any_spelling() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (root, own, _other) = own_and_other(tmp.path());
+        let respelled = root
+            .join("mem-repo")
+            .join("..")
+            .join("mem-repo")
+            .join(".git");
+        assert_ne!(respelled, own);
+
+        let mut kept = branch_mount("kept", &respelled, "refs/heads/kept");
+        kept.schema = Some(pin("widgets"));
+        let other = branch_mount("other", &own, "other");
+        let registries = schema_registries([&kept, &other], Some(root.as_path()));
+
+        assert_eq!(
+            registries,
+            vec![SchemaRegistry {
+                gitdir: respelled.clone(),
+                mounted: None,
+            }],
+            "one registry, spelled as the first mount spells it, taken whole"
+        );
+        assert_eq!(
+            schema_registry_gitdirs([&kept, &other], Some(root.as_path())),
+            vec![respelled]
+        );
+    }
+
+    /// Two mounts of one other git directory make one registry with one
+    /// entry per mount, in mount order. An entry carries the branch as
+    /// a short name and the roster's pins: `schema`, then
+    /// `migration_target`. The own mem-repo comes last when no mount
+    /// names it.
+    #[test]
+    fn schema_registries_groups_the_mounts_of_another_git_directory() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (root, own, other) = own_and_other(tmp.path());
+        let other_respelled = tmp
+            .path()
+            .join("store")
+            .join(".")
+            .join("mem-repo")
+            .join(".git");
+
+        let mut kept = branch_mount("kept", &other, "refs/heads/kept");
+        kept.schema = Some(pin("widgets"));
+        kept.migration_target = Some(pin("gadgets"));
+        let folder = Mount {
+            mem: "folder".into(),
+            schema: Some(pin("default")),
+            storage: MountStorage::Folder {
+                path: PathBuf::from("folder"),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        // No pin on the roster row: the entry still stands, so that the
+        // pin in the mem's configuration can count.
+        let notes = branch_mount("notes", &other_respelled, "deep/notes");
+
+        let registries = schema_registries([&kept, &folder, &notes], Some(root.as_path()));
+        assert_eq!(
+            registries,
+            vec![
+                SchemaRegistry {
+                    gitdir: other.clone(),
+                    mounted: Some(vec![
+                        MountedPins {
+                            branch: "kept".into(),
+                            pins: vec![pin("widgets"), pin("gadgets")],
+                        },
+                        MountedPins {
+                            branch: "deep/notes".into(),
+                            pins: vec![],
+                        },
+                    ]),
+                },
+                SchemaRegistry {
+                    gitdir: own.clone(),
+                    mounted: None,
+                },
+            ]
+        );
+
+        // A workspace with no mem-repo of its own, and one with no root
+        // at all, take every git directory by its mounts.
+        let view = tmp.path().join("view");
+        std::fs::create_dir_all(&view).unwrap();
+        for workspace_root in [Some(view.as_path()), None] {
+            let registries = schema_registries([&kept], workspace_root);
+            assert_eq!(
+                registries,
+                vec![SchemaRegistry {
+                    gitdir: other.clone(),
+                    mounted: Some(vec![MountedPins {
+                        branch: "kept".into(),
+                        pins: vec![pin("widgets"), pin("gadgets")],
+                    }]),
+                }]
+            );
+        }
+
+        // No mount at all: the own mem-repo alone, whole.
+        assert_eq!(
+            schema_registries(std::iter::empty::<&Mount>(), Some(root.as_path())),
+            vec![SchemaRegistry {
+                gitdir: own,
+                mounted: None,
+            }]
+        );
+    }
+
+    /// A pin switch passes unasked for a mount of the workspace's own
+    /// mem-repo and for other storage. For a mount of another git
+    /// directory it passes for a built-in target and for a target that
+    /// directory's registry holds, and refuses otherwise, naming the
+    /// mem, the pin and the directory.
+    #[test]
+    fn a_pin_must_be_held_where_the_mem_lives() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (root, own, other) = own_and_other(tmp.path());
+        let builtins = memstead_schema::builtins::load_builtin_schemas().unwrap();
+        let (builtin_name, builtin_version) = builtins[0].id();
+        let builtin = SchemaRef::new(&builtin_name, builtin_version);
+        let custom = pin("widgets");
+        let never = |_: &std::path::Path| -> bool { panic!("the registry is not asked") };
+
+        let own_mount = branch_mount("kept", &own, "kept");
+        assert_eq!(
+            lives_in_another_git_directory(&own_mount, Some(root.as_path())),
+            None
+        );
+        pin_is_held_where_the_mem_lives(&own_mount, Some(root.as_path()), &custom, &[], never)
+            .unwrap();
+
+        let folder = Mount {
+            storage: MountStorage::Folder {
+                path: PathBuf::from("folder"),
+            },
+            ..own_mount.clone()
+        };
+        assert_eq!(lives_in_another_git_directory(&folder, None), None);
+        pin_is_held_where_the_mem_lives(&folder, None, &custom, &[], never).unwrap();
+
+        let foreign = branch_mount("kept", &other, "kept");
+        assert_eq!(
+            lives_in_another_git_directory(&foreign, Some(root.as_path())),
+            Some(other.as_path())
+        );
+        // The same git directory is another one for a workspace without
+        // a root.
+        assert_eq!(
+            lives_in_another_git_directory(&own_mount, None),
+            Some(own.as_path())
+        );
+        pin_is_held_where_the_mem_lives(&foreign, Some(root.as_path()), &builtin, &builtins, never)
+            .unwrap();
+        let mut asked = None;
+        pin_is_held_where_the_mem_lives(
+            &foreign,
+            Some(root.as_path()),
+            &custom,
+            &builtins,
+            |gitdir| {
+                asked = Some(gitdir.to_path_buf());
+                true
+            },
+        )
+        .unwrap();
+        assert_eq!(asked.as_deref(), Some(other.as_path()));
+
+        let refused = pin_is_held_where_the_mem_lives(
+            &foreign,
+            Some(root.as_path()),
+            &custom,
+            &builtins,
+            |_| false,
+        )
+        .unwrap_err();
+        assert_eq!(refused.code(), "SCHEMA_NOT_FOUND");
+        match &refused {
+            crate::engine::EngineError::SchemaNotWhereTheMemLives { mem, pin, gitdir } => {
+                assert_eq!(mem, "kept");
+                assert_eq!(pin, "widgets@1.0.0");
+                assert_eq!(gitdir, &other.display().to_string());
+            }
+            other => panic!("unexpected refusal: {other:?}"),
+        }
+        assert!(
+            refused.to_string().contains("where the mem lives"),
+            "{refused}"
+        );
+        assert_eq!(
+            refused.details(),
+            serde_json::json!({
+                "mem": "kept",
+                "pin": "widgets@1.0.0",
+                "sources": [],
+                "mem_git_directory": other.display().to_string(),
+            })
+        );
     }
 }

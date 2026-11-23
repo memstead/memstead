@@ -1150,17 +1150,7 @@ fn removable_quarantined(
 /// holds it, which still serves it, so this workspace ceasing to mount
 /// it writes no tombstone there.
 fn is_foreign_storage(engine: &crate::Engine, mount: &crate::workspace::Mount) -> bool {
-    match &mount.storage {
-        crate::workspace::MountStorage::GitBranch { gitdir, .. } => {
-            let own = engine
-                .workspace_root()
-                .map(|root| root.join("mem-repo").join(".git"));
-            let canonical =
-                |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-            own.is_none_or(|own| canonical(&own) != canonical(gitdir))
-        }
-        _ => false,
-    }
+    crate::workspace::lives_in_another_git_directory(mount, engine.workspace_root()).is_some()
 }
 
 /// Whether the place `mount` names is on disk. A quarantined mount

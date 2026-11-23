@@ -135,6 +135,30 @@ pub fn set_mem_schema_below_boot(
             )
         })?;
 
+    // The booted path's rule that a pin is written only where the
+    // schema is held: for a mem of another git directory, a built-in
+    // target or one installed on that directory's registry.
+    let builtins = memstead_schema::builtins::load_builtin_schemas()
+        .map_err(|e| BootError::Engine(EngineError::SchemaResolverInit(e.to_string())))?;
+    memstead_base::pin_is_held_where_the_mem_lives(
+        &workspace.mounts[mount_idx],
+        Some(workspace_root),
+        target,
+        &builtins,
+        |gitdir| {
+            crate::storage_memstead::read_schema_file_from_memstead_ref(
+                gitdir,
+                &target.name,
+                &target.version.to_string(),
+                "schema.yaml",
+            )
+            .ok()
+            .flatten()
+            .is_some()
+        },
+    )
+    .map_err(BootError::Engine)?;
+
     // Authoritative home first: the mem's backend config, through the
     // same value-level bump the booted path uses. Only this one mount's
     // backend is instantiated — no workspace-wide boot.

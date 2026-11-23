@@ -587,7 +587,7 @@ impl Engine {
             // Every registry the workspace reads from: the mounts' git
             // directories, those of the rows about to be mounted, and
             // its own mem-repo.
-            let gitdirs = crate::workspace::schema_registry_gitdirs(
+            let registries = crate::workspace::schema_registries(
                 self.mounts
                     .iter()
                     .map(|m| &m.mount)
@@ -595,8 +595,8 @@ impl Engine {
                     .chain(arriving.iter()),
                 self.workspace_root(),
             );
-            for gitdir in gitdirs {
-                match (ops.read_ref_schemas)(&gitdir) {
+            for registry in registries {
+                match (ops.read_ref_schemas)(&registry) {
                     Ok(mut s) => fresh.append(&mut s),
                     Err(e) => {
                         sources_complete = false;

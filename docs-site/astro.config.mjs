@@ -98,6 +98,7 @@ export default defineConfig({
             { label: "Back up a mem-repo", link: "/guides/back-up-a-mem-repo/" },
             { label: "Review a proposal", link: "/guides/review-a-proposal/" },
             { label: "Gate a PR on mem fidelity", link: "/guides/verify-in-ci/" },
+            { label: "Give each caller a view", link: "/guides/give-each-caller-a-view/" },
           ],
         },
         {

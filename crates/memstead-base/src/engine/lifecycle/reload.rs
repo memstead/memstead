@@ -204,6 +204,7 @@ impl Engine {
         let Some(q_idx) = self.quarantined.iter().position(|q| q.mount.mem == mem) else {
             return Err(self.unknown_mem_error(mem));
         };
+        self.pin_is_held_where_the_mem_lives(&self.quarantined[q_idx].mount, target)?;
         let backend = self
             .instantiate_backend(&self.quarantined[q_idx].mount)
             .ok();

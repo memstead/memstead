@@ -23,6 +23,34 @@ impl Engine {
     /// no content hashing. The response hands the agent findings and
     /// nothing else (no migration scripts, no hints); each repair
     /// write is validated strictly against the target.
+    /// [`crate::workspace::pin_is_held_where_the_mem_lives`] with this
+    /// engine's built-ins and its read of a git directory's registry.
+    pub(crate) fn pin_is_held_where_the_mem_lives(
+        &self,
+        mount: &crate::workspace::Mount,
+        target: &memstead_schema::SchemaRef,
+    ) -> Result<(), EngineError> {
+        crate::workspace::pin_is_held_where_the_mem_lives(
+            mount,
+            self.workspace_root(),
+            target,
+            &self.builtin_schemas,
+            |gitdir| {
+                self.git_branch_ops().is_some_and(|ops| {
+                    (ops.read_schema_file)(
+                        gitdir,
+                        &target.name,
+                        &target.version.to_string(),
+                        "schema.yaml",
+                    )
+                    .ok()
+                    .flatten()
+                    .is_some()
+                })
+            },
+        )
+    }
+
     pub fn set_mem_schema(
         &mut self,
         mem: &str,
@@ -80,6 +108,7 @@ impl Engine {
             }
             .with_schema_install_probe(self.workspace_root())
         })?;
+        self.pin_is_held_where_the_mem_lives(&self.mounts[mount_idx].mount, target)?;
 
         // `Mount.schema` is now the optional assertion; for a mem the
         // operator is actively re-pinning it is normally `Some` (and kept

@@ -7,6 +7,40 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Security
+
+- **A workspace resolves, from another mem-repo, only the schemas its
+  mounted mems pin.** A workspace that mounts mems of another
+  workspace's mem-repo reads the schemas installed there, so that a
+  mounted mem resolves its pin without a second install (since
+  0.26.1). It read all of them. A caller in a workspace that mounts a
+  mem `alpha` and not a mem `gamma` of the same mem-repo could read
+  the schema that only `gamma` pins: `memstead_schema` returned its
+  whole body by pin and by bare name, the `available` list of
+  `SCHEMA_NOT_FOUND` named it, and `memstead_health` with it as
+  `target_schema` and `memstead_mem_set_schema` resolved it. Measured
+  on 0.27.1. Such a workspace now takes from another mem-repo the
+  schemas that the mems it mounts from there pin (the pin in the mem's
+  configuration, the pin and the migration target on the roster row)
+  and no others; asked for any other schema of that mem-repo it
+  answers as for a name that exists nowhere. A workspace's own
+  mem-repo is read whole as before, and so is its own
+  `.memstead/schemas/` folder. This narrows what the engine serves
+  through a workspace; it does not hide a mem-repo from whoever can
+  read its git directory.
+
+### Added
+
+- **A guide on serving several callers from one mem-repo.** "Give each
+  caller a view of a store" on the documentation site: the commands
+  that make a workspace of engine state only and mount a mem in it
+  read-only or writable, what a caller reaches for a mem that is not
+  mounted, mounted read-only and mounted writable, how
+  `[mcp].disabled_tools` withholds the three tools that change a mem's
+  settings, and what such a workspace does not hold: it is a
+  configuration, and keeping callers off the files and off the command
+  line is the host's part. No new verb, tool or key.
+
 ### Changed
 
 - **A mem-repo is packed.** Every write to a git-branch mem stores
@@ -31,6 +65,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A schema pin is written only where the schema is installed.** A
+  workspace that mounts a writable mem of another workspace's mem-repo
+  could switch that mem to a schema installed in its own
+  `.memstead/schemas/` folder only: `memstead_mem_set_schema` and
+  `memstead mem set-schema` answered `switched`, the pin was written
+  into the mem's configuration in the other mem-repo, and the
+  workspace that owns that mem-repo then listed the mem as quarantined
+  with `SCHEMA_NOT_FOUND`, as did every other workspace that mounts
+  it. Measured on 0.27.1. The switch now refuses `SCHEMA_NOT_FOUND`
+  before anything is written, with a message that says the schema must
+  be installed where the mem lives, and `details.mem_git_directory`
+  names that git directory. The switch below boot follows the same
+  rule. A switch to a built-in schema, and any switch in the workspace
+  that owns the mem-repo, answer as before.
 - **A mem delete over MCP no longer removes a workspace's directory.**
   In a folder workspace, `memstead_mem_delete` of the workspace's one
   mem, on a server in operator mode or under a delete rule, removed

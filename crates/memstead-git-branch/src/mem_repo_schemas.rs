@@ -133,10 +133,52 @@ impl memstead_base::schema_source::SchemaSource for GitBranchSchemaSource {
     }
 }
 
+/// The schemas a workspace takes from one registry: every schema sealed
+/// on the `__MEMSTEAD:schemas/` ref of its own mem-repo, and from any
+/// other git directory only those that the mems it mounts from there
+/// pin. A mounted mem's pins are the one in its configuration on that
+/// directory's registry ref, read here, and the ones its roster row
+/// carries. A mem whose configuration cannot be read contributes its
+/// roster pins alone.
+///
+/// The one reader of a registry: boot, the warm refresh, the below-boot
+/// repair and the CLI's schema read all come through here, so a schema
+/// that no mounted mem pins is absent from every set built from another
+/// git directory and no reader of such a set filters for itself.
+pub fn read_registry_schemas(
+    registry: &memstead_base::SchemaRegistry,
+) -> Result<Vec<Arc<Schema>>, memstead_base::schema_source::SchemaSourceError> {
+    use memstead_base::schema_source::SchemaSource as _;
+    let schemas = GitBranchSchemaSource::for_gitdir(&registry.gitdir).read_schemas()?;
+    let Some(mounted) = &registry.mounted else {
+        return Ok(schemas);
+    };
+    if schemas.is_empty() {
+        return Ok(schemas);
+    }
+    let mut pinned: std::collections::HashSet<(String, semver::Version)> =
+        std::collections::HashSet::new();
+    for mount in mounted {
+        for pin in &mount.pins {
+            pinned.insert((pin.name.clone(), pin.version.clone()));
+        }
+        if let Ok(config) =
+            crate::mem_repo_config::read_config_at_gitdir(&registry.gitdir, &mount.branch)
+            && let Some(pin) = config.schema
+        {
+            pinned.insert((pin.name, pin.version));
+        }
+    }
+    Ok(schemas
+        .into_iter()
+        .filter(|schema| pinned.contains(&schema.id()))
+        .collect())
+}
+
 /// Every schema a workspace resolves from a `__MEMSTEAD:schemas/`
-/// registry: the registries of
-/// [`memstead_base::schema_registry_gitdirs`] read in order, one schema
-/// per name and version (the earlier registry wins a collision).
+/// registry: the registries of [`memstead_base::schema_registries`]
+/// read in order through [`read_registry_schemas`], one schema per name
+/// and version (the earlier registry wins a collision).
 ///
 /// Best-effort per registry: a stub or unreadable git directory, or a
 /// transient read failure, must not brick the caller. It is skipped
@@ -146,12 +188,12 @@ pub fn read_workspace_ref_schemas<'a>(
     workspace_root: &Path,
     mounts: impl IntoIterator<Item = &'a memstead_base::Mount>,
 ) -> Vec<Arc<Schema>> {
-    use memstead_base::schema_source::SchemaSource as _;
     let mut seen: std::collections::HashSet<(String, semver::Version)> =
         std::collections::HashSet::new();
     let mut out: Vec<Arc<Schema>> = Vec::new();
-    for gitdir in memstead_base::schema_registry_gitdirs(mounts, Some(workspace_root)) {
-        match GitBranchSchemaSource::for_gitdir(&gitdir).read_schemas() {
+    for registry in memstead_base::schema_registries(mounts, Some(workspace_root)) {
+        let gitdir = registry.gitdir.clone();
+        match read_registry_schemas(&registry) {
             Ok(schemas) => {
                 for schema in schemas {
                     if seen.insert(schema.id()) {

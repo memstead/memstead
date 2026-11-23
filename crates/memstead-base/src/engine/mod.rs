@@ -921,14 +921,17 @@ pub type GitBranchReadSchemaFileFn = fn(
     rel: &str,
 ) -> Result<Option<Vec<u8>>, BackendError>;
 
-/// Re-read every schema sealed on one git directory's
-/// `__MEMSTEAD:schemas/` ref (empty when the directory, the ref or the
-/// subtree is absent). Read-only; `Engine::full_refresh` is the
-/// consumer, the warm-server path that makes an out-of-band `memstead
-/// schema install` resolvable without a process restart. It calls this
-/// once per directory of [`crate::workspace::schema_registry_gitdirs`].
-pub type GitBranchReadRefSchemasFn =
-    fn(gitdir: &Path) -> Result<Vec<Arc<memstead_schema::Schema>>, BackendError>;
+/// Re-read the schemas a workspace takes from one registry: every
+/// schema sealed on the `__MEMSTEAD:schemas/` ref of the workspace's own
+/// mem-repo, and from another git directory those its mounted mems pin
+/// (empty when the directory, the ref or the subtree is absent).
+/// Read-only; `Engine::full_refresh` is the consumer, the warm-server
+/// path that makes an out-of-band `memstead schema install` resolvable
+/// without a process restart. It calls this once per registry of
+/// [`crate::workspace::schema_registries`].
+pub type GitBranchReadRefSchemasFn = fn(
+    registry: &crate::workspace::SchemaRegistry,
+) -> Result<Vec<Arc<memstead_schema::Schema>>, BackendError>;
 
 /// Collect one pinned schema's raw source files (manifest, sealed
 /// format marker, type definitions) from one git directory's

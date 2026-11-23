@@ -1057,6 +1057,24 @@ pub enum EngineError {
         /// was available to probe.
         install_hint: Option<String>,
     },
+    /// A pin switch named a schema that the asking workspace resolves
+    /// and the git directory the mem lives in does not: the mem is
+    /// mounted from another workspace's mem-repo, and the schema is
+    /// neither built in nor installed there. A pin is written where the
+    /// mem lives, so this one would take the mem out of service in
+    /// every workspace that mounts it without that schema. Refused
+    /// before anything is written; shares `SCHEMA_NOT_FOUND`.
+    #[error(
+        "mem {mem}: schema pin {pin:?} resolves in this workspace only. The mem lives in the git \
+         directory {gitdir}, whose schema registry does not hold it, and a pin is written where \
+         the mem lives. Nothing was written. Install the schema in the workspace that owns that \
+         git directory (run `memstead schema install <package-dir>` there), then set the pin"
+    )]
+    SchemaNotWhereTheMemLives {
+        mem: String,
+        pin: String,
+        gitdir: String,
+    },
     /// A sealed schema package carried inside a mem archive could not
     /// be loaded — the archive's own `.memstead/schema/` tree is
     /// broken. Deliberately NOT `SchemaNotFound`: the package is right
@@ -1802,6 +1820,7 @@ impl EngineError {
             EngineError::Backend(BackendError::CommitNotApplied { .. }) => "COMMIT_NOT_APPLIED",
             EngineError::Backend(_) => "MEM_ERROR",
             EngineError::SchemaNotFound { .. } => "SCHEMA_NOT_FOUND",
+            EngineError::SchemaNotWhereTheMemLives { .. } => "SCHEMA_NOT_FOUND",
             EngineError::EmbeddedSchemaInvalid { .. } => "EMBEDDED_SCHEMA_INVALID",
             EngineError::SchemaPackageInvalid { .. } => "SCHEMA_VALIDATION_FAILED",
             EngineError::SchemaResolverInit(_) => "SCHEMA_RESOLVER_INIT_FAILED",
@@ -2400,6 +2419,12 @@ impl EngineError {
                 }
                 details
             }
+            EngineError::SchemaNotWhereTheMemLives { mem, pin, gitdir } => serde_json::json!({
+                "mem": mem,
+                "pin": pin,
+                "sources": [],
+                "mem_git_directory": gitdir,
+            }),
             EngineError::SchemaPackageInvalid {
                 name,
                 version,
