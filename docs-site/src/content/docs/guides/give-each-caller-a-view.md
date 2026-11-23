@@ -52,7 +52,7 @@ on; no restart is needed.
 
 | For a mem that is | a caller of the view's MCP server |
 |---|---|
-| not mounted | reaches nothing of it. A call that names it answers exactly as a call that names a mem that does not exist; its entities, its name and a schema that only it pins appear in no reply. |
+| not mounted | reaches nothing of it. A call that names it answers exactly as a call that names a mem that does not exist; its entities, its name and a schema that only it pins appear in no reply (one exception, an id that a mounted mem links to: see the limits). |
 | mounted `read-only` | reads its entities, its schema and its history. Every write refuses `READ_ONLY_MOUNT`, and its branch does not move. |
 | mounted `write` | also creates, updates, relates, renames, retypes and deletes its entities, records checks on them, and changes the mem's settings (below). |
 
@@ -63,7 +63,9 @@ stays in the view's own folder.
 
 Links between mems follow the view's own policy
 (`memstead workspace grant-cross-link`), which starts empty: a writable
-mem links into another mounted mem only where the view grants it.
+mem links into another mounted mem only where the view grants it. A
+running server takes a changed policy at its next `memstead_reload`
+without a mem, or at its next start.
 
 ## 3. Withhold the mem's settings
 
@@ -116,12 +118,14 @@ who reaches them.
 
 - **A linked id is visible.** If a mounted mem links to an entity of a
   mem the view does not mount, the view shows that id as a stub: the
-  id, a title derived from the id, and nothing of the entity's content
-  or type.
+  id (which carries the mem's name), a title derived from the id, and
+  nothing of the entity's content or type.
 - **Integrity checks see the view's mems only.** A delete or rename
   from a view does not know of entities in unmounted mems that link to
-  the target. The link is left dangling there, and
-  `memstead health --include dangling_links` in the store reports it.
+  the target. The reference is left dangling there, and the store's
+  health read shows it: `memstead health --include dangling_links,stubs`
+  lists a body link under dangling links and a relation's target under
+  stubs.
 - **Checks are recorded per workspace.** A check recorded through a
   view lands in that view's own ledger; another view, and the store,
   do not see it.
@@ -130,3 +134,6 @@ who reaches them.
 - **A running engine keeps the schema pin it booted with.** When the
   store moves a mem to another schema, a view serves that mem under
   the new pin from its engine's next start.
+- **A running engine keeps a schema it has resolved.** After a mem is
+  withdrawn from a view, the schema it pinned stays readable through
+  that view until its engine restarts.

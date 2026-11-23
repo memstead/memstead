@@ -23,8 +23,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   schemas that the mems it mounts from there pin (the pin in the mem's
   configuration, the pin and the migration target on the roster row)
   and no others; asked for any other schema of that mem-repo it
-  answers as for a name that exists nowhere. A workspace's own
-  mem-repo is read whole as before, and so is its own
+  answers as for a name that exists nowhere, so a switch of a mounted
+  mem to such a schema is made in the workspace that owns the
+  mem-repo. A workspace's own mem-repo is read whole as before, and so
+  is its own
   `.memstead/schemas/` folder. This narrows what the engine serves
   through a workspace; it does not hide a mem-repo from whoever can
   read its git directory.
@@ -68,8 +70,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **A schema pin is written only where the schema is installed.** A
   workspace that mounts a writable mem of another workspace's mem-repo
   could switch that mem to a schema installed in its own
-  `.memstead/schemas/` folder only: `memstead_mem_set_schema` and
-  `memstead mem set-schema` answered `switched`, the pin was written
+  `.memstead/schemas/` folder only: for a mem whose entities conform
+  to that schema (an empty one, for instance) `memstead_mem_set_schema`
+  and `memstead mem set-schema` answered `switched`, the pin was written
   into the mem's configuration in the other mem-repo, and the
   workspace that owns that mem-repo then listed the mem as quarantined
   with `SCHEMA_NOT_FOUND`, as did every other workspace that mounts
