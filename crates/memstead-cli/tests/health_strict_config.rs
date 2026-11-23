@@ -737,3 +737,85 @@ fn strict_passes_on_a_clean_workspace_with_every_include() {
         .success()
         .stdout(contains("# Graph health"));
 }
+
+/// A mem that is out of service is checked by nothing: its entities are
+/// in no view. The referee does not pass such a workspace. The strict
+/// run fails with the configuration defect `MEM_QUARANTINED`, naming the
+/// mem and the quarantine's reason; a plain run and a strict run scoped
+/// to a mem in service are as before; with the mem off the roster the
+/// strict run passes.
+#[test]
+fn strict_fails_on_a_mem_that_is_out_of_service() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path();
+    let run = |args: &[&str]| {
+        memstead()
+            .current_dir(ws)
+            .args(args)
+            .arg("--quiet")
+            .output()
+            .unwrap()
+    };
+    let ok = |args: &[&str]| {
+        let out = run(args);
+        assert!(
+            out.status.success(),
+            "`memstead {}`: {}{}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr),
+            String::from_utf8_lossy(&out.stdout)
+        );
+    };
+    ok(&["mem-repo", "init", "."]);
+    ok(&["workspace", "allow-create", "--schema", "*", "*"]);
+    ok(&["mem", "init", "live", "--schema", "default@1.3.0"]);
+    ok(&[
+        "mem",
+        "init",
+        "held",
+        "--storage",
+        "folder",
+        "--schema",
+        "default@1.3.0",
+    ]);
+    for mem in ["live", "held"] {
+        ok(&[
+            "create",
+            "--mem",
+            mem,
+            "--title",
+            "One",
+            "--type",
+            "spec",
+            "--metadata",
+            "level=M0",
+            "--section",
+            "identity=i",
+            "--section",
+            "purpose=p",
+        ]);
+    }
+    ok(&["health", "--strict"]);
+
+    // A commit record nobody can read puts the folder mem out of service.
+    fs::write(ws.join("held/.memstead/commit.json"), "not a record").unwrap();
+    let listed = String::from_utf8_lossy(&run(&["mem", "list"]).stdout).into_owned();
+    assert!(listed.contains("Quarantined"), "{listed}");
+
+    let strict = run(&["health", "--strict", "--json"]);
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&strict.stdout),
+        String::from_utf8_lossy(&strict.stderr)
+    );
+    assert!(!strict.status.success(), "{printed}");
+    assert!(printed.contains("HEALTH_STRICT_VIOLATIONS"), "{printed}");
+    assert!(printed.contains("MEM_QUARANTINED"), "{printed}");
+    assert!(printed.contains("held"), "{printed}");
+
+    ok(&["health"]);
+    ok(&["health", "--strict", "--mem", "live"]);
+
+    ok(&["mem", "unregister", "held", "--operator-mode"]);
+    ok(&["health", "--strict"]);
+}

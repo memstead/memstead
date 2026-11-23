@@ -13,8 +13,9 @@
 //!   An acknowledged finding is reported and does not fail the run.
 //! * **Configuration defects**, workspace- or mem-level and never
 //!   acknowledgeable: a schema pin that disagrees with its mem, a rotted
-//!   or drifted schema package, a mount that resolves to nothing, an
-//!   unreadable anchors sidecar, a schema format defect.
+//!   or drifted schema package, a mount that resolves to nothing, a mem
+//!   that is out of service, an unreadable anchors sidecar, a schema
+//!   format defect.
 //! * **Stale acknowledgements** ([`STALE_ACKNOWLEDGEMENT_CODE`]): an
 //!   acknowledgement that still stands while its finding no longer occurs.
 //!   That is a finding in its own right, so the acknowledged set shrinks
@@ -73,6 +74,7 @@ pub const CONFIGURATION_CONDITIONS: &[&str] = &[
     "SCHEMA_PIN_MISMATCH",
     "SCHEMA_UNSTAMPED_SOURCE_ROT",
     "MOUNT_UNBACKED",
+    "MEM_QUARANTINED",
     "ANCHORS_SIDECAR_UNREADABLE",
     "SCHEMA_FORMAT_DEFECT",
 ];
@@ -425,6 +427,21 @@ pub fn compose_strict_axis(
             });
         }
     }
+    // A mem that is out of service is checked by nothing above: its
+    // entities are in no view. The referee cannot pass a workspace it
+    // could not read, whatever put the mem out of service. A report
+    // scoped to one mem answers for that mem alone.
+    for q in arr("quarantined") {
+        let mem = s(&q, "mem");
+        if mem_filter.is_some_and(|scope| scope != mem) {
+            continue;
+        }
+        configuration.push(ConfigurationDefect {
+            code: "MEM_QUARANTINED".to_string(),
+            mem: Some(mem),
+            detail: q,
+        });
+    }
     // One row per configuration defect: the anchors axis and the integrity
     // findings both carry an unreadable sidecar.
     configuration.dedup_by(|a, b| a.code == b.code && a.mem == b.mem);
@@ -684,6 +701,38 @@ mod tests {
     }
 
     /// No ledger, no findings: a clean axis with zero violations.
+    /// A mem that is out of service is a configuration defect: nothing
+    /// of it was checked, so the referee does not pass the workspace. A
+    /// report scoped to another mem answers for its own mem alone.
+    #[test]
+    fn a_quarantined_mem_is_a_configuration_defect() {
+        let report = serde_json::json!({
+            "findings": [],
+            "warnings": [],
+            "quarantined": [
+                {"mem": "held", "reason_code": "SCHEMA_NOT_FOUND", "reason_message": "pin resolves nowhere"}
+            ],
+        });
+        let report = report.as_object().unwrap();
+        let axis = compose_strict_axis(report, None, None);
+        assert_eq!(axis.configuration.len(), 1, "{:?}", axis.configuration);
+        assert_eq!(axis.configuration[0].code, "MEM_QUARANTINED");
+        assert_eq!(axis.configuration[0].mem.as_deref(), Some("held"));
+        assert_eq!(
+            axis.configuration[0].detail["reason_code"],
+            "SCHEMA_NOT_FOUND"
+        );
+        assert_eq!(axis.violations, 1);
+
+        let scoped = compose_strict_axis(report, None, Some("live"));
+        assert!(
+            scoped.configuration.is_empty(),
+            "{:?}",
+            scoped.configuration
+        );
+        assert_eq!(scoped.violations, 0);
+    }
+
     #[test]
     fn clean_axis_is_empty() {
         let report = serde_json::json!({"findings": [], "warnings": []});

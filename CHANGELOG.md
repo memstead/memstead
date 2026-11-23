@@ -47,6 +47,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   wherever the mount stands on the roster. A workspace that holds only
   folder mems keeps its shape and its refusals.
 
+- **A strict health read fails on a mem that is out of service.**
+  `memstead health --strict` exited 0 on a workspace with a quarantined
+  mem unless something else was wrong too: the report listed the mem
+  under its quarantine roster and the strict axis did not count it, so
+  a gate that reads the referee's exit code passed over a mem nobody
+  could read. A quarantined mem is now a configuration defect of the
+  strict axis, `MEM_QUARANTINED` with the mem and the quarantine's
+  reason, counted once per mem and not acknowledgeable, like a mount
+  that resolves to nothing. A gate that passed over such a workspace
+  fails now. A strict read scoped with `--mem` to a mem in service is
+  not failed by another mem's quarantine, and without `--strict`
+  nothing changes.
+
 - **A write that meets a pack is done again, not refused.** A `git gc`
   of a mem-repo's git directory while an engine wrote to it, by hand or
   as the maintenance git runs after a fetch, could refuse a write.

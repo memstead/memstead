@@ -108,7 +108,8 @@ pub struct Args {
     /// `SECTION_FORMAT_VIOLATION`, `SIGNAL_WARN` — on any configuration
     /// defect, never acknowledgeable (`SCHEMA_PIN_MISMATCH`,
     /// `SCHEMA_UNSTAMPED_SOURCE_ROT`, `SCHEMA_AUTHORING_SOURCE_MISSING`
-    /// / `_DIVERGED`, `MOUNT_UNBACKED`, `ANCHORS_SIDECAR_UNREADABLE`,
+    /// / `_DIVERGED`, `MOUNT_UNBACKED`, `MEM_QUARANTINED` for a mem
+    /// that is out of service, `ANCHORS_SIDECAR_UNREADABLE`,
     /// `SCHEMA_FORMAT_DEFECT`), and on any `STALE_ACKNOWLEDGEMENT`: an
     /// acknowledgement that still stands while its finding no longer
     /// occurs. An acknowledgement is a check record on the finding's
@@ -117,7 +118,8 @@ pub struct Args {
     /// closing plan>"`); a later `ok` on the same condition withdraws
     /// it. Stale entities, drifted anchors and `SCHEMA_GENERATIONS_BEHIND`
     /// stay advisory. Any other exit code is a refusal of the run
-    /// itself (unknown mem, quarantine, boot failure), never a verdict.
+    /// itself (unknown mem, a `--mem` that is quarantined, boot
+    /// failure), never a verdict.
     #[arg(long)]
     pub strict: bool,
 
