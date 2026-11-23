@@ -422,15 +422,20 @@ pub fn is_workspace_root(dir: &Path) -> bool {
 /// the mem-repo-only refusals, and the MCP boot line all route through
 /// here so no surface can name a shape the others disagree with.
 pub fn is_mem_repo_shaped(workspace_root: &Path) -> bool {
-    workspace_root.join("mem-repo").join(".git").is_dir() || mounts_a_git_branch(workspace_root)
+    workspace_root.join("mem-repo").join(".git").is_dir() || roster_is_git_backed(workspace_root)
 }
 
-/// Whether the workspace's roster holds a mount of a git branch. A
-/// workspace that keeps engine state only and mounts mems out of
-/// another workspace's git directory (a view) has no `mem-repo/` of its
-/// own and is git-backed and multi-mem all the same: every command that
-/// works on a mem-repo workspace's mounts works on its mounts.
-fn mounts_a_git_branch(workspace_root: &Path) -> bool {
+/// Whether the workspace's roster holds a mount of a git branch, or no
+/// mount at all. A workspace that keeps engine state only and mounts
+/// mems out of another workspace's git directory (a view) has no
+/// `mem-repo/` of its own and is git-backed and multi-mem all the same:
+/// every command that works on a mem-repo workspace's mounts works on
+/// its mounts. It stays that shape when its last mount is taken off:
+/// the folder shape is the one that serves exactly one folder mem,
+/// which is always on its roster, so a roster that is readable and
+/// empty is never the folder shape. A roster that cannot be read
+/// counts as no git mount.
+fn roster_is_git_backed(workspace_root: &Path) -> bool {
     let roster = workspace_root
         .join(WORKSPACE_STORE_DIR)
         .join("state")
@@ -445,13 +450,14 @@ fn mounts_a_git_branch(workspace_root: &Path) -> bool {
         .get("mounts")
         .and_then(|m| m.as_array())
         .is_some_and(|mounts| {
-            mounts.iter().any(|mount| {
-                mount
-                    .get("storage")
-                    .and_then(|s| s.get("type"))
-                    .and_then(|t| t.as_str())
-                    == Some("git-branch")
-            })
+            mounts.is_empty()
+                || mounts.iter().any(|mount| {
+                    mount
+                        .get("storage")
+                        .and_then(|s| s.get("type"))
+                        .and_then(|t| t.as_str())
+                        == Some("git-branch")
+                })
         })
 }
 

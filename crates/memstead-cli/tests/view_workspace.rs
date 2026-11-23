@@ -227,6 +227,51 @@ fn the_commands_of_a_mem_repo_workspace_work_in_a_view() {
     assert!(!listed.contains("`facts`"), "{listed}");
 }
 
+/// A view whose last mount was taken off keeps its shape: the commands
+/// of a git-backed workspace still answer there, a name is unknown
+/// without a sentence about a folder workspace's one mem, and a mount
+/// brings everything back.
+#[test]
+fn a_view_with_no_mount_left_keeps_its_shape() {
+    let root = TempDir::new().unwrap();
+    let (store, view) = fixture(root.path());
+    ok(&view, &["mem", "unregister", "facts", "--operator-mode"]);
+    ok(&view, &["mem", "unregister", "notes", "--operator-mode"]);
+    let listed = ok(&view, &["mem", "list"]);
+    assert!(listed.contains("# Mems (0)"), "{listed}");
+
+    ok(&view, &["workspace", "dump"]);
+    ok(&view, &["workspace", "grant-cross-link", "notes", "facts"]);
+    let printed = refused(&view, &spec("notes", "Nowhere"), "UNKNOWN_MEM");
+    assert!(
+        !printed.contains("filesystem workspace"),
+        "no sentence about a folder workspace's one mem: {printed}"
+    );
+    refused(
+        &view,
+        &["mem", "unregister", "notes", "--operator-mode"],
+        "UNKNOWN_MEM",
+    );
+
+    let gitdir = store.join("mem-repo/.git").canonicalize().unwrap();
+    ok(
+        &view,
+        &[
+            "mem",
+            "mount",
+            "notes",
+            "--branch",
+            "notes",
+            "--gitdir",
+            gitdir.to_str().unwrap(),
+            "--capability",
+            "write",
+            "--operator-mode",
+        ],
+    );
+    ok(&view, &spec("notes", "Back Again"));
+}
+
 /// A workspace that holds one folder mem is still the filesystem shape:
 /// the commands that need a git-backed workspace refuse there, and a
 /// create that names another mem than its own is refused.

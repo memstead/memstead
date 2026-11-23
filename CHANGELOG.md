@@ -67,6 +67,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   not failed by another mem's quarantine, and without `--strict`
   nothing changes.
 
+- **A view with no mount left is still a view.** A workspace made with
+  `memstead mem mount --new-workspace` read as the shape made for one
+  folder mem again once its last mount was taken off: the policy
+  commands and the dump refused `UNSUPPORTED_WORKSPACE_SHAPE` with
+  advice to run `mem-repo init`, `mem unregister` refused the same way,
+  and a create answered `UNKNOWN_MEM` with the sentence "A filesystem
+  workspace holds one mem" and an empty name. A roster that is readable
+  and empty now counts as git-backed, since a folder workspace always
+  carries its one mem on the roster: the commands answer as in a view,
+  and a name is plainly unknown until a `mem mount` brings a mem back.
+
 - **A reattach keeps the leftover's own schema pin.** `memstead mem
   init <name> --reattach` (over MCP `memstead_mem_create` with
   `recovery: reattach`), and the reattach a plain create does after a
