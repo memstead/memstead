@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-23T11:12:59Z
-last_modified: 2026-11-23T11:23:33Z
+last_modified: 2026-11-23T13:11:34Z
 status: accepted
 decided_on: 2026-11-23
 deciders: operator (backlog bundle, go of 2026-11-23), implementing agent
@@ -21,7 +21,8 @@ Grading the automatic pack found writes refused beside a `git gc`, with nothing 
 - Measured with the refs packed in a tight loop beside the writes: none of 15,000 write rounds refused, and a second engine that reloads all the while finds everything written.
 - A real conflict is still a conflict: the repetition fires only when the engine's own lookup finds the branch on the parent the commit was built on, and the repeated commit goes through the library's compare-and-set again.
 - The repetition for an object that is not found is reasoned and not measured: the case was seen twice on a loaded machine and could not be provoked again.
-- The verbs that move several refs (a mem rename, a mem delete) are not repeated. A rename that is refused completes when it is sent again. A delete that cannot remove the mem's branch is not refused: it takes the mem off the roster, leaves the branch and says so (`Files deleted: false`, `MEM_FILES_NOT_DELETED`), and a rerun answers `UNKNOWN_MEM`; that is as it was before, and an open backlog item.
+- A mem rename is not repeated: one that is refused completes when it is sent again.
+- A mem delete's storage step, which removes the branch and the registry entry in one ref transaction after the mem has left the roster, is repeated when a ref was locked for a moment or a pack disturbed it (amended 2026-11-23), and for no other failure. When the lock outlasts the repetition the delete answers as before (`Files deleted: false`, `MEM_FILES_NOT_DELETED`); a second delete answers `UNKNOWN_MEM`, so the warning names the way that works: adopt the leftover branch again (`memstead mem init <name> --reattach`) and delete once more. The refusal for a name with a leftover branch names the CLI's flags and no delete. Two things were decided against. A delete of a name that is off the roster removes no leftover branch: a branch that a `mem unregister` kept on purpose cannot be told from one a cut-short delete left, so a leftover is removed only after it was adopted again or by an overwrite. And the roster is not rolled back when the storage step fails: the roster write is the decided part, and a mem that is half removed and back on the roster is worse than one that is off it with its branch kept.
 - The documentation promises that nothing is lost and that a refused write can be sent again, not that no write is ever refused.
 - The lookups of a mem's branch and of the engine's own refs go through the one function, and so does the listing of local branches; a new lookup of that kind that calls the library directly brings the race back, and the test that packs refs in a tight loop is what shows it. Not covered: the walk over remote-tracking refs in the branch reset's check for pushed commits, and the reads of `HEAD`, which call the library directly.
 

@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-23T13:43:26Z
-last_modified: 2026-09-02T12:06:06Z
+last_modified: 2026-11-23T13:11:34Z
 status: accepted
 decided_on: 2026-08-23
 deciders: operator, implementing agent
@@ -26,6 +26,7 @@ On the 0.10.0 tree `health --strict` participated five axes (`missing_required_o
 - `details` of the nested-prefix warning gained `target_mem` and `prefix_mounted`; the message changed, the code did not.
 - The CLI's `--strict` help and the generated reference name the set; the MCP instructions name the new boot warning. No MCP strict mode exists, and none is added: refusal is the CLI's job, the MCP surface reports.
 - Cost: one more ref or directory probe per mount at boot and reload (metadata only).
+- A mem that is out of service is a configuration defect too (amended 2026-11-23): `MEM_QUARANTINED`, counted once per quarantined mem with the mem and the quarantine's reason, never acknowledgeable. Until then the referee exited 0 beside a mem nobody could read unless the cause was counted under a code of its own (a mem whose own schema pin was changed to one that resolves nowhere while its mount names another was counted as `SCHEMA_PIN_MISMATCH` and is counted under both now; a changed pin that resolves keeps serving and counts the mismatch alone). A quarantined `--mem` is a refusal of the run, with exit status 1 like the verdict; the code tells the two apart, and the help says so. A strict read scoped to a mem in service is not failed by another mem's quarantine. Rejected: leaving it to the roster section of the report, which no exit code reads; and making it acknowledgeable, which would let a check record on some entity vouch for a mem that serves none.
 
 ## Relationships
 - **INFORMED_BY**: [[built-in-schema-versions-are-append-only-and-mems-stamp-their-mutating-engine-version]]
