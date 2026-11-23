@@ -1582,6 +1582,27 @@ pub fn create_mem(
         canonical.clone()
     };
 
+    // ---- Step 1.9: a view hosts no mem of its own ----
+    // A workspace that mounts git branches out of another workspace's
+    // git directory and carries no `mem-repo/` has no store to host a
+    // new branch. A mem created here would be a folder mem in the
+    // view's directory, and once the view's git mounts are taken off
+    // the workspace would read as the folder shape around that mem,
+    // with no verb left that removes it. The create refuses, as it did
+    // before such a workspace counted as git-backed.
+    if let Some(root) = workspace_root.as_deref()
+        && !root.join("mem-repo").join(".git").is_dir()
+        && crate::is_mem_repo_shaped(root)
+    {
+        return Err(crate::EngineError::InvalidInput(format!(
+            "this workspace mounts mems out of another workspace's git directory and has no \
+             mem-repo of its own to host mem `{}`: create the mem in the workspace that holds \
+             the git directory, then mount it here with `memstead mem mount`",
+            params.name
+        ))
+        .into());
+    }
+
     // ---- Step 1a0: a reattach adopts the leftover's own schema pin ----
     // A reattach takes the leftover as it is, its pin included. The
     // schema the caller named says nothing about a mem that already

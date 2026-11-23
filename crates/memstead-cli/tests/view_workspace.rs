@@ -227,6 +227,47 @@ fn the_commands_of_a_mem_repo_workspace_work_in_a_view() {
     assert!(!listed.contains("`facts`"), "{listed}");
 }
 
+/// A view hosts no mem of its own: `mem init` refuses there, whatever
+/// storage is named, and leaves nothing behind. (A mem created in a
+/// view would be a folder mem that no verb could take off again once
+/// the view's git mounts were gone.)
+#[test]
+fn a_mem_is_not_created_in_a_view() {
+    let root = TempDir::new().unwrap();
+    let (_store, view) = fixture(root.path());
+    ok(&view, &["workspace", "allow-create", "--schema", "*", "*"]);
+    let roster = fs::read_to_string(view.join(".memstead/state/mounts.json")).unwrap();
+    for args in [
+        vec!["mem", "init", "beta", "--schema", "default@1.3.0"],
+        vec![
+            "mem",
+            "init",
+            "beta",
+            "--schema",
+            "default@1.3.0",
+            "--storage",
+            "folder",
+        ],
+        vec![
+            "mem",
+            "init",
+            "beta",
+            "--schema",
+            "default@1.3.0",
+            "--operator-mode",
+        ],
+    ] {
+        let printed = refused(&view, &args, "INVALID_INPUT");
+        assert!(printed.contains("memstead mem mount"), "{printed}");
+        assert!(!view.join("beta").exists(), "nothing was created");
+        assert_eq!(
+            fs::read_to_string(view.join(".memstead/state/mounts.json")).unwrap(),
+            roster,
+            "the roster is as it was"
+        );
+    }
+}
+
 /// A view whose last mount was taken off reads as the folder shape,
 /// and its refusals say what is the case there: it mounts no mem, and a
 /// mount is what brings it back. No sentence names "the one mem" of a
