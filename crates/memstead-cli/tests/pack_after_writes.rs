@@ -222,8 +222,8 @@ fn a_git_that_fails_does_not_fail_the_write() {
     let calls = fs::read_to_string(&log).expect("git was asked to pack");
     assert!(calls.contains("gc --auto"), "{calls}");
     assert!(
-        calls.contains("gc.packRefs=false"),
-        "the engine's pack leaves the refs unpacked: {calls}"
+        !calls.contains("-c "),
+        "no setting of the engine's own: {calls}"
     );
     assert!(
         !calls.contains("prune"),

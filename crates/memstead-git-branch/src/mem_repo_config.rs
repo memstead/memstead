@@ -16,6 +16,7 @@
 //! The parser pipeline (`check_config` + `parse_mem_config`) is
 //! identical to the disk path; only the byte source differs (blob in
 //! the gix object database vs. file on disk).
+use crate::vcs::RefRead;
 use std::path::Path;
 
 use memstead_schema::{ConfigError, MemConfig, SchemaRef};
@@ -94,28 +95,17 @@ pub fn resolve_full_path_at_gitdir(
     // other branch ends in the same segment: the leaf match below is only
     // for a caller that holds a hierarchical mem's bare leaf.
     if repo
-        .try_find_reference(format!("refs/heads/{leaf}").as_str())
+        .fresh_ref(format!("refs/heads/{leaf}").as_str())
         .map_err(|e| MemRepoConfigError::GitTree(e.to_string()))?
         .is_some()
     {
         return Ok(Some(leaf.to_string()));
     }
-    let refs = repo
-        .references()
-        .map_err(|e| MemRepoConfigError::GitTree(e.to_string()))?;
-    let iter = refs
-        .local_branches()
-        .map_err(|e| MemRepoConfigError::GitTree(e.to_string()))?;
-    for r in iter {
-        let reference = match r {
-            Ok(reference) => reference,
-            Err(_) => continue,
-        };
-        let short = reference.name().shorten();
-        let name = match std::str::from_utf8(short) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
+    let names = repo
+        .fresh_local_branches()
+        .map_err(MemRepoConfigError::GitTree)?;
+    for name in &names {
+        let name = name.as_str();
         if name == "main" {
             continue;
         }
@@ -161,23 +151,12 @@ pub fn find_branches_by_leaf_at_gitdir(
         ));
     }
     let repo = gix::open(gitdir).map_err(|e| MemRepoConfigError::GixOpen(e.to_string()))?;
-    let refs = repo
-        .references()
-        .map_err(|e| MemRepoConfigError::GitTree(e.to_string()))?;
-    let iter = refs
-        .local_branches()
-        .map_err(|e| MemRepoConfigError::GitTree(e.to_string()))?;
+    let names = repo
+        .fresh_local_branches()
+        .map_err(MemRepoConfigError::GitTree)?;
     let mut matches: Vec<String> = Vec::new();
-    for r in iter {
-        let reference = match r {
-            Ok(reference) => reference,
-            Err(_) => continue,
-        };
-        let short = reference.name().shorten();
-        let name = match std::str::from_utf8(short) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
+    for name in &names {
+        let name = name.as_str();
         if name == "main" {
             continue;
         }
@@ -212,19 +191,12 @@ pub fn branch_namespace_conflicts_at_gitdir(
         ));
     }
     let repo = gix::open(gitdir).map_err(|e| MemRepoConfigError::GixOpen(e.to_string()))?;
-    let refs = repo
-        .references()
-        .map_err(|e| MemRepoConfigError::GitTree(e.to_string()))?;
-    let iter = refs
-        .local_branches()
-        .map_err(|e| MemRepoConfigError::GitTree(e.to_string()))?;
+    let names = repo
+        .fresh_local_branches()
+        .map_err(MemRepoConfigError::GitTree)?;
     let mut conflicts: Vec<String> = Vec::new();
-    for r in iter {
-        let Ok(reference) = r else { continue };
-        let short = reference.name().shorten();
-        let Ok(name) = std::str::from_utf8(short) else {
-            continue;
-        };
+    for name in &names {
+        let name = name.as_str();
         if name == branch_full_path {
             continue;
         }
@@ -402,10 +374,7 @@ pub fn has_real_mem_repo_main_at_gitdir(gitdir: &Path) -> bool {
     let Ok(repo) = gix::open(gitdir) else {
         return false;
     };
-    matches!(
-        repo.try_find_reference("refs/heads/__MEMSTEAD"),
-        Ok(Some(_))
-    )
+    matches!(repo.fresh_ref("refs/heads/__MEMSTEAD"), Ok(Some(_)))
 }
 
 /// Errors raised while writing a mem config to `mem-repo-git:__MEMSTEAD`.

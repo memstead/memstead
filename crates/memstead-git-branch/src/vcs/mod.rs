@@ -63,6 +63,110 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+/// How often a ref is looked up again when two lookups in a row do not
+/// agree, before the last answer is taken.
+const REF_READS: usize = 4;
+
+/// A ref lookup that is safe beside a pack of the refs.
+///
+/// git packs refs by writing each ref's value into `packed-refs` and
+/// then deleting the ref's own file. The git library looks a ref up the
+/// other way round from what that needs: it takes its view of
+/// `packed-refs` first and reads the ref file second. A lookup that
+/// falls between the two steps of a pack finds the file gone and answers
+/// from a `packed-refs` it loaded before the pack rewrote it: the branch
+/// where it stood at the pack before, or no branch at all. A write
+/// planned on that answer is refused, and a reload shows a view that is
+/// commits old.
+///
+/// [`RefRead::fresh_ref`] closes that gap. A ref file that is there
+/// after the lookup and says the same proves the answer current. If
+/// there is none, the answer came from `packed-refs`; that file is read
+/// again, unconditionally (its modification time is too coarse a signal
+/// on some filesystems), and the lookup repeated, until two lookups in
+/// a row agree.
+pub trait RefRead {
+    /// [`gix::Repository::try_find_reference`], current also while
+    /// another process packs the refs.
+    fn fresh_ref(&self, name: &str) -> Result<Option<gix::Reference<'_>>, gix::Error>;
+
+    /// The object a ref name or any other revision resolves to: a ref by
+    /// [`Self::fresh_ref`], anything that is no ref by the revision
+    /// parser. `None` when it names nothing.
+    fn fresh_rev(&self, spec: &str) -> Option<gix::ObjectId>;
+
+    /// The short names of the local branches, sorted. A listing takes
+    /// its view of `packed-refs` and then walks the ref files, so a pack
+    /// of the refs between the two hides a branch from it; the listing
+    /// is repeated, with `packed-refs` read again, until two in a row
+    /// agree.
+    fn fresh_local_branches(&self) -> Result<Vec<String>, String>;
+}
+
+impl RefRead for gix::Repository {
+    fn fresh_ref(&self, name: &str) -> Result<Option<gix::Reference<'_>>, gix::Error> {
+        let mut found = self.try_find_reference(name)?;
+        for _ in 0..REF_READS {
+            if let Some(reference) = &found
+                && let Ok(Some(file)) = self.refs.try_find_loose(reference.inner.name.as_ref())
+                && file.target == reference.inner.target
+            {
+                return Ok(found);
+            }
+            // No ref file vouches for the answer: read `packed-refs` as
+            // it is now and look again.
+            let _ = self.refs.force_refresh_packed_buffer();
+            let again = self.try_find_reference(name)?;
+            let agree = match (&found, &again) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.inner.target == b.inner.target,
+                _ => false,
+            };
+            found = again;
+            if agree {
+                break;
+            }
+        }
+        Ok(found)
+    }
+
+    fn fresh_rev(&self, spec: &str) -> Option<gix::ObjectId> {
+        if let Ok(Some(mut reference)) = self.fresh_ref(spec) {
+            return reference.peel_to_id().ok().map(|id| id.detach());
+        }
+        self.rev_parse_single(spec).ok().map(|id| id.detach())
+    }
+
+    fn fresh_local_branches(&self) -> Result<Vec<String>, String> {
+        let list = |repo: &gix::Repository| -> Result<Vec<String>, String> {
+            let refs = repo.references().map_err(|e| e.to_string())?;
+            let branches = refs.local_branches().map_err(|e| e.to_string())?;
+            let mut names: Vec<String> = branches
+                .filter_map(Result::ok)
+                .filter_map(|reference| {
+                    std::str::from_utf8(reference.name().shorten())
+                        .ok()
+                        .map(str::to_string)
+                })
+                .collect();
+            names.sort();
+            names.dedup();
+            Ok(names)
+        };
+        let mut names = list(self)?;
+        for _ in 0..REF_READS {
+            let _ = self.refs.force_refresh_packed_buffer();
+            let again = list(self)?;
+            let agree = again == names;
+            names = again;
+            if agree {
+                break;
+            }
+        }
+        Ok(names)
+    }
+}
+
 /// How often a step that stores git objects is done before its failure
 /// is the write's failure.
 pub(crate) const OBJECT_WRITE_ATTEMPTS: usize = 5;

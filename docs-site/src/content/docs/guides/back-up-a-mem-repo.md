@@ -231,11 +231,11 @@ What that means in practice:
 
 - It needs `git` on the search path. Without it nothing is packed and
   no write complains; the store keeps growing by loose objects.
-- git's own configuration of that directory decides when and how.
-  `gc.auto` is the number of loose objects past which git packs (about
-  6,700 by default, estimated from one object directory in 256, so the
-  exact moment varies), and `gc.auto = 0` switches the automatic pack
-  off:
+- git's own configuration of that directory decides when and how, and
+  the engine passes no setting of its own. `gc.auto` is the number of
+  loose objects past which git packs (about 6,700 by default, estimated
+  from one object directory in 256, so the exact moment varies), and
+  `gc.auto = 0` switches the automatic pack off:
 
   ```sh
   git --git-dir mem-repo/.git config gc.auto 0
@@ -243,35 +243,30 @@ What that means in practice:
 
   `gc.autoDetach` decides whether git packs in the background (the
   default) or the write waits for it.
-- The engine adds one setting of its own to that command: it leaves the
-  refs unpacked (`gc.packRefs=false`), for the reason given below.
 - A write never fails because the pack could not start or did not
   succeed.
 
 You can also pack by hand at any time, with the engine running:
 
 ```sh
-git --git-dir mem-repo/.git -c gc.packRefs=false gc
+git --git-dir mem-repo/.git gc
 ```
 
 That is safe beside a running engine, an MCP server included, at git's
 default prune grace (two weeks): nothing the engine wrote is lost, and
-it reads and writes on. A pack removes an object directory it has just
-emptied; a write that was about to store an object there does that
-step again.
+it reads and writes on. The same holds for the maintenance git runs
+after a fetch and for any other tool that packs the directory. A pack
+does two things under a writer, and the engine is built for both. It
+removes an object directory it has just emptied, so a write that was
+about to store an object there does that step again. And it packs the
+refs, which moves each branch's value into one file and deletes the
+branch's own; the engine reads a branch in the order that stays
+correct while that happens.
 
-Leave the refs unpacked, as the command above does. A pack that also
-packs the refs (a plain `git gc`, or the maintenance another git tool
-runs on the directory) deletes each branch's ref file once its value
-stands in `packed-refs`. A running engine that reads the branch in
-that instant sees it where it stood at the pack before, and the write
-it was planning is refused, with `HASH_MISMATCH`, `ENTITY_NOT_FOUND`
-or a storage error. This is rare, nothing is lost and the refused
-write has written nothing: send it again. The engine's own pack never
-packs the refs, and neither does the maintenance git runs after the
-engine fetches.
+A mem rename or delete moves several refs; if one of them meets a pack
+and refuses, send it again.
 
-One thing is not covered at all: a pack with an immediate prune expiry
+One thing is not covered: a pack with an immediate prune expiry
 (`git gc --prune=now`, or `gc.pruneExpire = now`). A write stores its
 objects before it moves the mem's branch to them, and for that moment
 only the prune grace protects them; such a pack beside a running

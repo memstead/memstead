@@ -35,6 +35,7 @@
 //! the per-branch file lock named by `write_lock_path` from its reload
 //! to this commit (`memstead_base::engine::write_lock`).
 
+use crate::vcs::RefRead;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -141,7 +142,7 @@ impl GitTreeBackend {
             return Ok(());
         }
         let repo = self.open_repo()?;
-        let mut reference = match repo.try_find_reference(&self.ref_name).map_err(|e| {
+        let mut reference = match repo.fresh_ref(&self.ref_name).map_err(|e| {
             BackendError::Path(format!(
                 "git-tree writer: resolve ref {}: {e}",
                 self.ref_name
@@ -168,7 +169,7 @@ impl GitTreeBackend {
     /// snapshot captured by the first read of the session.
     fn live_tip(&self) -> Result<Option<gix::ObjectId>, BackendError> {
         let repo = self.open_repo()?;
-        let mut reference = match repo.try_find_reference(&self.ref_name).map_err(|e| {
+        let mut reference = match repo.fresh_ref(&self.ref_name).map_err(|e| {
             BackendError::Path(format!(
                 "git-tree writer: resolve ref {}: {e}",
                 self.ref_name
@@ -260,7 +261,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
                 self.gitdir.display()
             ))
         })?;
-        repo.try_find_reference(&self.ref_name)
+        repo.fresh_ref(&self.ref_name)
             .map(|r| r.is_some())
             .map_err(|e| {
                 memstead_base::backend::BackendError::Other(format!(
@@ -694,24 +695,41 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
                     continue 'attempt;
                 }
                 Err(e) if is_ref_cas_conflict(&e) => {
-                    // CAS conflict. Re-resolve the live tip and surface
-                    // the new sha so the caller can retry with a fresh
-                    // `_hash`.
-                    let mut reference = repo
-                        .try_find_reference(&self.ref_name)
-                        .map_err(|e| {
-                            BackendError::Path(format!(
-                                "git-tree writer: re-resolve ref after CAS: {e}"
-                            ))
-                        })?
-                        .ok_or_else(|| {
-                            BackendError::Path(format!(
-                                "git-tree writer: ref {} vanished during CAS recovery",
-                                self.ref_name
-                            ))
-                        })?;
-                    let live_id = reference.peel_to_id().map_err(|e| {
-                        BackendError::Path(format!("git-tree writer: peel live tip after CAS: {e}"))
+                    // The library says the ref is not where this commit
+                    // expected it. Look where it is, by the lookup that
+                    // stays current beside a pack of the refs.
+                    let live = match repo.fresh_ref(&self.ref_name).map_err(|e| {
+                        BackendError::Path(format!(
+                            "git-tree writer: re-resolve ref after CAS: {e}"
+                        ))
+                    })? {
+                        Some(mut reference) => Some(
+                            reference
+                                .peel_to_id()
+                                .map_err(|e| {
+                                    BackendError::Path(format!(
+                                        "git-tree writer: peel live tip after CAS: {e}"
+                                    ))
+                                })?
+                                .detach(),
+                        ),
+                        None => None,
+                    };
+                    // Still on the parent this commit was built on: the
+                    // ref did not move. The library compared against a
+                    // `packed-refs` it had loaded before a pack rewrote
+                    // it and deleted the ref's file. Nothing has changed,
+                    // so the step is done again.
+                    if live == parent_snapshot && attempt < OBJECT_WRITE_ATTEMPTS {
+                        continue 'attempt;
+                    }
+                    // A real conflict: surface the new sha so the caller
+                    // can retry with a fresh `_hash`.
+                    let live_id = live.ok_or_else(|| {
+                        BackendError::Path(format!(
+                            "git-tree writer: ref {} vanished during CAS recovery",
+                            self.ref_name
+                        ))
                     })?;
                     return Err(BackendError::HashMismatch {
                         current: live_id.to_hex().to_string(),
@@ -786,7 +804,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         // A refusal here ends the transaction like a failed commit
         // does: the staged set is dropped, never left to be read back.
         let actual = match gix::open(&self.gitdir) {
-            Ok(repo) => match repo.try_find_reference(&self.ref_name) {
+            Ok(repo) => match repo.fresh_ref(&self.ref_name) {
                 Ok(Some(mut r)) => r
                     .peel_to_id()
                     .ok()
@@ -906,7 +924,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         let repo = gix::open(&self.gitdir)
             .map_err(|e| BackendError::Other(format!("open {}: {e}", self.gitdir.display())))?;
         let Some(mut reference) = repo
-            .try_find_reference(&self.ref_name)
+            .fresh_ref(&self.ref_name)
             .map_err(|e| BackendError::Other(format!("find ref {}: {e}", self.ref_name)))?
         else {
             return Ok(None);
@@ -1097,7 +1115,7 @@ pub(crate) fn read_blob_from_ref(
     let repo = gix::open(gitdir).map_err(|e| {
         memstead_base::backend::BackendError::Other(format!("open {}: {e}", gitdir.display()))
     })?;
-    let reference = match repo.try_find_reference(ref_name) {
+    let reference = match repo.fresh_ref(ref_name) {
         Ok(Some(r)) => r,
         Ok(None) => return Ok(None),
         Err(e) => {
@@ -1249,8 +1267,12 @@ fn commit_note_to_provenance(
 /// failure that is no compare-and-swap conflict, which the library
 /// reports under the same heading.
 fn ref_edit_was_blocked<E: std::fmt::Display + std::fmt::Debug>(e: &E) -> bool {
-    const CAUSE: &str = "Could not prepare reference edit";
-    e.to_string().contains(CAUSE) || format!("{e:?}").contains(CAUSE)
+    const CAUSES: [&str; 2] = [
+        "Could not prepare reference edit",
+        "Could not lock packed refs",
+    ];
+    let said = format!("{e} {e:?}");
+    CAUSES.iter().any(|cause| said.contains(cause))
 }
 
 fn is_ref_cas_conflict(e: &gix::Error) -> bool {
@@ -1289,13 +1311,9 @@ static LAST_PACK: Mutex<Option<HashMap<PathBuf, std::time::Instant>>> = Mutex::n
 /// has stored and not yet referenced is protected by git's prune grace,
 /// which is why no expiry is given here.
 ///
-/// The engine passes one setting of its own, `gc.packRefs=false`. A
-/// pack that also packs the refs deletes each branch's ref file once
-/// its value stands in `packed-refs`, and the git library reads
-/// `packed-refs` before it looks for the ref file: a read that falls
-/// between the two sees the branch where it stood at the pack before,
-/// and a write planned on that is refused. A mem-repo has a handful of
-/// refs, so leaving them unpacked costs nothing.
+/// The engine passes no setting of its own. A pack may pack the refs
+/// too; the engine's ref lookups stay current while it does
+/// ([`crate::vcs::RefRead`]).
 ///
 /// The decision to start a process at all is cheap and is git's own
 /// estimate: the loose objects whose hash begins with `17` stand for
@@ -1343,7 +1361,7 @@ fn pack_if_due(repo: &gix::Repository) {
     let child = std::process::Command::new("git")
         .arg("--git-dir")
         .arg(gitdir)
-        .args(["-c", "gc.packRefs=false", "gc", "--auto", "--quiet"])
+        .args(["gc", "--auto", "--quiet"])
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -1473,20 +1491,19 @@ pub fn read_branch_blobs(
         path: gitdir.display().to_string(),
         source: e,
     })?;
-    let mut reference =
-        match repo
-            .try_find_reference(ref_name)
-            .map_err(|e| BranchReadError::Resolve {
+    let mut reference = match repo
+        .fresh_ref(ref_name)
+        .map_err(|e| BranchReadError::Resolve {
+            ref_name: ref_name.to_string(),
+            message: e.to_string(),
+        })? {
+        Some(r) => r,
+        None => {
+            return Err(BranchReadError::BranchMissing {
                 ref_name: ref_name.to_string(),
-                message: e.to_string(),
-            })? {
-            Some(r) => r,
-            None => {
-                return Err(BranchReadError::BranchMissing {
-                    ref_name: ref_name.to_string(),
-                });
-            }
-        };
+            });
+        }
+    };
     let id = reference
         .peel_to_id()
         .map_err(|e| BranchReadError::Resolve {

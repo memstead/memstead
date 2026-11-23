@@ -78,17 +78,7 @@ pub fn fetch_in_gitdir(
 
     // `--` ends option parsing: a remote or refspec that starts with `-`
     // is an operand, never an option such as `--upload-pack=<command>`.
-    // git runs its automatic maintenance after a fetch. It may pack the
-    // objects; it does not pack the refs, for the reason the engine's own
-    // pack gives (`pack_if_due` in the git-tree backend): a ref file
-    // deleted under a reader shows that reader a stale branch.
-    let mut args: Vec<String> = vec![
-        "-c".to_string(),
-        "gc.packRefs=false".to_string(),
-        "fetch".to_string(),
-        "--".to_string(),
-        remote.to_string(),
-    ];
+    let mut args: Vec<String> = vec!["fetch".to_string(), "--".to_string(), remote.to_string()];
     for spec in refspecs {
         args.push(spec.clone());
     }
@@ -589,11 +579,10 @@ pub fn read_md_blobs_at_ref(
     ref_name: &str,
 ) -> Result<Vec<(String, String)>, BackendError> {
     let repo = gix::open(gitdir).map_err(|e| BackendError::Other(format!("gix open: {e}")))?;
-    let id = repo
-        .rev_parse_single(ref_name)
-        .map_err(|_| BackendError::Other(format!("UNKNOWN_REF: {ref_name}")))?;
-    let object = id
-        .object()
+    let id = crate::vcs::RefRead::fresh_rev(&repo, ref_name)
+        .ok_or_else(|| BackendError::Other(format!("UNKNOWN_REF: {ref_name}")))?;
+    let object = repo
+        .find_object(id)
         .map_err(|_| BackendError::Other(format!("UNKNOWN_REF: {ref_name}")))?;
     let commit = object
         .try_into_commit()

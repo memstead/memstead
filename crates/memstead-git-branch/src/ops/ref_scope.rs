@@ -36,6 +36,7 @@
 //! lookups run over the histories in scope alone, no object outside
 //! them is read at all: no commit, no tree, no blob, no header.
 
+use crate::vcs::RefRead;
 use gix::ObjectId;
 
 /// The histories a ref may be anchored in and walk through.
@@ -69,7 +70,7 @@ impl RefScope {
         };
         for branch in branches {
             let full = memstead_base::branch_full_ref(branch);
-            let Ok(Some(mut reference)) = repo.try_find_reference(full.as_str()) else {
+            let Ok(Some(mut reference)) = repo.fresh_ref(full.as_str()) else {
                 continue;
             };
             let Ok(id) = reference.peel_to_id() else {

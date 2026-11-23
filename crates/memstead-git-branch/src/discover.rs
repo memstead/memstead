@@ -48,25 +48,17 @@ fn enumerate_branches_in_gitdir(gitdir: &Path) -> Option<Vec<String>> {
         }
     };
 
-    if repo.find_reference("refs/heads/__MEMSTEAD").is_err() {
+    if !matches!(
+        crate::vcs::RefRead::fresh_ref(&repo, "refs/heads/__MEMSTEAD"),
+        Ok(Some(_))
+    ) {
         return None;
     }
 
     let mut branch_names: Vec<String> = Vec::new();
     let mut seen_leaves: HashMap<String, String> = HashMap::new();
-    let refs_platform = match repo.references() {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!(
-                gitdir = %gitdir.display(),
-                error = %e,
-                "could not access mem-repo references"
-            );
-            return None;
-        }
-    };
-    let iter = match refs_platform.local_branches() {
-        Ok(it) => it,
+    let names = match crate::vcs::RefRead::fresh_local_branches(&repo) {
+        Ok(names) => names,
         Err(e) => {
             tracing::warn!(
                 gitdir = %gitdir.display(),
@@ -76,22 +68,8 @@ fn enumerate_branches_in_gitdir(gitdir: &Path) -> Option<Vec<String>> {
             return None;
         }
     };
-    for r in iter {
-        let reference = match r {
-            Ok(reference) => reference,
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "failed to read a mem-repo reference; skipping"
-                );
-                continue;
-            }
-        };
-        let short = reference.name().shorten();
-        let name = match std::str::from_utf8(short) {
-            Ok(name) => name,
-            Err(_) => continue,
-        };
+    for name in &names {
+        let name = name.as_str();
         if name == "main" {
             continue;
         }

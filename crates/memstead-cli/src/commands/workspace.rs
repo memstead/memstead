@@ -1013,9 +1013,9 @@ fn read_branch_head_oid(gitdir: &Path, mem_name: &str) -> Result<String, String>
     }
     let repo = gix::open(gitdir).map_err(|e| format!("gix open: {e}"))?;
     let branch_ref = branch_ref_for_mem_at_gitdir(gitdir, mem_name);
-    let reference = repo
-        .find_reference(&branch_ref)
-        .map_err(|e| format!("find ref {branch_ref}: {e}"))?;
+    let reference = memstead_git_branch::vcs::RefRead::fresh_ref(&repo, &branch_ref)
+        .map_err(|e| format!("find ref {branch_ref}: {e}"))?
+        .ok_or_else(|| format!("find ref {branch_ref}: no such ref"))?;
     let oid = reference
         .into_fully_peeled_id()
         .map_err(|e| format!("peel {branch_ref}: {e}"))?;

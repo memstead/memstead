@@ -40,20 +40,16 @@ use memstead_base::ops::BranchResetOutcome;
 /// `EngineError::UnknownRef`.
 fn current_head(repo: &gix::Repository, branch: &str) -> Result<ObjectId, BackendError> {
     let ref_name = format!("refs/heads/{branch}");
-    let id = repo
-        .rev_parse_single(ref_name.as_str())
-        .map_err(|_| BackendError::Other(format!("UNKNOWN_REF: {ref_name}")))?;
-    Ok(id.detach())
+    crate::vcs::RefRead::fresh_rev(repo, ref_name.as_str())
+        .ok_or_else(|| BackendError::Other(format!("UNKNOWN_REF: {ref_name}")))
 }
 
 /// Resolve a caller-supplied target ref. Accepts any input
 /// `gix::rev_parse_single` understands — branch names, short SHAs,
 /// full SHAs. Unknown inputs flag via the `UNKNOWN_REF` marker.
 fn resolve_target(repo: &gix::Repository, target: &str) -> Result<ObjectId, BackendError> {
-    let id = repo
-        .rev_parse_single(target)
-        .map_err(|_| BackendError::Other(format!("UNKNOWN_REF: {target}")))?;
-    Ok(id.detach())
+    crate::vcs::RefRead::fresh_rev(repo, target)
+        .ok_or_else(|| BackendError::Other(format!("UNKNOWN_REF: {target}")))
 }
 
 /// Walk every `refs/remotes/*` ref and collect the set of all commit

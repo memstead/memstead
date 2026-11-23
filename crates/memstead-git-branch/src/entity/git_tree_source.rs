@@ -6,6 +6,7 @@
 //! only `*.md` blobs, return UTF-8 content. Feeds the same parse pipeline
 //! via [`memstead_base::entity::loader::parse_entries`].
 
+use crate::vcs::RefRead;
 use std::path::PathBuf;
 
 use memstead_base::entity::loader::{LoadError, LoadResult, parse_entries};
@@ -43,7 +44,7 @@ fn read_git_tree(
     ref_name: &str,
 ) -> Result<(Vec<SourceEntry>, Vec<SourceReadError>), LoadError> {
     let mut reference = repo
-        .try_find_reference(ref_name)
+        .fresh_ref(ref_name)
         .map_err(|e| LoadError::GitTree(format!("resolve {ref_name}: {e}")))?
         .ok_or_else(|| LoadError::RefNotFound(ref_name.to_string()))?;
 

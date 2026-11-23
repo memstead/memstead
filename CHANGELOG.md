@@ -17,34 +17,41 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   own estimate says enough loose objects have gathered there (about
   6,700 by default, judged by one object directory in 256). No process
   is started below that. git's configuration of the directory decides
-  when and how: `gc.auto = 0` switches the pack off, `gc.autoDetach`
-  decides whether git packs in the background. The engine adds one
-  setting of its own, `gc.packRefs=false`, and gives no prune expiry.
-  It needs `git` on the search path; without it nothing is packed and
-  no write says so. A write never fails, and never reports a failure,
-  because the pack could not start or did not succeed. Folder mems have
-  no object store and are not touched. The backup guide now says who
-  packs and how to pack by hand beside a running engine:
-  `git --git-dir mem-repo/.git -c gc.packRefs=false gc`, at git's
-  default prune grace. Two things had to change for that to be safe.
-  A pack removes an object directory it has just emptied, and an
-  object the engine was about to move there failed to land ("Could not
-  persist loose object"), which refused the write with nothing
-  written; entity writes, a mem's configuration and schema installs now do that
-  step again, and a commit whose ref was locked for a moment does too.
-  And a pack that packs the refs deletes a branch's ref file under a
-  reader, which shows a running engine the branch where it stood at
-  the pack before and refuses the write it was planning
-  (`HASH_MISMATCH`, `ENTITY_NOT_FOUND`); the engine's own pack, and
-  the maintenance git runs after the engine's fetch, therefore leave
-  the refs unpacked. A plain `git gc` by hand, or another tool's maintenance, still
-  packs the refs: a write that meets that instant can be refused, with
-  nothing lost and nothing written, and can be sent again. A pack with
-  an immediate prune expiry (`git gc --prune=now`) is not covered at
-  all and can destroy a mem beside a running engine: a write's objects
-  are protected by the prune grace until its branch points at them.
+  when and how, and the engine passes no setting of its own:
+  `gc.auto = 0` switches the pack off, `gc.autoDetach` decides whether
+  git packs in the background. It needs `git` on the search path;
+  without it nothing is packed and no write says so. A write never
+  fails, and never reports a failure, because the pack could not start
+  or did not succeed. Folder mems have no object store and are not
+  touched. A pack with an immediate prune expiry (`git gc --prune=now`)
+  is not covered and can destroy a mem beside a running engine: a
+  write's objects are protected by the prune grace until its branch
+  points at them. The backup guide says who packs and how to pack by
+  hand.
 
 ### Fixed
+
+- **A pack beside a running engine refuses no write.** A `git gc` of a
+  mem-repo's git directory while an engine wrote to it, by hand or as
+  the maintenance git runs after a fetch, could refuse a write. Nothing
+  was lost by it, the refused write had written nothing, and sending
+  it again worked. Two causes. A pack removes an object directory it
+  has just emptied, and an object the engine was about to move there
+  failed to land (`MEM_ERROR`, "Could not persist loose object");
+  entity writes, a mem's configuration and schema installs now do that
+  step again. And a pack of the refs writes each branch's value into
+  `packed-refs` and then deletes the branch's own file, while the git
+  library reads those two in the other order: a lookup between the two
+  steps saw the branch where it stood at the pack before, and the pack
+  held a ref's lock for a moment. A write that met either was refused
+  with `HASH_MISMATCH`, with `ENTITY_NOT_FOUND` for a create, or with a
+  storage error. The engine now looks a ref up so that it stays current while the refs
+  are packed, lists branches the same way, and does a commit again
+  when the library reports a moved ref that has not moved or a lock
+  that was held for a moment. Measured with the refs packed in a tight
+  loop beside the writes: about 10 of 1,500 write rounds refused
+  before, none of 15,000 after. A mem rename or delete that meets a
+  pack may still refuse and can be sent again.
 
 - **Every verb names a mem that is out of service.** A quarantined mem
   is on the roster and in no view. Entity reads, writes, `health --mem`,

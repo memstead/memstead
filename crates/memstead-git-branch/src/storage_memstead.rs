@@ -38,6 +38,7 @@
 //! migration helpers first lets operators upgrade their workspaces
 //! without coupling to the runtime read-path retire.
 
+use crate::vcs::RefRead;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -116,7 +117,7 @@ pub fn migrate_to_memstead_ref(
     //    object, byte-identical).
     let mut schema_entries: Vec<(String, gix::ObjectId)> = Vec::new();
     if let Some(reference) = repo
-        .try_find_reference("refs/heads/__SCHEMAS")
+        .fresh_ref("refs/heads/__SCHEMAS")
         .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
     {
         let id = reference
@@ -175,7 +176,7 @@ pub fn migrate_to_memstead_ref(
     //    preserved by copying the subtree's object id verbatim.
     let mut mem_entries: Vec<(String, gix::ObjectId, gix::object::tree::EntryKind)> = Vec::new();
     if let Some(reference) = repo
-        .try_find_reference("refs/heads/__SYSTEM")
+        .fresh_ref("refs/heads/__SYSTEM")
         .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
     {
         let id = reference
@@ -232,7 +233,7 @@ pub fn migrate_to_memstead_ref(
     // 4. Idempotency check — if __MEMSTEAD already exists with the same
     //    tree id, no commit needed.
     let existing_tip: Option<(gix::ObjectId, gix::ObjectId)> = repo
-        .try_find_reference("refs/heads/__MEMSTEAD")
+        .fresh_ref("refs/heads/__MEMSTEAD")
         .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
         .and_then(|r| {
             let id = r.into_fully_peeled_id().ok()?;
@@ -331,7 +332,7 @@ fn write_schema_to_memstead_ref_once(
 
     // Current `__MEMSTEAD` tip (commit id + tree id), if the ref exists.
     let existing_tip: Option<(gix::ObjectId, gix::ObjectId)> = repo
-        .try_find_reference("refs/heads/__MEMSTEAD")
+        .fresh_ref("refs/heads/__MEMSTEAD")
         .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
         .and_then(|r| {
             let id = r.into_fully_peeled_id().ok()?;
@@ -458,7 +459,7 @@ pub fn load_schemas_from_memstead_ref_at_gitdir(
 ) -> Result<LoadOutcome, MemRepoSchemasError> {
     let repo = gix::open(gitdir).map_err(|e| MemRepoSchemasError::GixOpen(e.to_string()))?;
     let memstead_ref = match repo
-        .try_find_reference("refs/heads/__MEMSTEAD")
+        .fresh_ref("refs/heads/__MEMSTEAD")
         .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?
     {
         Some(r) => r,
@@ -623,7 +624,7 @@ pub fn read_schema_file_from_memstead_ref(
 ) -> Result<Option<Vec<u8>>, MemsteadRefError> {
     let repo = gix::open(gitdir).map_err(|e| MemsteadRefError::GixOpen(e.to_string()))?;
     let memstead_ref = match repo
-        .try_find_reference("refs/heads/__MEMSTEAD")
+        .fresh_ref("refs/heads/__MEMSTEAD")
         .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
     {
         Some(r) => r,
@@ -685,7 +686,7 @@ pub fn read_mem_config_from_memstead_ref(
 
     let repo = gix::open(gitdir).map_err(|e| MemsteadRefError::GixOpen(e.to_string()))?;
     let memstead_ref = repo
-        .try_find_reference("refs/heads/__MEMSTEAD")
+        .fresh_ref("refs/heads/__MEMSTEAD")
         .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
         .ok_or_else(|| MemsteadRefError::Config {
             path: "refs/heads/__MEMSTEAD".to_string(),
@@ -818,7 +819,7 @@ fn commit_config_to_memstead_at_gitdir_cas_once(
     // Snapshot the existing __MEMSTEAD tip (or absence thereof) so the
     // ref-edit batch can use the matching precondition.
     let existing_tip: Option<gix::ObjectId> = repo
-        .try_find_reference("refs/heads/__MEMSTEAD")
+        .fresh_ref("refs/heads/__MEMSTEAD")
         .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
         .map(|r| {
             r.into_fully_peeled_id()
@@ -967,7 +968,7 @@ fn memstead_tip(gitdir: &Path) -> Result<Option<gix::ObjectId>, MemRepoWriteErro
             path: gitdir.display().to_string(),
             message: e.to_string(),
         })?
-        .try_find_reference("refs/heads/__MEMSTEAD")
+        .fresh_ref("refs/heads/__MEMSTEAD")
         .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
         .map(|r| {
             r.into_fully_peeled_id()
@@ -1015,7 +1016,7 @@ fn commit_paths_to_memstead_at_gitdir_once(
         message: e.to_string(),
     })?;
     let existing_tip: Option<gix::ObjectId> = repo
-        .try_find_reference("refs/heads/__MEMSTEAD")
+        .fresh_ref("refs/heads/__MEMSTEAD")
         .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
         .map(|r| {
             r.into_fully_peeled_id()
@@ -1251,7 +1252,7 @@ fn prune_mem_storage_at_gitdir(
             path: gitdir.display().to_string(),
             message: e.to_string(),
         })?;
-        repo.try_find_reference(format!("refs/heads/{branch_leaf}").as_str())
+        repo.fresh_ref(format!("refs/heads/{branch_leaf}").as_str())
             .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
             .map(|r| {
                 r.into_fully_peeled_id()
@@ -1285,7 +1286,7 @@ pub(crate) fn prune_mem_storage_pinned(
     })?;
     // ---- Step 1: drop the per-mem entry from __MEMSTEAD (if present) ----
     let existing_memstead_tip: Option<gix::ObjectId> = repo
-        .try_find_reference("refs/heads/__MEMSTEAD")
+        .fresh_ref("refs/heads/__MEMSTEAD")
         .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
         .map(|r| {
             r.into_fully_peeled_id()
@@ -1462,7 +1463,7 @@ pub fn rename_mem_artifacts_at_gitdir(
     let old_ref = format!("refs/heads/{old_leaf}");
     let new_ref = format!("refs/heads/{new_leaf}");
     let old_tip: gix::ObjectId = repo
-        .try_find_reference(&old_ref)
+        .fresh_ref(&old_ref)
         .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
         .ok_or_else(|| {
             MemRepoWriteError::GitTree(format!("rename source branch {old_ref} not found"))
@@ -1471,7 +1472,7 @@ pub fn rename_mem_artifacts_at_gitdir(
         .map_err(|e| MemRepoWriteError::GitTree(format!("peel {old_ref}: {e}")))?
         .detach();
     if repo
-        .try_find_reference(&new_ref)
+        .fresh_ref(&new_ref)
         .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
         .is_some()
     {
@@ -1482,7 +1483,7 @@ pub fn rename_mem_artifacts_at_gitdir(
 
     // ---- Step 1: move the config blob on __MEMSTEAD (if present) ----
     let existing_memstead_tip: Option<gix::ObjectId> = repo
-        .try_find_reference("refs/heads/__MEMSTEAD")
+        .fresh_ref("refs/heads/__MEMSTEAD")
         .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
         .map(|r| {
             r.into_fully_peeled_id()

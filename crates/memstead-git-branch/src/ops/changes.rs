@@ -18,6 +18,7 @@
 //! filtered out: the surface is entity-level. Only `.md` files outside
 //! `.memstead/` ever produce envelopes.
 
+use crate::vcs::RefRead;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -467,7 +468,7 @@ pub(crate) fn branch_tip_commit<'r>(
     head: &str,
 ) -> Result<Option<gix::Commit<'r>>, VcsError> {
     let reference = repo
-        .try_find_reference(head)
+        .fresh_ref(head)
         .map_err(|e| VcsError::Git(format!("find ref {head}: {e}")))?;
     let Some(mut reference) = reference else {
         return Ok(repo

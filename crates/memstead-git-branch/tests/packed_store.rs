@@ -109,11 +109,9 @@ fn git_ok(gitdir: &Path, args: &[&str]) {
     );
 }
 
-/// The pack a user runs by hand beside a running engine, as the backup
-/// guide gives it: git's `gc` at its default prune grace, leaving the
-/// refs unpacked. A pack that packs the refs deletes a branch's ref
-/// file under a reader, which is a different promise and not this one.
-const PACK: &[&str] = &["-c", "gc.packRefs=false", "gc", "--quiet"];
+/// The pack a user runs by hand beside a running engine: git's `gc` at
+/// its default prune grace.
+const PACK: &[&str] = &["gc", "--quiet"];
 
 /// The loose objects of a git directory, and its pack files.
 fn objects(gitdir: &Path) -> (usize, usize) {
@@ -190,9 +188,8 @@ fn reads_back(engine: &mut Engine, mem: &str, written: &Written, when: &str) {
 /// One engine that stays up writes a few hundred entities, with updates
 /// and a rename among them. Its git directory is packed under it at
 /// each point of the closed list: between two operations; several times
-/// from outside while the engine is inside a burst of writes, by the
-/// command the backup guide gives; and after the refs were packed
-/// between two operations. After each pack the same engine reads back
+/// from outside while the engine is inside a burst of writes; and
+/// after the refs were packed. After each pack the same engine reads back
 /// everything it wrote with the hash it got, and writes on; a second
 /// engine on the same git directory and a fresh one agree.
 #[test]
@@ -283,6 +280,63 @@ fn a_running_engine_loses_nothing_when_its_git_directory_is_packed_under_it() {
         "alpha",
         &written,
         "the first engine, at the end",
+    );
+}
+
+/// git packs refs by writing each ref's value into `packed-refs` and
+/// then deleting the ref's file, and the git library reads those two in
+/// the other order. A running engine that looks a branch up between the
+/// two steps would see it where it stood at the pack before, and a
+/// write planned on that would be refused. With the refs packed in a
+/// tight loop beside it, every write of the engine still succeeds, and
+/// a second engine that reloads all the while never sees the mem older
+/// than it was.
+#[test]
+fn a_pack_of_the_refs_beside_a_running_engine_refuses_no_write() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("alpha", "default@1.0.0")]);
+    let gitdir = gitdir_of(tmp.path());
+    git_ok(&gitdir, &["config", "gc.auto", "0"]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    let mut reader = engine_from_workspace_root(tmp.path()).expect("a second engine boots");
+    let mut written = Written::new();
+
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let packs = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (outside, halt, count) = (gitdir.clone(), stop.clone(), packs.clone());
+    let packer = std::thread::spawn(move || {
+        while !halt.load(std::sync::atomic::Ordering::Relaxed) {
+            // A pack that loses the race for a ref's lock against the
+            // engine says so and packs the rest; that is not this test's
+            // subject.
+            let _ = git(&outside, &["pack-refs", "--all"]);
+            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+
+    for i in 0..700 {
+        let id = create(&mut engine, "alpha", &format!("Beside {i}"));
+        update(&mut engine, &id, &format!("touched {i}"));
+        note(&mut written, &engine, &id);
+        if i % 25 == 0 {
+            // A second engine reads the mem from storage and finds
+            // everything written so far: its view is never an older one.
+            reads_back(&mut reader, "alpha", &written, &format!("round {i}"));
+        }
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    packer.join().unwrap();
+    assert!(
+        packs.load(std::sync::atomic::Ordering::Relaxed) > 50,
+        "the refs were packed many times beside the writes"
+    );
+    reads_back(&mut engine, "alpha", &written, "after the ref packs");
+    let mut fresh = engine_from_workspace_root(tmp.path()).expect("a fresh engine boots");
+    reads_back(
+        &mut fresh,
+        "alpha",
+        &written,
+        "a fresh engine after the ref packs",
     );
 }
 
@@ -399,12 +453,6 @@ fn a_store_packs_itself_past_gits_default_threshold() {
     );
     let (loose, _) = objects(&gitdir);
     assert!(loose < 6700, "{loose} loose objects after the pack");
-    // The engine's pack leaves the refs unpacked: the branch is still a
-    // ref file, which a reader never finds deleted under it.
-    assert!(
-        gitdir.join("refs").join("heads").join("alpha").is_file(),
-        "the branch's ref file is where it was"
-    );
 
     // As many commits again: the store stays bounded.
     let mut most_loose = 0;

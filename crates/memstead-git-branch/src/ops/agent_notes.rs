@@ -41,10 +41,10 @@ pub use memstead_base::ops::agent_notes::{AgentNotesReport, CommitNote};
 /// fresh repos legitimately have no `__MEMSTEAD` yet.
 pub fn read_memstead_ref(git_dir: &Path) -> Result<Option<String>, VcsError> {
     let repo = gix::open(git_dir)?;
-    Ok(repo
-        .rev_parse_single("refs/heads/__MEMSTEAD")
-        .ok()
-        .map(|id| id.to_hex().to_string()))
+    Ok(
+        crate::vcs::RefRead::fresh_rev(&repo, "refs/heads/__MEMSTEAD")
+            .map(|id| id.to_hex().to_string()),
+    )
 }
 
 /// Parsed shape of one commit body. Mirrors the layout produced by
