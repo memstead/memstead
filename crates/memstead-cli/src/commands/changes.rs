@@ -239,7 +239,7 @@ fn run_filesystem(
         && name != workspace_mem
     {
         return Err(CliError::from_engine_with_hint(
-            engine.unknown_mem(name),
+            engine.unknown_mem_error(name),
             &format!("A filesystem workspace holds one mem, `{workspace_mem}`."),
         )
         .into());

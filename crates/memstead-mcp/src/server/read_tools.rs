@@ -567,7 +567,7 @@ impl McpServer {
                     );
                 }
                 None => {
-                    let err = engine.unknown_mem(mem);
+                    let err = engine.unknown_mem_error(mem);
                     return attach_drift_to_error(
                         engine_err_unified(err, &engine),
                         &drift_warnings,

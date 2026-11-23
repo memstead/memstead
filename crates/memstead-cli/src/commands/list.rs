@@ -111,8 +111,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// behaviour: read-side commands now reject unknown names instead of silently
 /// returning empty results.
 pub(super) fn unknown_mem_error(name: &str, engine: &memstead_base::Engine) -> CliError {
-    CliError::from_engine_with_hint(
-        engine.unknown_mem(name),
-        "Run `memstead workspace dump` for the full snapshot.",
-    )
+    let refusal = engine.unknown_mem_error(name);
+    // The pointer to the roster dump helps with a name nobody knows; a
+    // mem that is out of service carries its own repairs.
+    if refusal.code() == "UNKNOWN_MEM" {
+        CliError::from_engine_with_hint(
+            refusal,
+            "Run `memstead workspace dump` for the full snapshot.",
+        )
+    } else {
+        CliError::from_engine_op(refusal)
+    }
 }

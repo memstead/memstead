@@ -164,7 +164,7 @@ fn resolve_schema(ctx: &CliContext, mem: Option<&str>) -> anyhow::Result<Resolve
                 if engine.quarantine_reason(name).is_some() {
                     return Err(CliError::from_engine_op(engine.unknown_mem_error(name)).into());
                 }
-                return Err(CliError::from_engine_op(engine.unknown_mem(name)).into());
+                return Err(CliError::from_engine_op(engine.unknown_mem_error(name)).into());
             }
             name
         }

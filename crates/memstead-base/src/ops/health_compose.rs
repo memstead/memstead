@@ -1332,7 +1332,7 @@ impl ComposeHealthError {
     /// reason): the one value both surfaces render.
     pub fn into_engine_error(self, engine: &crate::Engine) -> crate::EngineError {
         match self {
-            ComposeHealthError::UnknownMem { name, .. } => engine.unknown_mem(&name),
+            ComposeHealthError::UnknownMem { name, .. } => engine.unknown_mem_error(&name),
             ComposeHealthError::MemQuarantined(name) => engine.unknown_mem_error(&name),
             ComposeHealthError::InvalidTargetSchema { raw, reason } => {
                 crate::EngineError::InvalidTargetSchema { raw, reason }

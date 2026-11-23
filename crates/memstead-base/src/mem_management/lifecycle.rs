@@ -484,7 +484,7 @@ pub fn delete_mem(
                 pruned_orphan_config: Some(pruned),
             });
         }
-        return Err(engine.unknown_mem(&params.name.clone()).into());
+        return Err(engine.unknown_mem_error(&params.name.clone()).into());
     }
 
     // ---- Step 2: allowlist match ----
@@ -693,7 +693,7 @@ pub fn delete_mem(
     if out_of_service.is_some() {
         detached_referrers = referrers_into(engine, &params.name);
         let Some(taken) = engine.unregister_quarantined_mount(&params.name) else {
-            return Err(engine.unknown_mem(&params.name.clone()).into());
+            return Err(engine.unknown_mem_error(&params.name.clone()).into());
         };
         if let Err(e) = engine.persist_state() {
             engine.restore_quarantined_mount(taken);
@@ -2458,12 +2458,12 @@ fn rename_mode(
                         .is_some_and(|c| c.renaming_from.as_deref() == Some(params.old.as_str()))
                 });
             if !flipped_by_this_rename {
-                return Err(engine.unknown_mem(&params.old.clone()).into());
+                return Err(engine.unknown_mem_error(&params.old.clone()).into());
             }
             true
         }
         (None, false) => {
-            return Err(engine.unknown_mem(&params.old.clone()).into());
+            return Err(engine.unknown_mem_error(&params.old.clone()).into());
         }
     };
     Ok((old_mount, resumed))

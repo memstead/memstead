@@ -324,7 +324,7 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let selected: Vec<String> = match chain.as_ref().map(|(m, _)| m).or(args.mem_name.as_ref()) {
         Some(name) => {
             if !all_names.iter().any(|n| n == name) {
-                return Err(CliError::from_engine_op(engine.unknown_mem(name)).into());
+                return Err(CliError::from_engine_op(engine.unknown_mem_error(name)).into());
             }
             vec![name.clone()]
         }
@@ -542,7 +542,7 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
         .mem_configs_named()
         .find(|(name, _)| *name == mem_name)
         .map(|(_, c)| c)
-        .ok_or_else(|| CliError::from_engine_op(engine.unknown_mem(&mem_name)))?;
+        .ok_or_else(|| CliError::from_engine_op(engine.unknown_mem_error(&mem_name)))?;
 
     let output = match args.output {
         Some(p) => p,
@@ -749,7 +749,7 @@ fn run_mem_filesystem(
         && name != workspace_mem
     {
         return Err(CliError::from_engine_with_hint(
-            engine.unknown_mem(name),
+            engine.unknown_mem_error(name),
             &format!("A filesystem workspace holds one mem, `{workspace_mem}`."),
         )
         .into());

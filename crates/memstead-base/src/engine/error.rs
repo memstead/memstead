@@ -3617,17 +3617,39 @@ impl super::Engine {
         }
     }
 
-    /// `ENTITY_NOT_FOUND` for `id`, with the ids that look like it.
+    /// The refusal for an entity id that is in no view. `ENTITY_NOT_FOUND`
+    /// with the ids that look like it, unless the id's mem is out of
+    /// service or left the roster a moment ago: the engine has not read
+    /// that mem, so it does not know that the entity is missing, and
+    /// answers for the mem ([`Self::unknown_mem_error`]).
     pub fn not_found(&self, id: &str) -> EngineError {
+        if let Some(refusal) = self.mem_out_of_view(id) {
+            return refusal;
+        }
         EngineError::NotFound {
             id: id.to_string(),
             suggestions: suggest_similar(&self.store, id),
         }
     }
 
+    /// The refusal for the mem of `id`, when that mem is quarantined or
+    /// was unmounted a moment ago; `None` for an id of a mem in service,
+    /// of a mem nobody knows, or with no mem prefix.
+    pub fn mem_out_of_view(&self, id: &str) -> Option<EngineError> {
+        let id = crate::entity::EntityId::canonical(id);
+        let mem = id.mem();
+        (!mem.is_empty() && (self.quarantine_reason(mem).is_some() || self.recently_unmounted(mem)))
+            .then(|| self.unknown_mem_error(mem))
+    }
+
     /// `UNKNOWN_MEM` for `name`, with the mems mounted now and the
-    /// writable ones among them.
-    pub fn unknown_mem(&self, name: &str) -> EngineError {
+    /// writable ones among them. The plain form: it knows nothing of
+    /// the quarantine roster or of a mem that was unmounted a moment
+    /// ago, so nothing but [`Self::unknown_mem_error`] calls it. Every
+    /// caller that has a name which resolved to no mem in service asks
+    /// that function, which answers `MEM_QUARANTINED` or
+    /// `MEM_UNMOUNTED` where the roster knows the name.
+    pub(in crate::engine) fn plain_unknown_mem(&self, name: &str) -> EngineError {
         // Sorted, so the payload does not depend on mount order.
         let mut known_mems: Vec<String> = self.mounts().iter().map(|m| m.mem.clone()).collect();
         known_mems.sort();

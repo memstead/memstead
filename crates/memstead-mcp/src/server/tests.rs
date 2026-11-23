@@ -9709,6 +9709,101 @@ fn memstead_mem_delete_of_a_quarantined_mount_names_the_unregister() {
     assert!(!holder.exists(), "nothing is laid where the storage was");
 }
 
+/// The read tools that take a mem as their scope answer for a
+/// quarantined mem that it is out of service, with the reason and the
+/// repair, and for a name nobody knows that it is unknown.
+#[test]
+fn the_scoped_read_tools_name_a_quarantined_mem_as_out_of_service() {
+    use memstead_base::mem_management::{MemMountParams, MountSource, mount_mem};
+
+    let tmp = TempDir::new().unwrap();
+    let holder = tmp.path().join("holder");
+    let view = tmp.path().join("view");
+    memstead_git_branch::test_support::init_real_mem_repo(&holder, &[("notes", "default@1.0.0")]);
+    let gitdir = std::fs::canonicalize(holder.join("mem-repo").join(".git")).unwrap();
+    memstead_git_branch::lay_workspace_marker(&view).unwrap();
+    {
+        let mut engine =
+            memstead_git_branch::workspace_store::engine_from_workspace_root(&view).unwrap();
+        mount_mem(
+            &mut engine,
+            MemMountParams {
+                name: "notes".to_string(),
+                source: MountSource::Branch {
+                    branch: "notes".to_string(),
+                    gitdir: Some(gitdir),
+                },
+                capability: memstead_base::MountCapability::Write,
+                schema: None,
+                note: None,
+                operator_mode: true,
+                actor: memstead_base::vcs::Actor::Cli,
+                client: None,
+            },
+        )
+        .unwrap();
+    }
+    std::fs::remove_dir_all(&holder).unwrap();
+    let engine = memstead_git_branch::workspace_store::engine_from_workspace_root(&view).unwrap();
+    assert_eq!(engine.quarantined_mems().len(), 1);
+    let server = McpServer::new(engine, crate::config::DEFAULT_TOKEN_BUDGET);
+
+    let answers = |mem: &str| -> Vec<(&'static str, rmcp::model::CallToolResult)> {
+        vec![
+            (
+                "memstead_search",
+                server.memstead_search(Parameters(SearchParams {
+                    mem: Some(mem.to_string()),
+                    ..search_params_defaults()
+                })),
+            ),
+            (
+                "memstead_overview",
+                server.memstead_overview(Parameters(OverviewParams {
+                    rebuild: None,
+                    chunk: None,
+                    mem: Some(mem.to_string()),
+                    include: None,
+                    token_budget: None,
+                })),
+            ),
+            (
+                "memstead_health",
+                server.memstead_health(Parameters(HealthParams {
+                    include: None,
+                    limit: None,
+                    mem: Some(mem.to_string()),
+                    include_config: false,
+                    token_budget: None,
+                    chunk: None,
+                    target_schema: None,
+                })),
+            ),
+        ]
+    };
+    for (tool, result) in answers("notes") {
+        assert_eq!(result.is_error, Some(true), "{tool}");
+        let envelope = result
+            .structured_content
+            .unwrap_or_else(|| panic!("{tool}: an error carries its envelope"));
+        assert_eq!(envelope["code"], "MEM_QUARANTINED", "{tool}: {envelope}");
+        assert!(
+            envelope["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("`memstead mem unregister notes`"),
+            "{tool}: {envelope}"
+        );
+    }
+    for (tool, result) in answers("nosuch") {
+        assert_eq!(result.is_error, Some(true), "{tool}");
+        let envelope = result
+            .structured_content
+            .unwrap_or_else(|| panic!("{tool}: an error carries its envelope"));
+        assert_eq!(envelope["code"], "UNKNOWN_MEM", "{tool}: {envelope}");
+    }
+}
+
 /// One git directory holds two mems and the workspace mounts one. The
 /// two read tools that take a ref refuse a ref into the other mem as
 /// they refuse a ref that names nothing, and nothing of the other mem

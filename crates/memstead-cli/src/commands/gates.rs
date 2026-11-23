@@ -22,6 +22,14 @@ pub struct Args {
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let engine = ctx.cli_engine()?;
+    // A name that resolves to no mem in service is refused, so an empty
+    // brief always means "nothing gated", never "no such mem" or "out
+    // of service".
+    if let Some(name) = args.mem.as_deref()
+        && engine.base().mount(name).is_none()
+    {
+        return Err(super::list::unknown_mem_error(name, engine.base()).into());
+    }
     let brief = engine.base().render_gates_brief(args.mem.as_deref());
     if ctx.json {
         print_json(&json!({

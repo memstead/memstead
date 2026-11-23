@@ -218,6 +218,14 @@ impl Engine {
         {
             return Err(self.unknown_mem_error(mem));
         }
+        // The same for the entity a graph walk starts from: an anchor in
+        // a mem that is out of service has neighbours nobody has read,
+        // and "no hits" would say it has none.
+        if let Some(anchor) = scope.related_to.as_ref()
+            && let Some(refusal) = self.mem_out_of_view(&anchor.0)
+        {
+            return Err(refusal);
+        }
         #[cfg(target_arch = "wasm32")]
         {
             let _ = scope;

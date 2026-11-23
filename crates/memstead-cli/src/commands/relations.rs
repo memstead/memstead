@@ -1,7 +1,6 @@
 use clap::Parser;
 
 use memstead_base::EntityId;
-use memstead_base::Store;
 use memstead_base::render;
 
 use crate::CliError;
@@ -18,8 +17,8 @@ pub struct Args {
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let id = EntityId::canonical(&args.id);
     let (outgoing, incoming) = match ctx.cli_engine()? {
-        CliEngine::MemRepo(engine) => relations_from_store(&id, &args.id, engine.store())?,
-        CliEngine::Filesystem(engine) => relations_from_store(&id, &args.id, engine.store())?,
+        CliEngine::MemRepo(engine) => relations_from_engine(&id, &args.id, &engine)?,
+        CliEngine::Filesystem(engine) => relations_from_engine(&id, &args.id, &engine)?,
     };
     let payload = render::render_relations_json(id.as_ref(), &outgoing, &incoming);
 
@@ -60,19 +59,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// Returns `Err(NotFound)` when the entity is not in the store; the
 /// not-found check is here so the CLI exit code is uniform across
 /// workspace shapes.
-fn relations_from_store(
+fn relations_from_engine(
     id: &EntityId,
     id_for_err: &str,
-    store: &Store,
+    engine: &memstead_base::Engine,
 ) -> anyhow::Result<(Vec<memstead_base::Edge>, Vec<memstead_base::InEdge>)> {
+    let store = engine.store();
     if store.get(id).is_none() {
-        return Err(
-            CliError::from_engine_op(memstead_base::EngineError::NotFound {
-                id: id_for_err.to_string(),
-                suggestions: memstead_base::engine::error::suggest_similar(store, id_for_err),
-            })
-            .into(),
-        );
+        return Err(CliError::from_engine_op(engine.not_found(id_for_err)).into());
     }
     Ok((store.outgoing(id).to_vec(), store.incoming(id).to_vec()))
 }

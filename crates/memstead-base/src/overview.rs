@@ -1330,7 +1330,7 @@ impl ComposeOverviewError {
             ComposeOverviewError::InvalidIncludeKeySchemaTypes => {
                 crate::EngineError::InvalidInput(self.to_string())
             }
-            ComposeOverviewError::UnknownMem { name, .. } => engine.unknown_mem(&name),
+            ComposeOverviewError::UnknownMem { name, .. } => engine.unknown_mem_error(&name),
             ComposeOverviewError::MemQuarantined(name) => engine.unknown_mem_error(&name),
         }
     }

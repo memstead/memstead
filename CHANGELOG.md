@@ -7,6 +7,39 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every verb names a mem that is out of service.** A quarantined mem
+  is on the roster and in no view. Entity reads, writes, `health --mem`,
+  `changes --mem` and the MCP tools said so, with `MEM_QUARANTINED`,
+  which carries the reason and both repairs, or with `MEM_VIEW_STALE`
+  from a verb that reads the whole workspace. Some CLI verbs called the
+  same mem unknown, or its entity missing, so a caller could not tell a
+  mem that is out of service from a mistyped name. These now answer
+  `MEM_QUARANTINED` for a quarantined mem where they answered
+  `UNKNOWN_MEM`: `search --mem`, `list --mem`, `export --mem` in the
+  formats `mem`, `json`, `html` and `llms-txt`, `anchors --mem`,
+  `uninstall` and `mem rename`. These answer it for an entity id of a
+  quarantined mem where they answered `ENTITY_NOT_FOUND`: `relations`,
+  `context`, `delete`, and `update`, `rename` and `retype` with
+  `--auto-hash` or `--force` (without those two flags `rename` and
+  `retype` read the whole workspace and keep `MEM_VIEW_STALE`); a
+  `check --from` batch reports it per entry inside `BATCH_REFUSED`.
+  These readings were empty and refuse now: `anchors <id>` and
+  `search --related-to <id>` for an entity of a quarantined mem (the
+  search also over MCP, `memstead_search` with `related_to`), and
+  `due --mem` and `gates --mem`, which printed an empty reading for a
+  quarantined mem and for a name nobody knows alike and now refuse
+  `MEM_QUARANTINED` and `UNKNOWN_MEM`.
+  Nothing of a quarantined mem is served, as before, and a name the
+  roster does not carry is still `UNKNOWN_MEM`. In the engine there is
+  now one function that refuses a name which resolved to no mem in
+  service, and the refusal for an entity that is in no view asks it
+  first. For a program that links the crates: `Engine::unknown_mem` is
+  gone, `Engine::unknown_mem_error` is the one to call, and
+  `Engine::not_found` may return the mem's refusal. Neither is on the
+  library surface.
+
 ## [0.27.1] - 2026-11-23
 
 ### Security

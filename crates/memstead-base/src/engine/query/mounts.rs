@@ -749,6 +749,12 @@ impl Engine {
         })
     }
 
+    /// The refusal for a name that resolved to no mem in service, and
+    /// the only way to build it: `MEM_QUARANTINED` with the reason when
+    /// the roster carries the name and the mem is out of service,
+    /// `MEM_UNMOUNTED` when it was taken off the roster a moment ago,
+    /// `UNKNOWN_MEM` otherwise. A caller cannot tell a mem that is out
+    /// of service from a mistyped name unless every verb asks here.
     pub fn unknown_mem_error(&self, mem: &str) -> EngineError {
         match self.quarantine_reason(mem) {
             Some(q) => EngineError::MemQuarantined {
@@ -759,7 +765,7 @@ impl Engine {
             None if self.recently_unmounted(mem) => EngineError::MemUnmounted {
                 mem: mem.to_string(),
             },
-            None => self.unknown_mem(mem),
+            None => self.plain_unknown_mem(mem),
         }
     }
 

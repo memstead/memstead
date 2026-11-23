@@ -25,7 +25,13 @@ pub struct Args {
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let id = EntityId::canonical(&args.id_or_query);
-    let outcome: ContextOutcome = match ctx.cli_engine()? {
+    let cli_engine = ctx.cli_engine()?;
+    // An id of a mem that is out of service is answered for the mem,
+    // before the fallback search that would call it not found.
+    if let Some(refusal) = cli_engine.base().mem_out_of_view(&args.id_or_query) {
+        return Err(CliError::from_engine_op(refusal).into());
+    }
+    let outcome: ContextOutcome = match cli_engine {
         CliEngine::MemRepo(engine) => resolve_context_mem_repo(&engine, &id, ctx, &args)?,
         CliEngine::Filesystem(engine) => resolve_context_filesystem(&engine, &id, ctx, &args)?,
     };

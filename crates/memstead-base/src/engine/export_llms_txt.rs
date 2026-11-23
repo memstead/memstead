@@ -253,7 +253,7 @@ impl crate::Engine {
             .mounts
             .iter()
             .find(|m| m.mount.mem == mem)
-            .ok_or_else(|| self.unknown_mem(mem))?;
+            .ok_or_else(|| self.unknown_mem_error(mem))?;
 
         let schema_pin = mounted
             .mount

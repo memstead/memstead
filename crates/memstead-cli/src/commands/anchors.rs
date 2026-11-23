@@ -85,12 +85,20 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // Both variants expose the same read surface. `state` carries the live
     // resolution (present only for a by-entity lookup on a path-medium mem;
     // `None` for the reverse `--artifact` lookup, which spans mems).
-    let (rows, unreadable): (Vec<AnchorRow>, Vec<SidecarCondition>) = match ctx.cli_engine()? {
+    let cli_engine = ctx.cli_engine()?;
+    // An entity of a mem that is out of service has anchors nobody has
+    // read: the answer is the mem's refusal, not an empty list.
+    if let Some(id) = args.id.as_deref()
+        && let Some(refusal) = cli_engine.base().mem_out_of_view(id)
+    {
+        return Err(CliError::from_engine_op(refusal).into());
+    }
+    let (rows, unreadable): (Vec<AnchorRow>, Vec<SidecarCondition>) = match cli_engine {
         CliEngine::MemRepo(engine) => {
             if let Some(mem) = args.mem.as_deref()
                 && !engine.mem_names().contains(&mem)
             {
-                return Err(CliError::from_engine_op(engine.unknown_mem(mem)).into());
+                return Err(CliError::from_engine_op(engine.unknown_mem_error(mem)).into());
             }
             (collect(&engine, &args), unreadable_sidecars(&engine, &args))
         }
@@ -98,7 +106,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             if let Some(mem) = args.mem.as_deref()
                 && !engine.mem_names().contains(&mem)
             {
-                return Err(CliError::from_engine_op(engine.unknown_mem(mem)).into());
+                return Err(CliError::from_engine_op(engine.unknown_mem_error(mem)).into());
             }
             (collect(&engine, &args), unreadable_sidecars(&engine, &args))
         }

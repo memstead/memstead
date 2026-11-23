@@ -50,17 +50,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // typed `ENTITY_NOT_FOUND` code lives on the CLI side here —
     // pin it explicitly so the wire envelope matches what the engine
     // would emit from a write-path miss.
-    let miss = |engine: &memstead_base::Engine| {
-        // A quarantined mem's entities are deliberately absent — the
-        // read names the quarantine (MEM_QUARANTINED with the boot
-        // reason), not a phantom ENTITY_NOT_FOUND.
-        // Likewise a mem that left the roster: the read names the
-        // unmount (MEM_UNMOUNTED), not a phantom ENTITY_NOT_FOUND.
-        if engine.quarantine_reason(id.mem()).is_some() || engine.recently_unmounted(id.mem()) {
-            return CliError::from_engine_op(engine.unknown_mem_error(id.mem()));
-        }
-        CliError::from_engine_op(engine.not_found(&args.id))
-    };
+    // The engine's refusal answers for the mem where the mem is out of
+    // service or left the roster: `MEM_QUARANTINED` or `MEM_UNMOUNTED`,
+    // not a phantom `ENTITY_NOT_FOUND`.
+    let miss =
+        |engine: &memstead_base::Engine| CliError::from_engine_op(engine.not_found(&args.id));
     // Snapshot the store's outgoing edges alongside the entity so the
     // JSON envelope can resolve each relationship's `source` label after
     // the engine goes out of scope. The outgoing edges carry the

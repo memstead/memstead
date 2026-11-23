@@ -66,7 +66,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
     let Some(mount) = engine.mount(&args.name) else {
         return Err(CliError::from_engine_with_hint(
-            engine.unknown_mem(&args.name),
+            engine.unknown_mem_error(&args.name),
             "`memstead mem list` shows what is mounted.",
         )
         .into());
