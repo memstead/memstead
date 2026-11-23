@@ -57,10 +57,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   now reads its branch and builds its commit again through a newly
   opened repository. That third cause is rare: it was seen twice in
   about 6,000 write rounds on a loaded machine and could not be
-  provoked again, so its repetition is reasoned and not measured. A
-  write that still meets a pack at the wrong instant, most likely a
-  mem rename or delete, is refused with nothing lost and nothing
-  written, and can be sent again.
+  provoked again, so its repetition is reasoned and not measured. An
+  entity write that still meets a pack at the wrong instant is refused
+  with nothing lost and nothing written, and can be sent again
+  (measured under heavy load: 11 of 24,000, every resend landed). A mem
+  rename and a mem delete move several refs and are not repeated: a
+  rename that is refused completes when sent again, and a delete that
+  could not remove the mem's branch says so (`Files deleted: false`,
+  `MEM_FILES_NOT_DELETED`) and leaves the branch, as before.
 
 - **Every verb names a mem that is out of service.** A quarantined mem
   is on the roster and in no view. Entity reads, writes, `health --mem`,

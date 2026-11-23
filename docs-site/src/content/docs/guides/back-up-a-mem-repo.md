@@ -264,10 +264,15 @@ the engine reads a branch in the order that stays correct while that
 happens. And it moves objects from loose files into a pack file; a
 write that looks one up in that instant looks again.
 
-A write that still meets a pack at the wrong instant is refused with a
-storage error, nothing lost and nothing written: send it again. That
-is most likely for a mem rename or delete, which move several refs and
-are not repeated by the engine.
+A write of an entity that still meets a pack at the wrong instant is
+refused with a storage error, nothing lost and nothing written: send
+it again. A mem rename and a mem delete move several refs and are not
+repeated by the engine. A rename that is refused completes when it is
+sent again. A delete that could not remove the mem's branch says so in
+its reply (`Files deleted: false`, warning `MEM_FILES_NOT_DELETED`):
+the mem is off the roster, its branch stays, and
+`memstead mem init <name>` names the ways to adopt or remove what is
+left.
 
 One thing is not covered: a pack with an immediate prune expiry
 (`git gc --prune=now`, or `gc.pruneExpire = now`). A write stores its
