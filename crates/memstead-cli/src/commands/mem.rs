@@ -383,11 +383,12 @@ pub struct InitArgs {
     #[arg(long = "force-overwrite", group = "recovery_action")]
     pub force_overwrite: bool,
 
-    /// Refuse with `MEM_STORAGE_RESIDUE_DETECTED` instructing the
-    /// caller to run `memstead mem delete <name>` first — a hard barrier
-    /// that keeps residue cleanup a separate, named operation rather
-    /// than destructive auto-recovery. Mutually exclusive with
-    /// `--reattach` and `--force-overwrite`.
+    /// Refuse with `MEM_STORAGE_RESIDUE_DETECTED` and change nothing: a
+    /// hard barrier for a caller that wants residue handled by an
+    /// explicit `--reattach` or `--force-overwrite`, never recovered
+    /// automatically. A mem delete does not remove residue: the name is
+    /// off the roster, so it answers that the mem is unknown. Mutually
+    /// exclusive with `--reattach` and `--force-overwrite`.
     #[arg(long = "hard-cleanup-first", group = "recovery_action")]
     pub hard_cleanup_first: bool,
 
@@ -1398,7 +1399,16 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
 /// automatically reaches the CLI envelope without a hand-maintained
 /// translation table to update.
 fn full_engine_err_to_cli(err: memstead_base::FullEngineError) -> anyhow::Error {
-    CliError::from_full_engine_op(err).into()
+    let mut cli = CliError::from_full_engine_op(err);
+    // The engine names the recovery by its field value; on the command
+    // line the same choices are flags of `mem init`.
+    if cli.code == "MEM_STORAGE_RESIDUE_DETECTED" {
+        cli.message.push_str(
+            ". On the command line: `memstead mem init <name> --reattach` adopts it, \
+             `--force-overwrite` destroys it.",
+        );
+    }
+    cli.into()
 }
 
 /// `memstead mem set-version <NAME> <VERSION>` — bump the mem's

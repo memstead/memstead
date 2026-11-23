@@ -1218,7 +1218,10 @@ pub fn delete_mem_artifacts_at_gitdir(
     branch_leaf: &str,
     ctx: &CommitContext<'_>,
 ) -> Result<(), MemRepoWriteError> {
-    prune_mem_storage_at_gitdir(gitdir, branch_leaf, ctx, true)
+    // One commit on the registry ref and the branch's deletion, in one
+    // ref transaction: an attempt that a lock or a pack stopped has
+    // moved no ref, so the step is done again.
+    crate::vcs::again_when_disturbed(|| prune_mem_storage_at_gitdir(gitdir, branch_leaf, ctx, true))
 }
 
 /// Drop only the mem's blobs on `__MEMSTEAD` (its config and its mirrored

@@ -772,8 +772,12 @@ impl fmt::Display for WarningHint {
                     "mem '{mem}' was unregistered but backend \
                          artifact cleanup failed: {e}. The mem-repo \
                          branch and/or `__MEMSTEAD:mems/.../config.json` \
-                         entry may survive; rerun delete with the same \
-                         arguments or have an operator inspect."
+                         entry may survive. A second delete answers that \
+                         the mem is unknown, since it is off the roster. \
+                         To remove what is left, bring the mem back with \
+                         `memstead mem init {mem} --reattach` (over MCP: \
+                         `memstead_mem_create` with `recovery: reattach`) \
+                         and delete it again."
                 ),
                 ("backend_prune_failed", _, None) => write!(
                     f,

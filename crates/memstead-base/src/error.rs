@@ -124,7 +124,7 @@ pub enum FullEngineError {
          {entity_count} entities preserved from a prior session — \
          re-run with `recovery: reattach` to adopt, `recovery: \
          force_overwrite` to destroy, or `recovery: \
-         hard_cleanup_first` to refuse until `memstead mem delete` is run"
+         hard_cleanup_first` to keep refusing while the residue is there"
     )]
     MemStorageResidueDetected {
         /// Composed branch reference (`refs/heads/<branch_leaf>`)

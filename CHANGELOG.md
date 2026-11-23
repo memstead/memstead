@@ -60,6 +60,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   not failed by another mem's quarantine, and without `--strict`
   nothing changes.
 
+- **A mem delete does its storage step again when a ref was locked for
+  a moment.** A delete takes the mem off the roster and then removes
+  its branch and its registry entry in one ref transaction. A lock that
+  another process held on the branch's ref for a moment (a pack does)
+  ended that step: the reply said `Files deleted: false` with the
+  warning `MEM_FILES_NOT_DELETED`, the branch stayed, and the warning
+  advised to run the delete again, which answered `UNKNOWN_MEM`. The
+  step is now repeated as an entity write's is, so a lock held for a
+  few hundred milliseconds no longer leaves a branch behind. When the
+  lock outlasts the repetition the reply is as before, and its warning
+  names the way that works: `memstead mem init <name> --reattach`
+  brings the mem back onto the roster, and a delete then removes it
+  whole. The refusal `mem init` gives for a leftover branch
+  (`MEM_STORAGE_RESIDUE_DETECTED`) names the CLI's flags, `--reattach`
+  and `--force-overwrite`, beside the recovery values, and no longer
+  says that a mem delete removes such a branch; neither does the help
+  of `--hard-cleanup-first` or the description of `recovery` on
+  `memstead_mem_create`. A delete of a name that is off the roster
+  still answers `UNKNOWN_MEM` and destroys nothing.
+
 - **A write that meets a pack is done again, not refused.** A `git gc`
   of a mem-repo's git directory while an engine wrote to it, by hand or
   as the maintenance git runs after a fetch, could refuse a write.

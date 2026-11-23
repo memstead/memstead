@@ -195,6 +195,38 @@ pub(crate) fn lost_to_a_pack<E: std::fmt::Display + std::fmt::Debug>(e: &E) -> b
     CAUSES.iter().any(|cause| said.contains(cause))
 }
 
+/// Whether a step failed because a lock on a ref, or on `packed-refs`,
+/// was held by another process past the library's short wait. A pack
+/// that packs the refs holds those locks for a moment, and so may any
+/// other tool on the git directory. A ref that moved is a different
+/// failure and is not this one.
+pub(crate) fn ref_was_locked<E: std::fmt::Display + std::fmt::Debug>(e: &E) -> bool {
+    const CAUSES: [&str; 2] = ["could not be obtained after", "Could not lock packed refs"];
+    let said = format!("{e} {e:?}");
+    CAUSES.iter().any(|cause| said.contains(cause))
+}
+
+/// Do `step` again while it fails because a pack or a lock was in the
+/// way ([`lost_to_a_pack`], [`ref_was_locked`]). For a step that stores
+/// objects and then applies one ref transaction, so that a failed
+/// attempt has changed nothing a second one would trip over.
+pub(crate) fn again_when_disturbed<T, E: std::fmt::Display + std::fmt::Debug>(
+    mut step: impl FnMut() -> Result<T, E>,
+) -> Result<T, E> {
+    let mut attempt = 1;
+    loop {
+        match step() {
+            Err(e)
+                if attempt < OBJECT_WRITE_ATTEMPTS
+                    && (lost_to_a_pack(&e) || ref_was_locked(&e)) =>
+            {
+                attempt += 1
+            }
+            done => return done,
+        }
+    }
+}
+
 /// Do `step` again while it fails for [`lost_to_a_pack`]. For a step
 /// that stores objects and then moves one ref with a compare-and-set,
 /// so that a failed attempt has changed nothing a second one would
@@ -1521,5 +1553,28 @@ mod tests {
             &"peel ref refs/heads/notes to id: Could not peel reference"
         ));
         assert!(!lost_to_a_pack(&"hash mismatch"));
+
+        let locked = || {
+            "ref transaction rejected: The lock for resource \"refs/heads/a\" could not be \
+             obtained after 0.10s after 8 attempt(s)"
+                .to_string()
+        };
+        assert!(ref_was_locked(&locked()));
+        assert!(!ref_was_locked(&"reference was out of date"));
+        let mut calls = 0;
+        let once_locked: Result<u8, String> = again_when_disturbed(|| {
+            calls += 1;
+            if calls < 2 { Err(locked()) } else { Ok(1) }
+        });
+        assert_eq!((once_locked, calls), (Ok(1), 2));
+        let mut calls = 0;
+        let moved: Result<u8, String> = again_when_disturbed(|| {
+            calls += 1;
+            Err("reference was out of date".to_string())
+        });
+        assert_eq!(
+            (moved, calls),
+            (Err("reference was out of date".to_string()), 1)
+        );
     }
 }

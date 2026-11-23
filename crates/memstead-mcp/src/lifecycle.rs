@@ -60,10 +60,10 @@ pub enum RecoveryActionInput {
     /// pruned in one ref-edit transaction before the fresh seed
     /// commit. Prior entities are gone by design.
     ForceOverwrite,
-    /// Refuse with `MEM_STORAGE_RESIDUE_DETECTED`, instructing the
-    /// caller to run `memstead mem delete <name>` first. Hard barrier
-    /// against destructive auto-recovery — for operators who want
-    /// the cleanup to be a separate, named operation.
+    /// Refuse with `MEM_STORAGE_RESIDUE_DETECTED` and change nothing.
+    /// Hard barrier against automatic recovery, for a caller that
+    /// wants the residue handled by an explicit `reattach` or
+    /// `force_overwrite`.
     HardCleanupFirst,
 }
 
@@ -119,7 +119,7 @@ pub struct MemCreateParams {
     )]
     pub note: Option<String>,
     #[schemars(
-        description = "Explicit recovery action when on-disk storage residue is detected at the composed branch path. Three accepted values: `reattach` (adopt the residual entities, skip the seed commit), `force_overwrite` (destroy the residue — it is removed atomically, so either the residue is gone and the mem is created or nothing changed; the prior entities are gone by design), `hard_cleanup_first` (refuse with `MEM_STORAGE_RESIDUE_DETECTED`, instructing the caller to run `memstead_mem_delete` first). When omitted, the engine routes by whether the residue was left by a deliberate `memstead mem unregister`: such residue defaults to `reattach` and emits a `MEM_REATTACHED_AFTER_UNREGISTER` warning; residue from a crash refuses with `MEM_STORAGE_RESIDUE_DETECTED`. Bare create against a name with no residue ignores this field."
+        description = "Explicit recovery action when on-disk storage residue is detected at the composed branch path. Three accepted values: `reattach` (adopt the residual entities, skip the seed commit), `force_overwrite` (destroy the residue — it is removed atomically, so either the residue is gone and the mem is created or nothing changed; the prior entities are gone by design), `hard_cleanup_first` (refuse with `MEM_STORAGE_RESIDUE_DETECTED` and change nothing, for a caller that wants the residue handled by an explicit `reattach` or `force_overwrite`). When omitted, the engine routes by whether the residue was left by a deliberate `memstead mem unregister`: such residue defaults to `reattach` and emits a `MEM_REATTACHED_AFTER_UNREGISTER` warning; residue from a crash refuses with `MEM_STORAGE_RESIDUE_DETECTED`. Bare create against a name with no residue ignores this field."
     )]
     pub recovery: Option<RecoveryActionInput>,
     #[schemars(
