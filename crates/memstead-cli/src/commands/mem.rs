@@ -370,8 +370,10 @@ pub struct InitArgs {
     /// Default when the residue carries an `unregistered_at` tombstone
     /// (the deliberate unregister signal); pass `--reattach` explicitly
     /// to override for crash-residue you have verified is safe to adopt.
-    /// Mutually exclusive with `--force-overwrite` and
-    /// `--hard-cleanup-first`.
+    /// A reattach keeps the leftover's own schema pin: `--schema` is
+    /// not applied to a mem that already exists, and the reply names
+    /// the pin that was adopted. Mutually exclusive with
+    /// `--force-overwrite` and `--hard-cleanup-first`.
     #[arg(long, group = "recovery_action")]
     pub reattach: bool,
 

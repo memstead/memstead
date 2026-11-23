@@ -71,6 +71,63 @@ pub(super) enum ResidueProbe {
     },
 }
 
+/// The storage a create lands in: the explicit override wins, and
+/// without one a workspace with a mem-repo hosts a git branch.
+fn effective_storage_kind(
+    explicit: Option<StorageKind>,
+    workspace_has_mem_repo: bool,
+) -> StorageKind {
+    match explicit {
+        Some(kind) => kind,
+        None if workspace_has_mem_repo => StorageKind::GitBranch,
+        None => StorageKind::Folder,
+    }
+}
+
+/// The schema pin of the leftover a create is about to reattach, when
+/// there is one and the create's recovery routes to a reattach: named
+/// explicitly, or defaulted by the tombstone a `mem unregister` left.
+/// `None` for a fresh create, for a leftover that is to be overwritten
+/// or refused, and for a leftover whose config carries no pin.
+fn leftover_pin_for_reattach(
+    engine: &crate::Engine,
+    params: &MemCreateParams,
+    workspace_root: Option<&std::path::Path>,
+    canonical: &std::path::Path,
+    requested: &memstead_schema::SchemaRef,
+) -> Option<memstead_schema::SchemaRef> {
+    let workspace_has_mem_repo =
+        workspace_root.is_some_and(|root| root.join("mem-repo").join(".git").is_dir());
+    let config = match effective_storage_kind(params.storage, workspace_has_mem_repo) {
+        StorageKind::Folder => {
+            let bytes =
+                std::fs::read(canonical.join(crate::MEM_META_DIR).join("config.json")).ok()?;
+            serde_json::from_slice::<memstead_schema::config::MemConfig>(&bytes).ok()?
+        }
+        StorageKind::GitBranch => {
+            match residue_probe_for_workspace(
+                engine,
+                workspace_root,
+                &params.name,
+                &params.name,
+                requested,
+            ) {
+                ResidueProbe::Present {
+                    existing_config: Some(config),
+                    ..
+                } => *config,
+                _ => return None,
+            }
+        }
+    };
+    let reattaches = match params.recovery {
+        Some(crate::RecoveryAction::Reattach) => true,
+        Some(_) => false,
+        None => config.unregistered_at.is_some(),
+    };
+    if reattaches { config.schema } else { None }
+}
+
 /// Probe the workspace's mem-repo for pre-existing storage at the
 /// composed `branch_full_path`. Returns `None` when the workspace
 /// lacks a mem-repo (folder-only) or when nothing exists at the
@@ -1525,6 +1582,33 @@ pub fn create_mem(
         canonical.clone()
     };
 
+    // ---- Step 1a0: a reattach adopts the leftover's own schema pin ----
+    // A reattach takes the leftover as it is, its pin included. The
+    // schema the caller named says nothing about a mem that already
+    // exists (the CLI names its default when none is given): recorded
+    // as the mount's pin it contradicted the mem's own, the reply
+    // repeated it, and the allowlist judged a schema the mem does not
+    // carry. A pin that does not resolve here is left to the attach,
+    // which names it.
+    let canonical_schema_ref = match leftover_pin_for_reattach(
+        engine,
+        &params,
+        workspace_root.as_deref(),
+        &canonical,
+        &canonical_schema_ref,
+    )
+    .and_then(|pin| {
+        crate::engine::SchemaResolver::new(&builtin_schemas)
+            .resolve(&pin)
+            .ok()
+    }) {
+        Some(schema) => {
+            memstead_schema::SchemaRef::new(schema.manifest.name.clone(), schema.version.clone())
+        }
+        None => canonical_schema_ref,
+    };
+    params.schema_ref = canonical_schema_ref.clone();
+
     // ---- Step 1a: allowlist match ----
     // Compose the allowlist candidate from the optional `<path>`
     // plus `<name>`. Flat layout (path = None) candidate is just
@@ -1568,16 +1652,7 @@ pub fn create_mem(
     // preserving for existing callers). An explicit git-branch
     // request without a mem-repo has no gitdir to host the branch —
     // typed refusal rather than a downstream instantiate failure.
-    let storage_kind = match params.storage {
-        Some(k) => k,
-        None => {
-            if workspace_has_mem_repo {
-                StorageKind::GitBranch
-            } else {
-                StorageKind::Folder
-            }
-        }
-    };
+    let storage_kind = effective_storage_kind(params.storage, workspace_has_mem_repo);
     if storage_kind == StorageKind::GitBranch && !workspace_has_mem_repo {
         return Err(crate::EngineError::InvalidInput(
             "storage: git-branch requires a mem-repo workspace \

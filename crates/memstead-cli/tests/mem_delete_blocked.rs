@@ -172,6 +172,92 @@ fn a_ref_locked_for_long_leaves_a_branch_and_names_the_way_out() {
     assert!(!branch_exists(&ws, "notes"));
 }
 
+/// The way out works for a mem of another schema than the CLI's
+/// default, under an allowlist that names only that schema and with no
+/// operator mode: a reattach adopts the leftover's own pin, so the
+/// rule judges the schema the mem carries and the mount records it.
+#[test]
+fn the_way_out_keeps_the_leftovers_own_schema() {
+    let root = TempDir::new().unwrap();
+    let ws = root.path().join("ws");
+    fs::create_dir_all(&ws).unwrap();
+    ok(&ws, &["mem-repo", "init", "."]);
+    ok(
+        &ws,
+        &[
+            "workspace",
+            "allow-create",
+            "--schema",
+            "planning@0.4.0",
+            "plans",
+        ],
+    );
+    ok(&ws, &["workspace", "allow-delete", "plans"]);
+    ok(&ws, &["mem", "init", "plans", "--schema", "planning@0.4.0"]);
+    let lock = lock_file(&ws, "plans");
+    fs::write(&lock, "").unwrap();
+    let printed = ok(&ws, &["mem", "delete", "plans"]);
+    fs::remove_file(&lock).unwrap();
+    assert!(printed.contains("Files deleted: false"), "{printed}");
+
+    // The warning's command, as written.
+    let printed = ok(&ws, &["mem", "init", "plans", "--reattach"]);
+    assert!(
+        printed.contains("Schema: `planning@0.4.0`"),
+        "the reply names the adopted pin: {printed}"
+    );
+    let listed = ok(&ws, &["mem", "list"]);
+    assert!(listed.contains("schema `planning@0.4.0`"), "{listed}");
+    let (_, health) = run(&ws, &["health", "--strict"]);
+    assert!(!health.contains("SCHEMA_PIN_MISMATCH"), "{health}");
+
+    let printed = ok(&ws, &["mem", "delete", "plans"]);
+    assert!(printed.contains("Files deleted: true"), "{printed}");
+    assert!(!branch_exists(&ws, "plans"));
+}
+
+/// A reattach after `mem unregister` keeps the pin too, also when the
+/// call names another schema; an overwrite takes the named one.
+#[test]
+fn a_reattach_never_changes_a_pin() {
+    let root = TempDir::new().unwrap();
+    let ws = root.path().join("ws");
+    fs::create_dir_all(&ws).unwrap();
+    ok(&ws, &["mem-repo", "init", "."]);
+    ok(&ws, &["workspace", "allow-create", "--schema", "*", "*"]);
+    ok(&ws, &["mem", "init", "plans", "--schema", "planning@0.4.0"]);
+    for args in [
+        vec!["mem", "init", "plans"],
+        vec![
+            "mem",
+            "init",
+            "plans",
+            "--schema",
+            "default@1.3.0",
+            "--reattach",
+        ],
+    ] {
+        ok(&ws, &["mem", "unregister", "plans", "--operator-mode"]);
+        let printed = ok(&ws, &args);
+        assert!(printed.contains("Schema: `planning@0.4.0`"), "{printed}");
+        let (_, health) = run(&ws, &["health", "--strict"]);
+        assert!(!health.contains("SCHEMA_PIN_MISMATCH"), "{health}");
+    }
+    ok(&ws, &["mem", "unregister", "plans", "--operator-mode"]);
+    let printed = ok(
+        &ws,
+        &[
+            "mem",
+            "init",
+            "plans",
+            "--schema",
+            "default@1.3.0",
+            "--force-overwrite",
+        ],
+    );
+    assert!(printed.contains("Schema: `default@1.3.0`"), "{printed}");
+}
+
 /// A branch kept on purpose by `mem unregister` is removed by no
 /// delete: the name is off the roster, and the delete says so.
 #[test]

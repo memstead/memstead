@@ -67,6 +67,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   not failed by another mem's quarantine, and without `--strict`
   nothing changes.
 
+- **A reattach keeps the leftover's own schema pin.** `memstead mem
+  init <name> --reattach` (over MCP `memstead_mem_create` with
+  `recovery: reattach`), and the reattach a plain create does after a
+  `mem unregister`, recorded the schema the call named as the mount's
+  pin: the CLI names `default@1.3.0` when no `--schema` is given, so a
+  leftover of another schema came back with a reply that said
+  `Schema: default@1.3.0`, a mount that contradicted the mem's own pin
+  (`SCHEMA_PIN_MISMATCH` under `health --strict`), and a refusal
+  `MEM_SCHEMA_NOT_ALLOWED` where the create allowlist names only the
+  mem's real schema. A reattach now adopts the leftover as it is: the
+  pin is the leftover's, the allowlist judges that schema, and the
+  reply names it. A schema named beside a reattach is not applied; an
+  overwrite (`--force-overwrite`) still takes the named one.
+
 - **A mem delete does its storage step again when a ref was locked for
   a moment.** A delete takes the mem off the roster and then removes
   its branch and its registry entry in one ref transaction. A lock that
