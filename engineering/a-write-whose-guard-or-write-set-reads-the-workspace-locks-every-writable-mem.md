@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-11T11:30:34Z
-last_modified: 2026-11-12T02:15:13Z
+last_modified: 2026-11-22T22:21:19Z
 status: accepted
 decided_on: 2026-11-10
 deciders: engine-soundness bundle, executing session and its independent graders
@@ -20,7 +20,7 @@ Rename, the mem-rename sweep, delete and retype read other mems from views taken
 
 ## Consequences
 - Lock scope is wide: a write that refers to another mem waits for a write in progress there, and the whole-workspace verbs wait for any write in progress.
-- One mem that cannot be read, is out of service or cannot be locked blocks the whole-workspace verbs until it can or is removed; deleting that mem stays possible, and so do a pull, a pull of every mem, a branch reset and a schema pin change on that mem itself, which lock the rest of the workspace and proceed (amended 2026-11-12).
+- One mem that cannot be read, is out of service or cannot be locked blocks the whole-workspace verbs until it can or is removed. A mem that is out of service leaves the roster by `memstead mem unregister`, which decides by no mem's content, and its storage-destroying delete refuses `MEM_QUARANTINED` (amended 2026-11-22). Deleting a mem that is in service and cannot be read stays possible, and so do a pull, a pull of every mem, a branch reset and a schema pin change on that mem itself, which lock the rest of the workspace and proceed (amended 2026-11-12).
 - A reference added while a delete or rename holds its locks lands afterwards as a forward reference to a stub.
 - Not covered: a reference into a mem the engine does not mount is checked against storage without that mem's lock (amended 2026-11-12).
 

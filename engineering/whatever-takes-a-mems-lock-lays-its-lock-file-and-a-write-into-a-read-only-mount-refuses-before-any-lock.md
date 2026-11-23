@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-22T13:15:47Z
-last_modified: 2026-11-22T13:15:47Z
+last_modified: 2026-11-22T22:25:35Z
 status: accepted
 decided_on: 2026-11-22
 deciders: operator (shared-engine bundle, go of 2026-11-21), implementing agent
@@ -21,7 +21,7 @@ While the mount verb was graded, its documentation claimed that a read-only moun
 - A read-only mount of a directory that is not writable mounts, reads, refuses writes with `READ_ONLY_MOUNT` and unregisters.
 - An operation that has to hold the mem still (an entity delete, rename or retype in another mem, a write that refers to one of its entities, a call that names its entity by a bare slug) lays the lock directory there on first use, and refuses `MEM_VIEW_STALE` where it cannot.
 - What a user can rely on is a statement about content, not about every file.
-- The unregister of a write mount takes that mem's lock and so may lay its lock file.
+- The unregister of a write mount in service takes that mem's lock and so may lay its lock file. The unregister of a quarantined mount does not take that mem's write lock and lays no write-lock file; where it writes the marker of a folder mem it takes the short lock on that mem's config file, as for a mount in service (amended 2026-11-22).
 
 ## Relationships
 - **DERIVED_FROM**: [[a-write-whose-guard-or-write-set-reads-the-workspace-locks-every-writable-mem]]

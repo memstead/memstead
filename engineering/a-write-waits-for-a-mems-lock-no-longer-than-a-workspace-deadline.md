@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-22T13:15:46Z
-last_modified: 2026-11-22T13:15:46Z
+last_modified: 2026-11-22T22:25:35Z
 status: accepted
 decided_on: 2026-11-21
 deciders: operator (shared-engine bundle, go of 2026-11-21), implementing agent
@@ -20,7 +20,7 @@ The per-mem write lock is an exclusive file lock that dies with its process, so 
 ## Consequences
 - A hung writer costs the others one deadline each, then a typed refusal they can act on.
 - Ordinary contention still resolves by waiting; nothing an agent has to retry appears below the deadline.
-- The folder backend's completion of an interrupted commit at load time is not bounded by it: a fresh process still waits behind a writer that hung in the middle of its commit.
+- The folder backend's completion of an interrupted commit at load time was not bounded by it at first: a fresh process waited behind a writer that hung in the middle of its commit. Since the decision that a load waits for a folder mem's write lock no longer than the workspace deadline, the same setting bounds that wait and the wait of every direct read; a reader with no workspace to ask waits the setting's default (amended 2026-11-22).
 - An operator who wants the old behaviour sets `0`.
 
 ## Relationships
