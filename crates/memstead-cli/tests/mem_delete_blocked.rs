@@ -258,6 +258,59 @@ fn a_reattach_never_changes_a_pin() {
     assert!(printed.contains("Schema: `default@1.3.0`"), "{printed}");
 }
 
+/// A leftover whose schema pin resolves nowhere is not adopted, and the
+/// refusal changes nothing: the tombstone of the unregister stays, and
+/// the advice names the schema install, not a repin of a mem that is
+/// off the roster.
+#[test]
+fn a_leftover_with_an_unresolvable_pin_is_refused_and_left_as_it_was() {
+    let root = TempDir::new().unwrap();
+    let ws = root.path().join("ws");
+    fs::create_dir_all(&ws).unwrap();
+    ok(&ws, &["mem-repo", "init", "."]);
+    ok(&ws, &["workspace", "allow-create", "--schema", "*", "*"]);
+    ok(
+        &ws,
+        &[
+            "mem",
+            "init",
+            "fold",
+            "--storage",
+            "folder",
+            "--schema",
+            "default@1.3.0",
+        ],
+    );
+    ok(&ws, &["mem", "unregister", "fold", "--operator-mode"]);
+    let config = ws.join("fold/.memstead/config.json");
+    let pinned = fs::read_to_string(&config)
+        .unwrap()
+        .replace("default@1.3.0", "default@9.9.9");
+    fs::write(&config, &pinned).unwrap();
+    assert!(pinned.contains("unregistered"), "{pinned}");
+
+    for args in [
+        vec!["mem", "init", "fold", "--storage", "folder"],
+        vec!["mem", "init", "fold", "--storage", "folder", "--reattach"],
+    ] {
+        let (succeeded, printed) = run(&ws, &args);
+        assert!(
+            !succeeded && printed.contains("SCHEMA_NOT_FOUND"),
+            "{printed}"
+        );
+        assert!(printed.contains("memstead schema install"), "{printed}");
+        assert!(
+            !printed.contains("mem set-schema"),
+            "no repin of a mem that is off the roster: {printed}"
+        );
+        assert_eq!(
+            fs::read_to_string(&config).unwrap(),
+            pinned,
+            "a refusal changes nothing"
+        );
+    }
+}
+
 /// A branch kept on purpose by `mem unregister` is removed by no
 /// delete: the name is off the roster, and the delete says so.
 #[test]

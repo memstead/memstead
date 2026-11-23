@@ -78,6 +78,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   carries its one mem on the roster: the commands answer as in a view,
   and a name is plainly unknown until a `mem mount` brings a mem back.
 
+- **A leftover whose schema pin resolves nowhere is refused before
+  anything is written.** A create that routes to a reattach (after a
+  `mem unregister`, or with `--reattach`) over a leftover pinned to a
+  schema version no source holds refused `SCHEMA_NOT_FOUND` only after
+  it had cleared the tombstone the unregister left, and advised
+  `memstead mem set-schema <name>`, which answers `UNKNOWN_MEM` for a
+  name that is off the roster. The refusal now comes first and changes
+  nothing, and it names what works there: install the schema package
+  (a reattach keeps the pin it finds). For a leftover branch
+  `--force-overwrite` is the other way out, as before.
+
 - **A reattach keeps the leftover's own schema pin.** `memstead mem
   init <name> --reattach` (over MCP `memstead_mem_create` with
   `recovery: reattach`), and the reattach a plain create does after a

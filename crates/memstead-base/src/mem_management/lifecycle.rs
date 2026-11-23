@@ -1588,24 +1588,40 @@ pub fn create_mem(
     // exists (the CLI names its default when none is given): recorded
     // as the mount's pin it contradicted the mem's own, the reply
     // repeated it, and the allowlist judged a schema the mem does not
-    // carry. A pin that does not resolve here is left to the attach,
-    // which names it.
+    // carry. A pin that does not resolve refuses here, before anything
+    // is written: the attach refused it too, but only after the
+    // tombstone of an unregister was cleared, and with advice to repin
+    // a mem that is off the roster and out of that command's reach. A
+    // reattach keeps the pin it finds, so the remedy is the schema.
     let canonical_schema_ref = match leftover_pin_for_reattach(
         engine,
         &params,
         workspace_root.as_deref(),
         &canonical,
         &canonical_schema_ref,
-    )
-    .and_then(|pin| {
-        crate::engine::SchemaResolver::new(&builtin_schemas)
-            .resolve(&pin)
-            .ok()
-    }) {
-        Some(schema) => {
+    ) {
+        None => canonical_schema_ref,
+        Some(pin) => {
+            let schema = crate::engine::SchemaResolver::new(&builtin_schemas)
+                .resolve(&pin)
+                .map_err(|sources| {
+                    let hint = workspace_root
+                        .as_deref()
+                        .and_then(|root| {
+                            crate::engine::error::probe_authoring_package(root, &pin.name)
+                        })
+                        .unwrap_or_else(|| {
+                            crate::engine::error::SCHEMA_INSTALL_PACKAGE_UNKNOWN.to_string()
+                        });
+                    crate::EngineError::SchemaNotFound {
+                        mem: params.name.clone(),
+                        pin: pin.to_string(),
+                        sources,
+                        install_hint: Some(hint),
+                    }
+                })?;
             memstead_schema::SchemaRef::new(schema.manifest.name.clone(), schema.version.clone())
         }
-        None => canonical_schema_ref,
     };
     params.schema_ref = canonical_schema_ref.clone();
 

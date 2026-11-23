@@ -3112,7 +3112,7 @@ fn schema_not_found_message(
         // repin command is not.
         msg.push_str(&format!(
             "; the pinned version {pin} is not installed in this workspace and the pin is not \
-             to be moved (a fork copies the source's pin, never re-pins): obtain the schema \
+             to be moved (a fork and a reattach keep the pin they find, never re-pin): obtain the schema \
              package for {pin}, then run: memstead schema install {hint}"
         ));
     } else if let Some(path) = install_hint {
