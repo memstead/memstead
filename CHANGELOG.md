@@ -25,9 +25,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   and no others; asked for any other schema of that mem-repo it
   answers as for a name that exists nowhere, so a switch of a mounted
   mem to such a schema is made in the workspace that owns the
-  mem-repo. A workspace's own mem-repo is read whole as before, and so
-  is its own
-  `.memstead/schemas/` folder. This narrows what the engine serves
+  mem-repo, or from a workspace that has installed the same schema
+  itself. A workspace's own mem-repo is read whole as before, and so
+  is its own `.memstead/schemas/` folder. This narrows what the engine serves
   through a workspace; it does not hide a mem-repo from whoever can
   read its git directory.
 
