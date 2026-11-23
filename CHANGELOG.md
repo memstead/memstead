@@ -43,18 +43,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `UNKNOWN_MEM`, the writable ones included. A workspace whose roster
   holds a mount of a git branch now counts as git-backed: those
   commands work in a view, a create lands in whichever writable mem it
-  names, and a create into a read-only mount answers `READ_ONLY_MOUNT`
-  wherever the mount stands on the roster. A workspace that holds only
+  names, a create that names none takes the first writable mount, a
+  `changes` report reads whichever mount it names, and a write into a
+  read-only mount answers `READ_ONLY_MOUNT` wherever the mount stands
+  on the roster. A workspace that holds only
   folder mems keeps its shape and its refusals. What opens is the
   content of the mounts and the workspace's own policy, nothing else:
   the verbs that act on the store itself still refuse wherever the
   workspace has no `mem-repo/` of its own, as before (`mem init`,
   `mem delete`, `mem rename`, `branch-reset`, `fetch`, `pull`, `push`,
   `mem-repo remote-add`, `recover`; in a folder workspace that also
-  mounts a branch, `mem unregister` of its own mem too). The list was
-  taken from a run of every command in such workspaces on the released
-  and on the new binary: the cross-link grant, the dump, the batch
-  verbs and a create that names a mount are the only commands whose
+  mounts a branch, `mem unregister` of its own mem too), and
+  `schema install` there writes the workspace's own
+  `.memstead/schemas/`, never the other workspace's schema ref. The
+  list was taken from a run of every command in such workspaces on the
+  released and on the new binary: the cross-link grant, the dump, the
+  batch verbs, `create` and `changes` are the only commands whose
   answer changed.
 
 - **A strict health read fails on a mem that is out of service.**

@@ -184,7 +184,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 | SchemaCommand::Install(_)
                 | SchemaCommand::Migrate(_)
         )
-    ) && let Some((_, root)) = ctx.workspace_shape()
+    ) && let Some((_, root)) = ctx.store_shape()
     {
         let _ = memstead_schema::meta_schema::publish_meta_schemas(&root);
     }
@@ -316,7 +316,7 @@ fn workspace_installed_schema(
     ctx: &CliContext,
     schema_ref: &SchemaRef,
 ) -> Option<std::sync::Arc<memstead_schema::Schema>> {
-    let (_, root) = ctx.workspace_shape()?;
+    let (_, root) = ctx.store_shape()?;
     let folder = root.join(".memstead").join("schemas");
     let (mut schemas, _failed) =
         memstead_base::engine::boot::load_workspace_schemas_with_failures(Some(folder.as_path()));
@@ -381,7 +381,7 @@ fn one_line(text: &str) -> String {
 /// writes on git-backed workspaces) of each schema registry. `None` outside a
 /// workspace or when the package (or its README) is absent.
 fn workspace_installed_readme(ctx: &CliContext, schema_ref: &SchemaRef) -> Option<Vec<u8>> {
-    let (_, root) = ctx.workspace_shape()?;
+    let (_, root) = ctx.store_shape()?;
     let fs_readme = root
         .join(".memstead")
         .join("schemas")
@@ -609,7 +609,7 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
 fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
     use memstead_base::workspace::MountCapability;
     use memstead_base::workspace_store::{FileWorkspaceStore, WorkspaceStoreAdapter};
-    let workspace = ctx.workspace_shape().and_then(|(shape, root)| match shape {
+    let workspace = ctx.store_shape().and_then(|(shape, root)| match shape {
         WorkspaceShape::Filesystem => FileWorkspaceStore::new().load(&root).ok().and_then(|ws| {
             let mut writable = ws
                 .mounts
@@ -1102,15 +1102,13 @@ This package carries the retired `optional:` key, so it was written when an abse
 }
 
 fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
-    let (shape, root) = ctx.workspace_shape().ok_or_else(|| {
+    let (shape, root) = ctx.store_shape().ok_or_else(|| {
         // The engine's not-initialised refusal, as every other command gives it.
         let cwd = std::env::current_dir().unwrap_or_default();
         crate::setup::boot_error_to_cli(&cwd, memstead_base::BootError::NotInitialised(cwd.clone()))
     })?;
-    let (schema_ref, files) = resolve_source(
-        &args.source,
-        ctx.workspace_shape().map(|(_, r)| r).as_deref(),
-    )?;
+    let (schema_ref, files) =
+        resolve_source(&args.source, ctx.store_shape().map(|(_, r)| r).as_deref())?;
 
     match shape {
         WorkspaceShape::Filesystem => {
@@ -1163,7 +1161,7 @@ fn install_to_git_branch(
     schema_ref: &SchemaRef,
     files: &[memstead_schema::SchemaSourceFile],
 ) -> anyhow::Result<()> {
-    let Some((_shape, root)) = ctx.workspace_shape() else {
+    let Some((_shape, root)) = ctx.store_shape() else {
         return Err(crate::setup::workspace_not_initialised_error(
             "No workspace found. Run from a directory containing `.memstead/workspace.toml`.",
         )

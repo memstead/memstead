@@ -328,6 +328,13 @@ fn the_verbs_that_act_on_the_store_refuse_in_a_view() {
         remotes.stdout.is_empty(),
         "no remote was added to the store"
     );
+    // A schema installed in a view lands in the view's own schema
+    // directory, never on the store's schema ref.
+    ok(&view, &["schema", "new", "viewpkg"]);
+    let printed = ok(&view, &["schema", "install", "viewpkg"]);
+    assert!(printed.contains(".memstead/schemas/viewpkg@"), "{printed}");
+    assert_eq!(store_branches(&store), branches, "the store's refs stay");
+
     // What a view could always do stays: take a mount off its roster.
     ok(&view, &["mem", "unregister", "notes", "--operator-mode"]);
     assert_eq!(store_branches(&store), branches, "the branch stays");

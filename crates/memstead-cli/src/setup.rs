@@ -454,6 +454,21 @@ impl CliContext {
         })
     }
 
+    /// The workspace's shape as the store-acting commands read it: by
+    /// its own `mem-repo/`. A workspace that only mounts branches of
+    /// another workspace's git directory keeps its own schemas in its
+    /// own `.memstead/schemas/`; installing one there must not write
+    /// the other workspace's schema ref.
+    pub fn store_shape(&self) -> Option<(WorkspaceShape, PathBuf)> {
+        self.workspace_shape().map(|(shape, root)| {
+            if memstead_base::has_own_mem_repo(&root) {
+                (shape, root)
+            } else {
+                (WorkspaceShape::Filesystem, root)
+            }
+        })
+    }
+
     pub fn cli_engine(&self) -> anyhow::Result<CliEngine> {
         match self.workspace_shape() {
             Some((_, root)) => self.cli_engine_at(&root),
