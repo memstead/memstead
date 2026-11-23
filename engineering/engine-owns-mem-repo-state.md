@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:03Z
-last_modified: 2026-08-30T00:33:18Z
+last_modified: 2026-11-23T11:23:34Z
 authority: established
 universality: domain-wide
 tags: invariant, mem-repo, mutation, integrity, engine, plugin, mutation-boundary
@@ -29,6 +29,7 @@ On the plugin side this applies to all plugin hooks, skills, and scripts; the re
 - **GOVERNS**: [[plugin:entity-bash-guard-hook]]
 - **GOVERNS**: [[plugin:architecture-guard-check-script]]
 - **GOVERNS**: [[plugin:subagents-must-preserve-the-entity-mutation-guard-boundary]]
+- **GOVERNS**: [[a-mem-repo-is-packed-by-gits-own-maintenance-which-the-engine-starts-after-a-write]]
 
 ## Justification
 
@@ -39,7 +40,8 @@ Direct mutations skip schema validation, write rules, link-graph integrity, sear
 Operations against the OUTER project repo (the workspace root the user's `.git` lives in) are not Memstead-managed and are a documented carve-out, not a violation: `git add` / `git commit` / `git log` there are permitted. `memstead-cli`'s outer-repo gitignore management (mem-repo bootstrap) is one such outer-repo operation.
 
 - Reads of mem state are unrestricted and may use `memstead-cli` subprocess or `memstead-mcp`.
-- No mem-repo mutation carve-out exists. The principle permits no direct `git checkout` or raw entity-file write against mem state, on any backend. Restoring a graph to a prior commit routes through the engine's own history-rewrite path (`memstead branch-reset`), never an external git operation.
+- One carve-out exists since 2026-11-23: packing. A user may run `git gc` at git's default prune grace on a mem-repo's git directory, also beside a running engine, and may set its `gc` configuration; a pack changes how objects and refs are stored and nothing a mem says, and the engine is built to keep working beside it. A pack with an immediate prune expiry is not part of the carve-out.
+- No other mem-repo mutation carve-out exists. The principle permits no direct `git checkout` or raw entity-file write against mem state, on any backend. Restoring a graph to a prior commit routes through the engine's own history-rewrite path (`memstead branch-reset`), never an external git operation.
 - **Corrected 2026-08-30:** this section previously framed the outer-repo carve-out around the plugin's auto-commit hooks, twice. Those hooks retired with the outer-repo versioning concept on 2026-07-11 and no plugin hook commits anything today, so the carve-out is stated above as the general outer-repo rule it always was, with no live hook standing behind it.
 
 ## Consequences

@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:08Z
-last_modified: 2026-07-13T16:43:08Z
+last_modified: 2026-11-23T11:27:43Z
 status: accepted
 decided_on: 2026-05-19
 deciders: memstead-core
@@ -24,6 +24,7 @@ The transport surface (`Engine::fetch`, `pull`, `push`) needed to move history b
 - Cost: a hard runtime requirement on a `git` binary on the operator's PATH (accepted: already true for any mem-repo consumer).
 - `GIT_TERMINAL_PROMPT=0` plus a null stdin means a missing credential fails typed instead of hanging a non-interactive agent process.
 - The split model — subprocess for network, in-process `gix` for local object/ref work — means two git implementations coexist in the same module.
+- Outside the transport verbs, two local steps run the `git` binary too: the working-tree sync after a commit to the checked-out branch (`git read-tree`), and since 2026-11-23 the automatic pack after a write (`git gc --auto`), since the library offers no pack with pruning as one safe operation (amended 2026-11-23).
 
 ## Relationships
 - **REFERENCES**: [[engine:git-transport-and-history-surface]]

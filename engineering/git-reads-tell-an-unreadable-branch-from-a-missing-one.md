@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-11T11:24:22Z
-last_modified: 2026-11-22T22:21:20Z
+last_modified: 2026-11-23T11:13:00Z
 status: accepted
 decided_on: 2026-11-11
 deciders: engine-soundness bundle, executing session and its independent graders
@@ -21,6 +21,7 @@ Several reads collapsed a failure into absence: a configured mem whose repositor
 - A damaged repository stops writes through the stale-view refusal instead of serving a wrong answer.
 - A name that is not a ref still resolves as a revision where the engine itself supplies it (the tip of a mem's own branch). A ref a caller hands to `diff` or `changes-since` is resolved by the engine's own grammar inside the mounted histories and never as a general revision (amended 2026-11-22).
 - One old test asserted the contract's opposite and was removed.
+- A ref is looked up through one function of the git-branch crate that stays current while another process packs the refs; a lookup that calls the library directly can see a branch where it stood at an earlier pack (amended 2026-11-23).
 
 ## Relationships
 - **GOVERNS**: [[engine:git-tree-backend]]
