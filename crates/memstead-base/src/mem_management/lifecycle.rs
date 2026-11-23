@@ -71,6 +71,30 @@ pub(super) enum ResidueProbe {
     },
 }
 
+/// Whether a folder mem's folder is something a delete must not remove,
+/// or a create must not start in: a workspace root (this workspace's or
+/// another's), a folder that holds this workspace, or a folder in or
+/// over this workspace's `mem-repo/` or `.memstead/`.
+fn folder_is_not_the_mems_to_remove(
+    dir: &std::path::Path,
+    workspace_root: &std::path::Path,
+) -> bool {
+    let resolved = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let dir = resolved(dir);
+    if resolved(workspace_root).starts_with(&dir) || crate::is_workspace_root(&dir) {
+        return true;
+    }
+    [
+        workspace_root.join("mem-repo"),
+        workspace_root.join(crate::WORKSPACE_STORE_DIR),
+    ]
+    .iter()
+    .any(|reserved| {
+        let reserved = resolved(reserved);
+        reserved.starts_with(&dir) || dir.starts_with(&reserved)
+    })
+}
+
 /// The storage a create lands in: the explicit override wins, and
 /// without one a workspace with a mem-repo hosts a git branch.
 fn effective_storage_kind(
@@ -598,32 +622,26 @@ pub fn delete_mem(
         }
     }
 
-    // A delete removes the mem's folder whole. When that folder is the
-    // workspace's own directory, or holds it, or holds the workspace's
-    // git directory or its state, the delete would remove the workspace
-    // or every mem in it. No caller means that; refused before anything
-    // changes, whatever surface asked. (After the allowlist: a caller
-    // the workspace does not let delete learns that first.)
+    // A delete removes the mem's folder whole. A folder that is a
+    // workspace (this one or another), that holds this workspace, or
+    // that lies in or over this workspace's git directory or its state,
+    // is not the mem's to take along: the delete would remove a
+    // workspace, every branch in it, or its roster. Refused before
+    // anything changes, whatever surface asked. (After the allowlist: a
+    // caller the workspace does not let delete learns that first.)
     if params.delete_files
         && let (Some(dir), Some(root)) = (mem_dir.as_deref(), engine.workspace_root())
+        && folder_is_not_the_mems_to_remove(dir, root)
     {
-        let resolved = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-        let dir = resolved(dir);
-        let kept = [
-            root.to_path_buf(),
-            root.join("mem-repo"),
-            root.join(crate::WORKSPACE_STORE_DIR),
-        ];
-        if kept.iter().any(|path| resolved(path).starts_with(&dir)) {
-            return Err(crate::EngineError::InvalidInput(format!(
-                "mem `{}` lives in the workspace's own directory, or in a folder that holds the \
-                 workspace's git directory or its state ({}); deleting it would remove the \
-                 workspace or every mem in it. Remove the mem's files yourself, if that is meant",
-                params.name,
-                dir.display()
-            ))
-            .into());
-        }
+        return Err(crate::EngineError::InvalidInput(format!(
+            "mem `{}` lives in a folder that is not its own to remove ({}): a workspace's \
+             directory, or one in or over the workspace's git directory or its state. Deleting it \
+             would remove a workspace or every mem in it. Remove the mem's files yourself, if \
+             that is meant",
+            params.name,
+            dir.display()
+        ))
+        .into());
     }
 
     // ---- Step 3: MEM_REFERENCED_BY_POLICY check ----
@@ -1725,6 +1743,23 @@ pub fn create_mem(
              override or pass storage: folder"
                 .to_string(),
         )
+        .into());
+    }
+    if storage_kind == StorageKind::Folder
+        && let Some(root) = workspace_root.as_deref()
+        && canonical != canonicalize_maybe_missing(root)
+        && folder_is_not_the_mems_to_remove(&canonical, root)
+    {
+        // A folder mem does not start in the workspace's git directory
+        // or its state, nor in another workspace's directory: nothing
+        // there is a mem's to own, and a later delete would take it
+        // along. (The workspace's own root is where a folder workspace
+        // keeps its one mem; that stays.)
+        return Err(crate::EngineError::InvalidInput(format!(
+            "a folder mem cannot live at {}: that is a workspace's directory, or lies in or over \
+             this workspace's git directory or its state",
+            canonical.display()
+        ))
         .into());
     }
     if storage_kind == StorageKind::Folder {

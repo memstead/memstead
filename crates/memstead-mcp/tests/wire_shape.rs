@@ -4168,7 +4168,7 @@ fn mem_delete_removes_neither_the_workspace_directory_nor_another_stores_branch(
         let del = harness.call_tool("memstead_mem_delete", json!({ "name": "solo" }));
         let printed = del.to_string();
         assert!(printed.contains("INVALID_INPUT"), "{del}");
-        assert!(printed.contains("workspace's own directory"), "{del}");
+        assert!(printed.contains("not its own to remove"), "{del}");
     }
     assert_eq!(
         std::fs::read_to_string(solo.join("keep.txt")).unwrap(),

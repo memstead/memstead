@@ -37,12 +37,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the mem's folder,
   which is the workspace's own directory: the reply said
   `files_deleted: true` and every other file there was gone with it.
-  The engine now refuses any delete of a mem whose folder is the
-  workspace's own directory, or holds it, or holds the workspace's
-  `mem-repo/` or its `.memstead/` (`INVALID_INPUT`), whatever surface
-  asks: a folder mem placed at the workspace's root or named
-  `mem-repo` took the workspace, or every branch in it, with it, over
-  the CLI too. And in a workspace that only mounts a branch of another
+  The engine now refuses any delete of a mem whose folder is not the
+  mem's to remove (`INVALID_INPUT`), whatever surface asks: a folder
+  that is a workspace's directory (this workspace's or another's),
+  that holds this workspace, or that lies in or over its `mem-repo/`
+  or `.memstead/`. A folder mem placed at the workspace's root, named
+  `mem-repo`, or created inside the git directory took the workspace,
+  or every branch in it, with it, over the CLI too. A create refuses a
+  folder mem in those places as well; a folder workspace's one mem at
+  its root stays as it is. And in a workspace that only mounts a branch of another
   workspace's git directory the tool deleted that branch there, where
   the CLI's `mem delete` refuses; the tool now refuses a branch mount
   too wherever the workspace has no `mem-repo/` of its own

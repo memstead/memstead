@@ -311,6 +311,68 @@ fn a_leftover_with_an_unresolvable_pin_is_refused_and_left_as_it_was() {
     }
 }
 
+/// A folder mem does not start where nothing is a mem's to own: in or
+/// over the workspace's git directory or its state, above the
+/// workspace, or in another workspace's directory. (A delete of such a
+/// mem would take branches, the roster or a workspace along.) A folder
+/// of the mem's own is created, and deleted with the mem.
+#[test]
+fn a_folder_mem_is_not_created_in_the_workspaces_own_directories() {
+    let root = TempDir::new().unwrap();
+    let ws = root.path().join("ws");
+    let other = root.path().join("other");
+    fs::create_dir_all(&ws).unwrap();
+    fs::create_dir_all(&other).unwrap();
+    ok(&ws, &["mem-repo", "init", "."]);
+    ok(&other, &["mem-repo", "init", "."]);
+    for (name, location) in [
+        ("refs", "mem-repo/.git/refs"),
+        ("objects", "mem-repo/.git/objects"),
+        ("mem-repo", "mem-repo"),
+        ("state", ".memstead/state"),
+        ("other", "../other"),
+    ] {
+        let (succeeded, printed) = run(
+            &ws,
+            &[
+                "mem",
+                "init",
+                name,
+                "--storage",
+                "folder",
+                "--location",
+                location,
+                "--schema",
+                "default@1.3.0",
+                "--operator-mode",
+            ],
+        );
+        assert!(
+            !succeeded && printed.contains("INVALID_INPUT"),
+            "a folder mem at {location}: {printed}"
+        );
+    }
+    assert!(ws.join("mem-repo/.git/refs").is_dir());
+    assert!(ws.join(".memstead/state").is_dir());
+    assert!(other.join("mem-repo/.git").is_dir());
+
+    ok(
+        &ws,
+        &[
+            "mem",
+            "init",
+            "plain",
+            "--storage",
+            "folder",
+            "--schema",
+            "default@1.3.0",
+            "--operator-mode",
+        ],
+    );
+    let printed = ok(&ws, &["mem", "delete", "plain", "--operator-mode"]);
+    assert!(printed.contains("Files deleted: true"), "{printed}");
+}
+
 /// A branch kept on purpose by `mem unregister` is removed by no
 /// delete: the name is off the roster, and the delete says so.
 #[test]

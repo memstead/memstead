@@ -2812,10 +2812,7 @@ fn delete_refuses_a_mem_whose_folder_is_the_workspace_directory() {
         },
     )
     .unwrap_err();
-    assert!(
-        err.to_string().contains("workspace's own directory"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("not its own to remove"), "{err}");
     assert!(
         engine.mem_router().is_writable("solo"),
         "the mem is still served"
@@ -2882,7 +2879,7 @@ fn delete_refuses_a_mem_whose_folder_holds_the_git_directory() {
         )
     };
     let err = delete(&mut engine, "mem-repo").unwrap_err();
-    assert!(err.to_string().contains("git directory"), "{err}");
+    assert!(err.to_string().contains("not its own to remove"), "{err}");
     assert!(store.join(".git").is_dir(), "the git directory stays");
 
     let response = delete(&mut engine, "plain").unwrap();
@@ -2891,4 +2888,50 @@ fn delete_refuses_a_mem_whose_folder_holds_the_git_directory() {
         "a folder of the mem's own is removed"
     );
     assert!(!plain.exists());
+}
+
+/// The refusal is one rule, not a list of names: a folder inside the
+/// workspace's git directory or its state, and a folder that is another
+/// workspace's directory, are not a mem's to remove either.
+#[test]
+fn delete_refuses_a_mem_inside_the_git_directory_or_in_another_workspace() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().join("ws");
+    let refs = workspace.join("mem-repo").join(".git").join("refs");
+    let state = workspace.join(".memstead").join("state");
+    let other = tmp.path().join("other");
+    for dir in [&refs, &state, &other.join(".memstead")] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    std::fs::write(other.join(".memstead").join("workspace.toml"), "").unwrap();
+    let mount = |name: &str, dir: &std::path::Path| {
+        (
+            folder_mount(name, dir.to_path_buf()),
+            Box::new(FilesystemBackend::new(dir.to_path_buf())) as Box<dyn MemBackend>,
+        )
+    };
+    let mut engine = Engine::from_mounts(vec![
+        mount("refs", &refs),
+        mount("state", &state),
+        mount("other", &other),
+    ])
+    .unwrap();
+    engine.set_workspace_root(workspace.clone());
+    for (name, dir) in [("refs", &refs), ("state", &state), ("other", &other)] {
+        let err = mem_management::delete_mem(
+            &mut engine,
+            mem_management::MemDeleteParams {
+                name: name.to_string(),
+                delete_files: true,
+                note: None,
+                actor: memstead_base::vcs::Actor::Cli,
+                client: None,
+                detach_incoming: false,
+                operator_mode: true,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not its own to remove"), "{err}");
+        assert!(dir.is_dir(), "{} stays", dir.display());
+    }
 }
