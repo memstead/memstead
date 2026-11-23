@@ -4136,14 +4136,16 @@ fn full_memstead_proposal_brief_serves_markdown_and_the_json_skeleton() {
     refusal(&result, "UNKNOWN_MEM", "nobody");
 }
 
-/// A mem is deleted on a mem-repo workspace only, as CLI `mem delete`
-/// has it. In a folder workspace the mem's folder is the workspace's
-/// own directory, and the tool used to remove it whole, with every
-/// unrelated file in it; in a workspace that only mounts a branch of
-/// another workspace's git directory it removed that branch there.
-/// Both refuse now, operator mode included, and change nothing.
+/// Two things a mem delete never removes. In a folder workspace the
+/// one mem's folder is the workspace's own directory, and the tool
+/// used to remove it whole, with every unrelated file in it: the
+/// engine refuses that. In a workspace that only mounts a branch of
+/// another workspace's git directory the tool removed the branch
+/// there: it refuses as CLI `mem delete` does. Operator mode included;
+/// nothing changes. (A folder mem in a subfolder is still deleted with
+/// its folder; the server's unit tests hold that.)
 #[test]
-fn mem_delete_refuses_where_the_workspace_has_no_mem_repo_of_its_own() {
+fn mem_delete_removes_neither_the_workspace_directory_nor_another_stores_branch() {
     let tmp = TempDir::new().unwrap();
 
     // A folder workspace: one folder mem at the workspace's root.
@@ -4164,10 +4166,9 @@ fn mem_delete_refuses_where_the_workspace_has_no_mem_repo_of_its_own() {
     {
         let mut harness = WireHarness::start_with_args(&solo, &["--operator-mode"]);
         let del = harness.call_tool("memstead_mem_delete", json!({ "name": "solo" }));
-        assert!(
-            del.to_string().contains("UNSUPPORTED_WORKSPACE_SHAPE"),
-            "{del}"
-        );
+        let printed = del.to_string();
+        assert!(printed.contains("INVALID_INPUT"), "{del}");
+        assert!(printed.contains("workspace's own directory"), "{del}");
     }
     assert_eq!(
         std::fs::read_to_string(solo.join("keep.txt")).unwrap(),

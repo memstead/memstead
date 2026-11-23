@@ -2842,3 +2842,53 @@ fn delete_refuses_a_mem_whose_folder_is_the_workspace_directory() {
     assert!(response.deleted_from_router && !response.files_deleted);
     assert!(workspace.join("keep.txt").exists());
 }
+
+/// The same refusal for a folder mem whose folder holds the workspace's
+/// git directory: a folder mem named `mem-repo` sits in the directory
+/// every branch of the workspace lives in. A folder mem in a folder of
+/// its own is deleted with it.
+#[test]
+fn delete_refuses_a_mem_whose_folder_holds_the_git_directory() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().join("ws");
+    let store = workspace.join("mem-repo");
+    let plain = workspace.join("plain");
+    std::fs::create_dir_all(store.join(".git")).unwrap();
+    std::fs::create_dir_all(&plain).unwrap();
+    let mut engine = Engine::from_mounts(vec![
+        (
+            folder_mount("mem-repo", store.clone()),
+            Box::new(FilesystemBackend::new(store.clone())) as Box<dyn MemBackend>,
+        ),
+        (
+            folder_mount("plain", plain.clone()),
+            Box::new(FilesystemBackend::new(plain.clone())) as Box<dyn MemBackend>,
+        ),
+    ])
+    .unwrap();
+    engine.set_workspace_root(workspace.clone());
+    let delete = |engine: &mut Engine, name: &str| {
+        mem_management::delete_mem(
+            engine,
+            mem_management::MemDeleteParams {
+                name: name.to_string(),
+                delete_files: true,
+                note: None,
+                actor: memstead_base::vcs::Actor::Cli,
+                client: None,
+                detach_incoming: false,
+                operator_mode: true,
+            },
+        )
+    };
+    let err = delete(&mut engine, "mem-repo").unwrap_err();
+    assert!(err.to_string().contains("git directory"), "{err}");
+    assert!(store.join(".git").is_dir(), "the git directory stays");
+
+    let response = delete(&mut engine, "plain").unwrap();
+    assert!(
+        response.files_deleted,
+        "a folder of the mem's own is removed"
+    );
+    assert!(!plain.exists());
+}

@@ -32,19 +32,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 - **A mem delete over MCP no longer removes a workspace's directory.**
-  `memstead_mem_delete` had no gate on the workspace's shape, where the
-  CLI's `mem delete` and the tool's own counterpart
-  `memstead_mem_create` have one. In a folder workspace, sent to a
-  server in operator mode, it deleted the workspace's one mem by
-  removing the mem's folder, which is the workspace's own directory:
-  the reply said `files_deleted: true` and every other file there was
-  gone with it. In a workspace that only mounts a branch of another
-  workspace's git directory it deleted that branch there. The tool now
-  refuses `UNSUPPORTED_WORKSPACE_SHAPE` wherever the workspace has no
-  `mem-repo/` of its own, as the CLI does. Behind it the engine refuses
-  any delete of a mem whose folder is the workspace's own directory or
-  holds it (`INVALID_INPUT`), whatever surface asks; taking such a mem
-  off the roster without touching files is unaffected.
+  In a folder workspace, `memstead_mem_delete` of the workspace's one
+  mem, on a server in operator mode or under a delete rule, removed
+  the mem's folder,
+  which is the workspace's own directory: the reply said
+  `files_deleted: true` and every other file there was gone with it.
+  The engine now refuses any delete of a mem whose folder is the
+  workspace's own directory, or holds it, or holds the workspace's
+  `mem-repo/` or its `.memstead/` (`INVALID_INPUT`), whatever surface
+  asks: a folder mem placed at the workspace's root or named
+  `mem-repo` took the workspace, or every branch in it, with it, over
+  the CLI too. And in a workspace that only mounts a branch of another
+  workspace's git directory the tool deleted that branch there, where
+  the CLI's `mem delete` refuses; the tool now refuses a branch mount
+  too wherever the workspace has no `mem-repo/` of its own
+  (`UNSUPPORTED_WORKSPACE_SHAPE`). A folder mem that lies in a folder
+  of its own is deleted with that folder as before.
 
 - **A workspace that mounts a git branch is git-backed.** A workspace
   made with `memstead mem mount --new-workspace` keeps engine state
