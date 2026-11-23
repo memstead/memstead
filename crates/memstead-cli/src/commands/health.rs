@@ -117,9 +117,12 @@ pub struct Args {
     /// '{"code": "<condition>", "message": "..."}' --method "<owner,
     /// closing plan>"`); a later `ok` on the same condition withdraws
     /// it. Stale entities, drifted anchors and `SCHEMA_GENERATIONS_BEHIND`
-    /// stay advisory. Any other exit code is a refusal of the run
-    /// itself (unknown mem, a `--mem` that is quarantined, boot
-    /// failure), never a verdict.
+    /// stay advisory. The verdict is the code
+    /// `HEALTH_STRICT_VIOLATIONS` printed after the report, not the
+    /// exit status alone: a refusal of the run itself (an unknown mem,
+    /// a `--mem` that is quarantined, a boot failure) prints its own
+    /// code and no report, and may exit 1 as well (a quarantined
+    /// `--mem` does; an unknown mem exits 3).
     #[arg(long)]
     pub strict: bool,
 
