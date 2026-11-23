@@ -240,7 +240,7 @@ fn run_filesystem(
     {
         return Err(CliError::from_engine_with_hint(
             engine.unknown_mem_error(name),
-            &format!("A filesystem workspace holds one mem, `{workspace_mem}`."),
+            &crate::setup::one_mem_hint(&workspace_mem),
         )
         .into());
     }

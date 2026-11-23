@@ -422,43 +422,44 @@ pub fn is_workspace_root(dir: &Path) -> bool {
 /// the mem-repo-only refusals, and the MCP boot line all route through
 /// here so no surface can name a shape the others disagree with.
 pub fn is_mem_repo_shaped(workspace_root: &Path) -> bool {
-    workspace_root.join("mem-repo").join(".git").is_dir() || roster_is_git_backed(workspace_root)
+    workspace_root.join("mem-repo").join(".git").is_dir() || mounts_a_git_branch(workspace_root)
 }
 
-/// Whether the workspace's roster holds a mount of a git branch, or no
-/// mount at all. A workspace that keeps engine state only and mounts
-/// mems out of another workspace's git directory (a view) has no
-/// `mem-repo/` of its own and is git-backed and multi-mem all the same:
-/// every command that works on a mem-repo workspace's mounts works on
-/// its mounts. It stays that shape when its last mount is taken off:
-/// the folder shape is the one that serves exactly one folder mem,
-/// which is always on its roster, so a roster that is readable and
-/// empty is never the folder shape. A roster that cannot be read
-/// counts as no git mount.
-fn roster_is_git_backed(workspace_root: &Path) -> bool {
+/// Whether the workspace's roster holds a mount of a git branch. A
+/// workspace that keeps engine state only and mounts mems out of
+/// another workspace's git directory (a view) has no `mem-repo/` of its
+/// own and is git-backed and multi-mem all the same: every command that
+/// works on a mem-repo workspace's mounts works on its mounts.
+fn mounts_a_git_branch(workspace_root: &Path) -> bool {
+    roster_mounts(workspace_root).is_some_and(|mounts| {
+        mounts.iter().any(|mount| {
+            mount
+                .get("storage")
+                .and_then(|s| s.get("type"))
+                .and_then(|t| t.as_str())
+                == Some("git-branch")
+        })
+    })
+}
+
+/// Whether the workspace's roster is readable and holds no mount at
+/// all: the state a view is in once its last mount was taken off. Such
+/// a workspace reads as the folder shape, and a message that speaks of
+/// "the one mem" of a folder workspace has none to name there. A roster
+/// that cannot be read is not this state.
+pub fn mounts_no_mem(workspace_root: &Path) -> bool {
+    roster_mounts(workspace_root).is_some_and(|mounts| mounts.is_empty())
+}
+
+/// The mount rows of the workspace's roster file, when it can be read.
+fn roster_mounts(workspace_root: &Path) -> Option<Vec<serde_json::Value>> {
     let roster = workspace_root
         .join(WORKSPACE_STORE_DIR)
         .join("state")
         .join("mounts.json");
-    let Ok(text) = std::fs::read_to_string(roster) else {
-        return false;
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return false;
-    };
-    value
-        .get("mounts")
-        .and_then(|m| m.as_array())
-        .is_some_and(|mounts| {
-            mounts.is_empty()
-                || mounts.iter().any(|mount| {
-                    mount
-                        .get("storage")
-                        .and_then(|s| s.get("type"))
-                        .and_then(|t| t.as_str())
-                        == Some("git-branch")
-                })
-        })
+    let text = std::fs::read_to_string(roster).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    value.get("mounts")?.as_array().cloned()
 }
 
 /// The one spelling of a workspace's shape, for any surface that names

@@ -143,8 +143,35 @@ pub fn unsupported_shape_error(root: &Path, advice: &str) -> CliError {
         path: root.display().to_string(),
     });
     c.kind = ExitKind::Generic;
-    c.message = format!("{}: {advice}", c.message);
+    // A workspace that mounts no mem (a view whose last mount was taken
+    // off) reads as the folder shape. Advice to migrate or to use the
+    // folder verbs helps nobody there: what is missing is a mount.
+    c.message = if memstead_base::mounts_no_mem(root) {
+        let m = memstead_word();
+        format!(
+            "{}: this workspace mounts no mem and has no mem-repo of its own. Mount one with \
+             `{m} mem mount <name> --branch <branch> --gitdir <git-dir>`, or bootstrap a store \
+             with `{m} mem-repo init` in a fresh folder",
+            c.message
+        )
+    } else {
+        format!("{}: {advice}", c.message)
+    };
     c
+}
+
+/// The sentence a folder workspace adds when a call names another mem
+/// than its own. A workspace that mounts no mem has none to name, and
+/// says that instead.
+pub fn one_mem_hint(workspace_mem: &str) -> String {
+    if workspace_mem.is_empty() {
+        format!(
+            "This workspace mounts no mem; `{} mem mount` adds one.",
+            memstead_word()
+        )
+    } else {
+        format!("A filesystem workspace holds one mem, `{workspace_mem}`.")
+    }
 }
 
 fn unsupported_workspace_shape_message() -> String {

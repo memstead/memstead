@@ -227,12 +227,12 @@ fn the_commands_of_a_mem_repo_workspace_work_in_a_view() {
     assert!(!listed.contains("`facts`"), "{listed}");
 }
 
-/// A view whose last mount was taken off keeps its shape: the commands
-/// of a git-backed workspace still answer there, a name is unknown
-/// without a sentence about a folder workspace's one mem, and a mount
-/// brings everything back.
+/// A view whose last mount was taken off reads as the folder shape,
+/// and its refusals say what is the case there: it mounts no mem, and a
+/// mount is what brings it back. No sentence names "the one mem" of a
+/// folder workspace with an empty name.
 #[test]
-fn a_view_with_no_mount_left_keeps_its_shape() {
+fn a_view_with_no_mount_left_says_so() {
     let root = TempDir::new().unwrap();
     let (store, view) = fixture(root.path());
     ok(&view, &["mem", "unregister", "facts", "--operator-mode"]);
@@ -240,18 +240,25 @@ fn a_view_with_no_mount_left_keeps_its_shape() {
     let listed = ok(&view, &["mem", "list"]);
     assert!(listed.contains("# Mems (0)"), "{listed}");
 
-    ok(&view, &["workspace", "dump"]);
-    ok(&view, &["workspace", "grant-cross-link", "notes", "facts"]);
+    for args in [
+        vec!["workspace", "dump"],
+        vec!["workspace", "grant-cross-link", "notes", "facts"],
+        vec!["mem", "unregister", "notes", "--operator-mode"],
+    ] {
+        let printed = refused(&view, &args, "UNSUPPORTED_WORKSPACE_SHAPE");
+        assert!(printed.contains("mounts no mem"), "{printed}");
+        assert!(printed.contains("mem mount <name>"), "{printed}");
+        assert!(
+            !printed.contains("to migrate") && !printed.contains("here instead"),
+            "no advice for a folder workspace that has a mem: {printed}"
+        );
+    }
     let printed = refused(&view, &spec("notes", "Nowhere"), "UNKNOWN_MEM");
     assert!(
-        !printed.contains("filesystem workspace"),
-        "no sentence about a folder workspace's one mem: {printed}"
+        printed.contains("This workspace mounts no mem"),
+        "{printed}"
     );
-    refused(
-        &view,
-        &["mem", "unregister", "notes", "--operator-mode"],
-        "UNKNOWN_MEM",
-    );
+    assert!(!printed.contains("holds one mem"), "{printed}");
 
     let gitdir = store.join("mem-repo/.git").canonicalize().unwrap();
     ok(
@@ -270,6 +277,7 @@ fn a_view_with_no_mount_left_keeps_its_shape() {
         ],
     );
     ok(&view, &spec("notes", "Back Again"));
+    ok(&view, &["workspace", "dump"]);
 }
 
 /// A workspace that holds one folder mem is still the filesystem shape:
