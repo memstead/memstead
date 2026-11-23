@@ -33,6 +33,18 @@ pub struct Args {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    // Recovery repairs a store; a workspace that only mounts branches
+    // of another workspace's git directory is not one, and refuses as
+    // a folder workspace does.
+    if let Some((_, root)) = ctx.workspace_shape()
+        && !memstead_base::has_own_mem_repo(&root)
+    {
+        return Err(crate::setup::unsupported_shape_error(
+            &root,
+            &crate::setup::unsupported_workspace_shape_message(),
+        )
+        .into());
+    }
     let mut engine = crate::setup::full_engine(ctx)?;
     let note_ref = args.note.as_deref();
     let report = engine

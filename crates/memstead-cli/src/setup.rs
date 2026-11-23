@@ -174,7 +174,7 @@ pub fn one_mem_hint(workspace_mem: &str) -> String {
     }
 }
 
-fn unsupported_workspace_shape_message() -> String {
+pub(crate) fn unsupported_workspace_shape_message() -> String {
     let m = memstead_word();
     format!(
         "this subcommand is mem-repo-only and not yet supported on filesystem-mem workspaces — \
@@ -432,6 +432,28 @@ impl CliContext {
     /// Build a [`CliEngine`] from the current cwd. The workspace
     /// marker `.memstead/workspace.toml` resolves either shape; the
     /// presence of `mem-repo/.git/` switches the engine factory.
+    /// The engine for a verb that acts on the store itself: a mem's
+    /// branch (create, delete, rename, reset), the git directory's
+    /// remotes, its transport, its recovery. Resolved by the workspace's
+    /// own `mem-repo/`, not by its roster: a workspace that mounts git
+    /// branches of another workspace's git directory serves what its
+    /// mounts hold and is not the store they live in, so those verbs
+    /// take the `Filesystem` arm there and refuse as they do in a
+    /// folder workspace. Without this a `mem delete` in such a
+    /// workspace removed a branch in the other workspace's git
+    /// directory, and in a folder workspace that also mounts a branch
+    /// it removed the workspace's own directory.
+    pub fn store_engine(&self) -> anyhow::Result<CliEngine> {
+        let engine = self.cli_engine()?;
+        let own_store = self
+            .workspace_shape()
+            .is_some_and(|(_, root)| memstead_base::has_own_mem_repo(&root));
+        Ok(match engine {
+            CliEngine::MemRepo(base) if !own_store => CliEngine::Filesystem(base),
+            other => other,
+        })
+    }
+
     pub fn cli_engine(&self) -> anyhow::Result<CliEngine> {
         match self.workspace_shape() {
             Some((_, root)) => self.cli_engine_at(&root),

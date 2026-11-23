@@ -45,11 +45,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   commands work in a view, a create lands in whichever writable mem it
   names, and a create into a read-only mount answers `READ_ONLY_MOUNT`
   wherever the mount stands on the roster. A workspace that holds only
-  folder mems keeps its shape and its refusals. A view still hosts no
-  mem of its own: `memstead mem init` refuses there as before (now
-  `INVALID_INPUT`, naming the way: create the mem in the workspace that
-  holds the git directory and mount it), and `memstead_mem_create`
-  refuses `UNSUPPORTED_WORKSPACE_SHAPE` as before.
+  folder mems keeps its shape and its refusals. What opens is the
+  content of the mounts and the workspace's own policy, nothing else:
+  the verbs that act on the store itself still refuse wherever the
+  workspace has no `mem-repo/` of its own, as before (`mem init`,
+  `mem delete`, `mem rename`, `branch-reset`, `fetch`, `pull`, `push`,
+  `mem-repo remote-add`, `recover`; in a folder workspace that also
+  mounts a branch, `mem unregister` of its own mem too). The list was
+  taken from a run of every command in such workspaces on the released
+  and on the new binary: the cross-link grant, the dump, the batch
+  verbs and a create that names a mount are the only commands whose
+  answer changed.
 
 - **A strict health read fails on a mem that is out of service.**
   `memstead health --strict` exited 0 on a workspace with a quarantined

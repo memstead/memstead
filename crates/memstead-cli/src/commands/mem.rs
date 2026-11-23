@@ -715,7 +715,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         client: Some(crate::setup::cli_client_id()),
     };
 
-    let mut engine = match ctx.cli_engine()? {
+    let mut engine = match ctx.store_engine()? {
         CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(_) => {
             // Same situation, same code: every mem-repo-only verb
@@ -865,7 +865,7 @@ pub fn run_rename(ctx: &CliContext, args: RenameArgs) -> anyhow::Result<()> {
         )))
     })?;
 
-    let mut engine = match ctx.cli_engine()? {
+    let mut engine = match ctx.store_engine()? {
         CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(_) => {
             return Err(crate::setup::unsupported_shape_error(
@@ -1127,7 +1127,7 @@ fn run_delete_inner(
         e.mount(&name).is_some_and(branch)
             || e.quarantine_reason(&name).is_some_and(|q| branch(&q.mount))
     };
-    let mut engine = match ctx.cli_engine()? {
+    let mut engine = match ctx.store_engine()? {
         CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(e) if !delete_files && is_branch_mount(&e) => e,
         CliEngine::Filesystem(_) => {

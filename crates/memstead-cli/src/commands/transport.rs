@@ -81,7 +81,7 @@ pub struct PushArgs {
 }
 
 pub fn run_fetch(ctx: &CliContext, args: FetchArgs) -> anyhow::Result<()> {
-    let outcome = match ctx.cli_engine()? {
+    let outcome = match ctx.store_engine()? {
         CliEngine::MemRepo(engine) => engine
             .fetch(&args.mem, &args.remote, &args.refspecs)
             .map_err(CliError::from_engine_op)?,
@@ -144,7 +144,7 @@ pub fn run_pull(ctx: &CliContext, args: PullArgs) -> anyhow::Result<()> {
     }
     // clap guarantees `mem` when `--all` is absent.
     let mem = args.mem.as_deref().unwrap_or_default();
-    let outcome = match ctx.cli_engine()? {
+    let outcome = match ctx.store_engine()? {
         CliEngine::MemRepo(mut engine) => engine
             .pull(mem, &args.remote)
             .map_err(CliError::from_engine_op)?,
@@ -182,7 +182,7 @@ pub fn run_push(ctx: &CliContext, args: PushArgs) -> anyhow::Result<()> {
     }
     // clap guarantees `mem` when `--all` is absent.
     let mem = args.mem.as_deref().unwrap_or_default();
-    let outcome = match ctx.cli_engine()? {
+    let outcome = match ctx.store_engine()? {
         CliEngine::MemRepo(engine) => engine
             .push(mem, &args.remote, args.force)
             .map_err(CliError::from_engine_op)?,
@@ -215,7 +215,7 @@ pub fn run_push(ctx: &CliContext, args: PushArgs) -> anyhow::Result<()> {
 /// typed refusal carrying the first refusal's code, with every
 /// refused and pushed ref under `details`.
 fn run_push_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
-    let outcome = match ctx.cli_engine()? {
+    let outcome = match ctx.store_engine()? {
         CliEngine::MemRepo(engine) => engine.push_all(remote).map_err(CliError::from_engine_op)?,
         CliEngine::Filesystem(_) => {
             return Err(
@@ -304,7 +304,7 @@ fn run_push_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
 /// refused ref turns the exit into a typed refusal carrying the first
 /// refusal's code, with the whole outcome under `details`.
 fn run_pull_all(ctx: &CliContext, remote: &str) -> anyhow::Result<()> {
-    let outcome = match ctx.cli_engine()? {
+    let outcome = match ctx.store_engine()? {
         CliEngine::MemRepo(mut engine) => {
             engine.pull_all(remote).map_err(CliError::from_engine_op)?
         }

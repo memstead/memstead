@@ -88,7 +88,7 @@ fn absolutize_local_url(url: &str) -> String {
 }
 
 fn remote_add(ctx: &CliContext, args: RemoteAddArgs) -> anyhow::Result<()> {
-    let outcome = match ctx.cli_engine()? {
+    let outcome = match ctx.store_engine()? {
         crate::setup::CliEngine::MemRepo(engine) => engine
             .remote_add(&args.name, &absolutize_local_url(&args.url))
             .map_err(CliError::from_engine_op)?,

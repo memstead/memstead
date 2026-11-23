@@ -442,6 +442,16 @@ fn mounts_a_git_branch(workspace_root: &Path) -> bool {
     })
 }
 
+/// Whether the workspace carries a git directory of its own
+/// (`mem-repo/.git/`): the store its mems' branches live in. A
+/// workspace that only mounts branches of another workspace's git
+/// directory is git-backed for what its mounts hold and is not that
+/// store: the verbs that act on the store itself (a mem's branch, the
+/// git directory, its remotes) ask this, not [`is_mem_repo_shaped`].
+pub fn has_own_mem_repo(workspace_root: &Path) -> bool {
+    workspace_root.join("mem-repo").join(".git").is_dir()
+}
+
 /// Whether the workspace's roster is readable and holds no mount at
 /// all: the state a view is in once its last mount was taken off. Such
 /// a workspace reads as the folder shape, and a message that speaks of

@@ -227,17 +227,44 @@ fn the_commands_of_a_mem_repo_workspace_work_in_a_view() {
     assert!(!listed.contains("`facts`"), "{listed}");
 }
 
-/// A view hosts no mem of its own: `mem init` refuses there, whatever
-/// storage is named, and leaves nothing behind. (A mem created in a
-/// view would be a folder mem that no verb could take off again once
-/// the view's git mounts were gone.)
+fn store_branches(store: &Path) -> Vec<String> {
+    let out = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(store.join("mem-repo/.git"))
+        .args([
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            "refs/heads",
+        ])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(String::from)
+        .collect()
+}
+
+/// The verbs that act on the store itself (a mem's branch, the git
+/// directory, its remotes, its recovery) refuse in a view, as they do
+/// in a folder workspace: a view serves what its mounts hold and is not
+/// the store they live in. Nothing in the store or in the view changes.
+/// The closed list is what a comparison of every command against the
+/// released binary found opened when a view began to count as
+/// git-backed.
 #[test]
-fn a_mem_is_not_created_in_a_view() {
+fn the_verbs_that_act_on_the_store_refuse_in_a_view() {
     let root = TempDir::new().unwrap();
-    let (_store, view) = fixture(root.path());
+    let (store, view) = fixture(root.path());
     ok(&view, &["workspace", "allow-create", "--schema", "*", "*"]);
+    let branches = store_branches(&store);
     let roster = fs::read_to_string(view.join(".memstead/state/mounts.json")).unwrap();
-    for args in [
+    let tip = branches
+        .iter()
+        .find(|line| line.starts_with("refs/heads/notes "))
+        .and_then(|line| line.split(' ').nth(1))
+        .unwrap()
+        .to_string();
+    let calls: Vec<Vec<&str>> = vec![
         vec!["mem", "init", "beta", "--schema", "default@1.3.0"],
         vec![
             "mem",
@@ -247,25 +274,119 @@ fn a_mem_is_not_created_in_a_view() {
             "default@1.3.0",
             "--storage",
             "folder",
-        ],
-        vec![
-            "mem",
-            "init",
-            "beta",
-            "--schema",
-            "default@1.3.0",
             "--operator-mode",
         ],
-    ] {
-        let printed = refused(&view, &args, "INVALID_INPUT");
-        assert!(printed.contains("memstead mem mount"), "{printed}");
-        assert!(!view.join("beta").exists(), "nothing was created");
+        vec!["mem", "delete", "notes", "--operator-mode"],
+        vec!["mem", "rename", "notes", "renamed", "--operator-mode"],
+        vec!["branch-reset", "notes", &tip],
+        vec![
+            "mem-repo",
+            "remote-add",
+            "origin",
+            "https://example.invalid/x.git",
+        ],
+        vec!["fetch", "notes"],
+        vec!["pull", "notes"],
+        vec!["pull", "--all"],
+        vec!["push", "notes"],
+        vec!["push", "--all"],
+        vec!["recover"],
+    ];
+    for args in &calls {
+        let (succeeded, printed) = run(&view, args);
+        assert!(
+            !succeeded,
+            "`memstead {}` answered in a view:\n{printed}",
+            args.join(" ")
+        );
+        assert!(
+            !printed.contains("UNKNOWN_REMOTE") && !printed.contains("UNKNOWN_REF"),
+            "`memstead {}` got past the gate: {printed}",
+            args.join(" ")
+        );
+        assert_eq!(
+            store_branches(&store),
+            branches,
+            "the store is as it was after `{}`",
+            args.join(" ")
+        );
         assert_eq!(
             fs::read_to_string(view.join(".memstead/state/mounts.json")).unwrap(),
             roster,
-            "the roster is as it was"
+            "the view's roster is as it was after `{}`",
+            args.join(" ")
         );
+        assert!(!view.join("beta").exists(), "nothing was created");
     }
+    let remotes = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(store.join("mem-repo/.git"))
+        .arg("remote")
+        .output()
+        .unwrap();
+    assert!(
+        remotes.stdout.is_empty(),
+        "no remote was added to the store"
+    );
+    // What a view could always do stays: take a mount off its roster.
+    ok(&view, &["mem", "unregister", "notes", "--operator-mode"]);
+    assert_eq!(store_branches(&store), branches, "the branch stays");
+}
+
+/// A folder workspace that also mounts a git branch keeps the refusals
+/// of a folder workspace for those verbs. Its own mem is not deleted
+/// (the delete would remove the workspace's directory), and the mount's
+/// branch is not deleted in the other workspace's git directory.
+#[test]
+fn a_folder_workspace_with_a_branch_mount_keeps_its_own_mem() {
+    let root = TempDir::new().unwrap();
+    let (store, _view) = fixture(root.path());
+    let ws = root.path().join("plain");
+    fs::create_dir_all(&ws).unwrap();
+    ok(
+        &ws,
+        &["init", "--name", "plain", "--schema", "default@1.3.0"],
+    );
+    fs::write(ws.join("keep.txt"), "kept").unwrap();
+    let gitdir = store.join("mem-repo/.git").canonicalize().unwrap();
+    ok(
+        &ws,
+        &[
+            "mem",
+            "mount",
+            "notes",
+            "--branch",
+            "notes",
+            "--gitdir",
+            gitdir.to_str().unwrap(),
+            "--capability",
+            "write",
+            "--operator-mode",
+        ],
+    );
+    let branches = store_branches(&store);
+    for args in [
+        vec!["mem", "delete", "plain", "--operator-mode"],
+        vec!["mem", "unregister", "plain", "--operator-mode"],
+        vec!["mem", "rename", "plain", "renamed", "--operator-mode"],
+        vec!["mem", "delete", "notes", "--operator-mode"],
+        vec!["mem", "rename", "notes", "renamed", "--operator-mode"],
+    ] {
+        refused(&ws, &args, "UNSUPPORTED_WORKSPACE_SHAPE");
+        assert_eq!(
+            fs::read_to_string(ws.join("keep.txt")).unwrap(),
+            "kept",
+            "the workspace's directory is as it was"
+        );
+        assert_eq!(store_branches(&store), branches, "the store is as it was");
+    }
+    let listed = ok(&ws, &["mem", "list"]);
+    assert!(
+        listed.contains("`plain`") && listed.contains("`notes`"),
+        "{listed}"
+    );
+    // The content of the mount is served: a create lands in it.
+    ok(&ws, &spec("notes", "Into The Mount"));
 }
 
 /// A view whose last mount was taken off reads as the folder shape,

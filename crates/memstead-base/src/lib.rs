@@ -123,8 +123,9 @@ pub use workspace::{
 };
 pub use workspace_store::{
     FileWorkspaceStore, InstantiateError, Layout, StoreError, WORKSPACE_STORE_DIR,
-    WorkspaceStoreAdapter, detect_layout, instantiate_local_backend, is_mem_repo_shaped,
-    is_workspace_root, mounts_no_mem, standalone_workspace, workspace_shape_label,
+    WorkspaceStoreAdapter, detect_layout, has_own_mem_repo, instantiate_local_backend,
+    is_mem_repo_shaped, is_workspace_root, mounts_no_mem, standalone_workspace,
+    workspace_shape_label,
 };
 
 /// Lowercase hex encoding of a digest. Byte-identical to the `{:x}`
