@@ -171,19 +171,28 @@ impl RefRead for gix::Repository {
 /// is the write's failure.
 pub(crate) const OBJECT_WRITE_ATTEMPTS: usize = 5;
 
-/// Whether storing a loose object failed because its directory went
-/// away under the write. A pack that runs beside the engine (git's own
-/// maintenance, a user's `git gc`) removes an object directory it has
-/// just emptied, and an object that was about to be moved into that
-/// directory then fails to land; the library reports it as a failure to
-/// persist the object. Nothing is lost by it: objects are named by
-/// their content, and a step that stores objects and then moves one ref
-/// has moved nothing yet.
+/// Whether a step failed over an object that a pack was moving in that
+/// instant. A pack that runs beside the engine (git's own maintenance,
+/// a user's `git gc`) writes loose objects into a pack file and deletes
+/// the loose files, and removes an object directory it has emptied. Two
+/// things can meet that: an object the engine was about to move into
+/// such a directory fails to land (the library reports a failure to
+/// persist it), and an object the engine looks up is in neither place
+/// its handle knows for a moment (the library reports that it could not
+/// be found, or that a ref could not be peeled to it). Nothing is lost
+/// by either: objects are named by their content, a step that stores
+/// objects and then moves one ref has moved nothing yet, and a lookup
+/// through a newly opened repository finds the object in its pack.
 pub(crate) fn lost_to_a_pack<E: std::fmt::Display + std::fmt::Debug>(e: &E) -> bool {
     // The cause may sit below the error a call returns; its debug form
     // carries the chain.
-    const CAUSE: &str = "Could not persist loose object";
-    e.to_string().contains(CAUSE) || format!("{e:?}").contains(CAUSE)
+    const CAUSES: [&str; 3] = [
+        "Could not persist loose object",
+        "could not be found",
+        "Could not peel reference",
+    ];
+    let said = format!("{e} {e:?}");
+    CAUSES.iter().any(|cause| said.contains(cause))
 }
 
 /// Do `step` again while it fails for [`lost_to_a_pack`]. For a step
@@ -1505,6 +1514,12 @@ mod tests {
         assert_eq!((other, calls), (Err("the ref moved".to_string()), 1));
 
         assert!(lost_to_a_pack(&lost()));
+        assert!(lost_to_a_pack(
+            &"open parent 9002: An object with id 9002 could not be found"
+        ));
+        assert!(lost_to_a_pack(
+            &"peel ref refs/heads/notes to id: Could not peel reference"
+        ));
         assert!(!lost_to_a_pack(&"hash mismatch"));
     }
 }

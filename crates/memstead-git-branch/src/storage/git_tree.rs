@@ -44,8 +44,8 @@ use gix::objs::tree::EntryKind;
 
 use super::CommitId;
 use crate::vcs::{
-    CommitContext, OBJECT_WRITE_ATTEMPTS, acquire_branch_mutex, author_identity,
-    format_commit_message, lost_to_a_pack,
+    CommitContext, OBJECT_WRITE_ATTEMPTS, acquire_branch_mutex, again_when_lost_to_a_pack,
+    author_identity, format_commit_message, lost_to_a_pack,
 };
 use memstead_base::backend::{BackendError, MemBackend};
 
@@ -141,23 +141,14 @@ impl GitTreeBackend {
         if pending.parent.is_some() || !pending.ops.is_empty() {
             return Ok(());
         }
-        let repo = self.open_repo()?;
-        let mut reference = match repo.fresh_ref(&self.ref_name).map_err(|e| {
-            BackendError::Path(format!(
-                "git-tree writer: resolve ref {}: {e}",
-                self.ref_name
-            ))
-        })? {
-            Some(r) => r,
-            None => return Ok(()),
+        // Peeling looks the tip object up; a pack that is moving that
+        // object in the same instant makes the lookup miss once, and a
+        // newly opened repository finds it.
+        let tip = again_when_lost_to_a_pack(|| self.live_tip())?;
+        let Some(id) = tip else {
+            return Ok(());
         };
-        let id = reference.peel_to_id().map_err(|e| {
-            BackendError::Path(format!(
-                "git-tree writer: peel ref {} to id: {e}",
-                self.ref_name
-            ))
-        })?;
-        pending.parent = Some(id.detach());
+        pending.parent = Some(id);
         Ok(())
     }
 
@@ -576,17 +567,29 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         let mut attempt = 0;
         let commit_id = 'attempt: loop {
             attempt += 1;
+            // A later attempt looks through a newly opened repository:
+            // an object a pack has just moved is found in its pack.
+            let reopened;
+            let repo = if attempt == 1 {
+                &repo
+            } else {
+                reopened = self.open_repo()?;
+                &reopened
+            };
             // Build the editor on top of the snapshotted tree.
             let mut editor = match parent_snapshot {
                 Some(parent_id) => {
-                    let commit = repo
-                        .find_object(parent_id)
-                        .map_err(|e| {
-                            BackendError::Path(format!(
+                    let commit = match repo.find_object(parent_id) {
+                        Ok(object) => object.into_commit(),
+                        Err(e) if attempt < OBJECT_WRITE_ATTEMPTS && lost_to_a_pack(&e) => {
+                            continue 'attempt;
+                        }
+                        Err(e) => {
+                            return Err(BackendError::Path(format!(
                                 "git-tree writer: open parent {parent_id}: {e}"
-                            ))
-                        })?
-                        .into_commit();
+                            )));
+                        }
+                    };
                     let tree = commit.tree().map_err(|e| {
                         BackendError::Path(format!("git-tree writer: peel parent tree: {e}"))
                     })?;
@@ -680,7 +683,7 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
                 parents,
             );
             break match commit_result {
-                Ok(id) => id,
+                Ok(id) => id.detach(),
                 // The commit object is stored before the ref moves, so
                 // a commit that lost that race has changed nothing. The
                 // same holds when the ref could not be locked for the

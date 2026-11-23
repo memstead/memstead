@@ -256,15 +256,18 @@ That is safe beside a running engine, an MCP server included, at git's
 default prune grace (two weeks): nothing the engine wrote is lost, and
 it reads and writes on. The same holds for the maintenance git runs
 after a fetch and for any other tool that packs the directory. A pack
-does two things under a writer, and the engine is built for both. It
-removes an object directory it has just emptied, so a write that was
-about to store an object there does that step again. And it packs the
-refs, which moves each branch's value into one file and deletes the
-branch's own; the engine reads a branch in the order that stays
-correct while that happens.
+moves things under a writer, and the engine is built for it. It removes
+an object directory it has just emptied, so a write that was about to
+store an object there does that step again. It packs the refs, which
+moves each branch's value into one file and deletes the branch's own;
+the engine reads a branch in the order that stays correct while that
+happens. And it moves objects from loose files into a pack file; a
+write that looks one up in that instant looks again.
 
-A mem rename or delete moves several refs; if one of them meets a pack
-and refuses, send it again.
+A write that still meets a pack at the wrong instant is refused with a
+storage error, nothing lost and nothing written: send it again. That
+is most likely for a mem rename or delete, which move several refs and
+are not repeated by the engine.
 
 One thing is not covered: a pack with an immediate prune expiry
 (`git gc --prune=now`, or `gc.pruneExpire = now`). A write stores its

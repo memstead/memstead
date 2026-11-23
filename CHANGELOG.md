@@ -31,27 +31,36 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **A pack beside a running engine refuses no write.** A `git gc` of a
-  mem-repo's git directory while an engine wrote to it, by hand or as
-  the maintenance git runs after a fetch, could refuse a write. Nothing
-  was lost by it, the refused write had written nothing, and sending
-  it again worked. Two causes. A pack removes an object directory it
-  has just emptied, and an object the engine was about to move there
-  failed to land (`MEM_ERROR`, "Could not persist loose object");
-  entity writes, a mem's configuration and schema installs now do that
-  step again. And a pack of the refs writes each branch's value into
-  `packed-refs` and then deletes the branch's own file, while the git
-  library reads those two in the other order: a lookup between the two
-  steps saw the branch where it stood at the pack before, and the pack
-  held a ref's lock for a moment. A write that met either was refused
-  with `HASH_MISMATCH`, with `ENTITY_NOT_FOUND` for a create, or with a
-  storage error. The engine now looks a ref up so that it stays current while the refs
-  are packed, lists branches the same way, and does a commit again
-  when the library reports a moved ref that has not moved or a lock
-  that was held for a moment. Measured with the refs packed in a tight
-  loop beside the writes: about 10 of 1,500 write rounds refused
-  before, none of 15,000 after. A mem rename or delete that meets a
-  pack may still refuse and can be sent again.
+- **A write that meets a pack is done again, not refused.** A `git gc`
+  of a mem-repo's git directory while an engine wrote to it, by hand or
+  as the maintenance git runs after a fetch, could refuse a write.
+  Nothing was lost by it, the refused write had written nothing, and
+  sending it again worked. Three causes. A pack removes an object
+  directory it has just emptied, and an object the engine was about to
+  move there failed to land (`MEM_ERROR`, "Could not persist loose
+  object"); entity writes, a mem's configuration and schema installs
+  now do that step again. A pack of the refs writes each branch's value
+  into `packed-refs` and then deletes the branch's own file, while the
+  git library reads those two in the other order: a lookup between the
+  two steps saw the branch where it stood at the pack before, and the
+  pack held a ref's lock for a moment. A write that met either was
+  refused with `HASH_MISMATCH`, with `ENTITY_NOT_FOUND` for a create,
+  or with a storage error. The engine now looks a ref up so that it
+  stays current while the refs are packed, lists branches the same
+  way, and does a commit again when the library reports a moved ref
+  that has not moved or a lock that was held for a moment. Measured
+  with the refs packed in a tight loop beside the writes: about 10 of
+  1,500 write rounds refused before, none of 15,000 after. And a pack
+  moves objects from loose files into a pack file, so an object the
+  engine looks up can be in neither place for an instant (`MEM_ERROR`,
+  "could not be found" or "Could not peel reference"); an entity write
+  now reads its branch and builds its commit again through a newly
+  opened repository. That third cause is rare: it was seen twice in
+  about 6,000 write rounds on a loaded machine and could not be
+  provoked again, so its repetition is reasoned and not measured. A
+  write that still meets a pack at the wrong instant, most likely a
+  mem rename or delete, is refused with nothing lost and nothing
+  written, and can be sent again.
 
 - **Every verb names a mem that is out of service.** A quarantined mem
   is on the roster and in no view. Entity reads, writes, `health --mem`,
