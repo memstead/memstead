@@ -31,6 +31,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A workspace that mounts a git branch is git-backed.** A workspace
+  made with `memstead mem mount --new-workspace` keeps engine state
+  only and mounts mems out of another workspace's git directory. The
+  engine told a workspace's shape by whether a `mem-repo/` directory
+  lies in it, so such a view read as the shape made for one folder mem.
+  There `workspace grant-cross-link`, `workspace dump` and the
+  `batch-*` commands refused `UNSUPPORTED_WORKSPACE_SHAPE` (a grant
+  written into the workspace file by hand took effect), and
+  `create --mem` naming any mem but the first on the roster answered
+  `UNKNOWN_MEM`, the writable ones included. A workspace whose roster
+  holds a mount of a git branch now counts as git-backed: those
+  commands work in a view, a create lands in whichever writable mem it
+  names, and a create into a read-only mount answers `READ_ONLY_MOUNT`
+  wherever the mount stands on the roster. A workspace that holds only
+  folder mems keeps its shape and its refusals.
+
 - **A write that meets a pack is done again, not refused.** A `git gc`
   of a mem-repo's git directory while an engine wrote to it, by hand or
   as the maintenance git runs after a fetch, could refuse a write.

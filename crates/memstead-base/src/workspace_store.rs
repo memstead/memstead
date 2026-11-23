@@ -422,7 +422,37 @@ pub fn is_workspace_root(dir: &Path) -> bool {
 /// the mem-repo-only refusals, and the MCP boot line all route through
 /// here so no surface can name a shape the others disagree with.
 pub fn is_mem_repo_shaped(workspace_root: &Path) -> bool {
-    workspace_root.join("mem-repo").join(".git").is_dir()
+    workspace_root.join("mem-repo").join(".git").is_dir() || mounts_a_git_branch(workspace_root)
+}
+
+/// Whether the workspace's roster holds a mount of a git branch. A
+/// workspace that keeps engine state only and mounts mems out of
+/// another workspace's git directory (a view) has no `mem-repo/` of its
+/// own and is git-backed and multi-mem all the same: every command that
+/// works on a mem-repo workspace's mounts works on its mounts.
+fn mounts_a_git_branch(workspace_root: &Path) -> bool {
+    let roster = workspace_root
+        .join(WORKSPACE_STORE_DIR)
+        .join("state")
+        .join("mounts.json");
+    let Ok(text) = std::fs::read_to_string(roster) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    value
+        .get("mounts")
+        .and_then(|m| m.as_array())
+        .is_some_and(|mounts| {
+            mounts.iter().any(|mount| {
+                mount
+                    .get("storage")
+                    .and_then(|s| s.get("type"))
+                    .and_then(|t| t.as_str())
+                    == Some("git-branch")
+            })
+        })
 }
 
 /// The one spelling of a workspace's shape, for any surface that names
