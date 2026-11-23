@@ -331,6 +331,10 @@ fn a_folder_mem_is_not_created_in_the_workspaces_own_directories() {
         ("mem-repo", "mem-repo"),
         ("state", ".memstead/state"),
         ("other", "../other"),
+        // A store's own root, and the inside of another workspace.
+        ("ws", "."),
+        ("refs", "../other/mem-repo/.git/refs"),
+        ("state", "../other/.memstead/state"),
     ] {
         let (succeeded, printed) = run(
             &ws,

@@ -72,26 +72,27 @@ pub(super) enum ResidueProbe {
 }
 
 /// Whether a folder mem's folder is something a delete must not remove,
-/// or a create must not start in: a workspace root (this workspace's or
-/// another's), a folder that holds this workspace, or a folder in or
-/// over this workspace's `mem-repo/` or `.memstead/`.
+/// or a create must not start in. Two cases, both read off the path:
+/// the folder holds this workspace; or, walking up from the folder,
+/// some directory is a workspace root (this workspace's or another's)
+/// and the folder is that root itself or lies in its `mem-repo/` or its
+/// `.memstead/`. A folder that lies above another workspace without
+/// being one is not seen: that would take a walk down the tree.
 fn folder_is_not_the_mems_to_remove(
     dir: &std::path::Path,
     workspace_root: &std::path::Path,
 ) -> bool {
     let resolved = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
     let dir = resolved(dir);
-    if resolved(workspace_root).starts_with(&dir) || crate::is_workspace_root(&dir) {
+    let own = resolved(workspace_root);
+    if own.starts_with(&dir) {
         return true;
     }
-    [
-        workspace_root.join("mem-repo"),
-        workspace_root.join(crate::WORKSPACE_STORE_DIR),
-    ]
-    .iter()
-    .any(|reserved| {
-        let reserved = resolved(reserved);
-        reserved.starts_with(&dir) || dir.starts_with(&reserved)
+    dir.ancestors().any(|above| {
+        (above == own || crate::is_workspace_root(above))
+            && (above == dir
+                || dir.starts_with(above.join("mem-repo"))
+                || dir.starts_with(above.join(crate::WORKSPACE_STORE_DIR)))
     })
 }
 
@@ -1747,14 +1748,14 @@ pub fn create_mem(
     }
     if storage_kind == StorageKind::Folder
         && let Some(root) = workspace_root.as_deref()
-        && canonical != canonicalize_maybe_missing(root)
+        && !(canonical == canonicalize_maybe_missing(root) && !crate::has_own_mem_repo(root))
         && folder_is_not_the_mems_to_remove(&canonical, root)
     {
         // A folder mem does not start in the workspace's git directory
         // or its state, nor in another workspace's directory: nothing
         // there is a mem's to own, and a later delete would take it
-        // along. (The workspace's own root is where a folder workspace
-        // keeps its one mem; that stays.)
+        // along. (The root of a workspace without a mem-repo is where a
+        // folder workspace keeps its one mem; that stays.)
         return Err(crate::EngineError::InvalidInput(format!(
             "a folder mem cannot live at {}: that is a workspace's directory, or lies in or over \
              this workspace's git directory or its state",
