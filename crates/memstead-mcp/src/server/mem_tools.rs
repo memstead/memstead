@@ -478,6 +478,21 @@ impl McpServer {
                 Err(resp) => return *resp,
             };
         let mut engine = crate::lock_engine!(unified, self);
+        // A mem is deleted on a mem-repo workspace only, as CLI
+        // `mem delete` has it and as this server's create has it. In a
+        // folder workspace the mem's folder is the workspace's own
+        // directory, and the delete removed it whole; in a workspace
+        // that only mounts branches of another workspace's git
+        // directory it removed a branch there.
+        if let Some(root) = engine.workspace_root()
+            && !memstead_base::has_own_mem_repo(root)
+        {
+            return super::errors::engine_err(
+                memstead_base::EngineError::UnsupportedWorkspaceShape {
+                    path: root.display().to_string(),
+                },
+            );
+        }
         // The call's role and identity (or the session's) ride the
         // prune commit like every entity mutation's commit; without
         // this the engine carried whatever the previous call left on it.

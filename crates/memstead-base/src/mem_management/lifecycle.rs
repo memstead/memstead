@@ -560,6 +560,27 @@ pub fn delete_mem(
         .dir_for_mem(&params.name)
         .map(|p| p.to_path_buf());
 
+    // A delete removes the mem's folder whole. When that folder is the
+    // workspace's own directory, or holds it, the delete would remove
+    // the workspace with everything else that lies in it. No caller
+    // means that; refused before anything changes, whatever surface
+    // asked.
+    if params.delete_files
+        && let (Some(dir), Some(root)) = (mem_dir.as_deref(), engine.workspace_root())
+    {
+        let resolved = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        if resolved(root).starts_with(resolved(dir)) {
+            return Err(crate::EngineError::InvalidInput(format!(
+                "mem `{}` lives in the workspace's own directory ({}); deleting it would remove the \
+                 workspace and every other file in it. Remove the mem's files yourself, or the \
+                 directory, if that is meant",
+                params.name,
+                dir.display()
+            ))
+            .into());
+        }
+    }
+
     if !params.operator_mode {
         // Hierarchical paths are first-class mem identifiers.
         // `params.name` is already the full path (e.g.

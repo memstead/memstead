@@ -4135,3 +4135,88 @@ fn full_memstead_proposal_brief_serves_markdown_and_the_json_skeleton() {
     let result = harness.call_tool("memstead_proposal_brief", json!({ "fork": "nobody" }));
     refusal(&result, "UNKNOWN_MEM", "nobody");
 }
+
+/// A mem is deleted on a mem-repo workspace only, as CLI `mem delete`
+/// has it. In a folder workspace the mem's folder is the workspace's
+/// own directory, and the tool used to remove it whole, with every
+/// unrelated file in it; in a workspace that only mounts a branch of
+/// another workspace's git directory it removed that branch there.
+/// Both refuse now, operator mode included, and change nothing.
+#[test]
+fn mem_delete_refuses_where_the_workspace_has_no_mem_repo_of_its_own() {
+    let tmp = TempDir::new().unwrap();
+
+    // A folder workspace: one folder mem at the workspace's root.
+    let solo = tmp.path().join("solo");
+    std::fs::create_dir_all(solo.join(".memstead/state")).unwrap();
+    std::fs::write(solo.join(".memstead/workspace.toml"), WORKSPACE_TOML_BODY).unwrap();
+    std::fs::write(
+        solo.join(".memstead/config.json"),
+        "{\n  \"format\": 1,\n  \"schema\": \"default@1.3.0\",\n  \"version\": \"0.1.0\"\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        solo.join(".memstead/state/mounts.json"),
+        r#"{ "format": "memstead-mounts-3", "mounts": [ { "mem": "solo", "schema": "default@1.3.0", "storage": { "type": "folder", "path": "" }, "capability": "write", "lifecycle": "eager", "cross_linkable": true } ] }"#,
+    )
+    .unwrap();
+    std::fs::write(solo.join("keep.txt"), "kept").unwrap();
+    {
+        let mut harness = WireHarness::start_with_args(&solo, &["--operator-mode"]);
+        let del = harness.call_tool("memstead_mem_delete", json!({ "name": "solo" }));
+        assert!(
+            del.to_string().contains("UNSUPPORTED_WORKSPACE_SHAPE"),
+            "{del}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(solo.join("keep.txt")).unwrap(),
+        "kept"
+    );
+    assert!(solo.join(".memstead/config.json").exists());
+
+    // A view: a workspace that mounts a branch of a store's git directory.
+    let store = tmp.path().join("store");
+    std::fs::create_dir_all(&store).unwrap();
+    seed_full_workspace(&store, &[("demo", "default@1.0.0")]);
+    let gitdir = store.join("mem-repo/.git").canonicalize().unwrap();
+    let view = tmp.path().join("view");
+    std::fs::create_dir_all(view.join(".memstead/state")).unwrap();
+    std::fs::write(view.join(".memstead/workspace.toml"), WORKSPACE_TOML_BODY).unwrap();
+    std::fs::write(
+        view.join(".memstead/state/mounts.json"),
+        json!({
+            "format": "memstead-mounts-3",
+            "mounts": [{
+                "mem": "demo",
+                "schema": "default@1.0.0",
+                "storage": { "type": "git-branch", "gitdir": gitdir, "branch": "refs/heads/demo" },
+                "capability": "write",
+                "lifecycle": "eager",
+                "cross_linkable": true
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let branch_tip = || {
+        let out = Command::new("git")
+            .arg("--git-dir")
+            .arg(&gitdir)
+            .args(["rev-parse", "--verify", "refs/heads/demo"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let before = branch_tip();
+    assert!(!before.is_empty(), "the store carries the branch");
+    {
+        let mut harness = WireHarness::start_with_args(&view, &["--operator-mode"]);
+        let del = harness.call_tool("memstead_mem_delete", json!({ "name": "demo" }));
+        assert!(
+            del.to_string().contains("UNSUPPORTED_WORKSPACE_SHAPE"),
+            "{del}"
+        );
+    }
+    assert_eq!(branch_tip(), before, "the store's branch stays");
+}

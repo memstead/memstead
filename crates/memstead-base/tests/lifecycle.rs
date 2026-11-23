@@ -2780,3 +2780,65 @@ fn delete_mem_guard_sees_referrers_in_deferred_mems() {
         "mem b survives — refusal is pre-unregister"
     );
 }
+
+/// A delete removes the mem's folder whole. A mem whose folder is the
+/// workspace's own directory is not deleted: the delete would remove
+/// the workspace and every other file in it. Refused before anything
+/// changes, operator mode included.
+#[test]
+fn delete_refuses_a_mem_whose_folder_is_the_workspace_directory() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().join("solo");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::write(workspace.join("keep.txt"), "kept").unwrap();
+    let writer = FilesystemBackend::new(workspace.clone());
+    let mut engine = Engine::from_mounts(vec![(
+        folder_mount("solo", workspace.clone()),
+        Box::new(writer) as Box<dyn MemBackend>,
+    )])
+    .unwrap();
+    engine.set_workspace_root(workspace.clone());
+
+    let err = mem_management::delete_mem(
+        &mut engine,
+        mem_management::MemDeleteParams {
+            name: "solo".to_string(),
+            delete_files: true,
+            note: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
+            detach_incoming: false,
+            operator_mode: true,
+        },
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("workspace's own directory"),
+        "{err}"
+    );
+    assert!(
+        engine.mem_router().is_writable("solo"),
+        "the mem is still served"
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("keep.txt")).unwrap(),
+        "kept"
+    );
+
+    // Taking it off the roster without touching files is still allowed.
+    let response = mem_management::delete_mem(
+        &mut engine,
+        mem_management::MemDeleteParams {
+            name: "solo".to_string(),
+            delete_files: false,
+            note: None,
+            actor: memstead_base::vcs::Actor::Cli,
+            client: None,
+            detach_incoming: false,
+            operator_mode: true,
+        },
+    )
+    .unwrap();
+    assert!(response.deleted_from_router && !response.files_deleted);
+    assert!(workspace.join("keep.txt").exists());
+}
