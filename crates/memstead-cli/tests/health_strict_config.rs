@@ -812,6 +812,12 @@ fn strict_fails_on_a_mem_that_is_out_of_service() {
     assert!(printed.contains("HEALTH_STRICT_VIOLATIONS"), "{printed}");
     assert!(printed.contains("MEM_QUARANTINED"), "{printed}");
     assert!(printed.contains("held"), "{printed}");
+    // The rendered report names the reason beside the mem.
+    let rendered = String::from_utf8_lossy(&run(&["health", "--strict"]).stdout).into_owned();
+    assert!(
+        rendered.contains("- [MEM_QUARANTINED] configuration — mem `held`, reason `"),
+        "{rendered}"
+    );
 
     ok(&["health"]);
     ok(&["health", "--strict", "--mem", "live"]);

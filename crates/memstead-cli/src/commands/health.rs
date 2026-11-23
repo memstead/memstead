@@ -285,12 +285,18 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
             .into_iter()
             .flatten()
         {
+            // A defect that carries the reason a mem is out of service
+            // says it: the code alone names the state, not the cause.
             lines.push(format!(
-                "- [{}] configuration{}",
+                "- [{}] configuration{}{}",
                 s(c, "code"),
                 c["mem"]
                     .as_str()
                     .map(|m| format!(" — mem `{m}`"))
+                    .unwrap_or_default(),
+                c["detail"]["reason_code"]
+                    .as_str()
+                    .map(|r| format!(", reason `{r}`"))
                     .unwrap_or_default()
             ));
         }

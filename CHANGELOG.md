@@ -56,7 +56,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   strict axis, `MEM_QUARANTINED` with the mem and the quarantine's
   reason, counted once per mem and not acknowledgeable, like a mount
   that resolves to nothing. A gate that passed over such a workspace
-  fails now. A strict read scoped with `--mem` to a mem in service is
+  fails now. (One cause failed the referee before: a schema pin that
+  resolves nowhere was counted as `SCHEMA_PIN_MISMATCH`, and is counted
+  under both codes now.) A strict read scoped with `--mem` to a mem in service is
   not failed by another mem's quarantine, and without `--strict`
   nothing changes.
 
