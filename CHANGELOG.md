@@ -21,8 +21,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   formats `mem`, `json`, `html` and `llms-txt`, `anchors --mem`,
   `uninstall` and `mem rename`. These answer it for an entity id of a
   quarantined mem where they answered `ENTITY_NOT_FOUND`: `relations`,
-  `context`, `delete`, an `export` whose `--root` is such an entity,
-  and `update`, `rename` and `retype` with `--auto-hash` or `--force`
+  `context`, `delete`, an `export` of a mem in service (named with
+  `--mem`) whose `--root` is such an entity, and `update`, `rename` and
+  `retype` with `--auto-hash` or `--force`
   (in their other forms `rename` and `retype` read the whole workspace
   first and keep `MEM_VIEW_STALE`, and so does `retype --dry-run`); a
   `check --from` batch reports it per entry inside `BATCH_REFUSED`.
