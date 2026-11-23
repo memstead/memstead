@@ -2,10 +2,11 @@
 //!
 //! The delete takes the mem off the roster and then removes its branch
 //! and its registry entry in one ref transaction. A lock that another
-//! process holds on the branch's ref for a moment (a pack does) used to
-//! end that step, leaving the branch behind. The step is now done
-//! again. When the lock outlasts the repetition, the reply says so and
-//! names a way out that works when followed as written.
+//! process holds on the branch's ref for a moment (git does when it
+//! packs refs) used to end that step, leaving the branch behind. The
+//! step is now done again. When the lock outlasts the repetition, the
+//! reply says so and names a way out that works when followed as
+//! written.
 
 use std::fs;
 use std::path::{Path, PathBuf};

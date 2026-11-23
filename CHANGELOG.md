@@ -70,8 +70,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **A mem delete does its storage step again when a ref was locked for
   a moment.** A delete takes the mem off the roster and then removes
   its branch and its registry entry in one ref transaction. A lock that
-  another process held on the branch's ref for a moment (a pack does)
-  ended that step: the reply said `Files deleted: false` with the
+  another process held on the branch's ref for a moment ended that
+  step (git takes such a lock when it packs refs; a real pack did not
+  hit a delete in 1,000 measured rounds, so the case is built with a
+  lock file held by hand): the reply said `Files deleted: false` with the
   warning `MEM_FILES_NOT_DELETED`, the branch stayed, and the warning
   advised to run the delete again, which answered `UNKNOWN_MEM`. The
   step is now repeated as an entity write's is, so a lock held for a
@@ -117,10 +119,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   entity write that still meets a pack at the wrong instant is refused
   with nothing lost and nothing written, and can be sent again
   (measured under heavy load: 11 of 24,000, every resend landed). A mem
-  rename and a mem delete move several refs and are not repeated: a
-  rename that is refused completes when sent again, and a delete that
-  could not remove the mem's branch says so (`Files deleted: false`,
-  `MEM_FILES_NOT_DELETED`) and leaves the branch, as before.
+  rename moves several refs and is not repeated: one that is refused
+  completes when sent again. What a mem delete does beside a locked ref
+  is the entry above on its storage step.
 
 - **Every verb names a mem that is out of service.** A quarantined mem
   is on the roster and in no view. Entity reads, writes, `health --mem`,

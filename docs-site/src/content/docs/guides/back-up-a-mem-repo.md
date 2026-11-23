@@ -266,13 +266,14 @@ write that looks one up in that instant looks again.
 
 A write of an entity that still meets a pack at the wrong instant is
 refused with a storage error, nothing lost and nothing written: send
-it again. A mem rename and a mem delete move several refs and are not
-repeated by the engine. A rename that is refused completes when it is
-sent again. A delete that could not remove the mem's branch says so in
-its reply (`Files deleted: false`, warning `MEM_FILES_NOT_DELETED`):
-the mem is off the roster, its branch stays, and
-`memstead mem init <name>` names the ways to adopt or remove what is
-left.
+it again. A mem rename moves several refs and is not repeated by the
+engine: one that is refused completes when it is sent again. A mem
+delete repeats the step that removes the mem's branch when a ref was
+locked for a moment. A delete that still could not remove the branch
+says so in its reply (`Files deleted: false`, warning
+`MEM_FILES_NOT_DELETED`): the mem is off the roster and its branch
+stays. `memstead mem init <name> --reattach` brings it back onto the
+roster, and a second delete then removes it whole.
 
 One thing is not covered: a pack with an immediate prune expiry
 (`git gc --prune=now`, or `gc.pruneExpire = now`). A write stores its
