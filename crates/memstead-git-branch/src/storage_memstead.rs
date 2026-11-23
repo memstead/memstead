@@ -295,6 +295,19 @@ pub struct SchemaWriteOutcome {
     pub already_current: bool,
 }
 
+/// [`write_schema_to_memstead_ref_once`], done again when a pack running beside the engine
+/// took an object directory away under it (the ref has not moved by then).
+pub fn write_schema_to_memstead_ref(
+    gitdir: &Path,
+    name: &str,
+    version: &str,
+    files: &[(String, Vec<u8>)],
+) -> Result<SchemaWriteOutcome, MemsteadRefError> {
+    crate::vcs::again_when_lost_to_a_pack(|| {
+        write_schema_to_memstead_ref_once(gitdir, name, version, files)
+    })
+}
+
 /// Write a schema package onto the unified `__MEMSTEAD` ref under
 /// `schemas/<name>@<version>/`, committing on top of the current ref tip
 /// (or an empty tree when the ref is absent). `files` are
@@ -308,7 +321,7 @@ pub struct SchemaWriteOutcome {
 /// owns mem-repo state, so this lib function is invoked through the
 /// engine, never by an external consumer directly. Mirrors the
 /// committer identity and idempotency check of [`migrate_to_memstead_ref`].
-pub fn write_schema_to_memstead_ref(
+fn write_schema_to_memstead_ref_once(
     gitdir: &Path,
     name: &str,
     version: &str,
@@ -748,13 +761,35 @@ pub fn commit_config_to_memstead_at_gitdir(
         .map(|_| ())
 }
 
+/// [`commit_config_to_memstead_at_gitdir_cas_once`], done again when a pack running beside the engine
+/// took an object directory away under it (the ref has not moved by then).
+pub fn commit_config_to_memstead_at_gitdir_cas(
+    gitdir: &Path,
+    mem_name: &str,
+    expected: Option<&[u8]>,
+    config_bytes: &[u8],
+    ctx: &CommitContext<'_>,
+    message: &str,
+) -> Result<bool, MemRepoWriteError> {
+    crate::vcs::again_when_lost_to_a_pack(|| {
+        commit_config_to_memstead_at_gitdir_cas_once(
+            gitdir,
+            mem_name,
+            expected,
+            config_bytes,
+            ctx,
+            message,
+        )
+    })
+}
+
 /// [`commit_config_to_memstead_at_gitdir`] as a compare-and-set: with
 /// `expected` of `Some`, the write lands only when the stored config blob
 /// equals `expected` at the tip the new commit is built on, and the ref
 /// advance is pinned to that tip. `Ok(false)` means the blob differed, or
 /// another writer advanced `__MEMSTEAD` first; the caller re-reads and
 /// retries. `expected` of `None` writes unconditionally.
-pub fn commit_config_to_memstead_at_gitdir_cas(
+fn commit_config_to_memstead_at_gitdir_cas_once(
     gitdir: &Path,
     mem_name: &str,
     expected: Option<&[u8]>,
@@ -942,6 +977,19 @@ fn memstead_tip(gitdir: &Path) -> Result<Option<gix::ObjectId>, MemRepoWriteErro
         .transpose()
 }
 
+/// [`commit_paths_to_memstead_at_gitdir_once`], done again when a pack running beside the engine
+/// took an object directory away under it (the ref has not moved by then).
+pub fn commit_paths_to_memstead_at_gitdir(
+    gitdir: &Path,
+    edits: &[(String, Option<Vec<u8>>)],
+    ctx: &CommitContext<'_>,
+    message: &str,
+) -> Result<(), MemRepoWriteError> {
+    crate::vcs::again_when_lost_to_a_pack(|| {
+        commit_paths_to_memstead_at_gitdir_once(gitdir, edits, ctx, message)
+    })
+}
+
 /// Commit a batch of tree edits (upsert or remove) to arbitrary paths
 /// on the unified `__MEMSTEAD` ref in one commit. The pipeline-edit
 /// provenance path: `.memstead/` pipeline configs are plain disk JSON
@@ -956,7 +1004,7 @@ fn memstead_tip(gitdir: &Path) -> Result<Option<gix::ObjectId>, MemRepoWriteErro
 /// `edits`: `(tree_path, Some(bytes))` upserts, `(tree_path, None)`
 /// removes. Missing-`__MEMSTEAD` bootstrap follows the config helper's
 /// race-safe `MustNotExist` creation.
-pub fn commit_paths_to_memstead_at_gitdir(
+fn commit_paths_to_memstead_at_gitdir_once(
     gitdir: &Path,
     edits: &[(String, Option<Vec<u8>>)],
     ctx: &CommitContext<'_>,

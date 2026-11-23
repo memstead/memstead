@@ -7,6 +7,35 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **A mem-repo is packed.** Every write to a git-branch mem stores
+  loose objects (three for a create: 9,016 after 3,000 creates), and
+  nothing packed them: git packs a repository from its own commands,
+  and the engine writes without those. After a write the
+  engine now runs `git gc --auto` for the git directory it wrote to,
+  once git's own estimate says enough loose objects have gathered there
+  (about 6,700 by default, judged by one object directory in 256). No
+  process is started below that. git's configuration of the directory
+  decides the rest and the engine passes no setting of its own:
+  `gc.auto = 0` switches the pack off, `gc.autoDetach` decides whether
+  git packs in the background. It needs `git` on the search path;
+  without it nothing is packed and no write says so. A write never
+  fails, and never reports a failure, because the pack could not start
+  or did not succeed. Folder mems have no object store and are not
+  touched. A manual `git gc` at git's default prune grace is safe
+  beside a running engine, and the backup guide says so: the engine
+  reads back everything it wrote and writes on. To make that true, a
+  write that meets a pack is repeated: a pack removes an object
+  directory it has just emptied, and an object the engine was about to
+  move there failed to land ("Could not persist loose object"), which
+  refused the write with nothing written. Entity writes, a mem's
+  configuration and schema installs now do that step again; a mem
+  rename or delete that meets a pack may still refuse and can be sent
+  again. A pack with an immediate prune expiry (`git gc --prune=now`)
+  is not covered: a write's objects are protected by the prune grace
+  until its branch points at them.
+
 ### Fixed
 
 - **Every verb names a mem that is out of service.** A quarantined mem

@@ -42,7 +42,10 @@ use std::sync::Mutex;
 use gix::objs::tree::EntryKind;
 
 use super::CommitId;
-use crate::vcs::{CommitContext, acquire_branch_mutex, author_identity, format_commit_message};
+use crate::vcs::{
+    CommitContext, OBJECT_WRITE_ATTEMPTS, acquire_branch_mutex, author_identity,
+    format_commit_message, lost_to_a_pack,
+};
 use memstead_base::backend::{BackendError, MemBackend};
 
 /// Per-path final state for the buffered op log. Move operations
@@ -562,124 +565,156 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         self.ensure_snapshot(&mut pending)?;
         let parent_snapshot = pending.parent;
 
-        // Build the editor on top of the snapshotted tree.
-        let mut editor = match parent_snapshot {
-            Some(parent_id) => {
-                let commit = repo
-                    .find_object(parent_id)
-                    .map_err(|e| {
-                        BackendError::Path(format!("git-tree writer: open parent {parent_id}: {e}"))
-                    })?
-                    .into_commit();
-                let tree = commit.tree().map_err(|e| {
-                    BackendError::Path(format!("git-tree writer: peel parent tree: {e}"))
-                })?;
-                tree.edit()
-                    .map_err(|e| BackendError::Path(format!("git-tree writer: editor init: {e}")))?
-            }
-            None => repo.empty_tree().edit().map_err(|e| {
-                BackendError::Path(format!("git-tree writer: empty editor init: {e}"))
-            })?,
-        };
-
-        // Replay ops. Order is irrelevant since map keys are unique
-        // and final-state semantics already collapsed any duplicates.
-        for (path, state) in pending.ops.iter() {
-            match state {
-                PendingState::Upsert(bytes) => {
-                    let blob_id = repo
-                        .write_blob(bytes.as_slice())
+        // Blobs, trees and the commit are stored as loose objects. A
+        // pack that runs beside this write (git's own maintenance, a
+        // user's `git gc`) removes an object directory it has just
+        // emptied, and an object that was about to be moved into that
+        // directory then fails to land. Nothing is lost by it: objects
+        // are named by their content and the ref has not moved, so the
+        // whole step is done again.
+        let mut attempt = 0;
+        let commit_id = 'attempt: loop {
+            attempt += 1;
+            // Build the editor on top of the snapshotted tree.
+            let mut editor = match parent_snapshot {
+                Some(parent_id) => {
+                    let commit = repo
+                        .find_object(parent_id)
                         .map_err(|e| {
                             BackendError::Path(format!(
-                                "git-tree writer: write blob for {path}: {e}"
+                                "git-tree writer: open parent {parent_id}: {e}"
                             ))
                         })?
-                        .detach();
-                    editor
-                        .upsert(path.as_str(), EntryKind::Blob, blob_id)
-                        .map_err(|e| {
-                            BackendError::Path(format!("git-tree writer: tree upsert {path}: {e}"))
-                        })?;
-                }
-                PendingState::Delete => {
-                    editor.remove(path.as_str()).map_err(|e| {
-                        BackendError::Path(format!("git-tree writer: tree remove {path}: {e}"))
+                        .into_commit();
+                    let tree = commit.tree().map_err(|e| {
+                        BackendError::Path(format!("git-tree writer: peel parent tree: {e}"))
                     })?;
-                }
-            }
-        }
-
-        let tree_id = editor
-            .write()
-            .map_err(|e| BackendError::Path(format!("git-tree writer: tree write: {e}")))?
-            .detach();
-
-        // Build signatures via the same convention the disk adapter
-        // uses (see vcs::format_commit_message + author_identity).
-        let time = gix::date::Time::now_local_or_utc();
-        let committer_sig = gix::actor::Signature {
-            name: COMMITTER_NAME.into(),
-            email: COMMITTER_EMAIL.into(),
-            time,
-        };
-        let author_sig = match author_identity(ctx) {
-            Some((name, email)) => gix::actor::Signature {
-                name: name.into(),
-                email: email.into(),
-                time,
-            },
-            None => committer_sig.clone(),
-        };
-        let mut author_buf = gix::date::parse::TimeBuf::default();
-        let mut committer_buf = gix::date::parse::TimeBuf::default();
-        let author_ref = author_sig.to_ref(&mut author_buf);
-        let committer_ref = committer_sig.to_ref(&mut committer_buf);
-
-        let full_message = format_commit_message(message, ctx);
-
-        let parents: Vec<gix::ObjectId> = match parent_snapshot {
-            Some(p) => vec![p],
-            None => Vec::new(),
-        };
-        let commit_result = repo.commit_as(
-            committer_ref,
-            author_ref,
-            self.ref_name.as_str(),
-            full_message,
-            tree_id,
-            parents,
-        );
-        let commit_id = match commit_result {
-            Ok(id) => id,
-            Err(e) if is_ref_cas_conflict(&e) => {
-                // CAS conflict. Re-resolve the live tip and surface
-                // the new sha so the caller can retry with a fresh
-                // `_hash`.
-                let mut reference = repo
-                    .try_find_reference(&self.ref_name)
-                    .map_err(|e| {
-                        BackendError::Path(format!(
-                            "git-tree writer: re-resolve ref after CAS: {e}"
-                        ))
+                    tree.edit().map_err(|e| {
+                        BackendError::Path(format!("git-tree writer: editor init: {e}"))
                     })?
-                    .ok_or_else(|| {
-                        BackendError::Path(format!(
-                            "git-tree writer: ref {} vanished during CAS recovery",
-                            self.ref_name
-                        ))
+                }
+                None => repo.empty_tree().edit().map_err(|e| {
+                    BackendError::Path(format!("git-tree writer: empty editor init: {e}"))
+                })?,
+            };
+
+            // Replay ops. Order is irrelevant since map keys are unique
+            // and final-state semantics already collapsed any duplicates.
+            for (path, state) in pending.ops.iter() {
+                match state {
+                    PendingState::Upsert(bytes) => {
+                        let blob_id = repo.write_blob(bytes.as_slice());
+                        let blob_id = match blob_id {
+                            Ok(id) => id.detach(),
+                            Err(e) if attempt < OBJECT_WRITE_ATTEMPTS && lost_to_a_pack(&e) => {
+                                continue 'attempt;
+                            }
+                            Err(e) => {
+                                return Err(BackendError::Path(format!(
+                                    "git-tree writer: write blob for {path}: {e}"
+                                )));
+                            }
+                        };
+                        editor
+                            .upsert(path.as_str(), EntryKind::Blob, blob_id)
+                            .map_err(|e| {
+                                BackendError::Path(format!(
+                                    "git-tree writer: tree upsert {path}: {e}"
+                                ))
+                            })?;
+                    }
+                    PendingState::Delete => {
+                        editor.remove(path.as_str()).map_err(|e| {
+                            BackendError::Path(format!("git-tree writer: tree remove {path}: {e}"))
+                        })?;
+                    }
+                }
+            }
+
+            let tree_id = match editor.write() {
+                Ok(id) => id.detach(),
+                Err(e) if attempt < OBJECT_WRITE_ATTEMPTS && lost_to_a_pack(&e) => {
+                    continue 'attempt;
+                }
+                Err(e) => {
+                    return Err(BackendError::Path(format!(
+                        "git-tree writer: tree write: {e}"
+                    )));
+                }
+            };
+
+            // Build signatures via the same convention the disk adapter
+            // uses (see vcs::format_commit_message + author_identity).
+            let time = gix::date::Time::now_local_or_utc();
+            let committer_sig = gix::actor::Signature {
+                name: COMMITTER_NAME.into(),
+                email: COMMITTER_EMAIL.into(),
+                time,
+            };
+            let author_sig = match author_identity(ctx) {
+                Some((name, email)) => gix::actor::Signature {
+                    name: name.into(),
+                    email: email.into(),
+                    time,
+                },
+                None => committer_sig.clone(),
+            };
+            let mut author_buf = gix::date::parse::TimeBuf::default();
+            let mut committer_buf = gix::date::parse::TimeBuf::default();
+            let author_ref = author_sig.to_ref(&mut author_buf);
+            let committer_ref = committer_sig.to_ref(&mut committer_buf);
+
+            let full_message = format_commit_message(message, ctx);
+
+            let parents: Vec<gix::ObjectId> = match parent_snapshot {
+                Some(p) => vec![p],
+                None => Vec::new(),
+            };
+            let commit_result = repo.commit_as(
+                committer_ref,
+                author_ref,
+                self.ref_name.as_str(),
+                full_message,
+                tree_id,
+                parents,
+            );
+            break match commit_result {
+                Ok(id) => id,
+                // The commit object is stored before the ref moves, so
+                // a commit that lost that race has changed nothing.
+                Err(e) if attempt < OBJECT_WRITE_ATTEMPTS && lost_to_a_pack(&e) => {
+                    continue 'attempt;
+                }
+                Err(e) if is_ref_cas_conflict(&e) => {
+                    // CAS conflict. Re-resolve the live tip and surface
+                    // the new sha so the caller can retry with a fresh
+                    // `_hash`.
+                    let mut reference = repo
+                        .try_find_reference(&self.ref_name)
+                        .map_err(|e| {
+                            BackendError::Path(format!(
+                                "git-tree writer: re-resolve ref after CAS: {e}"
+                            ))
+                        })?
+                        .ok_or_else(|| {
+                            BackendError::Path(format!(
+                                "git-tree writer: ref {} vanished during CAS recovery",
+                                self.ref_name
+                            ))
+                        })?;
+                    let live_id = reference.peel_to_id().map_err(|e| {
+                        BackendError::Path(format!("git-tree writer: peel live tip after CAS: {e}"))
                     })?;
-                let live_id = reference.peel_to_id().map_err(|e| {
-                    BackendError::Path(format!("git-tree writer: peel live tip after CAS: {e}"))
-                })?;
-                return Err(BackendError::HashMismatch {
-                    current: live_id.to_hex().to_string(),
-                });
-            }
-            Err(e) => {
-                return Err(BackendError::Path(format!(
-                    "git-tree writer: commit_as failed: {e}"
-                )));
-            }
+                    return Err(BackendError::HashMismatch {
+                        current: live_id.to_hex().to_string(),
+                    });
+                }
+                Err(e) => {
+                    return Err(BackendError::Path(format!(
+                        "git-tree writer: commit_as failed: {e}"
+                    )));
+                }
+            };
         };
 
         let sha_hex = commit_id.to_hex().to_string();
@@ -701,6 +736,12 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
                 detail: e.to_string(),
             });
         }
+
+        // The commit has landed. Every write leaves loose objects, and
+        // nothing but git's own maintenance packs them; start it when
+        // enough have gathered. Whatever happens there is not this
+        // write's failure.
+        pack_if_due(&repo);
 
         Ok(sha_hex)
     }
@@ -1198,6 +1239,91 @@ fn is_ref_cas_conflict(e: &gix::Error) -> bool {
     use gix::refs::file::transaction::prepare::{MustNotExist, ReferenceOutOfDate};
     e.downcast_any_ref::<ReferenceOutOfDate>().is_some()
         || e.downcast_any_ref::<MustNotExist>().is_some()
+}
+
+/// git's default for `gc.auto`: the number of loose objects past which
+/// `git gc --auto` packs.
+const GIT_GC_AUTO_DEFAULT: i64 = 6700;
+
+/// How long a write waits for the `git gc --auto` process it started.
+/// git detaches the pack itself unless its configuration says
+/// otherwise, so the process usually ends at once; where it does not,
+/// the write stops waiting here and the pack runs on.
+const PACK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Start git's automatic maintenance for the git directory of `repo`
+/// once enough loose objects have gathered there.
+///
+/// The engine writes with the git library, and git packs a repository
+/// only from its own commands, so a mem-repo that is only ever written
+/// by the engine would keep every object loose. The pack itself is
+/// `git gc --auto`, run by the `git` binary: git's configuration of
+/// that directory decides whether and how (`gc.auto`, with `0` to
+/// switch it off; `gc.autoDetach`; `gc.pruneExpire`), and the engine
+/// passes no setting of its own. An object a write has stored and not
+/// yet referenced is protected by git's prune grace, which is why no
+/// expiry is given here.
+///
+/// The decision to start a process at all is cheap and is git's own
+/// estimate: the loose objects whose hash begins with `17` stand for
+/// one in 256. No process is started below the threshold, while another
+/// maintenance run holds its lock, or while git's log of a failed run
+/// says it will not run again yet.
+///
+/// Nothing here is a write's failure: no `git` on the path, a `git`
+/// that fails, a pack that takes long. The commit has landed.
+fn pack_if_due(repo: &gix::Repository) {
+    let auto = repo
+        .config_snapshot()
+        .integer("gc.auto")
+        .unwrap_or(GIT_GC_AUTO_DEFAULT);
+    if auto <= 0 {
+        return;
+    }
+    let threshold = (auto as u64).div_ceil(256);
+    let gitdir = repo.common_dir();
+    let Ok(bucket) = std::fs::read_dir(gitdir.join("objects").join("17")) else {
+        return;
+    };
+    let loose = bucket
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            let name = entry.file_name();
+            name.len() == 38
+                && name
+                    .to_string_lossy()
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit())
+        })
+        .count() as u64;
+    if loose <= threshold {
+        return;
+    }
+    // A run that is under way holds `gc.pid`; a run that failed or left
+    // too much loose leaves `gc.log`, and git refuses to run again
+    // while that file is fresh. Starting git would change nothing.
+    if gitdir.join("gc.pid").exists() || gitdir.join("gc.log").exists() {
+        return;
+    }
+    let child = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(gitdir)
+        .args(["gc", "--auto", "--quiet"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else {
+        return;
+    };
+    let started = std::time::Instant::now();
+    while started.elapsed() < PACK_WAIT {
+        match child.try_wait() {
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            _ => return,
+        }
+    }
 }
 
 fn sync_index_and_worktree(repo: &gix::Repository, ref_name: &str) -> Result<(), BackendError> {

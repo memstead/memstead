@@ -217,3 +217,52 @@ moves), the fetched tree is validated as `pull` validates before the
 mount exists, no grant is inherited (the remote's policy is not this
 workspace's), and a schema pin this workspace cannot resolve refuses
 naming the remedy, `memstead schema install`.
+
+## 6. Packing the repository
+
+Every write stores a few loose objects in the mem-repo's git
+directory: the entity's file, the directory listings up to the root, the
+commit. git packs loose objects into pack files when one of its own
+commands asks for it, and the engine writes without those commands, so
+it asks itself. After a write, when enough loose objects have gathered
+in the git directory it wrote to, the engine runs `git gc --auto` there.
+
+What that means in practice:
+
+- It needs `git` on the search path. Without it nothing is packed and
+  no write complains; the store keeps growing by loose objects.
+- git's own configuration of that directory decides the rest, and the
+  engine passes no setting of its own. `gc.auto` is the number of loose
+  objects past which git packs (about 6,700 by default, estimated from
+  one object directory in 256, so the exact moment varies), and
+  `gc.auto = 0` switches the automatic pack off:
+
+  ```sh
+  git --git-dir mem-repo/.git config gc.auto 0
+  ```
+
+  `gc.autoDetach` decides whether git packs in the background (the
+  default) or the write waits for it.
+- A write never fails because the pack could not start or did not
+  succeed.
+
+You can also pack by hand at any time, with the engine running:
+
+```sh
+git --git-dir mem-repo/.git gc
+```
+
+That is safe beside a running engine, an MCP server included, at git's
+default prune grace (two weeks): nothing the engine wrote is lost, and
+it reads and writes on. A write of an entity, of a mem's configuration
+or of a schema that meets the pack in the same instant is repeated by
+the engine. A mem rename or delete that meets it may refuse; send it
+again.
+
+One thing is not covered: a pack with an immediate prune expiry
+(`git gc --prune=now`, or `gc.pruneExpire = now`). A write stores its
+objects before it moves the mem's branch to them, and for that moment
+only the prune grace protects them.
+
+This is the one git command to run on a mem-repo's objects by hand.
+Everything else that changes a mem-repo goes through `memstead`.

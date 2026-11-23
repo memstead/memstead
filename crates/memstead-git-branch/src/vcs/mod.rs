@@ -63,6 +63,41 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+/// How often a step that stores git objects is done before its failure
+/// is the write's failure.
+pub(crate) const OBJECT_WRITE_ATTEMPTS: usize = 5;
+
+/// Whether storing a loose object failed because its directory went
+/// away under the write. A pack that runs beside the engine (git's own
+/// maintenance, a user's `git gc`) removes an object directory it has
+/// just emptied, and an object that was about to be moved into that
+/// directory then fails to land; the library reports it as a failure to
+/// persist the object. Nothing is lost by it: objects are named by
+/// their content, and a step that stores objects and then moves one ref
+/// has moved nothing yet.
+pub(crate) fn lost_to_a_pack<E: std::fmt::Display + std::fmt::Debug>(e: &E) -> bool {
+    // The cause may sit below the error a call returns; its debug form
+    // carries the chain.
+    const CAUSE: &str = "Could not persist loose object";
+    e.to_string().contains(CAUSE) || format!("{e:?}").contains(CAUSE)
+}
+
+/// Do `step` again while it fails for [`lost_to_a_pack`]. For a step
+/// that stores objects and then moves one ref with a compare-and-set,
+/// so that a failed attempt has changed nothing a second one would
+/// trip over.
+pub(crate) fn again_when_lost_to_a_pack<T, E: std::fmt::Display + std::fmt::Debug>(
+    mut step: impl FnMut() -> Result<T, E>,
+) -> Result<T, E> {
+    let mut attempt = 1;
+    loop {
+        match step() {
+            Err(e) if attempt < OBJECT_WRITE_ATTEMPTS && lost_to_a_pack(&e) => attempt += 1,
+            done => return done,
+        }
+    }
+}
+
 #[cfg(test)]
 use std::sync::MutexGuard;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -1334,5 +1369,38 @@ mod tests {
             held.borrow_mut().push(high.clone());
         });
         let _arc_low = acquire_branch_mutex(&low); // must panic
+    }
+
+    /// A step that fails because a pack took an object directory away is
+    /// done again, up to the limit; any other failure, and success, are
+    /// returned at once.
+    #[test]
+    fn a_step_lost_to_a_pack_is_done_again() {
+        let lost = || "write blob: Could not persist loose object, path=\"x\"".to_string();
+
+        let mut calls = 0;
+        let twice_lost: Result<u8, String> = again_when_lost_to_a_pack(|| {
+            calls += 1;
+            if calls < 3 { Err(lost()) } else { Ok(7) }
+        });
+        assert_eq!((twice_lost, calls), (Ok(7), 3));
+
+        let mut calls = 0;
+        let always_lost: Result<u8, String> = again_when_lost_to_a_pack(|| {
+            calls += 1;
+            Err(lost())
+        });
+        assert_eq!(always_lost, Err(lost()));
+        assert_eq!(calls, OBJECT_WRITE_ATTEMPTS, "the limit ends it");
+
+        let mut calls = 0;
+        let other: Result<u8, String> = again_when_lost_to_a_pack(|| {
+            calls += 1;
+            Err("the ref moved".to_string())
+        });
+        assert_eq!((other, calls), (Err("the ref moved".to_string()), 1));
+
+        assert!(lost_to_a_pack(&lost()));
+        assert!(!lost_to_a_pack(&"hash mismatch"));
     }
 }
