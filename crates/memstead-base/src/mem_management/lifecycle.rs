@@ -90,9 +90,12 @@ fn folder_is_not_the_mems_to_remove(
     }
     dir.ancestors().any(|above| {
         (above == own || crate::is_workspace_root(above))
+            // The reserved folders are resolved like the folder itself:
+            // on a filesystem that ignores case their spelling on disk
+            // may differ from the name the engine knows them by.
             && (above == dir
-                || dir.starts_with(above.join("mem-repo"))
-                || dir.starts_with(above.join(crate::WORKSPACE_STORE_DIR)))
+                || dir.starts_with(resolved(&above.join("mem-repo")))
+                || dir.starts_with(resolved(&above.join(crate::WORKSPACE_STORE_DIR))))
     })
 }
 
