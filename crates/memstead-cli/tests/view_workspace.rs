@@ -304,6 +304,13 @@ fn the_verbs_that_act_on_the_store_refuse_in_a_view() {
             "`memstead {}` got past the gate: {printed}",
             args.join(" ")
         );
+        // A view is no folder workspace: the refusal names what is
+        // missing, the workspace's own mem-repo, and no shape.
+        assert!(
+            !printed.contains("filesystem"),
+            "`memstead {}` calls a view a filesystem workspace: {printed}",
+            args.join(" ")
+        );
         assert_eq!(
             store_branches(&store),
             branches,

@@ -4218,6 +4218,11 @@ fn mem_delete_removes_neither_the_workspace_directory_nor_another_stores_branch(
             del.to_string().contains("UNSUPPORTED_WORKSPACE_SHAPE"),
             "{del}"
         );
+        assert!(
+            del.to_string().contains("no mem-repo of its own")
+                && !del.to_string().contains("filesystem"),
+            "the refusal names what is missing and no shape: {del}"
+        );
     }
     assert_eq!(branch_tip(), before, "the store's branch stays");
 }

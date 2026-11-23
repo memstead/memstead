@@ -177,8 +177,8 @@ pub fn one_mem_hint(workspace_mem: &str) -> String {
 pub(crate) fn unsupported_workspace_shape_message() -> String {
     let m = memstead_word();
     format!(
-        "this subcommand is mem-repo-only and not yet supported on filesystem-mem workspaces — \
-         bootstrap one with `{m} mem-repo init` in a fresh folder, or use `{m} status` / \
+        "this subcommand is mem-repo-only: it acts on a mem-repo the workspace holds itself. \
+         Bootstrap one with `{m} mem-repo init` in a fresh folder, or use `{m} status` / \
          `{m} list` / `{m} search` / `{m} entity` / `{m} health` / \
          `{m} create|update|delete|relate|rename` here instead."
     )

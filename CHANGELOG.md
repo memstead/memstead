@@ -67,6 +67,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A refusal for want of a mem-repo names what is missing, and no
+  shape.** `UNSUPPORTED_WORKSPACE_SHAPE` read "the workspace at <path>
+  is filesystem-shaped; this command needs a mem-repo workspace", and
+  the CLI's general advice spoke of "filesystem-mem workspaces". A
+  workspace that only mounts git branches of another workspace's git
+  directory gets the same refusal from the verbs that act on the store
+  and is no filesystem workspace. The message now reads "the workspace
+  at <path> has no mem-repo of its own; this command needs one", which
+  holds for both. The code and the `path` detail are unchanged.
+
 - **A schema pin is written only where the schema is installed.** A
   workspace that mounts a writable mem of another workspace's mem-repo
   could switch that mem to a schema installed in its own

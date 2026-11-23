@@ -56,7 +56,7 @@ switch (mode) {
   case 'delete-absent': err('memstead: ERROR [UNKNOWN_MEM]: unknown mem: app/graph\\n'); process.exit(3);
   case 'delete-fail': err('memstead: ERROR [GENERIC]: disk on fire\\n'); process.exit(1);
   case 'delete-fs-shape':
-    err('memstead: ERROR [UNSUPPORTED_WORKSPACE_SHAPE]: the workspace at /w is filesystem-shaped; this command needs a mem-repo workspace: \`memstead mem delete\` runs on mem-repo workspaces\\n');
+    err('memstead: ERROR [UNSUPPORTED_WORKSPACE_SHAPE]: the workspace at /w has no mem-repo of its own; this command needs one: \`memstead mem delete\` runs on mem-repo workspaces\\n');
     process.exit(1);
   default: process.exit(0);
 }
@@ -228,7 +228,7 @@ describe('ingest router — --clear <binding>', () => {
     assert.match(stdout, /single mem/);
     assert.doesNotMatch(
       stdout,
-      /filesystem-shaped|UNSUPPORTED_WORKSPACE_SHAPE/,
+      /no mem-repo of its own|UNSUPPORTED_WORKSPACE_SHAPE/,
       'the engine-internal wording must not reach the reader',
     );
   });

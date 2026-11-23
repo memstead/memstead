@@ -1168,11 +1168,11 @@ pub enum EngineError {
         mem: Option<String>,
         operation: String,
     },
-    /// A command that needs a mem-repo workspace, run on a filesystem-mem
-    /// one.
-    #[error(
-        "the workspace at {path} is filesystem-shaped; this command needs a mem-repo workspace"
-    )]
+    /// A command that acts on a workspace's own mem-repo, run where there
+    /// is none: a folder workspace, or one that only mounts git branches
+    /// of another workspace's git directory. The sentence names what is
+    /// missing and no shape, because both shapes get it.
+    #[error("the workspace at {path} has no mem-repo of its own; this command needs one")]
     UnsupportedWorkspaceShape { path: String },
     /// A schema pin (`name@version`) that does not parse.
     #[error("invalid schema pin {pin:?}: {reason}")]
