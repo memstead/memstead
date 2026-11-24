@@ -3,10 +3,15 @@
 # run locally) on Linux, the lint gates (clippy -D warnings, rustfmt), a
 # check that the workspace still builds on its declared minimum Rust
 # version, and a RustSec advisory audit. The macOS run of the same
-# surface is reserved for release commits (subject `release: ...`, as
-# `cargo run -p xtask -- release` writes it) and manual dispatch: the
-# development machines are Macs and run the suite locally, so a per-push
-# macOS run only doubled the wait. Windows has no job here: it stays
+# surface is reserved for a release in the making and manual dispatch:
+# the development machines are Macs and run the suite locally, so a
+# per-push macOS run only doubled the wait. A release is in the making
+# from the commit that bumps the workspace version until that version's
+# tag is on the remote, and every commit pushed in between gets the
+# macOS run: the release commit, and a fix committed above it. The run
+# used to hang on the commit's subject (`release: ...`), so a fix above
+# a release commit was checked without it and 0.27.1 was tagged on such
+# a commit with no finished macOS run. Windows has no job here: it stays
 # documented as untested.
 # The Rust version is the one rust-toolchain.toml pins, so CI lints with
 # exactly the clippy a developer runs locally.
@@ -55,15 +60,47 @@ jobs:
       - name: Run the full test surface
         run: ./run-tests.sh
 
+  # Whether the workspace version this commit carries is still without a
+  # tag on the remote: the one question the macOS job hangs on. A lookup
+  # that fails for any other reason than "no such tag" answers "pending",
+  # so a network fault runs the macOS job once too often, never too
+  # rarely.
+  release-pending:
+    name: Is the workspace version still untagged?
+    runs-on: ubuntu-latest
+    outputs:
+      pending: ${{ steps.probe.outputs.pending }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - id: probe
+        run: |
+          version="$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ -z "$version" ]; then
+            echo "cannot read the workspace version from Cargo.toml" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "v$version is tagged: no release in the making"
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$version is not tagged: a release is in the making"
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+          fi
+
   tests-macos:
     name: Full test surface on macOS (run-tests.sh)
     runs-on: macos-26
-    # Release commits and manual dispatch only (see the header).
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:'))
+    needs: release-pending
+    # A release in the making and manual dispatch only (see the header).
+    if: github.event_name == 'workflow_dispatch' || needs.release-pending.outputs.pending == 'true'
     # A bound, not an estimate: docs/macos-dev-setup.md records a nextest
     # discovery hang on Apple Silicon when Gatekeeper serialises code-signing
     # checks, and a hung job would otherwise hold the runner for six hours.
-    timeout-minutes: 60
+    # Well above a cold build: with a warm cache the job takes about half an
+    # hour, with a cold one it ran past an hour on the release commit of
+    # 0.28.0 with no test failed, and a cancelled job saves no cache, so
+    # the next attempt starts cold again.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       # The version and components (clippy, rustfmt) come from
