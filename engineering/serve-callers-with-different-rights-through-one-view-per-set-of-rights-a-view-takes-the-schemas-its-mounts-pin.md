@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-23T20:14:54Z
-last_modified: 2026-11-23T20:28:32Z
+last_modified: 2026-11-24T09:56:23Z
 status: accepted
 decided_on: 2026-11-23
 deciders: operator (requirement and go of 2026-11-23), implementing agent
@@ -26,10 +26,12 @@ A program that serves several callers from one store of mems wants each caller t
 - The suite holds the contract as one test over every tool the MCP server lists; a tool added later fails the test until it has a call there.
 - One thing of an unmounted mem is visible by design: where a mounted mem links to one of its entities, the view shows that id as a stub. The id carries the mem's name; no content, type or title of the entity is served. The id is content of the mounted mem. The suite's test and the guide except it by name.
 - Left open and stated as limits: an engine already running keeps the schema pin it booted with after the owning workspace moved it, and keeps a schema it has resolved after its mem is withdrawn; integrity checks of a delete or rename see only the mems the view mounts; checks are recorded per workspace; a check on a read-only mount refuses.
+  2026-11-24 amendment: the first of these limits is retired. An engine already running now follows a pin the owning workspace moved at its next operation, and every reply names the mem's pin from its configuration; see [[engineering--a-running-engine-follows-a-schema-pin-moved-where-the-mem-lives-and-every-reply-names-the-configurations-pin]]. The other limits stand.
 
 ## Relationships
 - **REFERENCES**: [[a-mem-that-exists-as-a-branch-is-mounted-by-a-cli-verb-that-writes-a-roster-row]]
 - **REFERENCES**: [[a-workspace-is-git-backed-when-its-roster-mounts-a-git-branch]]
+- **REFERENCES**: [[a-running-engine-follows-a-schema-pin-moved-where-the-mem-lives-and-every-reply-names-the-configurations-pin]]
 
 ## Options
 
@@ -42,3 +44,7 @@ A program that serves several callers from one store of mems wants each caller t
 - Stopping to read another git directory's schemas at all and asking for an install in the view: rejected. It reverses the fix of 0.26.1, which made a mounted mem resolve the schema its own git directory holds.
 - A policy key or a capability that decides which schemas of another git directory a workspace may read: rejected. There is nothing to configure; a schema that no mounted mem pins has no reader in that workspace.
 - Installing the schema into the mem's git directory as part of a pin switch from a view: rejected. A view would write the store's schema registry, and the registry of a mem-repo is written by the workspace that owns it; a schema installed from a view stays in the view's own folder.
+
+## Notes
+
+2026-11-24 amendment: the operator confirmed the form after the release. Asked whether the view form suffices for what he had called the rights system on 2026-11-23, or whether a verified identity in the record is still wanted, with the recommendation that the view form suffices and that verified identities are taken up only when a concrete case asks for them (two parties that do not trust each other and could dispute who wrote something), as work of its own, he answered: "dann alles das jetzt so machen wie du es empfohlen hast". Released in 0.28.0. Revisit condition: such a case, or a host that reports a measured failure of the view form.
