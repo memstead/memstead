@@ -474,15 +474,31 @@ impl Engine {
             .cloned()
     }
 
-    /// The mem's `Mount.schema` expectation assertion, when set.
-    /// `None` for unknown mems *and* for mems whose mount carries no
-    /// assertion (the authoritative pin then lives in the backend
-    /// config; the resolved active schema, not this, is the effective pin).
+    /// The mem's settled schema pin: the one its configuration states,
+    /// and the roster row's only where the configuration states none.
+    /// `None` for an unknown mem and for one neither names a pin for.
+    ///
+    /// The one reading of "this mem's pin" for whatever names it: the
+    /// `_mem_schema` field of reads and write replies, the schema tool
+    /// asked by mem, the health read, the overview, the check states
+    /// that are fresh only under the pin in force. The configuration
+    /// lives with the mem and is what the engine binds the schema from;
+    /// the roster row is this workspace's own statement about it, kept
+    /// as a cross-check, and may be stale (another workspace moved the
+    /// pin) or absent. During a migration this workspace started the
+    /// settled pin is still the old one, and the target is
+    /// [`Self::migration_target`]; the schema writes are validated
+    /// against is [`Self::resolved_schema`].
     pub fn schema_pin(&self, mem: &str) -> Option<memstead_schema::SchemaRef> {
         self.mounts
             .iter()
             .find(|m| m.mount.mem == mem)
-            .and_then(|m| m.mount.schema.clone())
+            .and_then(|m| {
+                m.mem_config
+                    .as_ref()
+                    .and_then(|c| c.schema.clone())
+                    .or_else(|| m.mount.schema.clone())
+            })
     }
 
     /// The mem's in-flight migration target, when dual-pin state is

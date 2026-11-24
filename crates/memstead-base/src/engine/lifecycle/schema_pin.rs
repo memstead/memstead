@@ -114,9 +114,12 @@ impl Engine {
         // operator is actively re-pinning it is normally `Some` (and kept
         // in sync with the config by the switch below). `<unset>` covers a
         // mount that carried no assertion.
+        // The roster row's pin decides whether the row has to be
+        // aligned; the pin the reply names is the mem's settled pin by
+        // the engine's one reading of it.
         let current_pin = self.mounts[mount_idx].mount.schema.clone();
-        let current_pin_display = current_pin
-            .as_ref()
+        let current_pin_display = self
+            .schema_pin(mem)
             .map(|p| p.as_display())
             .unwrap_or_else(|| "<unset>".to_string());
         let in_flight = self.mounts[mount_idx].mount.migration_target.clone();

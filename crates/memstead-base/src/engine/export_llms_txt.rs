@@ -249,16 +249,12 @@ impl crate::Engine {
         ctx: &LlmsTxtContext,
         chain: Option<&crate::graph::chain::ChainSet>,
     ) -> Result<String, crate::engine::EngineError> {
-        let mounted = self
-            .mounts
-            .iter()
-            .find(|m| m.mount.mem == mem)
-            .ok_or_else(|| self.unknown_mem_error(mem))?;
+        if !self.mounts.iter().any(|m| m.mount.mem == mem) {
+            return Err(self.unknown_mem_error(mem));
+        }
 
-        let schema_pin = mounted
-            .mount
-            .schema
-            .as_ref()
+        let schema_pin = self
+            .schema_pin(mem)
             .map(|s| s.as_display())
             .unwrap_or_default();
         let config = self.mem_config_for(mem);

@@ -32,6 +32,27 @@ enum FastForward {
     Diverged,
 }
 
+/// What [`Engine::follow_moved_pin`] found for one mounted mem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::engine) enum PinFollow {
+    /// The pin in the mem's configuration is the one this engine serves
+    /// the mem under, or the backend has no configuration cursor:
+    /// nothing was touched.
+    Unmoved,
+    /// The configuration's cursor or the configuration itself could not
+    /// be read. That says nothing about the pin, and "nothing" must not
+    /// read as "not moved": the caller treats the mem's view as unsure,
+    /// as after a failed head probe, until a reload has asked again.
+    Unsure,
+    /// The pin moved and resolves: the new schema is bound, and the
+    /// mem's entities are still the ones parsed under the old one. The
+    /// caller reloads the mem.
+    Rebound,
+    /// The pin moved to a schema this engine cannot resolve: the mem is
+    /// out of service, quarantined with the reason a boot gives.
+    OutOfService,
+}
+
 impl Engine {
     /// Reload-before-operation: before any read or write executes,
     /// check the mem ref; if it advanced past the engine's cached
@@ -70,6 +91,12 @@ impl Engine {
     /// - `current_head` errors, or the mem's last reload failed or was
     ///   incomplete → reload the mem whatever the head says; until a
     ///   reload succeeds the mem takes no write.
+    /// - the schema pin in the mem's configuration moved (another
+    ///   workspace switched it where the mem lives; the head does not
+    ///   move with it) → bind the new schema and reload the mem under
+    ///   it, or take the mem out of service when the new pin does not
+    ///   resolve ([`Self::follow_moved_pin`]). No warning of its own:
+    ///   the replies name the pin.
     ///
     /// Reload errors are warn-logged and the affected mem is
     /// skipped — the caller's response is still served from the (now
@@ -164,6 +191,29 @@ impl Engine {
                     cause: crate::engine::StaleCause::DiscardFailed,
                     detail: e.to_string(),
                 });
+            }
+        }
+
+        // The pin before the heads: a mem's schema decides how what the
+        // head names is parsed. A mem whose pin moved to a schema that
+        // does not resolve leaves the mounts here and is no candidate
+        // below; one that was bound again is reloaded in phase 3 whether
+        // its head moved or not.
+        let mut rebound: Vec<String> = Vec::new();
+        for name in &candidates {
+            match self.follow_moved_pin(name) {
+                PinFollow::Rebound => rebound.push(name.clone()),
+                // Like a failed head probe: the reload below asks again,
+                // and no write lands on the mem until one went through.
+                PinFollow::Unsure => {
+                    if let Some(state) = self.mounts.iter_mut().find(|m| &m.mount.mem == name) {
+                        state.reload_failure = Some(crate::engine::ViewFailure::drift(
+                            "the mem's configuration could not be read, so its schema pin is \
+                             not known to stand",
+                        ));
+                    }
+                }
+                PinFollow::Unmoved | PinFollow::OutOfService => {}
             }
         }
 
@@ -317,8 +367,10 @@ impl Engine {
                 // No drift, and the view in place is known to be
                 // incomplete or behind (its last load could not read
                 // everything): try again, so the mem takes writes again
-                // once storage delivers.
-                _ if view_incomplete => {
+                // once storage delivers. The same for a mem whose schema
+                // was just bound again: its entities are still the ones
+                // parsed under the schema it had.
+                _ if view_incomplete || rebound.contains(&name) => {
                     if let Err(e) = self.reload_one_mem(&name) {
                         self.note_reload_failure(&name, &e);
                     }
@@ -406,6 +458,148 @@ impl Engine {
         }
         self.appeared_heads.clear();
         warnings
+    }
+
+    /// Follow a schema pin that moved where the mem lives.
+    ///
+    /// A pin is written into the mem's configuration, which lives with
+    /// the mem: on the schema-and-config ref of its git directory, or in
+    /// the folder's `.memstead/config.json`. Another workspace that
+    /// mounts the same mem moves it there without touching this
+    /// workspace's roster and without moving the mem's head, so neither
+    /// probe of [`Self::reload_if_stale`] sees it. This is the third
+    /// probe, run with the other two before every operation and again
+    /// under a write's locks, and by every reload of the mem.
+    ///
+    /// Cheap when nothing moved: the backend's configuration cursor
+    /// ([`crate::backend::MemBackend::config_head`]) is compared with
+    /// the one this engine last saw, and the configuration is read only
+    /// when they differ. Only a moved pin acts: a configuration whose
+    /// pin is the one the mem is served under (its version, title, sync
+    /// state or stamp changed, a schema was installed beside it, another
+    /// mem of the same git directory was configured) advances the cursor
+    /// and touches nothing else.
+    ///
+    /// The pin is resolved in a boot's order: this workspace's own
+    /// migration target first (a migration it started is not overridden),
+    /// then the configuration's pin, then the roster row's. The schema
+    /// sources are read again first, so a schema the new pin names is
+    /// taken from where it is installed (from another git directory's
+    /// registry a workspace holds only what its mounts pin, and this pin
+    /// is new). The roster row is left as it is: its pin is this
+    /// workspace's own statement and stays a cross-check.
+    ///
+    /// A pin that does not resolve takes the mem out of service, under
+    /// the reason a boot gives: its writes would otherwise keep being
+    /// validated against a schema the mem no longer has. A reload brings
+    /// it back once the schema resolves.
+    pub(in crate::engine) fn follow_moved_pin(&mut self, mem: &str) -> PinFollow {
+        let Some(idx) = self.mounts.iter().position(|m| m.mount.mem == mem) else {
+            return PinFollow::Unmoved;
+        };
+        let state = &self.mounts[idx];
+        let head = match state.backend.config_head() {
+            Ok(Some(head)) => head,
+            // No cursor: nobody else changes this configuration.
+            Ok(None) => return PinFollow::Unmoved,
+            Err(_) => return PinFollow::Unsure,
+        };
+        if state.last_known_config_head.as_deref() == Some(head.as_str()) {
+            return PinFollow::Unmoved;
+        }
+        // The configuration may have changed: read it, as a boot reads
+        // it (one that is absent or does not parse states no pin). A
+        // read that fails leaves the cursor where it was.
+        let config = match state.backend.read_mem_config() {
+            Ok(bytes) => bytes.and_then(|bytes| {
+                let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+                memstead_schema::config::parse_mem_config(&value).ok()
+            }),
+            Err(_) => return PinFollow::Unsure,
+        };
+        let config_pin = config.as_ref().and_then(|c| c.schema.clone());
+        let cached_pin = state.mem_config.as_ref().and_then(|c| c.schema.clone());
+        let wanted = state
+            .mount
+            .migration_target
+            .clone()
+            .or_else(|| config_pin.clone())
+            .or_else(|| state.mount.schema.clone());
+        let served_under_wanted = match (&wanted, self.schemas.get(mem)) {
+            (Some(pin), Some(bound)) => {
+                let (name, version) = bound.id();
+                name == pin.name && version == pin.version
+            }
+            _ => false,
+        };
+        let mount = state.mount.clone();
+        self.mounts[idx].last_known_config_head = Some(head);
+        if served_under_wanted {
+            // The schema writes are validated against stands. Where the
+            // settled pin moved all the same (under a migration this
+            // workspace started), the replies name the new one.
+            if config_pin != cached_pin {
+                self.mounts[idx].mem_config = config;
+            }
+            return PinFollow::Unmoved;
+        }
+
+        let mut refresh = crate::ops::FullRefreshReport::default();
+        self.refresh_schema_sources(&mut refresh);
+        let resolved = match &wanted {
+            Some(pin) => {
+                let catalogue: Vec<std::sync::Arc<memstead_schema::Schema>> = self
+                    .workspace_schemas
+                    .iter()
+                    .cloned()
+                    .chain(crate::engine::boot::embedded_archive_schemas(&mount))
+                    .chain(self.builtin_schemas.iter().cloned())
+                    .collect();
+                crate::engine::SchemaResolver::new(&catalogue)
+                    .resolve(pin)
+                    .map_err(|sources| {
+                        EngineError::SchemaNotFound {
+                            mem: mem.to_string(),
+                            pin: pin.as_display(),
+                            sources,
+                            install_hint: None,
+                        }
+                        .with_schema_install_probe(self.workspace_root())
+                    })
+            }
+            None => Err(EngineError::MemConfigIncomplete {
+                mem: mem.to_string(),
+                missing_fields: vec!["schema".to_string()],
+            }),
+        };
+        match resolved {
+            Ok(schema) => {
+                self.mounts[idx].mem_config = config;
+                self.schemas_insert(mem.to_string(), schema);
+                PinFollow::Rebound
+            }
+            Err(reason) => {
+                match self.unmount_mem(mem) {
+                    Ok(()) => {
+                        // Out of service, not off the roster: an
+                        // operation naming it answers with the reason.
+                        self.recently_unmounted.remove(mem);
+                        self.quarantine_mount(mount, reason.code(), reason.to_string());
+                    }
+                    // The mem could not be taken down: its view takes no
+                    // write, and the pin is asked for again next time.
+                    Err(e) => {
+                        if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == mem) {
+                            state.last_known_config_head = None;
+                            state.reload_failure = Some(crate::engine::ViewFailure::drift(
+                                format!("{reason} (and the mem could not be unmounted: {e})"),
+                            ));
+                        }
+                    }
+                }
+                PinFollow::OutOfService
+            }
+        }
     }
 
     /// Remember that the drift reload of `mem` failed: its view is

@@ -2724,7 +2724,7 @@ pub fn rename_mem(
     }
 
     // ---- Step 1: mode resolution ----
-    let (old_mount, resumed) = rename_mode(engine, &params)?;
+    let (_, resumed) = rename_mode(engine, &params)?;
 
     // ---- Step 2: allowlist gates (normal mode, agent posture) ----
     // Resumption mode skips them: the flip that created the current
@@ -2791,15 +2791,8 @@ pub fn rename_mem(
             .iter()
             .any(|s| s == crate::SCHEMA_WILDCARD);
         if !schema_wildcard {
-            let existing_pin: Option<String> = engine
-                .mem_configs_named()
-                .find(|(name, _)| *name == params.old)
-                .and_then(|(_, c)| c.schema.as_ref().map(|s| s.to_string()))
-                .or_else(|| {
-                    old_mount
-                        .as_ref()
-                        .and_then(|m| m.schema.as_ref().map(|s| s.to_string()))
-                });
+            let existing_pin: Option<String> =
+                engine.schema_pin(&params.old).map(|s| s.to_string());
             let allowed = existing_pin
                 .as_deref()
                 .is_some_and(|pin| matched_rule.schemas.iter().any(|s| s == pin));

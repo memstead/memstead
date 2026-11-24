@@ -1229,6 +1229,22 @@ impl crate::backend::MemBackend for FilesystemBackend {
         }
     }
 
+    fn config_head(&self) -> Result<Option<String>, BackendError> {
+        // A folder mem's configuration is one small file, written by
+        // whichever workspace mounts the folder, and a configuration
+        // write appends nothing to the ledger. Its bytes are the one
+        // signal that cannot miss a rewrite (size and mtime can, for a
+        // pin of the same length written within the clock's grain), and
+        // reading them costs less than the ledger read every operation
+        // already makes for [`Self::current_head`].
+        use std::hash::{Hash, Hasher};
+        Ok(self.read_mem_config()?.map(|bytes| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            bytes.hash(&mut hasher);
+            format!("{:016x}", hasher.finish())
+        }))
+    }
+
     fn write_mem_config(
         &self,
         bytes: &[u8],

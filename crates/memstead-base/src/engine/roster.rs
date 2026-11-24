@@ -427,7 +427,12 @@ impl Engine {
         Ok(change)
     }
 
-    fn quarantine_mount(&mut self, mount: crate::workspace::Mount, code: &str, message: String) {
+    pub(in crate::engine) fn quarantine_mount(
+        &mut self,
+        mount: crate::workspace::Mount,
+        code: &str,
+        message: String,
+    ) {
         self.quarantined.push(super::QuarantinedMem {
             mount,
             reason_code: code.to_string(),

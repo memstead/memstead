@@ -108,7 +108,7 @@ impl Engine {
         // the operator authors against it here.
         let canon = format!("{name}@{version}");
         let pinned_by_writable = self.mounts().iter().any(|m| {
-            m.schema.as_ref().map(|s| s.to_string()).as_deref() == Some(canon.as_str())
+            self.schema_pin(&m.mem).map(|s| s.to_string()).as_deref() == Some(canon.as_str())
                 && self.mem_router().is_writable(&m.mem)
         });
         if pinned_by_writable {

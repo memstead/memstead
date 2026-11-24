@@ -130,6 +130,25 @@ impl Engine {
         if self.quarantine_reason(mem).is_some() {
             return self.reattach_quarantined_mem(mem);
         }
+        // A reload reads what storage states now, the schema pin
+        // included: the mem is parsed under the pin its configuration
+        // carries at this moment, as a boot would parse it. A pin that
+        // does not resolve has taken the mem out of service.
+        match self.follow_moved_pin(mem) {
+            crate::engine::drift::PinFollow::OutOfService => {
+                return Err(self.unknown_mem_error(mem));
+            }
+            // The pin could not be asked for: a reload that parsed under
+            // a pin it cannot vouch for would call the view level.
+            crate::engine::drift::PinFollow::Unsure => {
+                return Err(EngineError::Mem(format!(
+                    "reload of mem `{mem}` refused: its configuration could not be read, so \
+                     the schema pin it is parsed under is not known to stand"
+                )));
+            }
+            crate::engine::drift::PinFollow::Unmoved | crate::engine::drift::PinFollow::Rebound => {
+            }
+        }
         let mut sink: Vec<WarningHint> = Vec::new();
         let result = self.reload_one_mem_inner(mem, &mut sink)?;
         // The view is level with storage again: a write may land on it.
@@ -139,6 +158,20 @@ impl Engine {
         self.load_warnings.retain(|w| w.source_mem() != Some(mem));
         self.load_warnings
             .extend(sink.into_iter().filter(|w| w.source_mem() == Some(mem)));
+        // The cross-check a boot makes belongs to the mem's slice of the
+        // warnings like the ones the parse produced: the roster row's
+        // pin beside the configuration's, where both are set and differ.
+        if let Some(state) = self.mounts.iter().find(|m| m.mount.mem == mem)
+            && let Some(config_pin) = state.mem_config.as_ref().and_then(|c| c.schema.as_ref())
+            && let Some(mount_pin) = state.mount.schema.as_ref()
+            && config_pin != mount_pin
+        {
+            self.load_warnings.push(WarningHint::SchemaPinMismatch {
+                mem: mem.to_string(),
+                config_pin: config_pin.as_display(),
+                mount_pin: mount_pin.as_display(),
+            });
+        }
         Ok(result)
     }
 
@@ -333,6 +366,7 @@ impl Engine {
 
         // Same config / pin-authority reads as the boot loop.
         let last_known_head = backend.current_head().ok().flatten();
+        let last_known_config_head = backend.config_head().ok().flatten();
         let mem_config = backend.read_mem_config().ok().flatten().and_then(|bytes| {
             let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
             memstead_schema::config::parse_mem_config(&value).ok()
@@ -364,14 +398,26 @@ impl Engine {
         // Same catalogue order as boot: workspace tier, then the mount's
         // own embedded vocabulary when it is archive-backed, then the
         // built-ins.
-        let catalogue: Vec<std::sync::Arc<memstead_schema::Schema>> = self
-            .workspace_schemas
-            .iter()
-            .cloned()
-            .chain(crate::engine::boot::embedded_archive_schemas(&mount))
-            .chain(self.builtin_schemas.iter().cloned())
-            .collect();
-        let schema = match crate::engine::SchemaResolver::new(&catalogue).resolve(&effective_pin) {
+        let resolve = |this: &Self| {
+            let catalogue: Vec<std::sync::Arc<memstead_schema::Schema>> = this
+                .workspace_schemas
+                .iter()
+                .cloned()
+                .chain(crate::engine::boot::embedded_archive_schemas(&mount))
+                .chain(this.builtin_schemas.iter().cloned())
+                .collect();
+            crate::engine::SchemaResolver::new(&catalogue).resolve(&effective_pin)
+        };
+        // A boot reads the schema sources before it resolves. The repair
+        // of an unresolved pin is a schema installed since this engine
+        // read them, so a pin the held catalogue lacks is looked for
+        // once more in the sources as they are now.
+        let resolved = resolve(self).or_else(|_| {
+            let mut refresh = crate::ops::FullRefreshReport::default();
+            self.refresh_schema_sources(&mut refresh);
+            resolve(self)
+        });
+        let schema = match resolved {
             Ok(s) => s,
             Err(sources) => {
                 let err = EngineError::SchemaNotFound {
@@ -395,6 +441,7 @@ impl Engine {
             mount,
             backend: backend.into(),
             last_known_head,
+            last_known_config_head,
             mem_config,
             archive_provenance,
             archive_checks,

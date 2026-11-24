@@ -7,6 +7,90 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **A running engine follows a schema pin that another workspace
+  moved.** A mem's pin is written where the mem lives: on the
+  schema-and-config ref of its git directory, or in a folder mem's
+  `.memstead/config.json`. A workspace that mounts the mem from there
+  (a mem of another workspace's mem-repo, a folder mem another
+  workspace also mounts) learned of a moved pin only when its engine
+  started. Measured on 0.28.0 with a store, a workspace that mounts
+  one of its mems writable, and that workspace's server running: after
+  `memstead mem set-schema` in the store, the server's next write of a
+  type only the new schema declares answered `UNKNOWN_ENTITY_TYPE`
+  naming the old schema, and a type only the old schema declares was
+  still written. So it stayed after `memstead_reload` of the mem and
+  after `memstead_reload` with `full: true`, until the server was
+  started again. The check the engine makes before every operation,
+  and again under a write's locks, now also asks whether the mem's pin
+  moved, and the mem is served under the new pin from that operation
+  on: the write is validated against the new schema, the mem's
+  entities are parsed under it, and the `_mem_schema` field of entity
+  reads and write replies names it. No restart and no reload is
+  needed, and a reload asked for follows the pin too. For a mem of a
+  git directory the configuration is read only when the
+  schema-and-config ref has moved since the engine last looked. Only a
+  moved pin acts: a version, title, description, subject or sync state
+  set on the mem, a schema installed beside it, or the pin of another
+  mem of the same git directory does not reload the mem. A pin moved
+  to a schema the workspace cannot resolve takes the mem out of
+  service there, with the reason a start gives (`MEM_QUARANTINED`
+  carrying `SCHEMA_NOT_FOUND`), so that no write is validated against
+  a schema the mem no longer has; `memstead_reload` brings it back once
+  the schema resolves. The workspace's own roster row keeps the pin
+  the mem was mounted under, and the health read reports the
+  difference as `SCHEMA_PIN_MISMATCH`, as after a start. A migration
+  the workspace started itself keeps its target: its writes stay
+  validated against it whatever is written into the mem's
+  configuration. A server in the workspace that moves the pin follows
+  through its own roster as before.
+
+- **A reload of one mem brings a mem back whose schema was installed
+  since the engine started.** A mem whose pin does not resolve is out
+  of service, and its refusal says to install the schema and run
+  `memstead_reload`. Measured on 0.28.0 in a running server: after the
+  schema was installed, `memstead_reload` of that mem still answered
+  `MEM_QUARANTINED`, because it resolved against the schemas read at
+  the start; only `memstead_reload` with `full: true` and a restart
+  brought the mem back. A reload of one mem now reads the schema
+  sources again when the pin is not among the schemas the engine
+  holds.
+
+- **Every reply names a mem's schema pin from its configuration.** The
+  engine binds a mem's schema from the pin in the mem's configuration
+  and uses the pin on the workspace's roster row only where the
+  configuration states none. Several replies named the roster row's
+  pin all the same. Measured on 0.28.0 in a workspace that started
+  after the owning workspace had moved a mounted mem's pin, the mem
+  being served under the new one: `memstead_schema` asked by mem
+  returned the old schema; the `_mem_schema` field of
+  `memstead_entity`, `memstead_create`, `memstead_update`,
+  `memstead_relate`, `memstead_rename`, `memstead_retype`,
+  `memstead_delete` and `memstead_changes_since` named the old pin, as
+  did `mem_schemas`, `_mem_schema` and the per-schema counts of
+  `memstead_health`, the schema line and `_mem_schema` of
+  `memstead_overview`, the `schema_ref` a `memstead_check` of kind
+  `conformance` records, `memstead overview`, `memstead health --json`
+  and `memstead export --format llms-txt`. With a roster row that
+  carries no pin, `memstead_schema` asked by mem refused
+  `SCHEMA_NOT_FOUND` for an empty name, in a plain mem-repo workspace
+  too; `_mem_schema` was missing from those replies, the health read
+  and the overview named an empty schema, and a check of kind
+  `conformance` refused `INVALID_INPUT`. All of these now take the pin
+  from one reading in the engine: the configuration's pin, the roster
+  row's where the configuration states none. The same reading answers
+  for the schema `memstead_mem_set_schema` names as the settled pin
+  when it starts a migration, for the pin a conformance check is fresh
+  under, for the schema a process mem must be pinned to, and for
+  `memstead mem list`, `memstead workspace dump` and `memstead export
+  --format json`, which read the configuration before and answer as
+  they did. Where roster row and configuration name the same pin no
+  reply changes. During a migration a workspace started itself the
+  replies name the settled pin and the target as before. A start
+  beside a roster row that names another pin still raises
+  `SCHEMA_PIN_MISMATCH` with both values.
+
 ## [0.28.0] - 2026-11-23
 
 ### Security

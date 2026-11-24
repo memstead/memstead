@@ -272,6 +272,9 @@ impl Engine {
         // the authoritative pin (mirrors the boot path), so a mem
         // re-registered or mounted from another machine resolves from
         // its own backend, not this workspace's mount expectation.
+        // The configuration's cursor is taken first, so a write that
+        // lands between the two reads is seen by the next operation.
+        let last_known_config_head = backend.config_head().ok().flatten();
         let mem_config = backend.read_mem_config().ok().flatten().and_then(|bytes| {
             let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
             memstead_schema::config::parse_mem_config(&value).ok()
@@ -417,6 +420,7 @@ impl Engine {
             mount,
             backend: backend.into(),
             last_known_head,
+            last_known_config_head,
             mem_config,
             // A runtime-created mem is authored live, not installed from
             // an archive — it carries no archive-borne provenance payload

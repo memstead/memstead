@@ -143,8 +143,8 @@ impl Engine {
             let schema = self
                 .store()
                 .get(id)
-                .and_then(|e| self.mount(&e.mem))
-                .and_then(|m| m.schema.as_ref().map(|s| s.as_display()))
+                .and_then(|e| self.schema_pin(&e.mem))
+                .map(|s| s.as_display())
                 .unwrap_or_default();
             *by_schema.entry(schema).or_insert(0) += 1;
         }
@@ -165,8 +165,8 @@ impl Engine {
             std::collections::BTreeMap::new();
         for name in mems {
             let schema = self
-                .mount(name)
-                .and_then(|m| m.schema.as_ref().map(|s| s.as_display()))
+                .schema_pin(name)
+                .map(|s| s.as_display())
                 .unwrap_or_default();
             let clusters = crate::graph::community::clusters_in_mem(self.store(), louvain, name);
             buckets.entry(schema).or_default().extend(clusters);
@@ -479,11 +479,7 @@ impl Engine {
             .cloned()
             .chain(self.builtin_schemas.iter().cloned())
             .collect();
-        let pin = m
-            .mem_config
-            .as_ref()
-            .and_then(|c| c.schema.clone())
-            .or_else(|| m.mount.schema.clone());
+        let pin = self.schema_pin(&m.mount.mem);
         let (pin_display, sources) = match &pin {
             Some(pin) => (
                 pin.as_display(),

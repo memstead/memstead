@@ -339,12 +339,7 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     for mem_name in &selected {
         // The authoritative schema pin lives in the mem's own config;
         // carried once at the group level rather than per entity.
-        let schema_pin = engine
-            .mounts_with_optional_config()
-            .find(|(name, _)| name == mem_name)
-            .and_then(|(_, c)| c)
-            .and_then(|c| c.schema.as_ref())
-            .map(|s| s.to_string());
+        let schema_pin = engine.schema_pin(mem_name).map(|s| s.to_string());
 
         let mut entities: Vec<&memstead_base::Entity> = engine
             .store()

@@ -595,10 +595,7 @@ impl Engine {
             // `verification` and `x-` record) ignores the argument.
             // Hash-only derivation read every conformance record as
             // `check_stale`, so a gate on that kind never closed.
-            let current_pin = self
-                .find_mount(&entity.mem)
-                .ok()
-                .and_then(|m| m.mount.schema.as_ref().map(|s| s.as_display()));
+            let current_pin = self.schema_pin(&entity.mem).map(|s| s.as_display());
             let state = crate::check::derive_state_pinned(
                 latest.as_ref(),
                 &entity.content_hash,

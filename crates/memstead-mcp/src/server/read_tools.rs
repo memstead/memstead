@@ -557,7 +557,7 @@ impl McpServer {
             }
             (Some(name), None) => name.to_string(),
             (None, Some(mem)) => match engine.mount(mem) {
-                Some(m) => m.schema.as_ref().map(|s| s.to_string()).unwrap_or_default(),
+                Some(_) => mem_schema_ref_unified(&engine, mem).unwrap_or_default(),
                 None if engine.quarantine_reason(mem).is_some() => {
                     let err = engine.unknown_mem_error(mem);
                     return attach_drift_to_error(
@@ -605,14 +605,14 @@ impl McpServer {
             }
         };
 
-        // `used_by` — every writable mem whose pinned schema
-        // resolves to this one. Iterate mounts(), compare each
-        // mount.schema with the matched schema's canonical pin.
+        // `used_by`: every mem whose settled pin is this schema.
+        // Iterate mounts(), compare each mem's pin with the matched
+        // schema's canonical pin.
         let canon = format!("{}@{}", schema.manifest.name, schema.version);
         let mut used_by: Vec<String> = engine
             .mounts()
             .iter()
-            .filter(|m| m.schema.as_ref().map(|s| s.to_string()).as_deref() == Some(canon.as_str()))
+            .filter(|m| mem_schema_ref_unified(&engine, &m.mem).as_deref() == Some(canon.as_str()))
             .map(|m| m.mem.clone())
             .collect();
         used_by.sort();

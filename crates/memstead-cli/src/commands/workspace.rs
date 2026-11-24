@@ -921,14 +921,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
             _ => None,
         };
 
-        let schema_pin = config
-            .and_then(|c| c.schema.as_ref())
-            .map(|p| {
-                serde_json::to_value(p)
-                    .ok()
-                    .and_then(|v| v.as_str().map(String::from))
-            })
-            .unwrap_or(None);
+        let schema_pin = engine.schema_pin(name).map(|p| p.to_string());
 
         let mut write_guidance = Map::new();
         for (k, v) in config.iter().flat_map(|c| c.write_guidance.iter()) {

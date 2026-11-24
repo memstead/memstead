@@ -101,6 +101,10 @@ impl Engine {
             // probe failure during init falls back to None so a
             // later successful probe can establish the baseline.
             let last_known_head = backend.current_head().ok().flatten();
+            // The configuration's cursor, taken before the configuration
+            // is read: a write that lands between the two leaves the
+            // cursor behind, and the next operation reads again.
+            let last_known_config_head = backend.config_head().ok().flatten();
             // Load the per-mem `.memstead/config.json` via the
             // backend trait. Each backend resolves its own
             // canonical location (folder: `<root>/.memstead/config.json`;
@@ -137,6 +141,7 @@ impl Engine {
                 mount,
                 backend: backend.into(),
                 last_known_head,
+                last_known_config_head,
                 mem_config,
                 archive_provenance,
                 archive_checks,

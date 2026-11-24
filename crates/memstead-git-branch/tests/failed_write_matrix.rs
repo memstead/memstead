@@ -100,6 +100,7 @@ methods! {
     SetLockWait => "set_lock_wait",
     LockWait => "lock_wait",
     ReadMemConfig => "read_mem_config",
+    ConfigHead => "config_head",
     ReadArchiveProvenance => "read_archive_provenance",
     ReadArchiveChecks => "read_archive_checks",
     ReadProposalRecord => "read_proposal_record",
@@ -360,6 +361,10 @@ impl MemBackend for FaultBackend {
         self.gate(Method::ReadMemConfig)?;
         self.inner.read_mem_config()
     }
+    fn config_head(&self) -> Result<Option<String>, BackendError> {
+        self.gate(Method::ConfigHead)?;
+        self.inner.config_head()
+    }
     fn read_archive_provenance(&self) -> Result<Option<Vec<u8>>, BackendError> {
         self.gate(Method::ReadArchiveProvenance)?;
         self.inner.read_archive_provenance()
@@ -468,6 +473,7 @@ fn every_listed_method_is_gated_by_the_wrapper() {
                 faults.fired()
             }
             Method::ReadMemConfig => backend.read_mem_config().is_err(),
+            Method::ConfigHead => backend.config_head().is_err(),
             Method::ReadArchiveProvenance => backend.read_archive_provenance().is_err(),
             Method::ReadArchiveChecks => backend.read_archive_checks().is_err(),
             Method::ReadProposalRecord => backend.read_proposal_record().is_err(),
@@ -909,6 +915,7 @@ impl Method {
             | Method::SetLockWait
             | Method::LockWait
             | Method::ReadMemConfig
+            | Method::ConfigHead
             | Method::ReadArchiveProvenance
             | Method::ReadArchiveChecks
             | Method::ReadProposalRecord
@@ -2030,12 +2037,18 @@ fn view(engine: &Engine, hashes: bool) -> BTreeMap<String, String> {
 ///   engine reload the mem instead of trusting the head, and the call
 ///   goes on from the reloaded view; after the commit it only decides
 ///   which cursor is recorded for the engine's own write.
+/// - `config_head`: a failed probe of the configuration's cursor says
+///   nothing about the mem's schema pin, so the engine reloads the mem,
+///   which asks for the pin again, instead of trusting the pin it
+///   holds; the call goes on from the reloaded view. A probe that keeps
+///   failing fails that reload, and the write is refused.
 /// - `write_lock_path`, `set_lock_wait`, `lock_wait`: infallible by
 ///   signature.
 /// - `discard_pending`: called on exits only; on a successful call
 ///   nothing is staged and its failure has nothing to leave behind.
 const ABSORBED: &[Method] = &[
     Method::CurrentHead,
+    Method::ConfigHead,
     Method::WriteLockPath,
     Method::SetLockWait,
     Method::LockWait,
@@ -2447,6 +2460,38 @@ fn a_failed_drift_probe_does_not_let_a_write_land_on_a_stale_view() {
         assert_eq!(
             view(&engine, true),
             after_sibling,
+            "{kind:?}: the engine's view is not level with storage"
+        );
+    }
+}
+
+/// A probe of the configuration's cursor that fails is not "the pin did
+/// not move". One failure is settled by the reload that asks again (the
+/// matrix holds that). While the probe keeps failing the engine cannot
+/// know which schema the mem is pinned to, and no write lands; once the
+/// probe answers, the same write goes through.
+#[test]
+fn a_pin_probe_that_keeps_failing_lets_no_write_land() {
+    for kind in [Kind::Folder, Kind::GitBranch] {
+        let ws = Workspace::template(kind);
+        let (mut engine, faults, _backend) = ws.faulted_engine(Peer::Absent);
+        let before = view(&ws.fresh_engine(Peer::Absent), true);
+
+        faults.always_failing(Method::ConfigHead);
+        let err = run(Verb::Update, &mut engine)
+            .expect_err("a write under a pin the engine cannot ask for must not land");
+        assert!(err.starts_with("MEM_VIEW_STALE"), "{kind:?}: {err}");
+        assert_eq!(
+            view(&ws.fresh_engine(Peer::Absent), true),
+            before,
+            "{kind:?}: the refused write changed storage"
+        );
+
+        faults.reset();
+        run(Verb::Update, &mut engine).expect("the write lands once the probe answers");
+        assert_eq!(
+            view(&engine, true),
+            view(&ws.fresh_engine(Peer::Absent), true),
             "{kind:?}: the engine's view is not level with storage"
         );
     }

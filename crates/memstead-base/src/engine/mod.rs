@@ -94,6 +94,14 @@ pub(crate) struct MountedBackend {
     /// `None` means the backend doesn't track a head (folder /
     /// archive) — drift detection is a no-op for this mount.
     last_known_head: Option<String>,
+    /// Last cursor returned by `backend.config_head()`: the state of the
+    /// mem's configuration this engine last looked at. Seeded where the
+    /// mount is built, before its configuration is read; advanced by
+    /// [`Engine::follow_moved_pin`], which reads the configuration only
+    /// when the backend's cursor differs from this one. `None` for a
+    /// backend without such a cursor (nobody else changes its
+    /// configuration), and for one whose cursor could not be read yet.
+    last_known_config_head: Option<String>,
     /// Per-mem `.memstead/config.json` payload — surfaces via
     /// [`Engine::mem_config_for`] for handlers that need
     /// `write_guidance` / `extra` (`memstead_health

@@ -325,15 +325,11 @@ pub fn compose_health(
                 continue;
             }
             if let Some(m) = engine.mount(name) {
-                // The mem's *settled* pin — `Mount.schema` (now an optional
-                // assertion). During a dual-pin migration this stays the
+                // The mem's *settled* pin, by the engine's one reading
+                // of it. During a dual-pin migration this stays the
                 // settled pin; the in-flight target is the separate
                 // `migration_target` surface below.
-                let schema_ref = m
-                    .schema
-                    .as_ref()
-                    .map(|s| s.as_display())
-                    .unwrap_or_default();
+                let schema_ref = crate::overview::mem_schema_ref(engine, name).unwrap_or_default();
                 let mut entry = serde_json::json!({
                     "mem": name,
                     "schema": schema_ref,

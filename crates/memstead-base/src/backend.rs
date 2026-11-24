@@ -316,6 +316,27 @@ pub trait MemBackend: Send + Sync {
         Ok(None)
     }
 
+    /// Opaque cursor over what [`Self::read_mem_config`] would return:
+    /// it differs from an earlier answer whenever the mem's
+    /// configuration may have changed since, and answers "nothing moved"
+    /// without reading the configuration where storage allows. The
+    /// engine keeps the last answer per mount and reads the
+    /// configuration only when this one differs, to follow a schema pin
+    /// another workspace moved where the mem lives.
+    ///
+    /// `Ok(None)` (the default) means the backend has no such signal:
+    /// nobody but the mounting engine changes the configuration (archive,
+    /// in-memory), and the engine asks no further.
+    ///
+    /// Implementations:
+    /// - Git-branch backend: the tip of the git directory's
+    ///   schema-and-config ref, which every configuration write of every
+    ///   mem in that directory moves.
+    /// - Folder backend: a hash of `<root>/.memstead/config.json`.
+    fn config_head(&self) -> Result<Option<String>, BackendError> {
+        Ok(None)
+    }
+
     /// Read the optional authoring-provenance payload
     /// (`.memstead/provenance.json`) the archive carries, if any.
     ///

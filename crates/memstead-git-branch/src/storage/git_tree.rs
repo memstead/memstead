@@ -964,6 +964,27 @@ impl memstead_base::backend::MemBackend for GitTreeBackend {
         )
     }
 
+    fn config_head(&self) -> Result<Option<String>, memstead_base::backend::BackendError> {
+        // The tip of the ref [`Self::read_mem_config`] reads from. Every
+        // configuration write of every mem in this git directory, and
+        // every schema install, commits to it, so an unchanged tip says
+        // this mem's configuration is what it was, without reading a
+        // tree. A missing ref is the one absence.
+        use memstead_base::backend::BackendError;
+        let repo = gix::open(&self.gitdir)
+            .map_err(|e| BackendError::Other(format!("open {}: {e}", self.gitdir.display())))?;
+        let Some(mut reference) = repo
+            .fresh_ref("refs/heads/__MEMSTEAD")
+            .map_err(|e| BackendError::Other(format!("find ref refs/heads/__MEMSTEAD: {e}")))?
+        else {
+            return Ok(None);
+        };
+        let id = reference
+            .peel_to_id()
+            .map_err(|e| BackendError::Other(format!("peel refs/heads/__MEMSTEAD: {e}")))?;
+        Ok(Some(id.detach().to_hex().to_string()))
+    }
+
     fn read_anchors_sidecar(
         &self,
     ) -> Result<Option<Vec<u8>>, memstead_base::backend::BackendError> {

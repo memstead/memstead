@@ -128,14 +128,12 @@ pub struct OverviewOutput {
 // same import path.
 // ---------------------------------------------------------------------------
 
-/// Resolve the per-mem schema pin from the unified engine's
-/// `mounts()` shape.
+/// The mem's settled schema pin as `name@version`, through the engine's
+/// one reading of it ([`crate::Engine::schema_pin`]): the
+/// configuration's pin, the roster row's where the configuration states
+/// none.
 pub fn mem_schema_ref(engine: &crate::Engine, mem_name: &str) -> Option<String> {
-    // The mem's settled pin — `Mount.schema` (now an optional
-    // assertion). `None` when the mount carries no assertion.
-    engine
-        .mount(mem_name)
-        .and_then(|m| m.schema.as_ref().map(|s| s.to_string()))
+    engine.schema_pin(mem_name).map(|s| s.to_string())
 }
 
 /// Compute the set of workspace-policy entries to surface in
@@ -431,12 +429,8 @@ pub fn compose_overview(
     let mut used_by_by_ref: HashMap<String, Vec<String>> = HashMap::new();
     let mut per_mem_schema_ref: HashMap<String, String> = HashMap::new();
     for name in &visible_names {
-        if let Some(mount) = engine.mount(name) {
-            let sref = mount
-                .schema
-                .as_ref()
-                .map(|s| s.as_display())
-                .unwrap_or_default();
+        if engine.mount(name).is_some() {
+            let sref = mem_schema_ref(engine, name).unwrap_or_default();
             per_mem_schema_ref.insert(name.clone(), sref.clone());
             used_by_by_ref.entry(sref).or_default().push(name.clone());
         }

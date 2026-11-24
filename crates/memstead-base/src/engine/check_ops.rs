@@ -133,10 +133,7 @@ impl Engine {
         let schema_ref = match kind.engine_kind() {
             None | Some(CheckKind::Verification) => None,
             Some(CheckKind::Conformance) => Some(
-                self.mounts[mount_idx]
-                    .mount
-                    .schema
-                    .as_ref()
+                self.schema_pin(mem_name)
                     .map(|s| s.as_display())
                     .ok_or_else(|| {
                         EngineError::InvalidInput(format!(
@@ -582,8 +579,8 @@ impl Engine {
         mem_name: &str,
         entity_id: &str,
     ) -> Result<(CheckState, Option<CheckRecord>), EngineError> {
-        let mount = self.find_mount(mem_name)?;
-        let current_pin = mount.mount.schema.as_ref().map(|s| s.as_display());
+        self.find_mount(mem_name)?;
+        let current_pin = self.schema_pin(mem_name).map(|s| s.as_display());
         let current_hash = self
             .store
             .all_entities()

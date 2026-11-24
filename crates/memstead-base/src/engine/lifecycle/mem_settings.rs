@@ -297,15 +297,14 @@ impl Engine {
             if target == mem_name {
                 return Err(refuse("self_pairing", None));
             }
-            let Some(target_mount) = self.mount(target) else {
+            if self.mount(target).is_none() {
                 return Err(refuse("not_mounted", None));
-            };
-            let pin = target_mount
-                .schema
+            }
+            let target_pin = self.schema_pin(target);
+            let pin = target_pin
                 .as_ref()
                 .map(|s| format!("{}@{}", s.name, s.version));
-            let is_ingest = target_mount
-                .schema
+            let is_ingest = target_pin
                 .as_ref()
                 .is_some_and(|s| s.name == crate::binding_run::PROCESS_MEM_SCHEMA_NAME);
             if !is_ingest {

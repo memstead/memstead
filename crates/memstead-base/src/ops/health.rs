@@ -491,10 +491,7 @@ pub fn health_checks_axis(
         // every conformance verdict recorded under the old pin. A
         // workspace with no conformance records serves all
         // `never_checked` — honestly empty, never absent.
-        let current_pin = engine
-            .mount(&mem)
-            .and_then(|m| m.schema.as_ref())
-            .map(|s| s.as_display());
+        let current_pin = engine.schema_pin(&mem).map(|s| s.as_display());
         let mut conformance_counts = std::collections::BTreeMap::from([
             ("never_checked", 0usize),
             ("checked_ok", 0usize),

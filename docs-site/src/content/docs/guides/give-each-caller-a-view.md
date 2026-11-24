@@ -97,6 +97,20 @@ From a view a mem moves to a built-in schema, to one that another mem
 mounted from the same store pins, or to one the view has installed
 itself and the store holds too. Any other move is made in the store.
 
+When the store moves a mounted mem to another schema, a view follows
+the pin at its next operation. An engine already running in the view
+validates the next write against the new schema, reads the mem under
+it and names the new pin in `_mem_schema`; no restart and no reload is
+needed. The view's own roster keeps the pin the mem was mounted under,
+and the view's health read reports the difference as
+`SCHEMA_PIN_MISMATCH`. A migration the store has started and not
+completed changes nothing in a view: the store's pin moves when the
+switch completes. If the store moves a mem to a schema the view cannot
+resolve (one the store holds only in its own `.memstead/schemas/`
+folder), the mem goes out of service in the view, `MEM_QUARANTINED`
+with the reason `SCHEMA_NOT_FOUND`, until the schema is installed in
+the store's mem-repo and the view is reloaded with `memstead_reload`.
+
 ## 4. What a view is not
 
 A view is a configuration, not a wall. It decides what the engine
@@ -133,9 +147,6 @@ who reaches them.
   do not see it.
 - **A check needs a writable mount.** `memstead_check` on an entity of
   a read-only mount refuses `READ_ONLY_MOUNT`.
-- **A running engine keeps the schema pin it booted with.** When the
-  store moves a mem to another schema, a view serves that mem under
-  the new pin from its engine's next start.
 - **A running engine keeps a schema it has resolved.** After a mem is
   withdrawn from a view, the schema it pinned stays readable through
   that view until its engine restarts.
