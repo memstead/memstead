@@ -67,9 +67,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   returned the old schema; the `_mem_schema` field of
   `memstead_entity`, `memstead_create`, `memstead_update`,
   `memstead_relate`, `memstead_rename`, `memstead_retype`,
-  `memstead_delete` and `memstead_changes_since` named the old pin, as
-  did `mem_schemas`, `_mem_schema` and the per-schema counts of
-  `memstead_health`, the schema line and `_mem_schema` of
+  `memstead_delete`, `memstead_mem_delete` and `memstead_changes_since`
+  named the old pin, as did `mem_schemas`, `_mem_schema` and the
+  per-schema counts of `memstead_health` and the per-schema breakdown
+  `memstead health` prints as text, the schema line and `_mem_schema` of
   `memstead_overview`, the `schema_ref` a `memstead_check` of kind
   `conformance` records, `memstead overview`, `memstead health --json`
   and `memstead export --format llms-txt`. With a roster row that
