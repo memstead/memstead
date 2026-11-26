@@ -384,6 +384,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let branch = || MountStorage::GitBranch {
             gitdir: PathBuf::from("/elsewhere/mem-repo/.git"),

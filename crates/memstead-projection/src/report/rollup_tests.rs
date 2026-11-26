@@ -403,6 +403,7 @@ fn a3_workspace(root: &std::path::Path, files: &[&str]) {
         lifecycle: memstead_base::workspace::MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::workspace_store::WorkspaceStoreAdapter::save_state(
         &memstead_base::FileWorkspaceStore::new(),

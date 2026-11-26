@@ -54,7 +54,17 @@ on; no restart is needed.
 |---|---|
 | not mounted | reaches nothing of it. A call that names it answers exactly as a call that names a mem that does not exist; its entities, its name and a schema that only it pins appear in no reply (one exception, an id that a mounted mem links to: see the limits). |
 | mounted `read-only` | reads its entities, its schema and its history. Every write refuses `READ_ONLY_MOUNT`, and its branch does not move. |
+| mounted `read-only`, granted `check` | also records checks on its entities; every other write still refuses `READ_ONLY_MOUNT`, and nothing in the store moves but the mem's checks ref. |
 | mounted `write` | also creates, updates, relates, renames, retypes and deletes its entities, records checks on them, and changes the mem's settings (below). |
+| mounted `write`, denied `check` | writes as `write` does; a check refuses `CHECK_NOT_GRANTED`. |
+
+The check grant is a field of the roster row beside the capability,
+set with `memstead mem mount --check true|false`; a row without it
+records checks exactly when it is writable. It is how a host gives
+"approve" as a right of its own: a person who may write a mem but not
+accept work in it gets `write` with `check: false`, a reviewer who may
+accept but not edit gets `read-only` with `check: true`. A grant
+changed in the roster takes effect at the engine's next operation.
 
 No capability lets a view create, delete or rename a mem or move a
 branch: those acts belong to the workspace that owns the git
@@ -142,11 +152,10 @@ who reaches them.
   health read shows it: `memstead health --include dangling_links,stubs`
   lists a body link under dangling links and a relation's target under
   stubs.
-- **Checks are recorded per workspace.** A check recorded through a
-  view lands in that view's own ledger; another view, and the store,
-  do not see it.
-- **A check needs a writable mount.** `memstead_check` on an entity of
-  a read-only mount refuses `READ_ONLY_MOUNT`.
+- **Checks of a git-branch mem live in the store.** A check recorded
+  through a view lands on the mem's checks ref in the store, and every
+  view and the store's own workspace read it. A folder mem's checks
+  stay in the ledger of the workspace that recorded them.
 - **A running engine keeps a schema it has resolved.** After a mem is
   withdrawn from a view, the schema it pinned stays readable through
   that view until its engine restarts.

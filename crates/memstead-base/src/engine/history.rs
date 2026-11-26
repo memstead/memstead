@@ -1060,6 +1060,7 @@ mod tests {
             lifecycle: crate::MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         };
         let backend =
             Box::new(crate::storage::FilesystemBackend::new(dir)) as Box<dyn crate::MemBackend>;
@@ -1372,6 +1373,7 @@ mod tests {
                 lifecycle: crate::MountLifecycle::Eager,
                 cross_linkable: false,
                 migration_target: None,
+                check: None,
             };
             crate::Engine::from_mounts(vec![(
                 mount,
@@ -1464,6 +1466,7 @@ mod tests {
             lifecycle: crate::MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         };
         let engine = crate::Engine::from_mounts(vec![(
             mount,

@@ -327,6 +327,7 @@ pub fn register_cached_archive(
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     let backend: Box<dyn memstead_base::MemBackend> = Box::new(
         memstead_base::storage::ArchiveBackend::new(outcome.cache_path.clone()),

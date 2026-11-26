@@ -40,6 +40,7 @@ fn engine(tmp: &std::path::Path) -> memstead_base::Engine {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let backend = memstead_base::instantiate_local_backend(&mount).unwrap();
     memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap()

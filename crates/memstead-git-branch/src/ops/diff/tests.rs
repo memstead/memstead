@@ -717,6 +717,7 @@ fn engine_diff_routes_git_branch_mount_through_hook() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
     let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
@@ -755,6 +756,7 @@ fn engine_diff_unknown_ref_surfaces_typed_engine_error() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
     let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();

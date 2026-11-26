@@ -1606,6 +1606,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "INVALID_VERDICT",
             "ENTITY_NOT_FOUND",
             "READ_ONLY_MOUNT",
+            "CHECK_NOT_GRANTED",
             "CHECK_NOT_RECORDED",
             // The kind vocabulary and its refusal (kinded checks): a
             // conformance record is schema-bound and engine-stamped.

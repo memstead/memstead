@@ -727,6 +727,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         };
         let mut engine = Engine::from_mounts(vec![(
             mount,
@@ -779,6 +780,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         };
         let engine = Engine::from_mounts(vec![(
             mount,
@@ -867,6 +869,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         };
         Engine::from_mounts(vec![(
             mount,
@@ -952,6 +955,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         };
         let engine = Engine::from_mounts(vec![(
             mount,

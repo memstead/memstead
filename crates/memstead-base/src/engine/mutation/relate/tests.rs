@@ -1232,6 +1232,7 @@ write_rules: []
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }
     }
 
@@ -2056,6 +2057,7 @@ community:
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let mut engine = Engine::from_mounts_with_schemas_dir(
             vec![

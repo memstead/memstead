@@ -316,6 +316,7 @@ fn in_memory_mem_exports_to_mem_archive_that_mounts_standalone() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine =
         Engine::from_mounts(vec![(mount, Box::new(backend) as Box<dyn MemBackend>)]).unwrap();

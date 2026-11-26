@@ -847,6 +847,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let archive_reader = crate::storage::ArchiveBackend::new(archive_path.clone());
         let mut engine = Engine::from_mounts(vec![

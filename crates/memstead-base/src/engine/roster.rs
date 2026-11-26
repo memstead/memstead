@@ -56,10 +56,13 @@ pub struct RosterChange {
 }
 
 /// What makes a roster row the mount it is: under one name, a row with
-/// another capability, storage or pin is another mount.
+/// another capability, check grant, storage or pin is another mount. The
+/// grant compares as it acts (a row without the field and a row that
+/// states the default are the same mount).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RowIdentity {
     capability: crate::workspace::MountCapability,
+    check: bool,
     storage: crate::workspace::MountStorage,
     schema: Option<memstead_schema::SchemaRef>,
 }
@@ -85,6 +88,7 @@ impl RowIdentity {
         };
         Self {
             capability: mount.capability,
+            check: mount.may_check(),
             storage,
             schema: mount.schema.clone(),
         }

@@ -731,6 +731,7 @@ write_rules: []
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }
     }
 

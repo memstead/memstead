@@ -50,6 +50,7 @@ community:
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mounts = vec![
         (
@@ -175,6 +176,7 @@ fn undeclared_cross_schema_body_link_warns_instead_of_vanishing() {
             lifecycle: crate::workspace::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }
     };
     let mut engine = Engine::from_mounts(vec![
@@ -317,6 +319,7 @@ community:
             lifecycle: crate::workspace::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }
     };
     let boot = |grant: bool| -> Engine {

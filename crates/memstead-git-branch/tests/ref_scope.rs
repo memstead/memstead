@@ -92,6 +92,7 @@ fn mount(view: &Path, gitdir: &Path, name: &str, capability: MountCapability) {
                 gitdir: Some(gitdir.to_path_buf()),
             },
             capability,
+            check: None,
             schema: None,
             note: None,
             operator_mode: true,

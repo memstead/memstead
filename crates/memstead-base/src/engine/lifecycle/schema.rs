@@ -325,6 +325,7 @@ impl Engine {
             lifecycle: crate::workspace::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let backend = Box::new(crate::storage::InMemoryBackend::new()) as Box<dyn MemBackend>;
         let mut engine = Engine::from_mounts_with_schemas_dir_and_extra(

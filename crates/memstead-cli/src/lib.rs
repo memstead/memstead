@@ -275,6 +275,7 @@ impl CliError {
             | LocalInvalidState { .. }
             | SchemaViolationInFetch { .. }
             | ReadOnlyMount { .. }
+            | CheckNotGranted { .. }
             | MemNameCollision { .. }
             | ProcessMemNotEligible { .. }
             | SchemaNotFound { .. }

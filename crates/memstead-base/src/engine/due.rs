@@ -655,6 +655,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }
     }
 
@@ -907,6 +908,7 @@ mod obligation_builtin_tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }
     }
 

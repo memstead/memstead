@@ -68,9 +68,21 @@ pub struct Mount {
     /// workspace-store write. Persisted so a long migration is
     /// resumable across engine restarts.
     pub migration_target: Option<SchemaRef>,
+    /// Whether checks may be recorded through this mount, granted apart
+    /// from the capability. `None` (a row without the field) means
+    /// "exactly when the capability is write", the meaning every row had
+    /// before the grant existed. See [`Self::may_check`].
+    pub check: Option<bool>,
 }
 
 impl Mount {
+    /// Whether a check may be recorded through this mount: the row's
+    /// grant, or, where it states none, whether the mount is writable.
+    pub fn may_check(&self) -> bool {
+        self.check
+            .unwrap_or(self.capability == MountCapability::Write)
+    }
+
     /// Hierarchical organisational path for this mount, or `None` for
     /// flat layout / non-hierarchical storage. Mirrors the
     /// `MemCreateParams.path` create-side input — at delete time the
@@ -745,6 +757,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         assert_eq!(m.mem, "specs");
         assert!(matches!(m.storage, MountStorage::Folder { .. }));
@@ -763,6 +776,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         assert!(matches!(m.storage, MountStorage::GitBranch { .. }));
     }
@@ -786,6 +800,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         assert_eq!(m.mem_path(), Some("memstead".to_string()));
 
@@ -801,6 +816,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         assert_eq!(m.mem_path(), Some("planning".to_string()));
 
@@ -816,6 +832,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         assert_eq!(m.mem_path(), Some("a/b/c".to_string()));
 
@@ -831,6 +848,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         assert_eq!(m.mem_path(), None);
 
@@ -846,6 +864,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         assert_eq!(m.mem_path(), None);
 
@@ -860,6 +879,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         assert_eq!(m.mem_path(), None);
     }
@@ -876,6 +896,7 @@ mod tests {
             lifecycle: MountLifecycle::Lazy,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         };
         assert!(matches!(m.storage, MountStorage::Archive { .. }));
         assert_eq!(m.capability, MountCapability::ReadOnly);
@@ -896,6 +917,7 @@ mod tests {
                     lifecycle: MountLifecycle::Eager,
                     cross_linkable: true,
                     migration_target: None,
+                    check: None,
                 },
                 Mount {
                     mem: "macos".into(),
@@ -908,6 +930,7 @@ mod tests {
                     lifecycle: MountLifecycle::Eager,
                     cross_linkable: true,
                     migration_target: None,
+                    check: None,
                 },
                 Mount {
                     mem: "external".into(),
@@ -919,6 +942,7 @@ mod tests {
                     lifecycle: MountLifecycle::Lazy,
                     cross_linkable: false,
                     migration_target: None,
+                    check: None,
                 },
             ],
             settings: WorkspaceSettings::default(),
@@ -946,6 +970,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }
     }
 
@@ -1022,6 +1047,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         // No pin on the roster row: the entry still stands, so that the
         // pin in the mem's configuration can count.

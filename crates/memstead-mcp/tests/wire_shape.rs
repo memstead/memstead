@@ -94,6 +94,7 @@ fn seed_full_workspace_with_toml(root: &Path, mems: &[(&str, &str)], workspace_t
                 lifecycle: memstead_base::MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             }
         })
         .collect();

@@ -38,6 +38,7 @@ fn folder_mount(mem: &str, path: PathBuf) -> Mount {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     }
 }
 

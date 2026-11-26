@@ -590,6 +590,7 @@ fn end_to_end_report(
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::FileWorkspaceStore::new()
         .save_state(
@@ -804,6 +805,7 @@ fn compute_report_adopt_when_mem_predates_binding() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::FileWorkspaceStore::new()
         .save_state(

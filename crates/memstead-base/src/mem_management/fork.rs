@@ -473,6 +473,7 @@ pub fn fork_mem(
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let backend = match engine.instantiate_backend(&mount) {
         Ok(b) => b,

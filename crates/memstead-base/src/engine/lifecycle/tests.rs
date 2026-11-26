@@ -1147,6 +1147,7 @@ fn register_writable_mem_resolves_schema_from_mem_config() {
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     engine
             .register_writable_mem(

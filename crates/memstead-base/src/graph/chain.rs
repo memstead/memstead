@@ -210,6 +210,7 @@ mod tests {
                     lifecycle: crate::MountLifecycle::Eager,
                     cross_linkable: true,
                     migration_target: None,
+                    check: None,
                 },
                 Box::new(crate::storage::FilesystemBackend::new(path))
                     as Box<dyn crate::MemBackend>,

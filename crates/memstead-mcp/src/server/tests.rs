@@ -97,6 +97,7 @@ fn setup_unified_test_engine(workspace_root: &std::path::Path) -> memstead_base:
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let backend = memstead_base::instantiate_local_backend(&mount).unwrap();
         mounts.push((mount, backend));
@@ -156,6 +157,7 @@ fn setup_unified_test_engine_git_branch(workspace_root: &std::path::Path) -> mem
         let schema = Some(schema_str.parse().unwrap());
         let mount = Mount {
             migration_target: None,
+            check: None,
             mem: name.clone(),
             schema,
             storage: MountStorage::GitBranch {
@@ -703,6 +705,7 @@ fn health_scoped_most_connected_degrees_exclude_cross_mem_incoming() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let a_writer = memstead_base::storage::FilesystemBackend::new(a_dir.clone());
     let b_writer = memstead_base::storage::FilesystemBackend::new(b_dir.clone());
@@ -865,6 +868,7 @@ fn health_scoped_community_count_reflects_mem() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine = memstead_base::Engine::from_mounts(vec![
         (
@@ -1020,6 +1024,7 @@ fn overview_scoped_entity_and_community_count_reflect_mem() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let engine = memstead_base::Engine::from_mounts(vec![
         (
@@ -1286,6 +1291,7 @@ fn health_missing_fields_include_carries_issue_codes_additively() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine = memstead_base::Engine::from_mounts_with_schemas_dir(
         vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
@@ -2012,6 +2018,7 @@ community:
         lifecycle: memstead_base::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let backend = memstead_base::instantiate_local_backend(&mount).unwrap();
     let mut unified = memstead_base::Engine::from_mounts_with_schemas_dir(
@@ -2443,6 +2450,7 @@ fn entity_and_search_stamp_data_origin_by_mount_capability() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = vec![
         {
@@ -2547,6 +2555,7 @@ fn overview_marks_read_only_mem_third_party_origin() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = vec![
         {
@@ -2608,6 +2617,7 @@ fn test_memstead_mem_create_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -2745,6 +2755,7 @@ fn test_memstead_mem_delete_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -2796,6 +2807,7 @@ fn test_memstead_overview_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -2845,6 +2857,7 @@ fn test_memstead_health_default_body_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -2908,6 +2921,7 @@ fn test_memstead_health_include_config_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -2980,6 +2994,7 @@ fn test_memstead_entity_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -3034,6 +3049,7 @@ fn test_memstead_schema_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -3110,6 +3126,7 @@ fn test_memstead_schema_verbosity_toggle() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -3200,6 +3217,7 @@ fn test_memstead_schema_resolves_builtin_when_no_mem_pins_it() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -3275,6 +3293,7 @@ fn test_memstead_schema_mem_shortcut() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -3356,6 +3375,7 @@ fn test_memstead_reload_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -3429,6 +3449,7 @@ fn test_memstead_reload_full_closes_the_out_of_band_schema_gap() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     memstead_base::FileWorkspaceStore::new()
         .save_state(
@@ -3559,6 +3580,7 @@ fn test_memstead_changes_since_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -3600,6 +3622,7 @@ fn test_unified_validation_envelopes_carry_recovery_payload() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -3689,6 +3712,7 @@ fn test_unified_mutation_handlers_emit_typed_error_envelopes() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -3807,6 +3831,7 @@ fn text_channel_carries_typed_error_code_inline() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -4796,6 +4821,7 @@ fn test_memstead_relate_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -4886,6 +4912,7 @@ fn test_memstead_update_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -4971,6 +4998,7 @@ fn test_memstead_create_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -5091,6 +5119,7 @@ fn test_memstead_retype_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -5206,6 +5235,7 @@ fn test_memstead_delete_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -5282,6 +5312,7 @@ fn test_memstead_rename_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -5689,6 +5720,7 @@ fn test_memstead_search_via_unified_engine_path() {
         lifecycle: memstead_base::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let unified = memstead_base::Engine::from_mounts(vec![(
         mount,
@@ -9672,6 +9704,7 @@ fn memstead_mem_delete_of_a_quarantined_mount_names_the_unregister() {
                     gitdir: Some(gitdir),
                 },
                 capability: memstead_base::MountCapability::Write,
+                check: None,
                 schema: None,
                 note: None,
                 operator_mode: true,
@@ -9734,6 +9767,7 @@ fn the_scoped_read_tools_name_a_quarantined_mem_as_out_of_service() {
                     gitdir: Some(gitdir),
                 },
                 capability: memstead_base::MountCapability::Write,
+                check: None,
                 schema: None,
                 note: None,
                 operator_mode: true,
@@ -9861,6 +9895,7 @@ fn the_ref_taking_tools_stay_inside_the_mounted_mems() {
                     gitdir: Some(gitdir.clone()),
                 },
                 capability: memstead_base::MountCapability::Write,
+                check: None,
                 schema: None,
                 note: None,
                 operator_mode: true,
@@ -10565,6 +10600,7 @@ fn memstead_mem_delete_policy_grant_envelope_carries_referring_mems() {
     for mem_name in ["primary", "plan-x"] {
         let mount = memstead_base::Mount {
             migration_target: None,
+            check: None,
             mem: mem_name.to_string(),
             schema: Some("default@1.0.0".parse().unwrap()),
             storage: memstead_base::MountStorage::GitBranch {
@@ -12242,6 +12278,7 @@ mod schema_payload {
                 lifecycle: memstead_base::MountLifecycle::Eager,
                 cross_linkable: false,
                 migration_target: None,
+                check: None,
             };
             let backend: Box<dyn memstead_base::MemBackend> =
                 Box::new(memstead_base::storage::ArchiveBackend::new(archive));
@@ -14181,6 +14218,7 @@ fn a_stub_deletes_over_mcp_with_the_empty_hash() {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let backend = memstead_base::instantiate_local_backend(&mount).unwrap();
         mounts.push((mount, backend));

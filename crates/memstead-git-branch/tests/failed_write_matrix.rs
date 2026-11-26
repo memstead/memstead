@@ -615,6 +615,7 @@ impl Workspace {
                 lifecycle,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             };
         }
         Mount {
@@ -627,6 +628,7 @@ impl Workspace {
             lifecycle,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }
     }
 
@@ -677,6 +679,7 @@ impl Workspace {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         Self {
             _tmp: tmp,

@@ -172,6 +172,7 @@ fn create_entity_rejects_inline_relation_with_shape_violation() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine =
         Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
@@ -261,6 +262,7 @@ fn create_entity_rejects_inline_relation_with_shape_violation_for_a_lowercase_re
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine =
         Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();

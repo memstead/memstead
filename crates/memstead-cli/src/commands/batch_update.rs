@@ -464,6 +464,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let backend = memstead_base::instantiate_local_backend(&mount).unwrap();
         let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();

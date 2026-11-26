@@ -548,3 +548,212 @@ fn a_mount_from_a_remote_names_a_future_row_it_refused() {
     assert_eq!(seen.len(), 1);
     assert!(!seen.iter().any(|r| r["identity"] == "time-traveller"));
 }
+
+/// A view mounting `kept` with a capability and a check grant.
+fn granted_view(root: &Path, name: &str, gitdir: &Path, capability: &str, check: &str) -> PathBuf {
+    let view = root.join(name);
+    fs::create_dir_all(&view).unwrap();
+    ok(
+        &view,
+        &[
+            "mem",
+            "mount",
+            "kept",
+            "--branch",
+            "kept",
+            "--gitdir",
+            gitdir.to_str().unwrap(),
+            "--capability",
+            capability,
+            "--check",
+            check,
+            "--new-workspace",
+            "--operator-mode",
+        ],
+    );
+    view
+}
+
+fn refused_with(ws: &Path, args: &[&str], code: &str) {
+    let (succeeded, printed) = run(ws, args);
+    assert!(
+        !succeeded,
+        "`memstead {}` answered:\n{printed}",
+        args.join(" ")
+    );
+    assert!(
+        printed.contains(code),
+        "`memstead {}` should refuse {code}:\n{printed}",
+        args.join(" ")
+    );
+}
+
+/// Refs of a git directory but the checks refs.
+fn refs_but_checks(gitdir: &Path) -> String {
+    git(
+        gitdir,
+        &["for-each-ref", "--format=%(refname) %(objectname)"],
+    )
+    .lines()
+    .filter(|l| !l.starts_with("refs/memstead/checks/"))
+    .collect::<Vec<_>>()
+    .join("\n")
+}
+
+/// A read-only mount granted `check` records checks of every kind, which
+/// every other workspace reads; every mutation of the list still refuses
+/// `READ_ONLY_MOUNT`; nothing in the store moves but the checks ref.
+#[test]
+fn a_read_only_mount_granted_checking_records_checks_and_nothing_else() {
+    let tmp = TempDir::new().unwrap();
+    let (store, gitdir) = store(tmp.path(), "store", &["Thing", "Other"]);
+    let r = granted_view(tmp.path(), "r", &gitdir, "read-only", "true");
+    let listed = json(&r, &["mem", "list"]);
+    assert_eq!(listed["mems"][0]["check"], true, "{listed}");
+    let before = refs_but_checks(&gitdir);
+    for kind in ["verification", "conformance", "x-approval"] {
+        ok(
+            &r,
+            &[
+                "check",
+                "kept--thing",
+                "--verdict",
+                "ok",
+                "--kind",
+                kind,
+                "--identity",
+                "rev",
+                "--role",
+                "checker",
+            ],
+        );
+    }
+    assert_eq!(rows(&r).len(), 3);
+    assert_eq!(rows(&store).len(), 3);
+    let spec_args = [
+        "create",
+        "--mem",
+        "kept",
+        "--title",
+        "New",
+        "--type",
+        "spec",
+        "--metadata",
+        "level=M0",
+        "--section",
+        "identity=i",
+        "--section",
+        "purpose=p",
+    ];
+    refused_with(&r, &spec_args, "READ_ONLY_MOUNT");
+    for args in [
+        vec![
+            "update",
+            "kept--thing",
+            "--section",
+            "purpose=q",
+            "--auto-hash",
+        ],
+        vec!["relate", "kept--thing", "USES", "kept--other"],
+        vec!["delete", "kept--other"],
+        vec!["rename", "kept--thing", "Renamed"],
+        vec!["retype", "kept--thing", "--type", "concept"],
+        vec!["mem", "set-version", "kept", "0.2.0"],
+        vec!["mem", "set-schema", "kept", "default@1.3.0"],
+    ] {
+        refused_with(&r, &args, "READ_ONLY_MOUNT");
+    }
+    let batch = r.join("b.json");
+    fs::write(
+        &batch,
+        r#"{"updates":[{"id":"kept--thing","auto_hash":true,"sections":{"purpose":"q"}}]}"#,
+    )
+    .unwrap();
+    refused_with(
+        &r,
+        &["batch-update", "--from", batch.to_str().unwrap()],
+        "READ_ONLY_MOUNT",
+    );
+    assert_eq!(refs_but_checks(&gitdir), before, "a ref moved");
+    let entity = json(&r, &["entity", "kept--thing"]);
+    assert_eq!(entity["origin"], "third-party", "{entity}");
+}
+
+/// A writable mount denied `check` writes, and every check refuses
+/// `CHECK_NOT_GRANTED` with nothing recorded anywhere.
+#[test]
+fn a_writable_mount_denied_checking_writes_and_refuses_every_check() {
+    let tmp = TempDir::new().unwrap();
+    let (store, gitdir) = store(tmp.path(), "store", &["Thing"]);
+    let w = granted_view(tmp.path(), "w", &gitdir, "write", "false");
+    let listed = json(&w, &["mem", "list"]);
+    assert_eq!(listed["mems"][0]["check"], false, "{listed}");
+    ok(
+        &w,
+        &[
+            "update",
+            "kept--thing",
+            "--section",
+            "purpose=q",
+            "--auto-hash",
+        ],
+    );
+    spec(&w, "kept", "Written", "writer");
+    for kind in ["verification", "conformance", "x-approval"] {
+        refused_with(
+            &w,
+            &["check", "kept--thing", "--verdict", "ok", "--kind", kind],
+            "CHECK_NOT_GRANTED",
+        );
+    }
+    assert!(rows(&w).is_empty());
+    assert!(rows(&store).is_empty());
+    assert!(sha(&gitdir, "refs/memstead/checks/kept").is_empty());
+    assert!(!w.join(".memstead/state/checks/checks.jsonl").exists());
+}
+
+/// A grant another process changes on the roster takes effect at the
+/// running engine's next operation.
+#[test]
+fn a_grant_changed_by_another_process_takes_effect_at_the_next_operation() {
+    use memstead_base::check::{CheckKind, Verdict};
+    use memstead_base::vcs::Actor;
+    let tmp = TempDir::new().unwrap();
+    let (_store, gitdir) = store(tmp.path(), "store", &["Thing"]);
+    let v = view(tmp.path(), "v", &gitdir, "write");
+    let mut engine = memstead_git_branch::workspace_store::engine_from_workspace_root(&v).unwrap();
+    let record = |engine: &mut memstead_base::Engine| {
+        engine
+            .record_check(
+                "kept",
+                "kept--thing",
+                Verdict::Ok,
+                CheckKind::Verification,
+                None,
+                Actor::Cli,
+                None,
+            )
+            .map(|_| ())
+            .map_err(|e| e.code().to_string())
+    };
+    assert_eq!(record(&mut engine), Ok(()));
+    let roster = v.join(".memstead/state/mounts.json");
+    let set = |f: &dyn Fn(&mut serde_json::Value)| {
+        let mut doc: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&roster).unwrap()).unwrap();
+        f(&mut doc["mounts"][0]);
+        fs::write(&roster, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+    };
+    set(&|row| row["check"] = serde_json::json!(false));
+    assert_eq!(record(&mut engine), Err("CHECK_NOT_GRANTED".to_string()));
+    set(&|row| row["check"] = serde_json::json!(true));
+    assert_eq!(record(&mut engine), Ok(()));
+    set(&|row| {
+        row["capability"] = serde_json::json!("read-only");
+        row.as_object_mut().unwrap().remove("check");
+    });
+    assert_eq!(record(&mut engine), Err("READ_ONLY_MOUNT".to_string()));
+    set(&|row| row["check"] = serde_json::json!(true));
+    assert_eq!(record(&mut engine), Ok(()));
+    assert!(engine.mount("kept").is_some());
+}

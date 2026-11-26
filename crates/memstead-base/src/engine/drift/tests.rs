@@ -526,6 +526,7 @@ fn reload_if_stale_reloads_a_mem_whose_branch_appeared() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine =
         Engine::from_mounts(vec![(mount, Box::new(SharedHeadBackend(shared.clone())))]).unwrap();
@@ -638,6 +639,7 @@ fn reload_if_stale_emits_mem_reloaded_when_head_advances() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine = Engine::from_mounts(vec![(mount, backend)]).unwrap();
 
@@ -726,6 +728,7 @@ fn mem_drifted_tracks_sibling_advance_until_reload() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine = Engine::from_mounts(vec![(mount, backend)]).unwrap();
 
@@ -808,6 +811,7 @@ fn reload_one_mem_report_head_before_is_prior_cursor_and_advances() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine = Engine::from_mounts(vec![(mount, backend)]).unwrap();
 
@@ -883,6 +887,7 @@ fn reload_if_stale_fires_every_call_no_throttle() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine = Engine::from_mounts(vec![(mount, backend)]).unwrap();
 
@@ -1044,6 +1049,7 @@ fn a_moved_head_whose_reload_fails_leaves_the_view_marked_behind() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let backend = Box::new(Flaky {
         inner: inner.clone(),

@@ -315,6 +315,16 @@ pub enum EngineError {
     /// backend never triggers — capability gating runs first.
     #[error("mem {0} is mounted read-only; mutations rejected")]
     ReadOnlyMount(String),
+    /// A check refused because the mount the mem is served through is
+    /// not granted checking: its roster row says `check: false`. The
+    /// mount may still be writable; recording a check needs a mount
+    /// whose row grants `check` (`memstead mem mount --check`). Nothing
+    /// is recorded.
+    #[error(
+        "mem {0} is not granted checking through this mount; no check recorded \
+         (a mount granted `check` records checks)"
+    )]
+    CheckNotGranted(String),
     /// A check could not be persisted — either the engine has no
     /// workspace root (in-memory engines have no durable check
     /// store) or the ledger append failed. A check the caller
@@ -1750,6 +1760,7 @@ impl EngineError {
             EngineError::PushedCommitsProtected { .. } => "PUSHED_COMMITS_PROTECTED",
             EngineError::BranchResetHeadMoved { .. } => "BRANCH_RESET_HEAD_MOVED",
             EngineError::ReadOnlyMount(_) => "READ_ONLY_MOUNT",
+            EngineError::CheckNotGranted(_) => "CHECK_NOT_GRANTED",
             EngineError::CheckNotRecorded { .. } => "CHECK_NOT_RECORDED",
             EngineError::UnknownType { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::InvalidTitle(_) => "INVALID_TITLE",
@@ -2485,6 +2496,7 @@ impl EngineError {
             }),
             EngineError::MemUnmounted { mem } => serde_json::json!({ "mem": mem }),
             EngineError::ReadOnlyMount(mem) => serde_json::json!({ "mem": mem }),
+            EngineError::CheckNotGranted(mem) => serde_json::json!({ "mem": mem }),
             EngineError::CheckNotRecorded { reason } => serde_json::json!({ "reason": reason }),
             EngineError::InvalidTitle(slug_err) => {
                 let reason = slug_err.reason();

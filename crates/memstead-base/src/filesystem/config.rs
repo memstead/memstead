@@ -376,6 +376,7 @@ pub fn init_filesystem_mem_at(
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }],
         settings: WorkspaceSettings::default(),
     };

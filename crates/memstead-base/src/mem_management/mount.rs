@@ -50,6 +50,11 @@ pub struct MemMountParams {
     pub name: String,
     pub source: MountSource,
     pub capability: MountCapability,
+    /// The check grant the roster row carries: `Some(true)` lets checks
+    /// be recorded through a read-only mount, `Some(false)` refuses them
+    /// through a writable one (`CHECK_NOT_GRANTED`), `None` writes no
+    /// grant (checks exactly when the capability is write).
+    pub check: Option<bool>,
     /// The schema pin, for a mem no registry the verb reads has an
     /// entry for. Refused when it contradicts an entry that exists.
     pub schema: Option<memstead_schema::SchemaRef>,
@@ -69,6 +74,8 @@ pub struct MemMountResponse {
     pub branch: String,
     /// `write` or `read-only`.
     pub capability: &'static str,
+    /// Whether checks may be recorded through the mount.
+    pub check: bool,
     /// The schema the mem serves under.
     pub schema_ref: String,
     /// The branch tip the mount serves.
@@ -332,6 +339,7 @@ pub fn mount_mem(
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: params.check,
     };
 
     // The pin must resolve here before anything is written: against
@@ -486,6 +494,9 @@ pub fn mount_mem(
             MountCapability::Write => "write",
             MountCapability::ReadOnly => "read-only",
         },
+        check: params
+            .check
+            .unwrap_or(params.capability == MountCapability::Write),
         schema_ref: pin.to_string(),
         head,
         fetched,

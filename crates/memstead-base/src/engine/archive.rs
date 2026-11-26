@@ -138,6 +138,7 @@ impl Engine {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         };
         let backend: Box<dyn MemBackend> = Box::new(ArchiveBackend::from_bytes(bytes));
 

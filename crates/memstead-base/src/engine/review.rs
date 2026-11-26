@@ -263,6 +263,7 @@ mod tests {
             lifecycle: crate::MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         };
         let backend =
             Box::new(crate::storage::FilesystemBackend::new(dir)) as Box<dyn crate::MemBackend>;

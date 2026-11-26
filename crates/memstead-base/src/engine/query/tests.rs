@@ -314,6 +314,7 @@ community:
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let backend = Box::new(FilesystemBackend::new(mem_dir)) as Box<dyn MemBackend>;
         // Keep `tmp` alive for the engine's lifetime by leaking it —
@@ -727,6 +728,7 @@ fn cross_mem_link_allowed_synthesises_for_hierarchical_mem() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine =
@@ -2078,6 +2080,7 @@ fn list_applies_schema_declared_filter_on_non_default_schema_mem() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine =
         Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();

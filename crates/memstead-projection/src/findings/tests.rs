@@ -598,6 +598,7 @@ fn verify_persists_findings_readable_fresh() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::FileWorkspaceStore::new()
         .save_state(
@@ -795,6 +796,7 @@ fn mention_workspace(root: &Path, pointer: &str) {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::FileWorkspaceStore::new()
         .save_state(
@@ -1382,6 +1384,7 @@ fn finding_recorded_at_old_head_presents_in_brief_at_new_head() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::FileWorkspaceStore::new()
         .save_state(
@@ -1597,6 +1600,7 @@ fn hashless_anchor_backfills_once_then_drift_adjudicates_deterministically() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::FileWorkspaceStore::new()
         .save_state(
@@ -1920,6 +1924,7 @@ fn plain_tree_anchor_backfills_then_adjudicates_deterministically() {
                     lifecycle: MountLifecycle::Eager,
                     cross_linkable: false,
                     migration_target: None,
+                    check: None,
                 }],
                 settings: WorkspaceSettings::default(),
             },
@@ -2138,6 +2143,7 @@ fn backfill_writer_refuses_non_hash_classes_and_never_overwrites() {
                     lifecycle: MountLifecycle::Eager,
                     cross_linkable: false,
                     migration_target: None,
+                    check: None,
                 }],
                 settings: WorkspaceSettings::default(),
             },
@@ -2255,6 +2261,7 @@ fn verify_refuses_unreachable_source_with_typed_error() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::FileWorkspaceStore::new()
         .save_state(
@@ -2385,6 +2392,7 @@ fn every_surface_refuses_a_destination_mem_that_does_not_exist() {
                     lifecycle: MountLifecycle::Eager,
                     cross_linkable: false,
                     migration_target: None,
+                    check: None,
                 }],
                 settings: WorkspaceSettings::default(),
             },
@@ -2573,6 +2581,7 @@ fn completed_verify_records_the_verified_baseline() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::FileWorkspaceStore::new()
         .save_state(
@@ -2860,6 +2869,7 @@ fn full_resync_full_walk_covers_whole_source() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::FileWorkspaceStore::new()
         .save_state(
@@ -2993,6 +3003,7 @@ fn scheduled_full_walk_demotes_partial_facet_to_refusal() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::FileWorkspaceStore::new()
         .save_state(
@@ -3134,6 +3145,7 @@ fn full_verify_uncaps_adjudication_and_walks_whole_source() {
                     lifecycle: MountLifecycle::Eager,
                     cross_linkable: false,
                     migration_target: None,
+                    check: None,
                 }],
                 settings: WorkspaceSettings::default(),
             },
@@ -3324,6 +3336,7 @@ fn full_verify_refuses_non_enumerable_medium_typed() {
                     lifecycle: MountLifecycle::Eager,
                     cross_linkable: false,
                     migration_target: None,
+                    check: None,
                 }],
                 settings: WorkspaceSettings::default(),
             },
@@ -3544,6 +3557,7 @@ fn a3_workspace(root: &std::path::Path, files: &[&str]) {
         lifecycle: memstead_base::workspace::MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     memstead_base::workspace_store::WorkspaceStoreAdapter::save_state(
         &memstead_base::FileWorkspaceStore::new(),

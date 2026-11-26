@@ -103,6 +103,7 @@ write_rules: []
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     Engine::from_mounts_with_schemas_dir(
         vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
@@ -516,6 +517,7 @@ write_rules: []
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     Engine::from_mounts_with_schemas_dir(
         vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
@@ -797,6 +799,7 @@ write_rules: []
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     Engine::from_mounts_with_schemas_dir(
         vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
@@ -1106,6 +1109,7 @@ cross_mem_relationships:
                 lifecycle: crate::workspace::MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             },
             Box::new(writer) as Box<dyn MemBackend>,
         ));
@@ -1505,6 +1509,7 @@ community:
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     Engine::from_mounts_with_schemas_dir(
         vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
@@ -1938,6 +1943,7 @@ fn a_write_with_aggregate_signals_waits_for_every_mems_lock() {
                 lifecycle: crate::workspace::MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             },
             Box::new(FilesystemBackend::new(dir)) as Box<dyn MemBackend>,
         )

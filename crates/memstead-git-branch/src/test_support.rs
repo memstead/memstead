@@ -68,6 +68,7 @@ fn seed_new_layout(workspace_root: &Path, gitdir: &Path, mems: &[(&str, &str, &s
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             }
         })
         .collect();

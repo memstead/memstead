@@ -18,6 +18,7 @@ fn folder_mount(mem: &str, path: PathBuf) -> Mount {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     }
 }
 
@@ -365,6 +366,7 @@ name = "file-two-layer"
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             },
             Mount {
                 mem: "external".to_string(),
@@ -376,6 +378,7 @@ name = "file-two-layer"
                 lifecycle: MountLifecycle::Lazy,
                 cross_linkable: false,
                 migration_target: None,
+                check: None,
             },
         ],
         settings: WorkspaceSettings::default(),
@@ -425,6 +428,7 @@ name = "file-two-layer"
             lifecycle: MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         }],
         settings: WorkspaceSettings::default(),
     };
@@ -488,6 +492,7 @@ name = "file-two-layer"
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             },
             Mount {
                 mem: "external".to_string(),
@@ -499,6 +504,7 @@ name = "file-two-layer"
                 lifecycle: MountLifecycle::Lazy,
                 cross_linkable: false,
                 migration_target: None,
+                check: None,
             },
         ],
         settings: WorkspaceSettings::default(),
@@ -629,6 +635,7 @@ name = "file-two-layer"
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }],
         settings: WorkspaceSettings::default(),
     };
@@ -870,6 +877,7 @@ fn instantiate_local_backend_handles_folder_archive_and_in_memory() {
         lifecycle: MountLifecycle::Lazy,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     let in_memory = Mount {
         mem: "session".to_string(),
@@ -879,6 +887,7 @@ fn instantiate_local_backend_handles_folder_archive_and_in_memory() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
 
     let _: Box<dyn MemBackend> = instantiate_local_backend(&folder).unwrap();
@@ -916,6 +925,7 @@ name = "file-two-layer"
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             },
         ],
         settings: WorkspaceSettings::default(),
@@ -955,6 +965,7 @@ fn instantiate_local_backend_rejects_git_branch_with_typed_error() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     // `unwrap_err()` requires Box<dyn MemBackend> to be Debug;
     // matching on the Result keeps the test gix-free of that

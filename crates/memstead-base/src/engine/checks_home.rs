@@ -87,6 +87,7 @@ impl Engine {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         };
         self.instantiate_backend(&mount)
             .map_err(|e| EngineError::Mem(format!("checks ref backend: {e}")))
@@ -132,8 +133,7 @@ impl Engine {
         match self.mounts.iter().find(|m| m.mount.mem == mem) {
             Some(m) => match &m.mount.storage {
                 MountStorage::GitBranch { gitdir, .. }
-                    if m.mount.capability == MountCapability::Write
-                        && self.can_hold_store_checks(gitdir) =>
+                    if m.mount.may_check() && self.can_hold_store_checks(gitdir) =>
                 {
                     CheckHome::Store {
                         gitdir: gitdir.clone(),

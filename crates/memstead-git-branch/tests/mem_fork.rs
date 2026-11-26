@@ -1517,6 +1517,7 @@ fn fork_refuses_a_folder_only_workspace() {
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         },
         memstead_base::instantiate_local_backend(&memstead_base::Mount {
             mem: "notes".to_string(),
@@ -1528,6 +1529,7 @@ fn fork_refuses_a_folder_only_workspace() {
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         })
         .unwrap(),
     )])

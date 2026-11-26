@@ -94,6 +94,7 @@ write_rules: []
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     Engine::from_mounts_with_schemas_dir(
         vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
@@ -186,6 +187,7 @@ fn engine_with_proof_schema(
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     Engine::from_mounts_with_schemas_dir(
         vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
@@ -222,6 +224,7 @@ fn engine_with_planning_schema(tmp: &TempDir) -> Engine {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap()
 }

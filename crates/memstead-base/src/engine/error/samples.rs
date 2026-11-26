@@ -53,6 +53,7 @@ variant_tags!(
         MemUnmounted,
         MemQuarantined,
         ReadOnlyMount,
+        CheckNotGranted,
         CheckNotRecorded,
         UnknownType,
         InvalidTitle,
@@ -554,6 +555,10 @@ pub fn every_engine_error() -> Vec<(String, EngineError)> {
         (
             "ReadOnlyMount".into(),
             EngineError::ReadOnlyMount(s("archive")),
+        ),
+        (
+            "CheckNotGranted".into(),
+            EngineError::CheckNotGranted(s("notes")),
         ),
         (
             "CheckNotRecorded".into(),

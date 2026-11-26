@@ -30,6 +30,7 @@ fn unbacked_mount_probe_classes_missing_path_empty_and_present() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
 
     let gone = tmp.path().join("gone");
@@ -584,6 +585,7 @@ community:
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let engine = Engine::from_mounts_with_schemas_dir(
         vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
@@ -1726,6 +1728,7 @@ community:
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     use crate::workspace_store::WorkspaceStoreAdapter;
     crate::FileWorkspaceStore::new()
@@ -1806,6 +1809,7 @@ community:
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     use crate::workspace_store::WorkspaceStoreAdapter;
     crate::FileWorkspaceStore::new()
@@ -1929,6 +1933,7 @@ fn full_refresh_is_additive_and_reports_skipped_removals() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let save = |mounts: Vec<Mount>| {
         crate::FileWorkspaceStore::new()
@@ -2147,6 +2152,7 @@ fn from_mounts_quarantines_unknown_schema_pin() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let engine = Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)])
         .expect("a broken mem quarantines, never fails the workspace");
@@ -2197,6 +2203,7 @@ fn reload_returns_repaired_mem_from_quarantine() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine =
         Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
@@ -2265,6 +2272,7 @@ fn cross_mem_link_into_quarantined_mem_degrades_without_cascade() {
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             },
             Box::new(FilesystemBackend::new(dir)) as Box<dyn MemBackend>,
         )
@@ -2374,6 +2382,7 @@ fn ingest_0_3_entries_are_leaves_prior_version_unchanged() {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let engine =
             Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
@@ -2423,6 +2432,7 @@ fn broken_mem_quarantines_while_healthy_siblings_serve() {
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             },
             Box::new(writer) as Box<dyn MemBackend>,
         )
@@ -2451,6 +2461,7 @@ fn broken_mem_quarantines_while_healthy_siblings_serve() {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         },
         Box::new(FilesystemBackend::new(bad_io_path)) as Box<dyn MemBackend>,
     );
@@ -2546,6 +2557,7 @@ fn mem_config_schema_is_authoritative_over_mount_pin() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let engine = Engine::from_mounts(vec![(
             mount,
@@ -2814,6 +2826,7 @@ write_rules: []
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let engine = Engine::from_mounts_with_schemas_dir(
         vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
@@ -2949,6 +2962,7 @@ write_rules: []
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let mut engine = Engine::from_mounts_with_schemas_dir(
         vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
@@ -3920,6 +3934,7 @@ fn roster_fixture() -> (TempDir, Engine) {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     crate::FileWorkspaceStore::new()
         .save_state(
@@ -3954,6 +3969,7 @@ fn save_roster_pinned(root: &Path, mems: &[(&str, &Path, &str)]) {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         })
         .collect();
     // A roster write inside the same mtime tick as the previous one is
@@ -5051,6 +5067,7 @@ fn roster_mount(mem: &str, storage: MountStorage, capability: MountCapability) -
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     }
 }
 

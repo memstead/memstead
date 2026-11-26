@@ -36,6 +36,7 @@ fn folder_mount(mem: &str, dir: &Path, capability: MountCapability) -> Mount {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     }
 }
 
@@ -351,6 +352,7 @@ fn deferred_load_fails(verb: &str, git: bool) -> DeferredLoadOutcome {
                 lifecycle: MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             })
             .collect()
     } else {

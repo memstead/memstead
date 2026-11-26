@@ -1095,6 +1095,7 @@ mod tests {
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
         let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
@@ -1158,6 +1159,7 @@ mod tests {
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
         let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
@@ -1208,6 +1210,7 @@ mod tests {
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }
     }
 
@@ -1421,6 +1424,7 @@ mod tests {
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
 
         let mount = namespaced_mount(&local);
@@ -1475,6 +1479,7 @@ mod tests {
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
         let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();

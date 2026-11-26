@@ -647,6 +647,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         crate::FileWorkspaceStore::new()
             .save_state(
@@ -846,6 +847,7 @@ mod tests {
                 lifecycle: crate::workspace::MountLifecycle::Eager,
                 cross_linkable: true,
                 migration_target: None,
+                check: None,
             };
             crate::FileWorkspaceStore::new()
                 .save_state(

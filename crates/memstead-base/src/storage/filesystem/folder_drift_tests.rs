@@ -17,6 +17,7 @@ fn folder_engine(dir: std::path::PathBuf) -> crate::Engine {
         lifecycle: crate::MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     let backend = Box::new(FilesystemBackend::new(dir)) as Box<dyn crate::MemBackend>;
     crate::Engine::from_mounts(vec![(mount, backend)]).unwrap()

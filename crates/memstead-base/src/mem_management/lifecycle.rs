@@ -193,6 +193,7 @@ pub(super) fn residue_probe_for_workspace(
     let canonical_gitdir = gitdir.canonicalize().unwrap_or(gitdir);
     let probe_mount = crate::workspace::Mount {
         migration_target: None,
+        check: None,
         mem: mem_name.to_string(),
         schema: Some(canonical_schema_ref.clone()),
         storage: crate::workspace::MountStorage::GitBranch {
@@ -1286,6 +1287,7 @@ fn prune_orphan_config(
     // the branch itself need not exist, and the schema plays no part.
     let probe_mount = crate::workspace::Mount {
         migration_target: None,
+        check: None,
         mem: name.to_string(),
         schema: None,
         storage: crate::workspace::MountStorage::GitBranch {
@@ -1952,6 +1954,7 @@ pub fn create_mem(
                     let canonical_gitdir = gitdir.canonicalize().unwrap_or(gitdir);
                     let mount = crate::workspace::Mount {
                         migration_target: None,
+                        check: None,
                         mem: params.name.clone(),
                         schema: Some(canonical_schema_ref.clone()),
                         storage: crate::workspace::MountStorage::GitBranch {
@@ -2147,6 +2150,7 @@ pub fn create_mem(
                     // registered. No seed commit, no config write.
                     let mount = crate::workspace::Mount {
                         migration_target: None,
+                        check: None,
                         mem: params.name.clone(),
                         schema: Some(canonical_schema_ref.clone()),
                         storage,
@@ -2249,6 +2253,7 @@ pub fn create_mem(
         lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let backend = engine
         .instantiate_backend(&mount)
@@ -2922,6 +2927,7 @@ pub fn rename_mem(
             lifecycle: mount.lifecycle,
             cross_linkable: mount.cross_linkable,
             migration_target: mount.migration_target.clone(),
+            check: None,
         };
         let backend = engine
             .instantiate_backend(&new_mount)

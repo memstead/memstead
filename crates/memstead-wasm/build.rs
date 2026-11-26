@@ -56,6 +56,7 @@ fn build_fixture_bytes() -> Vec<u8> {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let writer = FilesystemBackend::new(mem_dir.clone());
     let mut engine = Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)])

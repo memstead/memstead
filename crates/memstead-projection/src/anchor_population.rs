@@ -538,6 +538,7 @@ mod tests {
                         lifecycle,
                         cross_linkable: false,
                         migration_target: None,
+                        check: None,
                     }],
                     settings: WorkspaceSettings::default(),
                 },

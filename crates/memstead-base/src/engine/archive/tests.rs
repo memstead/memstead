@@ -581,6 +581,7 @@ fn in_memory_mem_export_round_trips_anchors() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     let mut engine =
         Engine::from_mounts(vec![(mount, Box::new(backend) as Box<dyn MemBackend>)]).unwrap();
@@ -921,6 +922,7 @@ fn export_archive_backend_returns_sealed() {
             lifecycle: MountLifecycle::Lazy,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         },
         Box::new(crate::storage::ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
     )])
@@ -1831,6 +1833,7 @@ fn in_memory_export_seals_check_records() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     let mut engine =
         Engine::from_mounts(vec![(mount, Box::new(backend) as Box<dyn MemBackend>)]).unwrap();

@@ -1016,6 +1016,10 @@ struct MountWire {
     /// settled mems' entries byte-identical to before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     migration_target: Option<String>,
+    /// The check grant, absent on rows that state none (then "exactly
+    /// when the capability is write").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    check: Option<bool>,
     storage: MountStorageWire,
     capability: CapabilityWire,
     lifecycle: LifecycleWire,
@@ -1072,6 +1076,7 @@ impl MountWire {
             mem: m.mem.clone(),
             schema: m.schema.as_ref().map(|s| s.to_string()),
             migration_target: m.migration_target.as_ref().map(|t| t.to_string()),
+            check: m.check,
             storage: match &m.storage {
                 MountStorage::Folder { path } => MountStorageWire::Folder {
                     path: relativize_mount_path(path, workspace_root),
@@ -1122,6 +1127,7 @@ impl MountWire {
                 t.parse()
                     .expect("migration_target on disk must be `<name>@<version>`")
             }),
+            check: self.check,
             storage: match self.storage {
                 MountStorageWire::Folder { path } => MountStorage::Folder {
                     path: absolutize_mount_path(path, workspace_root),
@@ -1312,6 +1318,7 @@ pub fn standalone_workspace(workspace_root: &Path) -> Option<Workspace> {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: false,
         migration_target: None,
+        check: None,
     };
     Some(Workspace {
         mounts: vec![mount],

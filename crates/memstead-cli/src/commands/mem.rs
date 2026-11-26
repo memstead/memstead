@@ -526,6 +526,15 @@ pub struct MountArgs {
     #[arg(long, value_enum, default_value = "read-only")]
     pub capability: CapabilityArg,
 
+    /// Whether checks may be recorded through the mount, granted apart
+    /// from the capability: `true` lets a read-only mount record checks
+    /// (it writes nothing into the store but the mem's checks ref),
+    /// `false` refuses checks through a writable mount
+    /// (`CHECK_NOT_GRANTED`). Omitted: checks exactly when the
+    /// capability is write, as every mount before the grant existed.
+    #[arg(long, value_name = "BOOL")]
+    pub check: Option<bool>,
+
     /// Schema pin (`name@x.y.z`) for a mem no registry has an entry
     /// for. Refused when it contradicts the entry that exists: a mount
     /// never re-pins.
@@ -1010,6 +1019,7 @@ fn mount_in_workspace(
             CapabilityArg::ReadOnly => memstead_base::MountCapability::ReadOnly,
             CapabilityArg::Write => memstead_base::MountCapability::Write,
         },
+        check: args.check,
         schema,
         note: args.note,
         operator_mode: resolve_operator_mode(args.operator_mode),
@@ -1031,6 +1041,7 @@ fn mount_in_workspace(
             "head": response.head,
             "fetched": response.fetched,
             "config_written": response.config_written,
+            "check": response.check,
             "checks_imported": response.checks_imported,
             "checks_refused": response.checks_refused,
             "warnings": response
@@ -1041,9 +1052,14 @@ fn mount_in_workspace(
         }))?;
     } else {
         let mut out = format!(
-            "# Mounted `{}` ({})\n\n- Branch: `{}` at `{}`\n- Git directory: `{}`\n- Schema: `{}`",
+            "# Mounted `{}` ({}{})\n\n- Branch: `{}` at `{}`\n- Git directory: `{}`\n- Schema: `{}`",
             response.name,
             response.capability,
+            match (response.capability, response.check) {
+                ("read-only", true) => ", checks granted",
+                ("write", false) => ", checks not granted",
+                _ => "",
+            },
             response.branch,
             response.head,
             response.gitdir,
@@ -1981,6 +1997,9 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
             "version": cfg.and_then(|c| c.version.clone()),
             "entity_count": entity_count,
             "capability": capability,
+            // Whether checks may be recorded through the mount (the row's
+            // grant, or the capability where the row states none).
+            "check": engine.mount(name).map(|m| m.may_check()),
             // The engine-owned stamp of the last validated mutation —
             // the marker `ENGINE_VERSION_SKEW` reads — so a reader can
             // see which generation and which binary last wrote the mem
@@ -2034,7 +2053,11 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
             let schema = v["schema_ref"].as_str().unwrap_or("—");
             let version = v["version"].as_str().unwrap_or("—");
             let count = v["entity_count"].as_u64().unwrap_or(0);
-            let cap = v["capability"].as_str().unwrap_or("?");
+            let cap = match (v["capability"].as_str(), v["check"].as_bool()) {
+                (Some("read_only"), Some(true)) => "read_only, checks granted".to_string(),
+                (Some("write"), Some(false)) => "write, checks not granted".to_string(),
+                (c, _) => c.unwrap_or("?").to_string(),
+            };
             // Prefer the display title, fall back to the name — the
             // name (the identity) stays visible in the backticked slug.
             let display = match v["title"].as_str() {

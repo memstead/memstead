@@ -323,6 +323,7 @@ mod tests {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         };
         memstead_base::FileWorkspaceStore::new()
             .save_state(

@@ -1060,6 +1060,7 @@ pub(super) mod test_helpers {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }
     }
 
@@ -1072,6 +1073,7 @@ pub(super) mod test_helpers {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }
     }
 
@@ -1089,6 +1091,7 @@ pub(super) mod test_helpers {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
+            check: None,
         }
     }
 

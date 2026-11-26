@@ -1050,6 +1050,7 @@ fn instantiate_full_backend_constructs_git_branch_writer() {
         lifecycle: MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     };
     let backend: Box<dyn MemBackend> = crate::storage::instantiate_full_backend(&mount).unwrap();
     // Empty branch → empty list, no error.
@@ -1080,6 +1081,7 @@ fn instantiate_full_backend_accepts_branch_with_or_without_refs_prefix() {
             lifecycle: MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let backend: Box<dyn MemBackend> =
             crate::storage::instantiate_full_backend(&mount).unwrap();

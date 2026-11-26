@@ -9,6 +9,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Library surface
 
+- **`MemMountParams` gains `check: Option<bool>`, `MemMountResponse`
+  gains `check: bool` and `checks_refused`.** A program that builds the
+  parameters as a struct literal adds `check: None` to keep a mount's
+  meaning as before.
+
 - **`McpServer::with_default_role` joins the library promise**, with
   `Role` re-exported beside it. A program that builds one server per
   caller sets the role a call that declares none records, as it sets
@@ -17,6 +22,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   list, so it could change in any release.
 
 ### Added
+
+- **A mount grants checking apart from writing.** A roster row carries
+  `check: true|false` beside its capability, set with `memstead mem
+  mount --check true|false` and shown by `memstead mem list`. A
+  read-only mount granted `check` records checks (of every kind) and
+  nothing else: every mutation still refuses `READ_ONLY_MOUNT`, and
+  nothing in the store moves but the mem's checks ref. A writable mount
+  denied `check` writes as before and refuses every check with the new
+  code `CHECK_NOT_GRANTED`, recording nothing. A row without the field
+  records checks exactly when it is writable, as every row did on
+  0.28.0. A grant another process changes on the roster takes effect at
+  the engine's next operation. A host can so give "approve" as a right
+  of its own: write without check, check without write. Measured on
+  0.28.0: a check needed a writable mount, so whoever could write a mem
+  could also confirm another person's entity in it, and a reviewer
+  could not be given checking without writing.
 
 - **Independence can compare identity owners.** A workspace can set
   `[checks] independence = "owner"` in `.memstead/workspace.toml`:

@@ -124,13 +124,25 @@ impl Engine {
                 });
             }
         }
+        // The grant is judged on the roster as it stands now: a grant
+        // another process added or withdrew acts from this check on.
+        let _ = self.roster_warnings();
         let mount_idx = self
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
             .ok_or_else(|| self.unknown_mem_error(mem_name))?;
-        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
-            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
+        let mount = &self.mounts[mount_idx].mount;
+        if !mount.may_check() {
+            // A writable mount denied the grant says so; a read-only one
+            // without a grant refuses as every read-only mount did.
+            return Err(
+                if mount.capability == crate::workspace::MountCapability::Write {
+                    EngineError::CheckNotGranted(mem_name.to_string())
+                } else {
+                    EngineError::ReadOnlyMount(mem_name.to_string())
+                },
+            );
         }
         let schema_ref = match kind.engine_kind() {
             None | Some(CheckKind::Verification) => None,
@@ -810,6 +822,7 @@ write_rules: []
             lifecycle: crate::workspace::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         };
         let mut engine = crate::Engine::from_mounts_with_schemas_dir(
             vec![(

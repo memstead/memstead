@@ -118,6 +118,7 @@ fn mount(mem: &str, path: std::path::PathBuf, pin: SchemaRef, lifecycle: MountLi
         lifecycle,
         cross_linkable: true,
         migration_target: None,
+        check: None,
     }
 }
 

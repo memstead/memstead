@@ -131,6 +131,7 @@ fn migrate_legacy_read_mems(
                 lifecycle: memstead_base::MountLifecycle::Eager,
                 cross_linkable: false,
                 migration_target: None,
+                check: None,
             };
             let ro_backend: Box<dyn MemBackend> =
                 Box::new(memstead_base::storage::ArchiveBackend::new(archive_path));
@@ -675,6 +676,7 @@ write_rules: []
                         lifecycle: memstead_base::MountLifecycle::Eager,
                         cross_linkable: true,
                         migration_target: None,
+                        check: None,
                     }],
                     settings: Default::default(),
                 },
@@ -794,6 +796,7 @@ write_rules: []
             lifecycle: memstead_base::MountLifecycle::Eager,
             cross_linkable: true,
             migration_target: None,
+            check: None,
         }]);
         engine.reload_if_stale(None);
         assert_eq!(engine.mem_names(), ["notes"]);
@@ -865,6 +868,7 @@ write_rules: []
         // Another process mounts the holder's mem, read-only.
         let mount = |capability| MemMountParams {
             name: "notes".to_string(),
+            check: None,
             source: MountSource::Branch {
                 branch: "notes".to_string(),
                 gitdir: Some(holder_gitdir.clone()),
@@ -953,6 +957,7 @@ write_rules: []
                 gitdir: Some(gitdir.to_path_buf()),
             },
             capability: memstead_base::MountCapability::Write,
+            check: None,
             schema: None,
             note: None,
             operator_mode: true,
@@ -1064,6 +1069,7 @@ write_rules: []
                 gitdir: Some(gitdir.clone()),
             },
             capability: memstead_base::MountCapability::ReadOnly,
+            check: None,
             schema: None,
             note: None,
             operator_mode: true,
@@ -1168,6 +1174,7 @@ write_rules: []
                         gitdir: Some(gitdir.clone()),
                     },
                     capability: memstead_base::MountCapability::Write,
+                    check: None,
                     schema: None,
                     note: None,
                     operator_mode: true,

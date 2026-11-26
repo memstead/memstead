@@ -253,6 +253,7 @@ fn a_program_builds_on_the_library_module_alone() {
                 gitdir: Some(laid.mem_repo_dir.join(".git")),
             },
             capability: MountCapability::ReadOnly,
+            check: None,
             schema: Some(pin),
             note: None,
             operator_mode: false,
