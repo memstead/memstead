@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-11-26
+
 ### Added
 
 - **`[checks.owners]` names the owner of an identity exactly.** Under
@@ -8354,7 +8356,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.29.1...HEAD
+[0.29.1]: https://github.com/memstead/memstead/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/memstead/memstead/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/memstead/memstead/compare/v0.27.1...v0.28.0
 [0.27.1]: https://github.com/memstead/memstead/compare/v0.27.0...v0.27.1
