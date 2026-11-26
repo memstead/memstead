@@ -95,7 +95,12 @@ pub enum MemAction {
     /// removal that keeps the storage, use `memstead mem unregister`,
     /// which is also what removes a quarantined mount: destroying a mem
     /// that is out of service refuses `MEM_QUARANTINED`, whatever else
-    /// in the workspace is out of service.
+    /// in the workspace is out of service. Storage that is not the
+    /// mem's own is never destroyed: a branch mounted out of another
+    /// workspace's git directory (that workspace deletes it; leave it
+    /// here with `mem unregister`) and a folder that holds the storage
+    /// of another mem the roster names (that mem leaves first) refuse
+    /// before anything changes.
     Delete(DeleteArgs),
     /// Rename a mem: `<old> <new>`, complete across every surface
     /// that carries the name — entity-id prefixes, cross-mem edges and

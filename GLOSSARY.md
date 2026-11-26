@@ -453,7 +453,7 @@ Every mutation operation (`create`, `update`, `delete`, `relate`, `rename`, `ret
 - **Entity** — the affected entity's ID.
 - **Actor** — the surface that initiated the mutation: `agent` (MCP / chat subprocess), `cli` (memstead binary), `app` (a human-driven application embedding or fronting the engine), `external` (out-of-band), `unknown`.
 - **Client** — optional name + version (e.g. `claude-code@2.1.136`), picked up from the MCP client handshake.
-- **Role** and **Identity**: optional, and present only when the caller declared them (`--role author|checker|verifier` and `--identity <name>` on the CLI or the MCP server, or per MCP call). Caller-declared and unverified; the gates that require an independent checker compare identities and nothing else (under the workspace policy `[checks] independence = "owner"`, their parts before the first `/`, so one person's several keys are one party).
+- **Role** and **Identity**: optional, and present only when the caller declared them (`--role author|checker|verifier` and `--identity <name>` on the CLI or the MCP server, or per MCP call). Caller-declared and unverified; the gates that require an independent checker compare identities and nothing else (under the workspace policy `[checks] independence = "owner"`, their parts before the first `/`, so one person's several keys are one party; `[checks.owners]` names the owner of an identity exactly, ahead of that rule).
 - **Note** — optional free-text justification supplied by the agent.
 
 **Realizations per storage backend.**

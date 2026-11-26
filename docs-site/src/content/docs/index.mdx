@@ -3,31 +3,36 @@ title: Memstead documentation
 description: Guides plus the auto-generated reference for the Memstead engine's MCP and CLI surfaces.
 ---
 
-**Typed project knowledge for AI agents.** Your AI coding agent keeps what it learns about a project as a mem: a typed knowledge graph in plain markdown and git, validated on every write against a schema you control, and read back by the next session. New here? Start with the tutorial, then see [Skills](skills/) for what you actually run day to day — before diving into the concept and reference layers.
+**Typed project knowledge for AI agents.** Your AI coding agent keeps what it learns about a project as a mem: a typed knowledge graph in plain markdown and git, validated on every write against a schema you control, and read back by the next session. New here? Start with the tutorial, then see [Skills](skills/) for what you actually run day to day, before the concept and reference layers.
 
 ## Guides
 
-- [Getting started](guides/getting-started/) — install, `memstead quickstart`, first entities, agent connect.
-- [Skills](skills/) — the plugin roster as a job → command map: what to run for setup, capture, building, syncing, verifying.
-- [Author a schema](guides/author-a-schema/) — scaffold a custom schema and pin a mem to it.
-- [Publish a mem](guides/publish-a-mem/) — share a mem through a Memstead registry.
-- [Agent recipes](guides/agent-recipes/) — worked MCP tool-call sequences with real payloads.
-- [Back up a mem-repo](guides/back-up-a-mem-repo/) — push mems to any git remote and recover them on another machine.
+- [Getting started](guides/getting-started/): install, `memstead quickstart`, first entities, agent connect.
+- [Skills](skills/): the plugin roster as a map from job to command: what to run for setup, capture, building, syncing, verifying.
+- [Grow a mem from a source](guides/grow-a-mem-from-a-source/): declare a source, run build batches, measure coverage, stop and resume.
+- [Keep a mem current](guides/keep-a-mem-current/): the maintenance recipe, from the first ingest to `/sync` on a loop.
+- [Verify in CI](guides/verify-in-ci/): fail a pull request when the mem drifts from the source it describes.
+- [Author a schema](guides/author-a-schema/): scaffold a custom schema and pin a mem to it.
+- [Agent recipes](guides/agent-recipes/): worked MCP tool-call sequences with real payloads.
+- [Give each caller a view of a store](guides/give-each-caller-a-view/): serve several callers from one mem-repo, each with its own mems and rights to write and to check.
+- [Review a proposal](guides/review-a-proposal/): read a fork's changes against the mem it came from, and merge it under both identities.
+- [Back up a mem-repo](guides/back-up-a-mem-repo/): push mems to any git remote and recover them on another machine.
+- [Publish a mem](guides/publish-a-mem/): share a mem through a Memstead registry you run; a local `.mem` file installs without one.
 
 ## Concepts
 
-- [Glossary](glossary/) — normative definitions: mem, schema, workspace, mount, entity, and the rest. Built from the repository's `GLOSSARY.md` on every deploy.
-- [The fidelity contract](concepts/fidelity-contract/) — what a verify run measures (coverage, accuracy, freshness), how it reports honestly, and what it deliberately does not measure yet.
-- [Vision](https://github.com/memstead/memstead/blob/main/VISION.md) — what Memstead is for and the design rationale.
+- [Glossary](glossary/): normative definitions: mem, schema, workspace, mount, entity, and the rest. Built from the repository's `GLOSSARY.md` on every deploy.
+- [The fidelity contract](concepts/fidelity-contract/): what a verify run measures (coverage, accuracy, freshness), how it reports honestly, and what it deliberately does not measure yet.
+- [Vision](https://github.com/memstead/memstead/blob/main/VISION.md): what Memstead is for and the design rationale.
 
 ## Reference
 
 Rendered from the engine sources of the commit this site was built from, at every build: every MCP tool, every CLI subcommand, every typed error code the engine, the CLI and the MCP server produce. The Surface Parity Matrix lines them up so cross-surface gaps are visible by inspection. A registry's HTTP API is documented by the registry that serves it.
 
-- [Skills](skills/) — the shipped plugin roster, generated from the skill frontmatter.
-- [Binding format](reference/binding/) — the versioned source→mem binding: fields, operations, and the per-medium capability matrix.
+- [Skills](skills/): the shipped plugin roster, generated from the skill frontmatter.
+- [Binding format](reference/binding/): the versioned binding from source to mem: fields, operations, and the capability matrix per medium.
 - [MCP tools](reference/mcp/)
 - [CLI](reference/cli/cli/)
-- Registry HTTP API — not rendered here: each registry documents its own routes.
+- Registry HTTP API: not rendered here; each registry documents its own routes.
 - [Surface Parity Matrix](reference/parity/)
 - [Error Code Index](reference/errors/)

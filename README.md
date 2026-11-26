@@ -50,7 +50,7 @@ cd my-existing-repo
 memstead quickstart --repo .
 ```
 
-One run leaves a working graph: a workspace, a mem pinned to the built-in `default` schema, a seed entity, and the MCP wiring for the agent(s) you pick (Claude Code, Codex, Cursor, Gemini CLI; pass `--agent <target>` to skip the prompt). It prints each artifact it created plus the single next action.
+One run leaves a working graph: a workspace, a mem pinned to the built-in `default` schema, a seed entity, and the MCP wiring for the agent(s) you pick (Claude Code, Cursor and Gemini CLI get a config file; Codex keeps its servers in a global config, so it gets the exact `codex mcp add` command to run; pass `--agent <target>` to skip the prompt). It prints each artifact it created plus the single next action.
 
 `--repo .` adds one thing: a **source binding** over that repository, so the mem has a subject to grow into. The mem takes a folder of its own inside the repo (your files are never adopted as entities), and the receipt states exactly what the starter mem holds, what it does not, and the command that starts the ingest loop. Nothing is ingested during quickstart itself; see [Growing a mem from a source](#growing-a-mem-from-a-source).
 
@@ -69,7 +69,7 @@ memstead status             # node / edge counts, type distribution, projection 
 memstead search idempotency # find it back
 ```
 
-On disk that entity is one readable markdown file, `idempotency.md`. This is the whole trick: what your agent knows about the project is a file you can open, diff, and review:
+On disk that entity is one readable markdown file, `idempotency.md`. What your agent knows about the project is a file you can open, diff, and review:
 
 ```markdown
 ---
@@ -142,20 +142,24 @@ The full walkthrough, with the commands verified against the workspace it builds
 
 ## How a Memstead system runs
 
-Memstead ships no scheduler, no notifications, and no recurrence engine, by design. **The agent writes, the engine enforces, and a periodically-invoked agent run measures, maintains, and advances what needs advancing: curated by agents, enforced by schema, run by the agent loop.** The engine is the deterministic half: it validates every write, measures drift and due-ness (`memstead health`, `memstead due`, `memstead projection verify`), and renders briefs that tell the next agent run what to do. The loop is the runtime: an agent session invoked on whatever cadence the holding needs (a cron'd Claude Code run, a CI job, the plugin's `/sync` skill) reads the brief, does the work, advances recurring dates, and records the outcome. Evaluate the engine alone and you are measuring half the system; recurrence, freshness, and follow-through are the loop's job, not missing engine features.
+Memstead ships no scheduler, no notifications, and no recurrence engine, by design. **The agent writes, the engine enforces, and an agent run invoked on a cadence measures, maintains and advances what is due.** The engine is the deterministic half: it validates every write, measures drift and due-ness (`memstead health`, `memstead due`, `memstead projection verify`), and renders briefs that tell the next agent run what to do. The loop is the runtime: an agent session invoked on whatever cadence the holding needs (a cron'd Claude Code run, a CI job, the plugin's `/sync` skill) reads the brief, does the work, advances recurring dates, and records the outcome. Evaluate the engine alone and you are measuring half the system; recurrence, freshness, and follow-through are the loop's job, not missing engine features.
 
-## Share and reuse mems
+## Review and shared stores
 
-Publish a mem to a Memstead registry, and install someone else's with one command. The CLI knows no registry by name: point it at one with `--registry <URL>` or the `MEMSTEAD_REGISTRY` environment variable. **memstead.com** is the engine's public site: it hosts the docs, the install script and the contact addresses (`hello@` / `security@memstead.com`).
+A write that passes the schema is valid, not yet accepted. Acceptance is a separate act: `memstead check <entity> --verdict ok` records who checked what, against which write, in an append-only ledger, and the engine derives each entity's standing from it (checked, stale after a later edit, failed). A schema can gate a transition on it: `transition_requires_checks` refuses to move a plan to `complete` until every criterion that verifies it carries a fresh check, recorded in the role `checker` by an identity that did not write the work. Identities are declared by the caller, not authenticated; the engine compares them and records them in history that cannot be edited afterwards. Under `[checks] independence = "owner"` two keys of one person (`anna/laptop`, `anna/agent`) count as one party.
+
+Several people and agents can work on one store. A workspace can mount another mem-repo's mems with its own rights, so one engine behind a server can give each caller a view: which mems it reaches, whether it may write, and whether it may check, which is granted apart from writing (a reviewer gets `read-only` with `check: true`). The checks of a git-branch mem live with the mem in its store and travel with `push` and `pull`. How to set it up: [Give each caller a view of a store](https://memstead.com/dev/guides/give-each-caller-a-view/) and [Review a proposal](https://memstead.com/dev/guides/review-a-proposal/).
+
+## Hand a mem on
+
+A mem leaves a workspace as one sealed `.mem` archive and enters another read-only, with one command each:
 
 ```bash
-export MEMSTEAD_REGISTRY=https://registry.example.com
-
 memstead export --format mem -o my.mem
-memstead publish my.mem        # GitHub Device Flow on first use
-
-memstead install scope/name    # pull a published mem into your workspace
+memstead install my.mem         # in the receiving workspace; `memstead uninstall` removes it
 ```
+
+The CLI can also publish to and install from a Memstead registry (`--registry <URL>` or `MEMSTEAD_REGISTRY`; `memstead install scope/name`). It knows no registry by name, and there is no public one: the protocol is there for whoever runs one. **memstead.com** is the engine's public site: the docs, the install script and the contact addresses (`hello@` / `security@memstead.com`).
 
 **Trust posture: a non-first-party mem is untrusted input.** A mem installed from the registry or adopted from a foreign folder/clone is a channel for *someone else's* text to enter your agent's reasoning loop. Memstead treats it as untrusted: the engine serves a non-first-party mem's schema as structure only (its `system_context` / `write_rules` prose is withheld, never served as instructions), and tags non-first-party entity content with a machine-readable `origin` on every read surface (`memstead_schema`, `memstead_entity`, `memstead_search`, `memstead_overview`, the registry manifest, the served read tier's discovery manifest). A consuming agent/host should treat third-party content as quoted data, not instructions. The engine guarantees its half (omit foreign instruction-prose, label foreign data) but cannot force the calling host to gate consequential actions on untrusted input; that residual is the host's. See `SECURITY.md`.
 
@@ -233,7 +237,7 @@ pkill -f memstead-mcp
 
 ## Built in the open, on itself
 
-Memstead is built by one person, Björn Bösenberg, a Berlin-based full-stack developer of ~25 years, building Memstead in the open, on a single thesis: *correctness enforced at boundaries replaces trust in the author.* That is why the engine is Rust (the compiler and borrow-checker stand in for the human code review a solo builder gives up) and why every write to a mem is validated at the boundary rather than trusted after the fact. The same thesis, applied to knowledge instead of code, *is* the product. The platform was built as an AI-orchestration project, none of the Rust written by hand: the first public release (July 2026) came after roughly 4.5 **calendar** months of **part-time** work, begun in mid-February 2026. It keeps its own project knowledge as Memstead mems: the engine's design decisions are public as the [`engineering/`](engineering/) mem, gaps included, and the project's other mems are private. That method is the project's standing working mode and not a start-up phase: what ships next quarter is built the same way. What it means for a contributor is spelled out in [CONTRIBUTING.md](CONTRIBUTING.md).
+Memstead is built by one person, Björn Bösenberg, a Berlin-based full-stack developer of ~25 years, building Memstead in the open, on a single thesis: *correctness enforced at boundaries replaces trust in the author.* That is why the engine is Rust (the compiler and borrow-checker stand in for the human code review a solo builder gives up) and why every write to a mem is validated at the boundary rather than trusted after the fact. The same thesis, applied to knowledge instead of code, *is* the product. The platform was built as an AI-orchestration project, none of the Rust written by hand: the first public release (July 2026) came after roughly 4.5 **calendar** months of **part-time** work, begun in mid-February 2026. It keeps its own project knowledge as Memstead mems: the engine's design decisions are public as the [`engineering/`](engineering/) mem, gaps included, and the project's other mems are private. What ships next quarter is built the same way. What it means for a contributor is spelled out in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

@@ -156,6 +156,18 @@ who reaches them.
   through a view lands on the mem's checks ref in the store, and every
   view and the store's own workspace read it. A folder mem's checks
   stay in the ledger of the workspace that recorded them.
+- **Independence reads identities the same way everywhere, if you set
+  it so.** When one person holds several keys, set
+  `[checks] independence = "owner"` in every view and in the store's
+  workspace: two identities with the same part before the first `/`
+  then count as one party. Keys of an older naming convention that the
+  prefix misreads get their owner named exactly in `[checks.owners]`
+  (`"hub/machine-1" = "anna"`). A view that sets it differently reads
+  the same check rows differently.
+- **A view deletes no mem of the store.** `memstead mem delete` in a
+  view refuses for a mounted branch of the store's git directory; the
+  store deletes its own mems, and a view withdraws one with
+  `memstead mem unregister`.
 - **A running engine keeps a schema it has resolved.** After a mem is
   withdrawn from a view, the schema it pinned stays readable through
   that view until its engine restarts.
