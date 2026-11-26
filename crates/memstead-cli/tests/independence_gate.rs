@@ -1407,6 +1407,105 @@ fn the_first_author_survives_a_rename_on_both_backends() {
     }
 }
 
+/// Under `[checks] independence = "owner"` two identities whose parts
+/// before the first `/` are equal are one party: a second key of the
+/// author reads `self_checked` and the gate stays shut, another person's
+/// key reads `confirmed_independent` and the plan completes. An identity
+/// without `/` is its own owner. Without the key the two keys of one
+/// person are independent, as before; an unknown value refuses at load.
+#[test]
+fn under_the_owner_policy_two_keys_of_one_person_are_one_party() {
+    let set_policy = |root: &Path, value: &str| {
+        let toml = root.join(".memstead/workspace.toml");
+        let mut text = fs::read_to_string(&toml).unwrap();
+        text.push_str(&format!("\n[checks]\nindependence = \"{value}\"\n"));
+        fs::write(&toml, text).unwrap();
+    };
+    let fixture = |policy: Option<&str>| {
+        let ws = seed();
+        let root = ws.path().to_path_buf();
+        if let Some(p) = policy {
+            set_policy(&root, p);
+        }
+        create(&root, "anna/laptop", "plan", "The Plan", None);
+        create(
+            &root,
+            "anna/laptop",
+            "criterion",
+            "The Criterion",
+            Some("VERIFIES:plans--the-plan"),
+        );
+        (ws, root)
+    };
+
+    // The owner policy: anna's second key is anna.
+    let (_ws, root) = fixture(Some("owner"));
+    check(&root, Some("anna/agent"), "plans--the-criterion");
+    let ind = independence(&root);
+    assert_eq!(
+        ind["self_checked"]["items"],
+        serde_json::json!(["plans--the-criterion"]),
+        "{ind}"
+    );
+    let out = complete(&root, "anna/laptop");
+    assert!(!out.status.success());
+    let env: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(env.to_string().contains("self_checked"), "{env}");
+    // An identity without `/` is its own owner: `anna` is anna.
+    check(&root, Some("anna"), "plans--the-criterion");
+    assert_eq!(
+        independence(&root)["self_checked"]["items"],
+        serde_json::json!(["plans--the-criterion"])
+    );
+    // Another person's key confirms, and the record keeps the full name.
+    check(&root, Some("ben/laptop"), "plans--the-criterion");
+    let ind = independence(&root);
+    assert_eq!(
+        ind["confirmed_independent"]["items"],
+        serde_json::json!(["plans--the-criterion"]),
+        "{ind}"
+    );
+    let rows = ledger_text(&root, "plans").unwrap();
+    assert!(rows.contains("\"identity\":\"ben/laptop\""), "{rows}");
+    assert!(rows.contains("\"identity\":\"anna/agent\""), "{rows}");
+    let out = complete(&root, "anna/laptop");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // The default: whole identities, so anna's second key is independent.
+    for policy in [None, Some("identity")] {
+        let (_ws, root) = fixture(policy);
+        check(&root, Some("anna/agent"), "plans--the-criterion");
+        assert_eq!(
+            independence(&root)["confirmed_independent"]["items"],
+            serde_json::json!(["plans--the-criterion"]),
+            "{policy:?}"
+        );
+    }
+
+    // An unknown value refuses at load and names the allowed values.
+    let ws = seed();
+    set_policy(ws.path(), "person");
+    let out = memstead()
+        .current_dir(ws.path())
+        .args(["health", "--quiet"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        text.contains("identity") && text.contains("owner") && text.contains("person"),
+        "{text}"
+    );
+}
+
 /// The check rows a workspace holds for `mem`, in the transport form: the
 /// lines of its ledger file, then the lines of the mem's checks ref in
 /// the workspace's own mem-repo. `Err` when neither exists.

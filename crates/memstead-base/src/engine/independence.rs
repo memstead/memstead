@@ -485,7 +485,12 @@ impl Engine {
         };
         match self.executors_of(entity, touches) {
             Some(executors) => {
-                let reading = if executors.identities.iter().any(|i| i == checker) {
+                let policy = &self.settings.checks;
+                let reading = if executors
+                    .identities
+                    .iter()
+                    .any(|i| policy.same_party(i, checker))
+                {
                     Independence::SelfChecked
                 } else if executors.identities.is_empty()
                     && !executors.plans.iter().any(|p| touches.any_identity(p))
@@ -505,7 +510,12 @@ impl Engine {
                 // checker checking its own content; a write without an
                 // identity leaves nothing to compare.
                 let seen = touches.writes_seen_by(&entity.id.0, check);
-                let reading = if seen.iter().any(|t| t.identity.as_deref() == Some(checker)) {
+                let policy = &self.settings.checks;
+                let reading = if seen.iter().any(|t| {
+                    t.identity
+                        .as_deref()
+                        .is_some_and(|i| policy.same_party(i, checker))
+                }) {
                     Independence::SelfChecked
                 } else if seen.is_empty() || seen.iter().any(|t| t.identity.is_none()) {
                     Independence::Unconfirmable

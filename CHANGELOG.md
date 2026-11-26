@@ -16,6 +16,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   method's behaviour is unchanged; before, it was public but not on the
   list, so it could change in any release.
 
+### Added
+
+- **Independence can compare identity owners.** A workspace can set
+  `[checks] independence = "owner"` in `.memstead/workspace.toml`:
+  the author-checker independence reading then counts two identities
+  as one party when their parts before the first `/` are equal (an
+  identity without `/` is its own owner), so a host that gives one
+  person several keys (`anna/laptop`, `anna/agent`) keeps independence
+  between people. Every reading follows it: the health checks axis,
+  the gates (`transition_requires_checks`,
+  `transition_requires_self_check`), entity provenance and archive
+  sealing. Records keep the full identity. The default, `identity`,
+  is the 0.28.0 reading; an unknown value refuses when the workspace
+  loads. Set it alike in every workspace of a store, or two of them
+  read the same rows differently.
+
 ### Changed
 
 - **A git-branch mem keeps its check records in its store.** Until

@@ -101,7 +101,8 @@ pub struct Cli {
     /// name, a session handle, a person's tag. Recorded immutably
     /// alongside each mutation and check (commit trailer / ledger);
     /// the author≠checker independence gate compares identities and
-    /// nothing else. Also settable via the `MEMSTEAD_IDENTITY`
+    /// nothing else (their parts before the first `/` under the
+    /// workspace policy `[checks] independence = "owner"`). Also settable via the `MEMSTEAD_IDENTITY`
     /// environment variable; the flag wins when both are present.
     /// Caller-declared and unverified, but tamper-evident in
     /// append-only history. Omit to record operations without an

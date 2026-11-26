@@ -401,6 +401,9 @@ pub struct WorkspaceSettings {
     /// `require_notes` field surfaces a `WarningHint::NoteMissing` on
     /// mutation calls that omit a `note`. Default-zeroed when absent.
     pub mutations: MutationsSection,
+    /// `[checks]` section — how the author-checker independence reading
+    /// compares identities. Defaulted when absent.
+    pub checks: ChecksSection,
     /// `[plugin.*]` namespace — opaque pass-through map keyed by
     /// plugin identifier (`claude_code`, …). Values are raw
     /// TOML tables the engine never inspects; named plugins read
@@ -423,6 +426,48 @@ pub struct McpSection {
     /// from the effective set. Empty / absent → every compiled-in
     /// tool is advertised.
     pub disabled_tools: Option<Vec<String>>,
+}
+
+/// `[checks]` section — the workspace's reading of check records.
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ChecksSection {
+    /// How the independence reading compares a checker's identity with
+    /// the identities that wrote what was checked. Absent → `identity`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub independence: Option<IndependencePolicy>,
+}
+
+impl ChecksSection {
+    /// Whether identities `a` and `b` are one party under the policy.
+    pub fn same_party(&self, a: &str, b: &str) -> bool {
+        match self.independence.unwrap_or_default() {
+            IndependencePolicy::Identity => a == b,
+            IndependencePolicy::Owner => identity_owner(a) == identity_owner(b),
+        }
+    }
+}
+
+/// The comparison the independence reading makes between identities.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IndependencePolicy {
+    /// Two identities are one party when they are equal (the default).
+    #[default]
+    Identity,
+    /// Two identities are one party when their owners are equal: the
+    /// text before the first `/`, or the whole identity without one. A
+    /// host that gives one person several keys (`anna/laptop`,
+    /// `anna/agent`) keeps independence between people.
+    Owner,
+}
+
+/// The owner of an identity: its text before the first `/`, or the whole
+/// identity when it has none.
+pub fn identity_owner(identity: &str) -> &str {
+    identity
+        .split_once('/')
+        .map_or(identity, |(owner, _)| owner)
 }
 
 /// `[mutations]` section — engine-wide mutation policy. Carried on

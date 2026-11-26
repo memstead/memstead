@@ -536,6 +536,7 @@ impl WorkspaceStoreAdapter for FileWorkspaceStore {
             toml_doc.cross_mem_links,
             toml_doc.mcp,
             toml_doc.mutations,
+            toml_doc.checks,
             toml_doc.plugin,
         )?;
         Ok(Workspace { mounts, settings })
@@ -783,6 +784,10 @@ struct WorkspaceTomlDoc {
     /// `require_notes = None` (interpreted as `false`).
     #[serde(default)]
     mutations: MutationsSection,
+    /// `[checks]` section — the reading of check records. Absent →
+    /// the identity comparison.
+    #[serde(default)]
+    checks: crate::workspace::ChecksSection,
     /// `[plugin.*]` namespace — opaque pass-through map keyed by
     /// plugin identifier. Values are raw TOML tables; the engine
     /// never inspects them.
@@ -876,6 +881,7 @@ pub fn parse_workspace_settings(
         toml_doc.cross_mem_links,
         toml_doc.mcp,
         toml_doc.mutations,
+        toml_doc.checks,
         toml_doc.plugin,
     )
 }
@@ -890,6 +896,7 @@ fn build_settings(
     cross_mem_links_raw: toml::Table,
     mcp: McpSection,
     mutations: MutationsSection,
+    checks: crate::workspace::ChecksSection,
     plugin: std::collections::HashMap<String, toml::Table>,
 ) -> Result<WorkspaceSettings, StoreError> {
     let mut create_rules = Vec::with_capacity(vm.create.len());
@@ -928,6 +935,7 @@ fn build_settings(
         cross_mem_links,
         mcp,
         mutations,
+        checks,
         plugin,
     })
 }
