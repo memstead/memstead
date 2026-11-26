@@ -228,7 +228,7 @@ pub fn run_list(ctx: &CliContext, args: ListArgs) -> anyhow::Result<()> {
         "# Check records of {} — {} row(s)\n\n",
         match args.mem.as_deref() {
             Some(mem) => format!("`{mem}`"),
-            None => "the workspace ledger".to_string(),
+            None => "every mem this workspace reads".to_string(),
         },
         records.len()
     );

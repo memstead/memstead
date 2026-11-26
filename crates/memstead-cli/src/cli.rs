@@ -361,7 +361,8 @@ pub enum Command {
     /// order (by time of the act; a carried line after the records it
     /// stands over; ties by the rows' bytes), with filters by kind, verdict,
     /// identity, entity and time window. Read-only; the read to take
-    /// instead of parsing `.memstead/state/checks/checks.jsonl`.
+    /// instead of parsing the rows where they live (a git-branch mem's
+    /// checks ref in its store, the workspace's ledger file).
     Checks(commands::check::ListArgs),
 
     /// Read and move the per-mem review mark — the engine's one
