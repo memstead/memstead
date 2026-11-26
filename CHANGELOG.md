@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-26
+
 ### Library surface
 
 - **`MemMountParams` gains `check: Option<bool>`, `MemMountResponse`
@@ -8322,7 +8324,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/memstead/memstead/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/memstead/memstead/compare/v0.27.1...v0.28.0
 [0.27.1]: https://github.com/memstead/memstead/compare/v0.27.0...v0.27.1
 [0.27.0]: https://github.com/memstead/memstead/compare/v0.26.1...v0.27.0
