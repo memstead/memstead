@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-23T20:14:54Z
-last_modified: 2026-11-26T16:45:24Z
+last_modified: 2026-11-26T19:32:41Z
 status: accepted
 decided_on: 2026-11-23
 deciders: operator (requirement and go of 2026-11-23), implementing agent
@@ -49,3 +49,4 @@ A program that serves several callers from one store of mems wants each caller t
 
 2026-11-24 amendment: the operator confirmed the form after the release. Asked whether the view form suffices for what he had called the rights system on 2026-11-23, or whether a verified identity in the record is still wanted, with the recommendation that the view form suffices and that verified identities are taken up only when a concrete case asks for them (two parties that do not trust each other and could dispute who wrote something), as work of its own, he answered: "dann alles das jetzt so machen wie du es empfohlen hast". Released in 0.28.0. Revisit condition: such a case, or a host that reports a measured failure of the view form.
 2026-11-26 amendment (shared-checks bundle, plans 01 and 02): "approve" is a right a view gives like read and write. A roster row carries `check: true|false` beside its capability (`memstead mem mount --check`); absent, it means "exactly when writable". Read-only with `check` records checks and nothing else; write denied `check` refuses every check `CHECK_NOT_GRANTED`. The grant is part of the row identity the reconciliation compares, so a changed grant acts at the next operation, and the reconciliation's report reaches the reply of that call whatever path it takes (refusals included). Checks recorded through any view of a store live in the store and read alike in every view (plan 01), which is what makes an acceptance visible to every caller. Rejected: a third capability (write would still imply approve), tool filtering per caller (leaks both ways). Deciders: operator 2026-11-26, executed by session memstead-93.
+2026-11-26, retiring two limits: the limits "checks are recorded per workspace" and "a check on a read-only mount refuses" no longer stand from 0.29.0. A check of a git-branch mem lands in its store and reads alike in every view, and a read-only mount granted `check` records checks.

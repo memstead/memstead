@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-22T13:15:46Z
-last_modified: 2026-11-22T13:15:46Z
+last_modified: 2026-11-26T19:32:41Z
 status: accepted
 decided_on: 2026-11-22
 deciders: operator (shared-engine bundle, go of 2026-11-21), implementing agent
@@ -32,3 +32,7 @@ Until 0.26.1 the reconciliation followed writable rows only and compared a row w
 - A new field on the roster report for a changed row: rejected, removed plus added says what happened and every consumer reads both already.
 - Keep read-only rows out of the reconciliation: rejected, a read-only mount is membership like a writable one.
 - Compare capability, storage and pin: chosen.
+
+## Notes
+
+2026-11-26 amendment (shared-checks bundle, plan 02): a roster row also carries a check grant (`check: true|false`, absent meaning exactly when writable), and the grant is part of what makes a row the mount it is: a row whose effective grant differs from the mount it serves is unmounted and mounted again like a capability change, so a grant another process adds or withdraws acts at the next operation, and the reconciliation report names the mem on the reply of that call. A row that states the default and a row without the field are the same mount. Deciders: operator 2026-11-26, executed by session memstead-93.
