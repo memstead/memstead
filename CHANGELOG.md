@@ -83,8 +83,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   workspace's ledger file, which every reading still folds in.
 
 - **Migration of existing check rows.** The rows a workspace's ledger
-  file holds for its writable git-branch mems move into those mems'
-  stores when an engine of this version first opens the workspace, and
+  file holds for its git-branch mems that may check (a writable mount
+  not denied `check`, a mount granted it) move into those mems' stores when an engine of this version first opens the workspace, and
   again whenever the file grew since (an older engine appended to it).
   `memstead checks --migrate` runs the move on demand and reports it
   per mem. The move is idempotent and the file keeps its lines; a row

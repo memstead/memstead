@@ -54,7 +54,9 @@ pub enum Independence {
     /// The check's identity mutated nothing in the verified plan's set
     /// since the criterion was written.
     ConfirmedIndependent,
-    /// The check's identity is one of the executors.
+    /// The check's identity is one of the executors (one party with one
+    /// of them, under the workspace policy `[checks] independence =
+    /// "owner"`).
     SelfChecked,
     /// The check, or every relevant provenance record, carries no
     /// identity — absence is never promoted.

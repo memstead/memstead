@@ -1088,7 +1088,7 @@ pub const SEALED_CHECKS_VERSION: u32 = 1;
 /// carries, nothing invented. `kind` is the map key it sits under, the
 /// entity is the map key above that (its mem-relative path, so the
 /// member survives a remount under another mem name). The transport
-/// client and the structured finding stay in the workspace ledger: the
+/// client and the structured finding stay where the rows live: the
 /// archive answers state, and state derives from these fields alone.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealedCheck {

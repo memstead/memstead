@@ -126,13 +126,14 @@ scan keeps flagging it.
 
 ## Check records travel with the archive
 
-A `.mem` archive exported from a workspace whose check ledger holds records
-for the mem carries them in `.memstead/checks.json`: per entity, the latest
+A `.mem` archive exported from a workspace that reads check records for the
+mem (from the mem's checks ref in its store, or the workspace's ledger file)
+carries them in `.memstead/checks.json`: per entity, the latest
 record per kind (`verification`, `conformance`, and each foreign `x-<name>`
 kind) with the verdict, the method note, the checker's declared identity
 handle exactly as recorded, the actor and role, the entity's content hash at
 check time, the timestamp and, where a rename carried the record, its
-origin. A mem with no record, and a workspace with no ledger, export no
+origin. A mem with no record exports no
 member and the same bytes as before the member existed. The method note
 passes the same per-class redaction the provenance member applies; the
 identity handle is copied verbatim, never mapped to a person. The archive

@@ -251,8 +251,8 @@ impl Engine {
     /// nothing resolves any more. The carried lines keep their hash, so
     /// they derive `check_stale` against the renamed file — a rename is
     /// a content change (title, self-links), and the verdict is not
-    /// re-asserted on content the checker never saw. An engine with no
-    /// workspace root has no ledger and carries nothing. A failed
+    /// re-asserted on content the checker never saw. The carried lines go
+    /// where the mem's rows live ([`Self::append_check_rows`]). A failed
     /// append refuses, as recording does: the caller runs this before
     /// the rename commits.
     pub(crate) fn carry_checks_across_rename(
@@ -471,9 +471,8 @@ impl Engine {
     /// constraint reads unsatisfied the moment after it was satisfied.
     /// The carried line keeps the checker's identity: the writer is not
     /// the checker, and independence must go on reading it that way. A
-    /// stale or failed record is not carried, it licensed nothing. An
-    /// engine with no workspace root has no ledger and carries nothing.
-    /// A failed append refuses, as recording does: the caller runs this
+    /// stale or failed record is not carried, it licensed nothing. The
+    /// carried line goes where the mem's rows live. A failed append refuses, as recording does: the caller runs this
     /// before the write is staged. Returns the number of lines carried.
     pub(crate) fn carry_checks_across_transition(
         &self,

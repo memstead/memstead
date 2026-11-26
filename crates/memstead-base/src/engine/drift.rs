@@ -1400,9 +1400,9 @@ impl Engine {
             };
 
             for (ref_name, remote_sha) in &remote_refs {
-                // The check-ledger transport ref is derived from the
-                // workspace ledger before every publish and unioned on
-                // every fetch: it has no ahead or behind to report.
+                // The checks refs (the old single transport branch, the
+                // per-mem refs) are united on every fetch and publish: they
+                // have no ahead or behind to report.
                 if *ref_name == checks_ref
                     || ref_name.starts_with(crate::workspace::MEMSTEAD_CHECKS_REF_PREFIX)
                 {

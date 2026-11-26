@@ -150,8 +150,9 @@ pub struct ListArgs {
     #[arg(long, value_name = "ISO-8601")]
     pub until: Option<String>,
 
-    /// Move the rows this workspace's ledger file holds for its writable
-    /// git-branch mems into those mems' stores, and report what moved per
+    /// Move the rows this workspace's ledger file holds for its git-branch
+    /// mems that may check (a writable mount not denied `check`, a mount
+    /// granted it) into those mems' stores, and report what moved per
     /// mem: how many of the file's rows the store holds, and how many this
     /// run moved. Idempotent; the file keeps its lines. An engine moves
     /// them on its own when it opens a workspace whose file changed, which
