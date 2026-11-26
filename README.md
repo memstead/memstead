@@ -1,6 +1,6 @@
 # Memstead
 
-[![CI](https://github.com/memstead/memstead/actions/workflows/ci.yml/badge.svg)](https://github.com/memstead/memstead/actions/workflows/ci.yml)
+[![CI](https://github.com/memstead/memstead/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/memstead/memstead/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/memstead/memstead)](https://github.com/memstead/memstead/releases)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSING.md)
 

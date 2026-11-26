@@ -29,9 +29,14 @@ on:
 permissions:
   contents: read
 
+# A pull request's superseded run is cancelled: only its newest commit
+# merges. A push to main is never cancelled, and its group is the commit,
+# because GitHub also cancels a run that waits in a group: every commit on
+# main gets its own verdict, and a cancelled run (which the README badge
+# shows as failing) never stands where a result should.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   tests:
