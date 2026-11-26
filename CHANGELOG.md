@@ -95,6 +95,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **`memstead_diff` and `memstead_proposal_brief` follow the roster.**
+  Every other MCP call reconciles the mount roster before it serves, so
+  a mem another process withdrew refuses `MEM_UNMOUNTED`. Measured on
+  0.28.0 in a view whose roster another process had emptied:
+  `memstead_diff` of the withdrawn mem still answered with its history
+  while `memstead_entity` refused. Both tools now reconcile first.
+
 - **A roster change is named on the reply of the call that saw it,
   refusals included.** Every MCP call reconciles the mount roster before
   it serves, and a change (a mem added, withdrawn, or mounted again

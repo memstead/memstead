@@ -900,3 +900,29 @@ fn a_check_after_a_grant_change_names_the_roster_change() {
     );
     assert!(!next.to_string().contains("MEM_ROSTER_CHANGED"), "{next}");
 }
+
+/// A mem another process withdrew from the roster serves no history
+/// through a running server: `memstead_diff` refuses `MEM_UNMOUNTED` as
+/// every other operation naming it does.
+#[test]
+fn a_withdrawn_mem_serves_no_diff() {
+    let tmp = TempDir::new().unwrap();
+    let (_store, gitdir) = store(tmp.path(), "store", &["Thing"]);
+    let v = view(tmp.path(), "v", &gitdir, "read-only");
+    let mut mcp = Mcp::start(&v);
+    let head = sha(&gitdir, "refs/heads/kept");
+    let diff = serde_json::json!({ "mem": "kept", "ref_a": head, "ref_b": head });
+    let before = mcp.call("memstead_diff", diff.clone());
+    assert_ne!(before["isError"], true, "{before}");
+    let roster = v.join(".memstead/state/mounts.json");
+    let mut doc: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&roster).unwrap()).unwrap();
+    doc["mounts"] = serde_json::json!([]);
+    fs::write(&roster, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+    let after = mcp.call("memstead_diff", diff);
+    assert_eq!(after["isError"], true, "{after}");
+    assert_eq!(
+        after["structuredContent"]["code"], "MEM_UNMOUNTED",
+        "{after}"
+    );
+}

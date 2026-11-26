@@ -876,7 +876,10 @@ impl McpServer {
     )]
     pub(super) fn memstead_diff(&self, Parameters(p): Parameters<DiffParams>) -> CallToolResult {
         let unified = self.unified_engine();
-        let engine = crate::lock_engine!(unified, self);
+        let mut engine = crate::lock_engine!(unified, self);
+        // The roster as it stands now: a mem withdrawn from this
+        // workspace has no history to serve here (`MEM_UNMOUNTED`).
+        let _ = engine.reload_if_stale(Some(&p.mem));
         let config = memstead_base::ops::DiffConfig {
             rename_similarity: p
                 .rename_similarity
@@ -905,6 +908,8 @@ impl McpServer {
     ) -> CallToolResult {
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified, self);
+        // The roster as it stands now, before either side is read.
+        let _ = engine.reload_if_stale(None);
         // The brief reloads both sides itself and writes nothing; the
         // markdown rides the text channel for a human, the JSON (with
         // the disposition skeleton) rides `structured_content`.
