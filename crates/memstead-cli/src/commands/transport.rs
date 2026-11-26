@@ -14,7 +14,7 @@ pub struct FetchArgs {
     /// The mem whose remote to fetch. The mem's check records travel
     /// with it: the remote's checks ref of the mem is fetched too and
     /// its rows are added to the mem's own checks ref in its store (to
-    /// this workspace's ledger file for a read-only mount; rows already
+    /// this workspace's ledger file for a mount that may not check; rows already
     /// present are skipped; nothing is rewritten). Only a mounted mem's
     /// own rows are ever imported.
     pub mem: String,

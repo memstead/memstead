@@ -582,8 +582,8 @@ fn check_ledger_path(workspace_root: &Path) -> PathBuf {
 /// store that holds it, on its checks ref
 /// ([`crate::workspace::checks_ref_for_mem`]); the engine reads those and
 /// hands them in ([`Self::composed`]). Every other row (a folder mem's,
-/// rows a workspace held before the store was the home, rows of a
-/// read-only mount) is a line of the workspace's file. Every reading
+/// rows a workspace held before the store was the home, rows that came
+/// through a mount that may not check) is a line of the workspace's file. Every reading
 /// folds both, a row present in both counted once: a row is its bytes.
 /// Appends through this handle go to the file only; a store append is
 /// the engine's (`engine::checks_home`).

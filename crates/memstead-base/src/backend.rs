@@ -358,7 +358,8 @@ pub trait MemBackend: Send + Sync {
     /// [`crate::check::SealedChecks`] and derives check state from on an
     /// archive mount ([`crate::Engine::archive_checks_for`]). Default
     /// impl returns `Ok(None)`: a writable backend never carries the
-    /// member (its check state lives in the workspace ledger), and an
+    /// member (its check rows live in its store's checks ref or the
+    /// workspace's ledger file), and an
     /// archive sealed without records signals "no records sealed".
     fn read_archive_checks(&self) -> Result<Option<Vec<u8>>, BackendError> {
         Ok(None)

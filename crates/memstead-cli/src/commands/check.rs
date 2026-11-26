@@ -4,8 +4,10 @@
 //! engine-recorded act of verification: verdict from the closed
 //! vocabulary (`ok` | `failed`), optional method note,
 //! provenance (actor, client, the session's `--role`), and the
-//! entity's `content_hash` at check time — appended to the
-//! workspace's append-only check ledger. Checking mutates nothing:
+//! entity's `content_hash` at check time — appended where the mem's
+//! rows live: a git-branch mem's checks ref in its store, when the mount
+//! may check into it, the workspace's ledger file otherwise. Checking
+//! mutates nothing:
 //! no entity write, no mem commit. Derived check state is served by
 //! `memstead entity <id> --provenance`.
 //!
@@ -103,7 +105,8 @@ pub struct Args {
 /// can change without breaking anyone. A git-branch mem's rows live in
 /// its store, on the mem's checks ref, where every workspace that mounts
 /// the mem reads them; the workspace's ledger file holds the rest (a
-/// folder mem's, a read-only mount's, rows of earlier engines). An
+/// folder mem's, rows imported through a mount that may not check, rows
+/// of earlier engines). An
 /// archive mount's sealed records stay under `entity <id> --provenance`.
 #[derive(Parser, Debug)]
 pub struct ListArgs {

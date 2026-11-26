@@ -347,12 +347,14 @@ impl Engine {
         }
     }
 
-    /// Move the rows this workspace's ledger file holds for its writable
-    /// git-branch mems into those mems' stores. Idempotent: a row a store
+    /// Move the rows this workspace's ledger file holds for its git-branch
+    /// mems that may check (a writable mount without a denial, a mount
+    /// granted `check`) into those mems' stores. Idempotent: a row a store
     /// already holds is not added again, and the file keeps its lines
     /// (the reading counts a row present in both once). Rows of folder
-    /// mems, of read-only mounts and of mems the workspace does not mount
-    /// stay in the file and nowhere else. Returns what moved, per mem.
+    /// mems, of mounts that may not check and of mems the workspace does
+    /// not mount stay in the file and nowhere else. Returns what moved,
+    /// per mem.
     pub fn migrate_checks_to_stores(&self) -> Result<Vec<MigratedChecks>, EngineError> {
         let Some(root) = self.workspace_root() else {
             return Ok(Vec::new());

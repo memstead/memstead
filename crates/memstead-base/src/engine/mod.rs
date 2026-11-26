@@ -126,8 +126,9 @@ pub(crate) struct MountedBackend {
     /// The sealed check records an archive mount carries
     /// (`.memstead/checks.json`), read at construction via
     /// [`crate::backend::MemBackend::read_archive_checks`]. `None` on
-    /// every writable mount (their check state is the workspace
-    /// ledger's) and on an archive sealed without records; every
+    /// every writable mount (their rows live in the store's checks ref or
+    /// the workspace's ledger file) and on an archive sealed without
+    /// records; every
     /// check-state read on an archive mount derives from this and never
     /// from a workspace ledger ([`Engine::archive_checks_for`]).
     archive_checks: Option<crate::check::SealedChecks>,

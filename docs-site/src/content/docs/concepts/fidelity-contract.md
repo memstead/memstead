@@ -275,7 +275,8 @@ measurement first, expensive judgment last and only under a budget:
 The judgment tier leaves a trace the engine records rather than infers: a check
 record per entity and kind (`verification`, `conformance`, a foreign `x-<name>`
 kind), with the verdict, the method, the checker's declared identity handle and the
-entity's hash at check time. Those records are workspace state, and a sealed
+entity's hash at check time. Those records live with the mem (a git-branch mem's
+on its checks ref in the store, a folder mem's in the workspace), and a sealed
 `.mem` archive carries the latest one per entity and kind in an optional member,
 `.memstead/checks.json`, so an installed or served mem answers "who checked this,
 and is that check still fresh" from the archive alone. Freshness on an archive

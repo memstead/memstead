@@ -78,9 +78,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   five minutes ahead is still refused, named, and kept on the remote.
   The single `__MEMSTEAD_CHECKS` branch earlier engines published is
   still read on a fetch or pull and no longer written. A folder mem, a
-  read-only mount and a workspace without git-branch storage keep
-  their rows in the workspace's ledger file, which every reading still
-  folds in.
+  mount that may not check (read-only without the `check` grant) and a
+  workspace without git-branch storage keep their rows in the
+  workspace's ledger file, which every reading still folds in.
 
 - **Migration of existing check rows.** The rows a workspace's ledger
   file holds for its writable git-branch mems move into those mems'

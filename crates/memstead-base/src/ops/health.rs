@@ -379,10 +379,12 @@ impl CheckMaps {
 /// The `include=["checks"]` axis: per mem,
 /// counts of the four derived check states plus the author≠checker
 /// independence gate over ok-checked entities. The gate compares
-/// caller-declared IDENTITIES and nothing else:
-/// the entity's created-by record against its newest ok-check record
-/// — both carry an identity and they are equal → `self_checked`
-/// ("twice-asserted, not verified"); both carry one and they differ →
+/// caller-declared IDENTITIES and nothing else (as one party when equal,
+/// or under `[checks] independence = "owner"` when their parts before the
+/// first `/` are equal):
+/// the entity's writers against its newest ok-check record
+/// — both carry an identity and they are one party → `self_checked`
+/// ("twice-asserted, not verified"); both carry one and they are not →
 /// `confirmed_independent`; either side lacks one → `unconfirmable`,
 /// never a guessed category. Transport is not identity: the recorded
 /// `(actor, client)` pair names the SURFACE a record arrived through

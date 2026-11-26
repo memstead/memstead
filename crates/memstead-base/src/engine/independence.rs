@@ -13,7 +13,10 @@
 //! criterion was written**; a check under one of those identities reads
 //! `self_checked`; a check or a record without an identity stays
 //! `unconfirmable`. Identities are the only comparator; roles and the
-//! transport pair are recorded context. Nothing is stamped: the reading
+//! transport pair are recorded context. Two identities are one party when
+//! they are equal, or, under the workspace policy `[checks] independence
+//! = "owner"`, when their parts before the first `/` are equal
+//! ([`crate::workspace::ChecksSection::same_party`]). Nothing is stamped: the reading
 //! is computed at read time from the append-only provenance record, so
 //! every existing ledger keeps parsing and derives under the new rule.
 //!

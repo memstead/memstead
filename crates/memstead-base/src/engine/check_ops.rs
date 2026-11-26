@@ -23,7 +23,9 @@ use super::{Engine, error::EngineError};
 
 impl Engine {
     /// Record a check of one entity. Refuses typed on unknown mem
-    /// (quarantine included), unknown entity, read-only mounts, and
+    /// (quarantine included), unknown entity, a read-only mount without
+    /// the check grant (`READ_ONLY_MOUNT`), a mount denied it
+    /// (`CHECK_NOT_GRANTED`), and
     /// on any persistence failure (`CHECK_NOT_RECORDED`) — recording
     /// is never best-effort, because a caller who believes an
     /// unrecorded check landed is the exact dishonesty this tier
@@ -221,11 +223,11 @@ impl Engine {
     /// every row, every kind, nothing derived. The read a
     /// consumer takes instead of parsing `checks.jsonl` itself, so the
     /// line shape can grow (as it did with `observed_at`) without
-    /// breaking a reader. Refuses an unknown mem; an engine with no
-    /// workspace root has no ledger and serves nothing. An archive mount
-    /// keeps its sealed records under `entity --provenance`; this read is
-    /// the workspace ledger's. The mem need not be mounted: the ledger
-    /// keeps the rows of a mem after it was unmounted or deleted
+    /// breaking a reader. The rows are the mem's store's (its checks ref)
+    /// beside the workspace's ledger file's. An archive mount keeps its
+    /// sealed records under `entity --provenance`. The mem need not be
+    /// mounted: the rows of a mem outlive its mount, read from the ledger
+    /// file and the workspace's own mem-repo, after it was unmounted or deleted
     /// (archived bundles, deleted forks), and a history over them is
     /// exactly what a reader comes here for instead of the file; the
     /// second value says whether the mem is mounted now.
@@ -235,8 +237,9 @@ impl Engine {
         (rows, mounted)
     }
 
-    /// Every record of the workspace ledger, in standing order, whatever mem
-    /// the entity belongs to and whether that mem is mounted.
+    /// Every record this workspace reads (its ledger file and the stores
+    /// of its mounted git-branch mems), in standing order, whatever mem the
+    /// entity belongs to and whether that mem is mounted.
     pub fn check_records_all(&self) -> Vec<CheckRecord> {
         self.check_ledger_all().in_standing_order()
     }
@@ -504,9 +507,9 @@ impl Engine {
     /// The newest check record of one entity under one wire kind, from
     /// the one source the mount has: the sealed member for an archive
     /// mount (a workspace ledger beside it is never consulted, and an
-    /// archive sealed without records has none), the workspace ledger
-    /// for every other mount (a writable mem never reads a sealed
-    /// member; an engine with no workspace root has no ledger). Every
+    /// archive sealed without records has none), the mem's store and the
+    /// workspace's ledger file for every other mount (a writable mem never
+    /// reads a sealed member). Every
     /// check-state read goes through here, so the derivation is the same
     /// whatever the mount.
     pub fn latest_check_record(
