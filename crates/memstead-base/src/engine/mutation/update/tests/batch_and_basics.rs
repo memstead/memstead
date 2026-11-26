@@ -1116,6 +1116,11 @@ fn batch_update_naming_one_entity_twice_composes_the_items_in_order() {
         Box::new(writer) as Box<dyn MemBackend>,
     )])
     .unwrap();
+    // The hash a rehearsal names covers the `last_modified` stamp, which
+    // has second granularity: with the real clock the rehearsal and the
+    // batch can land in different seconds and the named hash goes stale.
+    let t0 = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_778_243_696);
+    engine.set_mutation_clock(std::sync::Arc::new(move || t0));
     let created = engine
         .create_entity(
             CreateEntityArgs {
