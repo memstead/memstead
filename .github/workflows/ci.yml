@@ -47,7 +47,7 @@ jobs:
         with:
           workspaces: . -> target
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
         with:
           tool: cargo-nextest
       # ci/verify_gate.py parses the docs guide's printed workflow with a
@@ -111,7 +111,7 @@ jobs:
         with:
           workspaces: . -> target
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
         with:
           tool: cargo-nextest
       # Same reason as the Linux job. The runner's Homebrew Python refuses a
@@ -165,7 +165,7 @@ jobs:
         with:
           workspaces: . -> target
       - name: Install wasm-pack
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
         with:
           tool: wasm-pack
       # This job is the kernel's portability proof: memstead-base must
