@@ -757,3 +757,126 @@ fn a_grant_changed_by_another_process_takes_effect_at_the_next_operation() {
     assert_eq!(record(&mut engine), Ok(()));
     assert!(engine.mount("kept").is_some());
 }
+
+/// One `tools/call` against a running `memstead-mcp` over stdio, by a
+/// minimal line-delimited JSON-RPC driver.
+struct Mcp {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    reader: std::io::BufReader<std::process::ChildStdout>,
+    next_id: u64,
+}
+
+impl Mcp {
+    fn start(ws: &Path) -> Self {
+        let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("memstead-mcp"))
+            .arg("--workspace")
+            .arg(ws)
+            .current_dir(ws)
+            .env_remove("MEMSTEAD_WORKSPACE")
+            .env_remove("MEMSTEAD_IDENTITY")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("memstead-mcp spawns");
+        let stdin = child.stdin.take().unwrap();
+        let reader = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut s = Self {
+            child,
+            stdin,
+            reader,
+            next_id: 0,
+        };
+        s.request(
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2024-11-05", "capabilities": {},
+                "clientInfo": { "name": "shared-checks-test", "version": "0" }
+            }),
+        );
+        s.send(&serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+        s
+    }
+
+    fn send(&mut self, m: &serde_json::Value) {
+        use std::io::Write as _;
+        writeln!(self.stdin, "{m}").unwrap();
+        self.stdin.flush().unwrap();
+    }
+
+    fn request(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        use std::io::BufRead as _;
+        self.next_id += 1;
+        let id = self.next_id;
+        self.send(
+            &serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
+        );
+        loop {
+            let mut line = String::new();
+            assert!(
+                self.reader.read_line(&mut line).unwrap() > 0,
+                "memstead-mcp exited"
+            );
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line)
+                && v["id"] == serde_json::json!(id)
+            {
+                return v["result"].clone();
+            }
+        }
+    }
+
+    fn call(&mut self, tool: &str, arguments: serde_json::Value) -> serde_json::Value {
+        self.request(
+            "tools/call",
+            serde_json::json!({ "name": tool, "arguments": arguments }),
+        )
+    }
+}
+
+impl Drop for Mcp {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// A running server whose next call after a grant change is a check:
+/// the check honours the new row, and its reply names the roster change,
+/// on a refusal and on a recorded check alike.
+#[test]
+fn a_check_after_a_grant_change_names_the_roster_change() {
+    let tmp = TempDir::new().unwrap();
+    let (_store, gitdir) = store(tmp.path(), "store", &["Thing"]);
+    let v = view(tmp.path(), "v", &gitdir, "write");
+    let mut mcp = Mcp::start(&v);
+    let check = serde_json::json!({ "entity": "kept--thing", "verdict": "ok" });
+    let first = mcp.call("memstead_check", check.clone());
+    assert_ne!(first["isError"], true, "{first}");
+    let roster = v.join(".memstead/state/mounts.json");
+    let set = |value: bool| {
+        let mut doc: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&roster).unwrap()).unwrap();
+        doc["mounts"][0]["check"] = serde_json::json!(value);
+        fs::write(&roster, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+    };
+    set(false);
+    let refused = mcp.call("memstead_check", check.clone());
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert_eq!(
+        refused["structuredContent"]["code"], "CHECK_NOT_GRANTED",
+        "{refused}"
+    );
+    assert!(
+        refused.to_string().contains("MEM_ROSTER_CHANGED"),
+        "{refused}"
+    );
+    assert!(refused.to_string().contains("kept"), "{refused}");
+    set(true);
+    let recorded = mcp.call("memstead_check", check);
+    assert_ne!(recorded["isError"], true, "{recorded}");
+    assert!(
+        recorded.to_string().contains("MEM_ROSTER_CHANGED"),
+        "{recorded}"
+    );
+}

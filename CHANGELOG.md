@@ -47,7 +47,7 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   person several keys (`anna/laptop`, `anna/agent`) keeps independence
   between people. Every reading follows it: the health checks axis,
   the gates (`transition_requires_checks`,
-  `transition_requires_self_check`), entity provenance and archive
+  `transition_requires_self_check`), the due reading and archive
   sealing. Records keep the full identity. The default, `identity`,
   is the 0.28.0 reading; an unknown value refuses when the workspace
   loads. Set it alike in every workspace of a store, or two of them

@@ -334,13 +334,9 @@ impl McpServer {
         })
     }
 
-    /// Builder-style setter for the operator-mode posture. Returns
-    /// `self` for fluent chaining at the boot site. Only the
-    /// `memstead-mcp --operator-mode` boot path is authorised to call
-    /// this with `true`; agent-spawned servers leave it on the
-    /// default `false`.
     /// Set the session-level default role (the binary's `--role`
-    /// flag). Per-call `role` parameters win over this default.
+    /// flag): the role a call that declares none records. Per-call
+    /// `role` parameters win over this default.
     pub fn with_default_role(mut self, role: memstead_base::vcs::Role) -> Self {
         self.default_role = role;
         self
@@ -467,6 +463,11 @@ impl McpServer {
         Ok((role, identity))
     }
 
+    /// Builder-style setter for the operator-mode posture. Returns
+    /// `self` for fluent chaining at the boot site. Only the
+    /// `memstead-mcp --operator-mode` boot path is authorised to call
+    /// this with `true`; agent-spawned servers leave it on the
+    /// default `false`.
     pub fn with_operator_mode(mut self, operator_mode: bool) -> Self {
         self.operator_mode = operator_mode;
         self

@@ -726,7 +726,10 @@ impl McpServer {
 
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified, self);
-        let _drift = engine.reload_if_stale(Some(id.mem()));
+        // The roster is reconciled here, before the grant is judged, and
+        // the report rides the response either way: a grant another
+        // process changed is named on the check it governs.
+        let drift = engine.reload_if_stale(Some(id.mem()));
         engine.set_role(role);
         engine.set_identity(identity);
         let client = self.client.get().cloned();
@@ -766,8 +769,12 @@ impl McpServer {
                     "observed_at": record.observed_at,
                     "method": record.method,
                     "finding": record.finding,
+                    "warnings": drift
+                        .iter()
+                        .map(|w| serde_json::json!({"code": w.code(), "message": w.message()}))
+                        .collect::<Vec<_>>(),
                 });
-                md_with_structured(
+                let res = md_with_structured(
                     format!(
                         "Check recorded: {} — kind {}, verdict {}, state {}",
                         record.entity,
@@ -776,9 +783,10 @@ impl McpServer {
                         state.as_str()
                     ),
                     body,
-                )
+                );
+                prepend_drift_warnings_to_result_text(res, &drift)
             }
-            Err(e) => engine_err_unified(e, &engine),
+            Err(e) => prepend_drift_warnings_to_result_text(engine_err_unified(e, &engine), &drift),
         }
     }
 
