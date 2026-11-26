@@ -26,6 +26,8 @@
 //! - Setting a default identity and pinning an identity:
 //!   [`McpServer::with_default_identity`] and
 //!   [`McpServer::with_pin_identity`].
+//! - Setting a default role, the one a call that declares none records:
+//!   [`McpServer::with_default_role`] with a [`Role`].
 //! - Filtering tools: [`McpServer::new_with_filter`].
 //! - Listing the tools: [`McpServer::filtered_tool_list`].
 //! - The default token budget: [`DEFAULT_TOKEN_BUDGET`].
@@ -49,7 +51,7 @@ pub use memstead_base::mem_management::{
     MemDeleteParams, MemDeleteResponse, MemMountParams, MemMountResponse, MountSource, delete_mem,
     mount_mem,
 };
-pub use memstead_base::vcs::{Actor, ClientId};
+pub use memstead_base::vcs::{Actor, ClientId, Role};
 pub use memstead_base::{BootError, CallerKey, Engine, FullEngineError, MountCapability};
 pub use memstead_git_branch::workspace_store::engine_from_workspace_root;
 pub use memstead_git_branch::{MemRepoInit, MemRepoInitError, init_mem_repo};

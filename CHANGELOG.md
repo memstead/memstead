@@ -7,6 +7,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Library surface
+
+- **`McpServer::with_default_role` joins the library promise**, with
+  `Role` re-exported beside it. A program that builds one server per
+  caller sets the role a call that declares none records, as it sets
+  and pins the identity; a role the call declares still wins. The
+  method's behaviour is unchanged; before, it was public but not on the
+  list, so it could change in any release.
+
 ### Changed
 
 - **A git-branch mem keeps its check records in its store.** Until

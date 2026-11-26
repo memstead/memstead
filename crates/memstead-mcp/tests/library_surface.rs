@@ -13,7 +13,7 @@ use std::path::Path;
 use memstead_mcp::library::{
     Actor, BootError, CallerKey, ClientId, DEFAULT_TOKEN_BUDGET, Engine, FullEngineError,
     McpServer, MemDeleteParams, MemDeleteResponse, MemMountParams, MemMountResponse, MemRepoInit,
-    MemRepoInitError, MountCapability, MountSource, SchemaRef, delete_mem,
+    MemRepoInitError, MountCapability, MountSource, Role, SchemaRef, delete_mem,
     engine_from_workspace_root, init_mem_repo, mount_mem,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -184,6 +184,43 @@ fn a_program_builds_on_the_library_module_alone() {
         "{}",
         text_of(&results[3])
     );
+    // An instance for a checking caller records the role it was given on
+    // a check that declares none; a role the call declares wins.
+    let for_a_checker = server
+        .for_caller(CallerKey::new("caller-two"))
+        .with_default_identity(Some("checker-two".to_string()))
+        .with_pin_identity(true)
+        .with_default_role(Role::Checker);
+    let checks = serve_and_call(
+        for_a_checker,
+        vec![
+            (
+                "memstead_check",
+                serde_json::json!({
+                    "entity": "notes--written-through-the-library", "verdict": "ok"
+                }),
+            ),
+            (
+                "memstead_check",
+                serde_json::json!({
+                    "entity": "notes--written-through-the-library", "verdict": "ok",
+                    "role": "author"
+                }),
+            ),
+        ],
+    );
+    assert_ne!(checks[0]["isError"], true, "{}", text_of(&checks[0]));
+    assert_eq!(
+        checks[0]["structuredContent"]["role"], "checker",
+        "{}",
+        checks[0]
+    );
+    assert_eq!(
+        checks[1]["structuredContent"]["role"], "author",
+        "{}",
+        checks[1]
+    );
+
     // The first instance serves what the other one wrote, from the one
     // engine both share: the mem the other caller created is mounted
     // in it already. An instance over an engine of its own would learn
