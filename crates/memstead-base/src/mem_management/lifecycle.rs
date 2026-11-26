@@ -99,6 +99,33 @@ fn folder_is_not_the_mems_to_remove(
     })
 }
 
+/// The other mounts the roster names (in a view or out of service)
+/// whose storage lies inside `dir`, by name and sorted.
+fn mounts_stored_inside(engine: &crate::Engine, name: &str, dir: &std::path::Path) -> Vec<String> {
+    use crate::workspace::MountStorage;
+    let resolved = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let dir = resolved(dir);
+    let quarantined = engine.quarantined_mems();
+    let mut held: Vec<String> = engine
+        .mounts()
+        .into_iter()
+        .chain(quarantined.iter().map(|q| &q.mount))
+        .filter(|m| m.mem != name)
+        .filter(|m| {
+            let at = match &m.storage {
+                MountStorage::Folder { path } | MountStorage::Archive { path } => path,
+                MountStorage::GitBranch { gitdir, .. } => gitdir,
+                _ => return false,
+            };
+            resolved(at).starts_with(&dir)
+        })
+        .map(|m| m.mem.clone())
+        .collect();
+    held.sort();
+    held.dedup();
+    held
+}
+
 /// The storage a create lands in: the explicit override wins, and
 /// without one a workspace with a mem-repo hosts a git branch.
 fn effective_storage_kind(
@@ -647,6 +674,56 @@ pub fn delete_mem(
             dir.display()
         ))
         .into());
+    }
+
+    // A branch mounted out of another workspace's git directory is that
+    // workspace's to delete: its roster still names the mem and serves
+    // it. Destroying storage is for the workspace's own mem-repo only;
+    // this workspace stops mounting such a mem by unregister.
+    if params.delete_files
+        && let Some(root) = engine.workspace_root()
+        && let Some(mount) = engine.mount(&params.name)
+        && let Some(gitdir) = crate::workspace::lives_in_another_git_directory(mount, Some(root))
+    {
+        return Err(crate::EngineError::InvalidInput(format!(
+            "mem `{}` is a branch of another git directory ({}), not of this workspace's own \
+             mem-repo: the workspace that holds it deletes it. Stop mounting it here with \
+             `mem unregister {}`",
+            params.name,
+            gitdir.display(),
+            params.name,
+        ))
+        .into());
+    }
+
+    // A folder that holds the storage of another mount the roster names
+    // (a nested folder mem, an archive, a git directory) is not this
+    // mem's to take along either: the delete would destroy that mem
+    // while the roster still names it. Refused before anything changes;
+    // the other mem leaves first, or this one leaves by unregister.
+    if params.delete_files
+        && let Some(dir) = mem_dir.as_deref()
+    {
+        let held = mounts_stored_inside(engine, &params.name, dir);
+        if !held.is_empty() {
+            return Err(crate::EngineError::InvalidInput(format!(
+                "mem `{}` lives in a folder that holds the storage of {} ({}): deleting it \
+                 would destroy {} while the roster still names {}. Delete or unregister {} \
+                 first, or remove `{}` from the roster with `mem unregister`",
+                params.name,
+                if held.len() == 1 {
+                    "another mounted mem"
+                } else {
+                    "other mounted mems"
+                },
+                held.join(", "),
+                if held.len() == 1 { "it" } else { "them" },
+                if held.len() == 1 { "it" } else { "them" },
+                if held.len() == 1 { "it" } else { "them" },
+                params.name,
+            ))
+            .into());
+        }
     }
 
     // ---- Step 3: MEM_REFERENCED_BY_POLICY check ----

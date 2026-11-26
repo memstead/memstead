@@ -272,6 +272,50 @@ fn a_write_mount_of_another_mem_repo_writes_there() {
     assert!(ok(&holder, &["entity", "notes--from-the-view"]).contains("# From The View"));
 }
 
+/// A workspace with its own mem-repo that mounts a branch of another
+/// git directory does not delete that branch: the holder's roster still
+/// names the mem. The delete refuses before anything changes and names
+/// the unregister, which then takes the mount off and leaves the other
+/// git directory as it was.
+#[test]
+fn a_mem_delete_leaves_a_branch_of_another_git_directory_where_it_is() {
+    let root = TempDir::new().unwrap();
+    let holder = holder(root.path());
+    let gitdir = holder_gitdir(&holder);
+    let view = root.path().join("view");
+    fs::create_dir_all(&view).unwrap();
+    ok(&view, &["mem-repo", "init", "."]);
+    ok(
+        &view,
+        &[
+            "mem",
+            "mount",
+            "notes",
+            "--branch",
+            "refs/heads/notes",
+            "--gitdir",
+            &gitdir,
+            "--capability",
+            "write",
+            "--operator-mode",
+        ],
+    );
+    let before = refs_and_objects(Path::new(&gitdir));
+    let roster_before = roster(&view);
+    let stderr = refused(
+        &view,
+        &["mem", "delete", "notes", "--operator-mode"],
+        "INVALID_INPUT",
+    );
+    assert!(stderr.contains("mem unregister notes"), "{stderr}");
+    assert_eq!(refs_and_objects(Path::new(&gitdir)), before);
+    assert_eq!(roster(&view), roster_before);
+
+    ok(&view, &["mem", "unregister", "notes", "--operator-mode"]);
+    assert_eq!(refs_and_objects(Path::new(&gitdir)), before);
+    assert!(ok(&holder, &["entity", "notes--held"]).contains("# Held"));
+}
+
 /// The refusals of the first criterion leave the roster file as it was,
 /// byte for byte: a name already mounted, a branch that does not exist,
 /// a git directory that is no mem-repo. And the create rules admit the

@@ -2891,6 +2891,57 @@ fn delete_refuses_a_mem_whose_folder_holds_the_git_directory() {
     assert!(!plain.exists());
 }
 
+/// A folder mem whose folder holds another mounted mem's folder is not
+/// deleted: the delete would remove `team/sub` with `team` while the
+/// roster still names it. Once the nested mem has left, the delete
+/// removes the folder.
+#[test]
+fn delete_refuses_a_folder_mem_whose_folder_holds_another_mounted_mem() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().join("ws");
+    let team = workspace.join("mems").join("team");
+    let sub = team.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let mut engine = Engine::from_mounts(vec![
+        (
+            folder_mount("team", team.clone()),
+            Box::new(FilesystemBackend::new(team.clone())) as Box<dyn MemBackend>,
+        ),
+        (
+            folder_mount("team/sub", sub.clone()),
+            Box::new(FilesystemBackend::new(sub.clone())) as Box<dyn MemBackend>,
+        ),
+    ])
+    .unwrap();
+    engine.set_workspace_root(workspace.clone());
+    let delete = |engine: &mut Engine, name: &str| {
+        mem_management::delete_mem(
+            engine,
+            mem_management::MemDeleteParams {
+                name: name.to_string(),
+                delete_files: true,
+                note: None,
+                actor: memstead_base::vcs::Actor::Cli,
+                client: None,
+                detach_incoming: false,
+                operator_mode: true,
+            },
+        )
+    };
+    let err = delete(&mut engine, "team").unwrap_err();
+    let text = err.to_string();
+    assert!(
+        text.contains("team/sub") && text.contains("mem unregister"),
+        "{text}"
+    );
+    assert!(sub.is_dir(), "the nested mem's folder stays");
+    assert!(engine.mem_router().is_writable("team"), "nothing changed");
+
+    assert!(delete(&mut engine, "team/sub").unwrap().files_deleted);
+    assert!(delete(&mut engine, "team").unwrap().files_deleted);
+    assert!(!team.exists());
+}
+
 /// The refusal is one rule, not a list of names: a folder inside the
 /// workspace's git directory or its state, and a folder that is another
 /// workspace's directory, are not a mem's to remove either.

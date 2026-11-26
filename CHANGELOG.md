@@ -21,6 +21,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `identity` policy the map has no effect. 0.29.0 refuses the key, so
   set it once every engine that reads the workspace knows it.
 
+### Fixed
+
+- **A mem delete no longer destroys a branch of another git
+  directory.** A workspace with its own mem-repo that mounted a branch
+  out of a second workspace's git directory deleted that branch there,
+  while the second workspace's roster still named the mem. `mem delete`
+  now destroys storage only in the workspace's own mem-repo; for such a
+  mount it refuses before anything changes and names `mem unregister`,
+  which takes the mount off and leaves the other git directory as it was.
+- **A folder mem's delete no longer removes another mem's storage
+  inside its folder.** With folder mems `team` and `team/sub` nested on
+  disk, deleting `team` removed the folder of `team/sub` while the
+  roster still named it. The delete now refuses when its folder holds
+  the storage of any other mount the roster names (a folder, an archive
+  or a git directory), and names the mems that have to leave first.
+
 ## [0.29.0] - 2026-11-26
 
 ### Library surface
