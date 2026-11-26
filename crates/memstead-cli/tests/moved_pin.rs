@@ -757,25 +757,36 @@ fn store_acts_that_move_no_pin_change_nothing_a_caller_of_the_view_sees() {
             overview.contains(&format!("- **Schema:** {OLD}")),
             "{overview}"
         );
-        overview.contains("- **Version:** 0.1.0")
+        overview
+            .lines()
+            .find(|line| line.contains("- **Version:**"))
+            .map(str::to_string)
+            .unwrap_or_default()
     };
-    assert!(cached_version(&mut mcp));
+    assert!(cached_version(&mut mcp).contains("0.1.0"));
 
     for (what, act) in acts_that_move_no_pin(&fx) {
+        let before = cached_version(&mut mcp);
         act();
         let read = mcp.answered("memstead_entity", json!({ "id": "kept--one" }));
         assert_eq!(read["_mem_schema"], OLD, "{what}: {read}");
         assert_no_notice(&read);
+        // Compared before the view writes and against what it held before
+        // the act: the view's own write stamps the mem's configuration
+        // anew whenever the stamp differs (the CLI that acted and this
+        // engine may come from different builds), and that stamp merges
+        // the configuration as it now stands. What is measured is the act.
+        assert_eq!(
+            cached_version(&mut mcp),
+            before,
+            "{what}: the engine reloaded the mem's configuration"
+        );
         let made = mcp.answered(
             "memstead_create",
             entity("kept", &format!("Part after {}", what.len()), "part"),
         );
         assert_eq!(made["_mem_schema"], OLD, "{what}: {made}");
         assert_no_notice(&made);
-        assert!(
-            cached_version(&mut mcp),
-            "{what}: the engine reloaded the mem's configuration"
-        );
     }
 
     // A reload asked for now reports no change, and the pin stands.
