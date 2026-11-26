@@ -141,7 +141,15 @@ impl Engine {
                 });
             }
         }
+        self.pending_roster_warnings
+            .extend(warnings.iter().cloned());
         warnings
+    }
+
+    /// The roster-change reports produced since the last take, each once:
+    /// what a surface adds to a response whose own path did not carry it.
+    pub fn take_roster_notices(&mut self) -> Vec<crate::ops::WarningHint> {
+        std::mem::take(&mut self.pending_roster_warnings)
     }
 
     /// The content half of [`Self::reload_if_stale`] alone — the branch-tip

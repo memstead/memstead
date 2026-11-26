@@ -307,6 +307,15 @@ impl McpServer {
         {
             drop(self.open_operation(guard));
         }
+        // A roster change the call's reconciliation reported is named on
+        // the response, whichever path built it: a refusal drops the
+        // report its write gathered, and the change would reach no reply.
+        let roster = self
+            .unified_engine()
+            .lock()
+            .map(|mut e| e.take_roster_notices())
+            .unwrap_or_default();
+        let res = responses::attach_roster_notices(res, &roster);
         let notices = CALL
             .try_with(|call| std::mem::take(&mut call.borrow_mut().notices))
             .unwrap_or_default();

@@ -452,6 +452,11 @@ pub struct Engine {
     /// ref's tip they were read at; a read whose tip moved reads again
     /// ([`Self::store_check_rows`]).
     pub(crate) checks_cache: std::sync::Mutex<checks_home::ChecksCache>,
+    /// Roster-change reports the reconciliation produced and no caller
+    /// has taken yet ([`Self::take_roster_notices`]): a surface that
+    /// answers a call whose own path dropped the report (a refusal, an
+    /// early return) still delivers it.
+    pub(crate) pending_roster_warnings: Vec<crate::ops::WarningHint>,
     /// Per-mem subscriber registry for [`MemChangedEvent`]s. Held
     /// behind `Arc<Mutex<_>>` so [`SubscriptionHandle`]s — which own
     /// the consumer's view of the subscription lifetime — can call

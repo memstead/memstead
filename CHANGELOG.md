@@ -95,6 +95,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A roster change is named on the reply of the call that saw it,
+  refusals included.** Every MCP call reconciles the mount roster before
+  it serves, and a change (a mem added, withdrawn, or mounted again
+  under another capability, storage, pin or check grant) is reported
+  as `MEM_ROSTER_CHANGED`. Measured on 0.28.0: when the call was a
+  write that then refused (`EXPECTED_HASH_REQUIRED`, `HASH_MISMATCH`,
+  `ENTITY_NOT_FOUND`, an existing entity), or a `memstead_check`, the
+  report was dropped, and since the reconciliation had happened no
+  later call named the change either. The engine now keeps a report
+  until a reply has carried it, and the server adds it to any reply
+  that did not: on the text channel and under `warnings`.
+
 - **A running engine follows a schema pin that another workspace
   moved.** A mem's pin is written where the mem lives: on the
   schema-and-config ref of its git directory, or in a folder mem's

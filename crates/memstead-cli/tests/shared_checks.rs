@@ -879,4 +879,24 @@ fn a_check_after_a_grant_change_names_the_roster_change() {
         recorded.to_string().contains("MEM_ROSTER_CHANGED"),
         "{recorded}"
     );
+    // A refused write after a roster change names the change too: the
+    // refusal path carries the report its write's reconciliation made.
+    set(false);
+    let refused_write = mcp.call(
+        "memstead_update",
+        serde_json::json!({ "id": "kept--thing", "sections": { "purpose": "q" } }),
+    );
+    assert_eq!(refused_write["isError"], true, "{refused_write}");
+    assert!(
+        refused_write["structuredContent"]["warnings"]
+            .as_array()
+            .is_some_and(|w| w.iter().any(|w| w["code"] == "MEM_ROSTER_CHANGED")),
+        "{refused_write}"
+    );
+    // Once delivered, the report is not repeated.
+    let next = mcp.call(
+        "memstead_entity",
+        serde_json::json!({ "id": "kept--thing" }),
+    );
+    assert!(!next.to_string().contains("MEM_ROSTER_CHANGED"), "{next}");
 }

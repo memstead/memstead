@@ -471,3 +471,40 @@ pub(super) fn with_mem_schema_anchor(mut res: CallToolResult, schema_ref: &str) 
     }
     res
 }
+
+/// Name the roster changes `roster` reports on `res` when it does not
+/// carry them already: the `> [!warning]` line on the text channel, and
+/// an entry in the structured `warnings`. A response that names
+/// `MEM_ROSTER_CHANGED` already, and an empty report, leave it as it was.
+pub(super) fn attach_roster_notices(res: CallToolResult, roster: &[WarningHint]) -> CallToolResult {
+    if roster.is_empty() {
+        return res;
+    }
+    let carried_in_text = res
+        .content
+        .iter()
+        .filter_map(|c| c.as_text())
+        .any(|t| t.text.contains("MEM_ROSTER_CHANGED"));
+    let carried_in_structure = res
+        .structured_content
+        .as_ref()
+        .is_some_and(|sc| sc.to_string().contains("MEM_ROSTER_CHANGED"));
+    let mut res = if carried_in_text {
+        res
+    } else {
+        prepend_drift_warnings_to_result_text(res, roster)
+    };
+    if !carried_in_structure
+        && let Some(serde_json::Value::Object(map)) = res.structured_content.as_mut()
+    {
+        let entries = map
+            .entry("warnings")
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+        if let serde_json::Value::Array(list) = entries {
+            for w in roster {
+                list.push(serde_json::json!({ "code": w.code(), "message": w.message() }));
+            }
+        }
+    }
+    res
+}
