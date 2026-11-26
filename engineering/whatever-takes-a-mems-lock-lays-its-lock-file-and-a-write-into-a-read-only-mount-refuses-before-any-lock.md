@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-11-22T13:15:47Z
-last_modified: 2026-11-22T22:25:35Z
+last_modified: 2026-11-26T16:45:19Z
 status: accepted
 decided_on: 2026-11-22
 deciders: operator (shared-engine bundle, go of 2026-11-21), implementing agent
@@ -32,3 +32,7 @@ While the mount verb was graded, its documentation claimed that a read-only moun
 - Lock a read-only mount only where a lock file already exists: rejected, a reader would not hold still against the first writer of that branch, which is what the lock on a read-only mount is for.
 - Keep lock files outside the git directory: rejected, engines of other versions lock in the git directory and would not exclude each other.
 - One rule for content, one for lock files: chosen.
+
+## Notes
+
+2026-11-26 amendment (shared-checks bundle, plan 02): a read-only mount whose roster row grants `check: true` writes one thing into the storage it names, the mem's checks ref (`refs/memstead/checks/<mem>`), and nothing else; every mutation through it still refuses `READ_ONLY_MOUNT` before any lock. Without the grant the rule stands as written. Deciders: operator 2026-11-26, executed by session memstead-93.
