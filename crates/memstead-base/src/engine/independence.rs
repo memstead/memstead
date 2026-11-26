@@ -108,7 +108,8 @@ pub const LABEL_ROLE_UNSPECIFIED: &str = "role_unspecified";
 /// Three orthogonal conditions close a gate, and each is reported on
 /// its own: the state is `checked_ok` (fresh against the entity's
 /// bytes), the reading is `confirmed_independent` (the identity is none
-/// of the executors), and the role is a checking capacity, `checker` or
+/// of the executors, compared as one party under the workspace's
+/// independence policy), and the role is a checking capacity, `checker` or
 /// `verifier`. A record in role `author` reads [`LABEL_ROLE_AUTHOR`],
 /// one with no role [`LABEL_ROLE_UNSPECIFIED`]; neither confirms. The
 /// role never enters the independence reading, which compares

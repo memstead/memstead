@@ -491,7 +491,8 @@ pub enum ConstraintDef {
     /// `x-<name>` kind the engine records verbatim), recorded under an
     /// identity that wrote none of the content it checked (every identity
     /// on a write of the entity up to the write the record names in
-    /// `checked_write`). The record names either the bytes the write
+    /// `checked_write`; under the workspace policy `[checks] independence
+    /// = "owner"`, no identity with the same part before the first `/`). The record names either the bytes the write
     /// produces, or the stored content when the write changes nothing but
     /// `field` and the engine-stamped timestamps; only in that second case
     /// is it carried to the new hash, so a later edit leaves the check

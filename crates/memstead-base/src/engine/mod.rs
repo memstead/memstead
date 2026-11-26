@@ -824,9 +824,8 @@ pub enum DisjointMerge {
 /// [`RefPrevious::At`] (or [`RefPrevious::Absent`] for a ref it saw
 /// missing), so a commit that lands between the decision and the move
 /// makes the move fail instead of being dropped. [`RefPrevious::Any`] is
-/// for a ref the engine derives and owns outright (the check-ledger
-/// transport ref, re-derived from the workspace ledger before every
-/// publish).
+/// for a ref the engine derives and owns outright (the tracking ref a
+/// check-rows publish builds its commit on).
 pub type GitBranchUpdateRefFn = fn(
     gitdir: &Path,
     ref_name: &str,

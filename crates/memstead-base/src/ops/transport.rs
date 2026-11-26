@@ -21,9 +21,11 @@ pub struct FetchOutcome {
     /// (e.g. `refs/remotes/origin/specs` → new SHA). Only refs that
     /// actually moved appear here; unchanged refs are omitted.
     pub updated_refs: Vec<UpdatedRef>,
-    /// Check-ledger rows imported from the remote's `__MEMSTEAD_CHECKS` ref
-    /// for the mem, into the workspace ledger; `0` when the remote
-    /// carries none, or none new.
+    /// Check rows of the mem imported from the remote's checks ref of the
+    /// mem (and the old single `__MEMSTEAD_CHECKS` branch, where the
+    /// remote still carries it), into where the mem's rows live (its
+    /// checks ref in the store, or the workspace's ledger file for a mount
+    /// that may not check); `0` when the remote carries none, or none new.
     #[serde(default)]
     pub checks_imported: usize,
     /// Check-ledger rows the import refused, each named: a row whose time
@@ -64,8 +66,8 @@ pub struct PullOutcome {
     pub new_sha: String,
     /// Updated remote-tracking refs the underlying fetch produced.
     pub updated_refs: Vec<UpdatedRef>,
-    /// Check-ledger rows imported from the remote's `__MEMSTEAD_CHECKS` ref
-    /// for the mem, into the workspace ledger.
+    /// Check rows of the mem imported from the remote, as
+    /// [`FetchOutcome::checks_imported`] counts them.
     #[serde(default)]
     pub checks_imported: usize,
     /// Check-ledger rows the import refused, each named: a row whose time
@@ -96,9 +98,9 @@ pub struct PushOutcome {
     /// `force: true` and the underlying ref move was not a
     /// fast-forward). Consumers warn on this in their UI.
     pub forced: bool,
-    /// The `__MEMSTEAD_CHECKS` commit the mem's ledger rows were published
-    /// in, when the push moved that ref; `None` when the remote already
-    /// held the same rows.
+    /// The commit the remote's checks ref of the mem
+    /// (`refs/memstead/checks/<mem>`) stands at after the push, when the
+    /// push moved it; `None` when the remote already held every row.
     #[serde(default)]
     pub checks_published: Option<String>,
     /// Rows of the remote's transport ref this ledger refused on the
