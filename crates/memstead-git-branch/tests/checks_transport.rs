@@ -415,3 +415,34 @@ fn a_push_keeps_and_names_the_rows_its_import_refused() {
             .any(|l| l.contains("clock-ahead"))
     );
 }
+
+/// The pin an append to a checks ref commits with: an empty expected
+/// parent means the ref must still be absent. Two writers that both read
+/// no ref: the second commit refuses instead of replacing the first
+/// writer's row.
+#[test]
+fn an_empty_pin_refuses_a_commit_once_the_ref_exists() {
+    use memstead_base::backend::BackendError;
+    let tmp = TempDir::new().unwrap();
+    let gitdir = tmp.path().join("r.git");
+    gix::init_bare(&gitdir).unwrap();
+    let gitdir = gitdir.canonicalize().unwrap();
+    let ctx = || memstead_base::vcs::CommitContext::internal();
+    let a = GitTreeBackend::new(gitdir.clone(), CHECKS_REF.to_string());
+    let b = GitTreeBackend::new(gitdir.clone(), CHECKS_REF.to_string());
+    assert!(a.current_head().unwrap().is_none());
+    assert!(b.current_head().unwrap().is_none());
+    b.write_entity(Path::new(MEMBER), b"row-b\n").unwrap();
+    b.commit_with_expected_parent("memstead: checks specs", &ctx(), Some(""))
+        .unwrap();
+    a.write_entity(Path::new(MEMBER), b"row-a\n").unwrap();
+    let res = a.commit_with_expected_parent("memstead: checks specs", &ctx(), Some(""));
+    assert!(
+        matches!(
+            res,
+            Err(BackendError::ParentMismatch { .. } | BackendError::HashMismatch { .. })
+        ),
+        "{res:?}"
+    );
+    assert_eq!(member_at(&gitdir, CHECKS_REF).as_deref(), Some("row-b\n"));
+}

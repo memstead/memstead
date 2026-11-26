@@ -272,7 +272,14 @@ impl Engine {
                 self.current_identity().map(str::to_string),
             );
             let subject = format!("memstead: checks {mem}");
-            match backend.commit_with_expected_parent(&subject, &ctx, tip.as_deref()) {
+            // The tip that was read is the pin, absence included: an empty
+            // pin asks that the ref still not exist, so a writer that read
+            // no ref never overwrites the first row another writer created.
+            match backend.commit_with_expected_parent(
+                &subject,
+                &ctx,
+                Some(tip.as_deref().unwrap_or("")),
+            ) {
                 Ok(_) => {
                     if let Ok(mut cache) = self.checks_cache.lock() {
                         cache.rows.remove(&(gitdir.to_path_buf(), mem.to_string()));
