@@ -7,6 +7,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **`[checks.owners]` names the owner of an identity exactly.** Under
+  `[checks] independence = "owner"` a workspace can map an identity to
+  its owner in `.memstead/workspace.toml` (`"hub/machine-1" = "anna"`);
+  the map is read before the part before the first `/`, on the
+  checker's side and the writer's alike, wherever independence is
+  read. It is for a history whose identities follow an older
+  convention: check rows are append-only, so a key named before the
+  convention changed cannot be renamed, only read correctly. An
+  identity not in the map keeps the prefix reading, and under the
+  `identity` policy the map has no effect. 0.29.0 refuses the key, so
+  set it once every engine that reads the workspace knows it.
+
 ## [0.29.0] - 2026-11-26
 
 ### Library surface

@@ -1506,6 +1506,65 @@ fn under_the_owner_policy_two_keys_of_one_person_are_one_party() {
     );
 }
 
+/// `[checks.owners]` names the owner of an identity exactly, before the
+/// part before the first `/`: a key of another convention mapped to the
+/// author is the author, and a key whose prefix is the author's name but
+/// which is mapped to someone else confirms. Under the `identity` policy
+/// the map has no effect.
+#[test]
+fn the_owner_map_names_the_owner_of_an_identity_the_prefix_misreads() {
+    let fixture = |policy: &str| {
+        let ws = seed();
+        let root = ws.path().to_path_buf();
+        let toml = root.join(".memstead/workspace.toml");
+        let mut text = fs::read_to_string(&toml).unwrap();
+        text.push_str(&format!(
+            "\n[checks]\nindependence = \"{policy}\"\n\n[checks.owners]\n\
+             \"hub/machine-1\" = \"anna\"\n\"anna/legacy\" = \"ben\"\n"
+        ));
+        fs::write(&toml, text).unwrap();
+        create(&root, "anna/laptop", "plan", "The Plan", None);
+        create(
+            &root,
+            "anna/laptop",
+            "criterion",
+            "The Criterion",
+            Some("VERIFIES:plans--the-plan"),
+        );
+        (ws, root)
+    };
+
+    // A key of the old convention, mapped to anna, is anna.
+    let (_ws, root) = fixture("owner");
+    check(&root, Some("hub/machine-1"), "plans--the-criterion");
+    assert_eq!(
+        independence(&root)["self_checked"]["items"],
+        serde_json::json!(["plans--the-criterion"])
+    );
+    let out = complete(&root, "anna/laptop");
+    assert!(!out.status.success());
+    // A key whose prefix reads anna but which the map gives to ben confirms.
+    check(&root, Some("anna/legacy"), "plans--the-criterion");
+    assert_eq!(
+        independence(&root)["confirmed_independent"]["items"],
+        serde_json::json!(["plans--the-criterion"])
+    );
+    let out = complete(&root, "anna/laptop");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // Under the identity policy the map changes nothing.
+    let (_ws, root) = fixture("identity");
+    check(&root, Some("hub/machine-1"), "plans--the-criterion");
+    assert_eq!(
+        independence(&root)["confirmed_independent"]["items"],
+        serde_json::json!(["plans--the-criterion"])
+    );
+}
+
 /// The check rows a workspace holds for `mem`, in the transport form: the
 /// lines of its ledger file, then the lines of the mem's checks ref in
 /// the workspace's own mem-repo. `Err` when neither exists.

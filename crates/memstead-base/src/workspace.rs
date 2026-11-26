@@ -448,6 +448,13 @@ pub struct ChecksSection {
     /// the identities that wrote what was checked. Absent → `identity`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub independence: Option<IndependencePolicy>,
+    /// `[checks.owners]`: the owner of an identity named exactly, read by
+    /// the `owner` policy before the part before the first `/`. For a
+    /// history whose identities do not follow that rule (a convention
+    /// changed after rows were written, and the rows are append-only).
+    /// Under the `identity` policy it has no effect.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub owners: BTreeMap<String, String>,
 }
 
 impl ChecksSection {
@@ -455,8 +462,16 @@ impl ChecksSection {
     pub fn same_party(&self, a: &str, b: &str) -> bool {
         match self.independence.unwrap_or_default() {
             IndependencePolicy::Identity => a == b,
-            IndependencePolicy::Owner => identity_owner(a) == identity_owner(b),
+            IndependencePolicy::Owner => self.owner_of(a) == self.owner_of(b),
         }
+    }
+
+    /// The owner of `identity` under the owner policy: the entry
+    /// `[checks.owners]` names for it exactly, else [`identity_owner`].
+    pub fn owner_of<'a>(&'a self, identity: &'a str) -> &'a str {
+        self.owners
+            .get(identity)
+            .map_or_else(|| identity_owner(identity), String::as_str)
     }
 }
 
