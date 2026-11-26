@@ -125,7 +125,7 @@ pub fn run_fetch(ctx: &CliContext, args: FetchArgs) -> anyhow::Result<()> {
 }
 
 /// The markdown lines naming the check-ledger rows an import refused.
-fn refused_check_lines(rows: &[memstead_base::check::RefusedCheckRow]) -> String {
+pub(crate) fn refused_check_lines(rows: &[memstead_base::check::RefusedCheckRow]) -> String {
     rows.iter()
         .map(|r| {
             format!(

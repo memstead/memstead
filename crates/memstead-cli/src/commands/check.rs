@@ -149,9 +149,11 @@ pub struct ListArgs {
 
     /// Move the rows this workspace's ledger file holds for its writable
     /// git-branch mems into those mems' stores, and report what moved per
-    /// mem. Idempotent; the file keeps its lines. An engine moves them on
-    /// its own when it opens a workspace whose file changed; this runs the
-    /// move on demand. Takes no filter.
+    /// mem: how many of the file's rows the store holds, and how many this
+    /// run moved. Idempotent; the file keeps its lines. An engine moves
+    /// them on its own when it opens a workspace whose file changed, which
+    /// this command's own opening does too, so a first run mostly reports
+    /// rows held and none moved. Takes no filter.
     #[arg(long, conflicts_with_all = ["mem", "kind", "verdict", "identity", "entity", "since", "until"])]
     pub migrate: bool,
 }
@@ -623,7 +625,10 @@ fn run_migrate(ctx: &CliContext) -> anyhow::Result<()> {
         md.push_str("- None: the ledger file holds no row of a writable git-branch mem.\n");
     }
     for m in &moved {
-        md.push_str(&format!("- `{}`: {} row(s) moved\n", m.mem, m.moved));
+        md.push_str(&format!(
+            "- `{}`: {} of the file's row(s) in the store, {} moved by this run\n",
+            m.mem, m.held, m.moved
+        ));
     }
     print_markdown(&md);
     Ok(())

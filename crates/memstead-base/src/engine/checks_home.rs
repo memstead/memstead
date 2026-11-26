@@ -63,6 +63,9 @@ pub struct MigratedChecks {
     pub mem: String,
     /// Rows the mem's store did not hold before and holds now.
     pub moved: usize,
+    /// The file's rows of the mem the store holds after the run, moved
+    /// now or before (an earlier run, the automatic one at opening).
+    pub held: usize,
 }
 
 impl Engine {
@@ -359,8 +362,24 @@ impl Engine {
             if rows.is_empty() {
                 continue;
             }
-            let moved = self.append_store_check_rows(&gitdir, &mem, &rows)?;
-            out.push(MigratedChecks { mem, moved });
+            let moved =
+                self.append_store_check_rows(&gitdir, &mem, &rows)
+                    .map_err(|e| match e {
+                        e @ EngineError::CheckNotRecorded { .. } => e,
+                        other => EngineError::CheckNotRecorded {
+                            reason: format!(
+                                "moving the ledger file's rows of mem `{mem}` into its checks ref \
+                             failed: {}; the rows stay in the file, where this workspace \
+                             still reads them",
+                                other.prose_render()
+                            ),
+                        },
+                    })?;
+            out.push(MigratedChecks {
+                held: rows.len(),
+                mem,
+                moved,
+            });
         }
         write_marker(root, len_before);
         Ok(out)

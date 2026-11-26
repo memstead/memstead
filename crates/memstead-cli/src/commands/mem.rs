@@ -1031,6 +1031,8 @@ fn mount_in_workspace(
             "head": response.head,
             "fetched": response.fetched,
             "config_written": response.config_written,
+            "checks_imported": response.checks_imported,
+            "checks_refused": response.checks_refused,
             "warnings": response
                 .warnings
                 .iter()
@@ -1053,6 +1055,15 @@ fn mount_in_workspace(
         if response.config_written {
             out.push_str("\n- Registry entry written into this workspace's mem-repo");
         }
+        if response.checks_imported > 0 {
+            out.push_str(&format!(
+                "\n- Check records brought from the remote: {}",
+                response.checks_imported
+            ));
+        }
+        out.push_str(&crate::commands::transport::refused_check_lines(
+            &response.checks_refused,
+        ));
         for w in &response.warnings {
             out.push_str(&format!("\n\n> [!warning] {}: {}", w.code(), w.message()));
         }

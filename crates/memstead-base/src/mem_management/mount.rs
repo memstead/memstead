@@ -82,6 +82,11 @@ pub struct MemMountResponse {
     /// mount from a remote adopts the mem's checks with its branch).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub checks_imported: usize,
+    /// Rows of the remote's checks ref this mount refused (a time of the
+    /// act beyond the clock skew ahead of this engine's clock), each
+    /// named; they stay on the remote.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks_refused: Vec<crate::check::RefusedCheckRow>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<crate::ops::WarningHint>,
 }
@@ -445,6 +450,7 @@ pub fn mount_mem(
     // A mem adopted from a remote brings its check rows: the remote's
     // checks ref of the mem, united into where the mem's rows live now.
     let mut checks_imported = 0;
+    let mut checks_refused = Vec::new();
     if let MountSource::Remote { remote } = &params.source
         && let Some(hook) = engine.git_branch_ops()
     {
@@ -460,6 +466,7 @@ pub fn mount_mem(
                 ))
             })?;
         checks_imported = merged.appended;
+        checks_refused = merged.refused;
     }
 
     let mut warnings: Vec<crate::ops::WarningHint> = Vec::new();
@@ -484,6 +491,7 @@ pub fn mount_mem(
         fetched,
         config_written,
         checks_imported,
+        checks_refused,
         warnings,
     })
 }

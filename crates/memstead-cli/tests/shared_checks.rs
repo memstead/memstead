@@ -440,3 +440,111 @@ fn rows_held_in_a_workspace_ledger_reach_the_store_once() {
     let w = view(tmp.path(), "w", &gitdir, "read-only");
     assert_eq!(rows(&w).len(), 1);
 }
+
+/// A row of the remote's checks ref dated beyond the clock skew is not
+/// imported by `mem mount --remote`, and the mount names it; a row
+/// within the skew lands.
+#[test]
+fn a_mount_from_a_remote_names_a_future_row_it_refused() {
+    let tmp = TempDir::new().unwrap();
+    let (store, gitdir) = store(tmp.path(), "store", &["Thing"]);
+    ok(
+        &store,
+        &[
+            "check",
+            "kept--thing",
+            "--verdict",
+            "ok",
+            "--identity",
+            "checker-c",
+            "--role",
+            "checker",
+        ],
+    );
+    let held = git(&gitdir, &["show", "refs/memstead/checks/kept:checks.jsonl"]);
+    let ahead = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 86_400;
+    let doctored = format!(
+        "{held}\n{{\"ts\":{ahead},\"entity\":\"kept--thing\",\"verdict\":\"failed\",\
+         \"entity_hash\":\"0000000000000000\",\"actor\":\"cli\",\"role\":\"checker\",\
+         \"identity\":\"time-traveller\"}}\n"
+    );
+    let file = tmp.path().join("doctored.jsonl");
+    fs::write(&file, doctored).unwrap();
+    let blob = git(&gitdir, &["hash-object", "-w", file.to_str().unwrap()]);
+    let mut mktree = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&gitdir)
+        .arg("mktree")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write as _;
+        mktree
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(format!("100644 blob {blob}\tchecks.jsonl\n").as_bytes())
+            .unwrap();
+    }
+    let tree = String::from_utf8(mktree.wait_with_output().unwrap().stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let commit = git(
+        &gitdir,
+        &[
+            "-c",
+            "user.name=x",
+            "-c",
+            "user.email=x@x",
+            "commit-tree",
+            &tree,
+            "-p",
+            "refs/memstead/checks/kept",
+            "-m",
+            "a wrong clock",
+        ],
+    );
+    git(
+        &gitdir,
+        &["update-ref", "refs/memstead/checks/kept", &commit],
+    );
+
+    let target = tmp.path().join("target");
+    fs::create_dir_all(&target).unwrap();
+    ok(&target, &["mem-repo", "init", "."]);
+    ok(
+        &target,
+        &["workspace", "allow-create", "--schema", "*", "*"],
+    );
+    ok(
+        &target,
+        &["mem-repo", "remote-add", "src", gitdir.to_str().unwrap()],
+    );
+    let mounted = json(
+        &target,
+        &[
+            "mem",
+            "mount",
+            "kept",
+            "--remote",
+            "src",
+            "--capability",
+            "write",
+            "--operator-mode",
+        ],
+    );
+    assert_eq!(mounted["checks_imported"], 1, "{mounted}");
+    let refused = mounted["checks_refused"].as_array().unwrap();
+    assert_eq!(refused.len(), 1, "{mounted}");
+    assert_eq!(refused[0]["identity"], "time-traveller", "{mounted}");
+    let seen = rows(&target);
+    assert_eq!(seen.len(), 1);
+    assert!(!seen.iter().any(|r| r["identity"] == "time-traveller"));
+}
