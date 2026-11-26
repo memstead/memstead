@@ -161,7 +161,7 @@ workspace, and again whenever the file grew since; `memstead checks
 workspace's state directory until that has happened: the rows of a
 workspace you delete first are gone. A folder mem, and a mem mounted
 through a mount that may not check (read-only without the `check`
-grant), keep their rows in that file.
+grant, or writable and denied it), keep their rows in that file.
 
 `push --all` is the whole-workspace form: it lists the remote once, skips
 every ref already in sync (a run with nothing to send prints nothing),
