@@ -330,8 +330,8 @@ impl Engine {
                 // The sealed check records come from the workspace ledger
                 // the engine holds, each with the independence reading the
                 // engine derives; the hook only places the member.
-                let (checks_bytes, check_redactions) = crate::ops::export::sealed_checks_bytes_for(
-                    workspace_root,
+                let (checks_bytes, check_redactions) = crate::ops::export::sealed_checks_bytes_from(
+                    &self.check_ledger_for_mem(mem_name).in_standing_order(),
                     mem_name,
                     &entity_paths,
                     Some(&self.sealed_row_reader(mem_name)),

@@ -936,6 +936,7 @@ const HOOKS: &[(&str, bool)] = &[
     ("fetch", false),
     ("pull", true),
     ("push", false),
+    ("push_ref", false),
     ("ls_remote", false),
     ("resolve_ref", false),
     ("is_ancestor", false),
@@ -1268,8 +1269,16 @@ const NOT_VERBS: &[(&str, &str)] = &[
         "the merge of a proposal replaces an entity's anchors; no verb does",
     ),
     (
-        "engine/checks_transport.rs::publish_checks",
-        "writes check records to the check-ledger ref, not to a mem's entities",
+        "engine/checks_home.rs::append_store_check_rows",
+        "writes check rows to a mem's checks ref, not to its entities",
+    ),
+    (
+        "engine/checks_transport.rs::commit_checks_on",
+        "writes check rows on a tracking ref for a push, not to a mem's entities",
+    ),
+    (
+        "engine/checks_transport.rs::fast_forward_checks",
+        "moves a mem's checks ref forward to rows it fetched, not its entities",
     ),
     (
         "engine/conflicts.rs::resolve_merge_conflict",
@@ -2046,8 +2055,22 @@ fn view(engine: &Engine, hashes: bool) -> BTreeMap<String, String> {
 ///   signature.
 /// - `discard_pending`: called on exits only; on a successful call
 ///   nothing is staged and its failure has nothing to leave behind.
+/// - `storage_present`: every reader takes a failed probe as storage
+///   that is present (a load, a reload, the drift probe), so the call
+///   goes on as if the probe had said so. Until check rows lived in the
+///   store, every merge cell of this matrix also carried a warning for
+///   a check the root-less engine could not record, which hid this.
+/// - `read_mem_config`: where a write already committed (the reload a
+///   proposal merge runs after its last commit), a failed read leaves
+///   the configuration the engine holds in place, by the reload's own
+///   rule ("never fails on a config read hiccup"); where a write needs
+///   the configuration before it commits, the failure refuses the write,
+///   which the refusal arm checks. Hidden until 0.29 by the same merge
+///   warning as `storage_present`.
 const ABSORBED: &[Method] = &[
     Method::CurrentHead,
+    Method::StoragePresent,
+    Method::ReadMemConfig,
     Method::ConfigHead,
     Method::WriteLockPath,
     Method::SetLockWait,

@@ -1730,8 +1730,9 @@ fn a_noop_landing_records_no_check_and_an_amend_alone_counts_as_an_update() {
 
 /// Once the last commit is on the branch the merge has landed, and a
 /// failure of the bookkeeping after it must not read as a refusal: with
-/// the check ledger unwritable (a directory sits where the ledger file
-/// goes), the merge returns an outcome, the commits and the record
+/// the mem's checks ref unwritable (a ref file sits where the checks
+/// namespace's directory goes, so no ref can be created under it), the
+/// merge returns an outcome, the commits and the record
 /// stand, every created or updated entity carries `check_recorded:
 /// false`, and the warnings name each check that was not recorded.
 #[test]
@@ -1740,7 +1741,12 @@ fn a_failure_after_the_last_commit_is_a_warning_on_a_landed_merge() {
     let gitdir = gitdir_of(tmp.path());
     let target_tip_before = sha_of(&gitdir, "refs/heads/specs").unwrap();
     let file = filled(&mut engine);
-    std::fs::create_dir_all(tmp.path().join(".memstead/state/checks/checks.jsonl")).unwrap();
+    std::fs::create_dir_all(gitdir.join("refs/memstead")).unwrap();
+    std::fs::write(
+        gitdir.join("refs/memstead/checks"),
+        format!("{target_tip_before}\n"),
+    )
+    .unwrap();
 
     let outcome = engine
         .proposal_merge("specs-fork", &file, Actor::Cli, None, None)

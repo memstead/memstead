@@ -4,10 +4,12 @@
 //! failed, via method M". It is engine state, never entity content:
 //! absent from markdown and `content_hash`, and it produces no mem
 //! commit — checking-touches-nothing is what makes check-staleness
-//! computable. Records are append-only JSONL under the workspace
-//! store (`.memstead/state/checks/checks.jsonl`); a newer check of
-//! the same kind supersedes older ones for state derivation but
-//! never erases them (kinds derive independently, see [`CheckKind`]).
+//! computable. Records are append-only JSONL: a git-branch mem's on
+//! its checks ref in the store that holds it (`engine::checks_home`),
+//! every other row in the workspace's ledger file
+//! (`.memstead/state/checks/checks.jsonl`); a newer check of the same
+//! kind supersedes older ones for state derivation but never erases
+//! them (kinds derive independently, see [`CheckKind`]).
 //!
 //! Unlike the friction ledger next door, recording here is NOT
 //! best-effort: a check the ledger failed to persist must refuse —
@@ -573,17 +575,74 @@ fn check_ledger_path(workspace_root: &Path) -> PathBuf {
     checks_dir(workspace_root).join("checks.jsonl")
 }
 
-/// Append/read handle for a workspace's check ledger.
+/// Read handle over the check rows a workspace sees, and append handle
+/// for its ledger file.
+///
+/// The rows come from two homes. A git-branch mem keeps its rows in the
+/// store that holds it, on its checks ref
+/// ([`crate::workspace::checks_ref_for_mem`]); the engine reads those and
+/// hands them in ([`Self::composed`]). Every other row (a folder mem's,
+/// rows a workspace held before the store was the home, rows of a
+/// read-only mount) is a line of the workspace's file. Every reading
+/// folds both, a row present in both counted once: a row is its bytes.
+/// Appends through this handle go to the file only; a store append is
+/// the engine's (`engine::checks_home`).
 #[derive(Debug, Clone)]
 pub struct CheckLedger {
-    path: PathBuf,
+    path: Option<PathBuf>,
+    store_rows: Vec<CheckRecord>,
 }
 
 impl CheckLedger {
     pub fn for_workspace(workspace_root: &Path) -> Self {
         Self {
-            path: check_ledger_path(workspace_root),
+            path: Some(check_ledger_path(workspace_root)),
+            store_rows: Vec::new(),
         }
+    }
+
+    /// The rows a workspace sees: its ledger file (when it has a root)
+    /// beside `store_rows`, the rows the stores of its mems hold.
+    pub fn composed(workspace_root: Option<&Path>, store_rows: Vec<CheckRecord>) -> Self {
+        Self {
+            path: workspace_root.map(check_ledger_path),
+            store_rows,
+        }
+    }
+
+    /// Parse transport lines (one JSON record per line); unparseable
+    /// lines are skipped, as a torn tail is.
+    pub fn parse_lines(bytes: &[u8]) -> Vec<CheckRecord> {
+        String::from_utf8_lossy(bytes)
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect()
+    }
+
+    /// The rows of the workspace file alone whose entity `mem` qualifies,
+    /// in file order: what a migration into the mem's store moves.
+    pub fn file_rows_for_mem(&self, mem: &str) -> Vec<CheckRecord> {
+        let prefix = format!("{mem}--");
+        self.file_lines()
+            .into_iter()
+            .filter(|r| r.entity.starts_with(&prefix))
+            .collect()
+    }
+
+    /// The byte length of the workspace file, `0` when it is absent: a
+    /// cheap marker of whether it gained lines since it was last read.
+    pub fn file_len(&self) -> u64 {
+        self.path
+            .as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .map(|m| m.len())
+            .unwrap_or(0)
+    }
+
+    fn file_path(&self) -> std::io::Result<&Path> {
+        self.path.as_deref().ok_or_else(|| {
+            std::io::Error::other("the engine has no workspace root, so no ledger file")
+        })
     }
 
     /// Append one record. One `write` syscall of one complete line on
@@ -591,30 +650,42 @@ impl CheckLedger {
     /// lines, never tear them. Errors propagate: a check that did not
     /// persist must refuse at the surface.
     pub fn record(&self, rec: &CheckRecord) -> std::io::Result<()> {
-        if let Some(dir) = self.path.parent() {
+        self.append_lines(std::slice::from_ref(rec))
+    }
+
+    /// Append records as one write of whole lines.
+    fn append_lines(&self, recs: &[CheckRecord]) -> std::io::Result<()> {
+        if recs.is_empty() {
+            return Ok(());
+        }
+        let path = self.file_path()?;
+        if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let mut line = serde_json::to_string(rec).map_err(std::io::Error::other)?;
-        line.push('\n');
+        let mut lines = String::new();
+        for rec in recs {
+            lines.push_str(&serde_json::to_string(rec).map_err(std::io::Error::other)?);
+            lines.push('\n');
+        }
         let mut f = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&self.path)?;
-        f.write_all(line.as_bytes())
+            .open(path)?;
+        f.write_all(lines.as_bytes())
     }
 
-    /// Append one check this engine just made, stamped so it never ties
-    /// with an earlier act on the same entity: `ts` is the engine's clock,
-    /// and when the entity's newest act already sits at or up to
+    /// Stamp one check this engine just made so it never ties with an
+    /// earlier act on the same entity: `ts` is the engine's clock, and
+    /// when the entity's newest act already sits at or up to
     /// [`LOCAL_TIE_WINDOW_SECS`] past it (a re-check within the same
     /// second as the last one, say after an edit), `ts` moves to one
     /// second past that act. Whole-second clocks would otherwise tie the
     /// two, and the tie would go to the rows' bytes, which could stand
     /// the check of the replaced content over the check just made. A
-    /// record whose caller stated `observed_at` is appended as stated:
-    /// the caller named the time of the act. Returns the record as
-    /// appended.
-    pub fn record_local(&self, mut rec: CheckRecord) -> std::io::Result<CheckRecord> {
+    /// record whose caller stated `observed_at` stays as stated: the
+    /// caller named the time of the act. The newest act is read over
+    /// every row this handle sees, the store's included.
+    pub fn stamp_local(&self, mut rec: CheckRecord) -> CheckRecord {
         if rec.observed_at.is_none() {
             let newest = self
                 .raw_lines()
@@ -629,19 +700,23 @@ impl CheckLedger {
                 rec.ts = newest + 1;
             }
         }
+        rec
+    }
+
+    /// [`Self::stamp_local`], then append the record to the file.
+    /// Returns the record as appended.
+    pub fn record_local(&self, rec: CheckRecord) -> std::io::Result<CheckRecord> {
+        let rec = self.stamp_local(rec);
         self.record(&rec)?;
         Ok(rec)
     }
 
-    /// Carry every record of `old` across a rename to `new`: each line
-    /// keyed by the old id is appended again under the new id with
-    /// `renamed_from` set, in ledger order, as one write of whole lines.
-    /// The originals stay — the ledger is append-only and they remain the
-    /// record of what was checked under that id. Returns the number of
-    /// lines carried; zero (and no write) when the old id has none.
-    pub fn carry_rename(&self, old: &str, new: &str) -> std::io::Result<usize> {
-        let carried: Vec<CheckRecord> = self
-            .raw_lines()
+    /// The lines a rename of `old` to `new` carries: each record keyed by
+    /// the old id, again under the new id with `renamed_from` set, in
+    /// ledger order (the file's lines, then the store's). The originals
+    /// stay where they are: the record of what was checked under that id.
+    pub fn carried_rename_rows(&self, old: &str, new: &str) -> Vec<CheckRecord> {
+        self.raw_lines()
             .into_iter()
             .filter(|r| r.entity == old)
             .map(|mut r| {
@@ -649,32 +724,54 @@ impl CheckLedger {
                 r.renamed_from = Some(old.to_string());
                 r
             })
-            .collect();
-        if carried.is_empty() {
-            return Ok(0);
-        }
-        let mut lines = String::new();
-        for rec in &carried {
-            lines.push_str(&serde_json::to_string(rec).map_err(std::io::Error::other)?);
-            lines.push('\n');
-        }
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)?;
-        f.write_all(lines.as_bytes())?;
+            .collect()
+    }
+
+    /// Carry every record of `old` across a rename to `new` into the file
+    /// ([`Self::carried_rename_rows`]), as one write of whole lines.
+    /// Returns the number of lines carried; zero (and no write) when the
+    /// old id has none.
+    pub fn carry_rename(&self, old: &str, new: &str) -> std::io::Result<usize> {
+        let carried = self.carried_rename_rows(old, new);
+        self.append_lines(&carried)?;
         Ok(carried.len())
     }
 
-    /// Carry the record that licensed a status transition across the
-    /// write it licensed: the newest record of `entity` under the wire
-    /// `kind` is appended again with `post_hash` as its `entity_hash` and
-    /// `carried_from: {hash: pre_hash, reason: "transition"}`, if and
-    /// only if it is fresh at `pre_hash` and confirming (`ok`). A stale
-    /// or failed record is not carried (it did not license anything),
-    /// and equal hashes carry nothing. Every other field stays the
-    /// original act's, identity included. Returns whether a line was
-    /// appended.
+    /// The line that carries the record which licensed a status
+    /// transition across the write it licensed: the newest record of
+    /// `entity` under the wire `kind`, with `post_hash` as its
+    /// `entity_hash` and `carried_from: {hash: pre_hash, reason:
+    /// "transition"}`, if and only if it is fresh at `pre_hash` and
+    /// confirming (`ok`). A stale or failed record carries nothing (it did
+    /// not license anything), and equal hashes carry nothing. Every other
+    /// field stays the original act's, identity included.
+    pub fn carried_transition_row(
+        &self,
+        entity: &str,
+        kind: &str,
+        pre_hash: &str,
+        post_hash: &str,
+    ) -> Option<CheckRecord> {
+        if pre_hash == post_hash {
+            return None;
+        }
+        let latest = self.latest_for_wire_kind(entity, kind)?;
+        if latest.entity_hash != pre_hash || latest.verdict != Verdict::Ok.as_str() {
+            return None;
+        }
+        let depth = latest
+            .carried_from
+            .as_ref()
+            .map_or(1, |c| c.chain_depth() + 1);
+        Some(CheckRecord {
+            entity_hash: post_hash.to_string(),
+            carried_from: Some(CarriedFrom::transition_at(pre_hash, depth)),
+            ..latest
+        })
+    }
+
+    /// Append the transition carry ([`Self::carried_transition_row`]) to
+    /// the file. Returns whether a line was appended.
     pub fn carry_transition(
         &self,
         entity: &str,
@@ -682,26 +779,13 @@ impl CheckLedger {
         pre_hash: &str,
         post_hash: &str,
     ) -> std::io::Result<bool> {
-        if pre_hash == post_hash {
-            return Ok(false);
+        match self.carried_transition_row(entity, kind, pre_hash, post_hash) {
+            Some(carried) => {
+                self.record(&carried)?;
+                Ok(true)
+            }
+            None => Ok(false),
         }
-        let Some(latest) = self.latest_for_wire_kind(entity, kind) else {
-            return Ok(false);
-        };
-        if latest.entity_hash != pre_hash || latest.verdict != Verdict::Ok.as_str() {
-            return Ok(false);
-        }
-        let depth = latest
-            .carried_from
-            .as_ref()
-            .map_or(1, |c| c.chain_depth() + 1);
-        let carried = CheckRecord {
-            entity_hash: post_hash.to_string(),
-            carried_from: Some(CarriedFrom::transition_at(pre_hash, depth)),
-            ..latest
-        };
-        self.record(&carried)?;
-        Ok(true)
     }
 
     /// The records of one mem's entities, in standing order
@@ -756,12 +840,30 @@ impl CheckLedger {
     /// in the outcome: ordered by time, a row from a machine with a wrong
     /// clock would otherwise stand for good.
     pub fn merge_transport_lines(&self, lines: &[u8], now: u64) -> std::io::Result<MergedRows> {
-        let present: std::collections::HashSet<String> = self
+        let (new_rows, refused) = self.new_transport_rows(lines, now);
+        self.append_lines(&new_rows)?;
+        Ok(MergedRows {
+            appended: new_rows.len(),
+            refused,
+        })
+    }
+
+    /// The rows of `lines` (the transport form) this handle does not hold
+    /// yet, in their order, with the rows dated beyond the clock skew
+    /// ahead of `now` refused and named ([`Self::merge_transport_lines`]).
+    /// Writes nothing.
+    pub fn new_transport_rows(
+        &self,
+        lines: &[u8],
+        now: u64,
+    ) -> (Vec<CheckRecord>, Vec<RefusedCheckRow>) {
+        let mut present: std::collections::HashSet<String> = self
             .raw_lines()
             .iter()
             .filter_map(|r| serde_json::to_string(r).ok())
             .collect();
-        let mut out = MergedRows::default();
+        let mut fresh = Vec::new();
+        let mut refused = Vec::new();
         for line in String::from_utf8_lossy(lines).lines() {
             let Ok(rec) = serde_json::from_str::<CheckRecord>(line) else {
                 continue;
@@ -773,7 +875,7 @@ impl CheckLedger {
                 continue;
             }
             if rec.act_time() > now.saturating_add(OBSERVED_AT_SKEW_SECS) {
-                out.refused.push(RefusedCheckRow {
+                refused.push(RefusedCheckRow {
                     entity: rec.entity.clone(),
                     kind: sealed_kind_of(&rec),
                     act_time: rec.act_time(),
@@ -787,10 +889,24 @@ impl CheckLedger {
                 });
                 continue;
             }
-            self.record(&rec)?;
-            out.appended += 1;
+            present.insert(canonical);
+            fresh.push(rec);
         }
-        Ok(out)
+        (fresh, refused)
+    }
+
+    /// The workspace file's lines, in file order.
+    fn file_lines(&self) -> Vec<CheckRecord> {
+        let Some(path) = self.path.as_ref() else {
+            return Vec::new();
+        };
+        let Ok(content) = std::fs::read_to_string(path) else {
+            return Vec::new();
+        };
+        content
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect()
     }
 
     /// The ledger's lines in arrival order. Private by construction:
@@ -801,13 +917,21 @@ impl CheckLedger {
     /// ledger is an empty one; unparseable lines are skipped (a torn tail
     /// must not poison the readable history).
     fn raw_lines(&self) -> Vec<CheckRecord> {
-        let Ok(content) = std::fs::read_to_string(&self.path) else {
-            return Vec::new();
-        };
-        content
-            .lines()
-            .filter_map(|l| serde_json::from_str(l).ok())
-            .collect()
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut rows = Vec::new();
+        for rec in self
+            .file_lines()
+            .into_iter()
+            .chain(self.store_rows.iter().cloned())
+        {
+            let Ok(canonical) = serde_json::to_string(&rec) else {
+                continue;
+            };
+            if seen.insert(canonical) {
+                rows.push(rec);
+            }
+        }
+        rows
     }
 
     /// Every record, in standing order: the one order every reader of a

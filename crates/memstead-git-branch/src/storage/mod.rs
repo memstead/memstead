@@ -54,6 +54,7 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     fetch: fetch_dispatch,
     pull: pull_dispatch,
     push: push_dispatch,
+    push_ref: crate::ops::transport::push_ref_in_gitdir,
     ls_remote: ls_remote_dispatch,
     resolve_ref: resolve_ref_dispatch,
     is_ancestor: is_ancestor_dispatch,

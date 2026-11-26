@@ -834,9 +834,7 @@ pub fn compose_health(
     // The strict axis, read off the sections rendered above and the
     // workspace check ledger. Last, so every section it reads is there.
     if args.strict {
-        let ledger = engine
-            .workspace_root()
-            .map(crate::check::CheckLedger::for_workspace);
+        let ledger = Some(engine.check_ledger_all());
         let axis = crate::ops::strict::compose_strict_axis(obj, ledger.as_ref(), vf);
         obj.insert(
             "strict".into(),

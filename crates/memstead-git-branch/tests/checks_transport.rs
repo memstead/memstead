@@ -1,9 +1,9 @@
-//! The check ledger travels with a pushed branch
-//! (`engine::checks_transport`): a push publishes the mem's ledger
-//! rows on the mem-repo's `__MEMSTEAD_CHECKS` ref, a pull on another
-//! machine unions them into its own ledger, an export made there seals
-//! them, two machines' rows merge by set union, and a round trip adds
-//! nothing. The remote is a plain bare repository.
+//! A mem's check rows travel with its pushed branch
+//! (`engine::checks_transport`): they live on the mem's checks ref in
+//! its store, a push publishes that ref beside the branch, a pull on
+//! another machine unites the remote's rows into its own store, an
+//! export made there seals them, two machines' rows merge by set union,
+//! and a round trip adds nothing. The remote is a plain bare repository.
 
 use std::path::{Path, PathBuf};
 
@@ -17,8 +17,8 @@ use memstead_git_branch::test_support::init_real_mem_repo;
 use memstead_git_branch::workspace_store::engine_from_workspace_root;
 use tempfile::TempDir;
 
-const CHECKS_REF: &str = "refs/heads/__MEMSTEAD_CHECKS";
-const MEMBER: &str = "mems/specs/checks.jsonl";
+const CHECKS_REF: &str = "refs/memstead/checks/specs";
+const MEMBER: &str = "checks.jsonl";
 
 fn gitdir_of(root: &Path) -> PathBuf {
     root.join("mem-repo").join(".git").canonicalize().unwrap()
@@ -71,9 +71,13 @@ fn check(engine: &mut memstead_base::Engine, identity: &str, id: &EntityId) {
     engine.set_identity(None);
 }
 
+/// The rows the workspace at `root` sees for `specs`: its store's and
+/// its ledger file's, each once.
 fn ledger_lines(root: &Path) -> Vec<String> {
-    memstead_base::check::CheckLedger::for_workspace(root)
-        .in_standing_order()
+    engine_from_workspace_root(root)
+        .unwrap()
+        .check_records("specs")
+        .0
         .iter()
         .map(|r| serde_json::to_string(r).unwrap())
         .collect()
@@ -113,7 +117,8 @@ fn fixture() -> (TempDir, TempDir) {
     (a, remote)
 }
 
-/// A second machine: a copy of A's workspace with no ledger of its own.
+/// A second machine: a copy of A's workspace with no check rows of its
+/// own (no ledger file, no checks ref in its store).
 fn clone_workspace(a: &Path) -> TempDir {
     let b = TempDir::new().unwrap();
     let status = std::process::Command::new("cp")
@@ -133,6 +138,13 @@ fn clone_workspace(a: &Path) -> TempDir {
     if ledger.exists() {
         std::fs::remove_file(&ledger).unwrap();
     }
+    let status = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(gitdir_of(b.path()))
+        .args(["update-ref", "-d", CHECKS_REF])
+        .status()
+        .unwrap();
+    assert!(status.success());
     b
 }
 
@@ -346,13 +358,8 @@ fn a_push_keeps_and_names_the_rows_its_import_refused() {
         check(&mut engine_b, "clock-ahead", &alpha);
     }
     // Move B's own row an hour ahead, as a wrong clock would have.
-    let ledger = b
-        .path()
-        .join(".memstead")
-        .join("state")
-        .join("checks")
-        .join("checks.jsonl");
-    let text = std::fs::read_to_string(&ledger).unwrap();
+    let gitdir_b = gitdir_of(b.path());
+    let text = member_at(&gitdir_b, CHECKS_REF).unwrap();
     let ahead = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -368,7 +375,16 @@ fn a_push_keeps_and_names_the_rows_its_import_refused() {
             format!("{v}\n")
         })
         .collect();
-    std::fs::write(&ledger, rewritten).unwrap();
+    let writer = GitTreeBackend::new(gitdir_b.clone(), CHECKS_REF.to_string());
+    writer
+        .write_entity(Path::new(MEMBER), rewritten.as_bytes())
+        .unwrap();
+    writer
+        .commit(
+            "test: a wrong clock",
+            &memstead_base::vcs::CommitContext::internal(),
+        )
+        .unwrap();
     {
         let engine_b = engine_from_workspace_root(b.path()).unwrap();
         engine_b.push("specs", "hub", false).unwrap();

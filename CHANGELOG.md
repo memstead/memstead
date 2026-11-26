@@ -7,6 +7,46 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **A git-branch mem keeps its check records in its store.** Until
+  0.28.0 every check landed in the ledger file of the workspace that
+  recorded it (`.memstead/state/checks/checks.jsonl`), and the store
+  carried a mem's rows only as last published by a `push`. Measured on
+  0.28.0 with a store and two workspaces that mount one of its mems:
+  a check recorded through one workspace read `never_checked` in the
+  other, in the store's own workspace and through `entity
+  --provenance` there, and a copy of the mem-repo carried no check at
+  all. A git-branch mem's rows now live on one ref per mem beside its
+  branch, `refs/memstead/checks/<mem>`, in the mem-repo that holds it.
+  Every workspace that mounts the mem reads the same rows and the same
+  standing from there, an engine already running reads a new row at
+  its next operation, a mirror of the mem-repo carries them, and
+  `memstead mem mount --remote` brings an adopted mem's rows with its
+  branch. A check still moves no mem branch, no registry ref and no
+  content hash. Concurrent recorders in several engines and workspaces
+  never lose a row: an append that lost the race to another writer
+  reads again and retries. `push` pushes the mem's checks ref beside
+  the branch (`push --all` every mounted mem's), `fetch` and `pull`
+  unite the remote's rows into the local ref; a row dated more than
+  five minutes ahead is still refused, named, and kept on the remote.
+  The single `__MEMSTEAD_CHECKS` branch earlier engines published is
+  still read on a fetch or pull and no longer written. A folder mem, a
+  read-only mount and a workspace without git-branch storage keep
+  their rows in the workspace's ledger file, which every reading still
+  folds in.
+
+- **Migration of existing check rows.** The rows a workspace's ledger
+  file holds for its writable git-branch mems move into those mems'
+  stores when an engine of this version first opens the workspace, and
+  again whenever the file grew since (an older engine appended to it).
+  `memstead checks --migrate` runs the move on demand and reports it
+  per mem. The move is idempotent and the file keeps its lines; a row
+  present in both is read once. Before upgrading a store that several
+  workspaces write, keep every workspace's state directory until the
+  new engine has opened it, or run `memstead checks --migrate` in it:
+  rows of a workspace deleted first are not in the store.
+
 ### Fixed
 
 - **A running engine follows a schema pin that another workspace

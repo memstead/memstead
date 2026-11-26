@@ -78,8 +78,16 @@ pub struct MemMountResponse {
     /// Whether the mem's registry entry was written into the
     /// workspace's own mem-repo by this mount.
     pub config_written: bool,
+    /// Check rows of the mem brought from the remote's checks ref (a
+    /// mount from a remote adopts the mem's checks with its branch).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub checks_imported: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<crate::ops::WarningHint>,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 const REGISTRY_REF: &str = "refs/heads/__MEMSTEAD";
@@ -434,6 +442,26 @@ pub fn mount_mem(
         });
     }
 
+    // A mem adopted from a remote brings its check rows: the remote's
+    // checks ref of the mem, united into where the mem's rows live now.
+    let mut checks_imported = 0;
+    if let MountSource::Remote { remote } = &params.source
+        && let Some(hook) = engine.git_branch_ops()
+    {
+        let merged = engine
+            .import_checks(&hook, &gitdir, remote, &[params.name.as_str()])
+            .map_err(|e| {
+                crate::EngineError::Mem(format!(
+                    "mem {:?} is mounted; its check rows were not brought from `{remote}` ({}); \
+                     run `memstead fetch {}` to bring them",
+                    params.name,
+                    e.prose_render(),
+                    params.name
+                ))
+            })?;
+        checks_imported = merged.appended;
+    }
+
     let mut warnings: Vec<crate::ops::WarningHint> = Vec::new();
     if engine.settings().mutations.require_notes.unwrap_or(false)
         && params.note.as_deref().is_none_or(|n| n.trim().is_empty())
@@ -455,6 +483,7 @@ pub fn mount_mem(
         head,
         fetched,
         config_written,
+        checks_imported,
         warnings,
     })
 }

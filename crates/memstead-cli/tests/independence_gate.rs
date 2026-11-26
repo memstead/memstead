@@ -748,8 +748,7 @@ fn an_edge_whitespace_change_beside_the_transition_refuses() {
         let root = ws.path();
         create(root, "identity-a", "plan", "The Plan", None);
         approve(root, "identity-c");
-        let ledger = root.join(".memstead/state/checks/checks.jsonl");
-        let before = fs::read_to_string(&ledger).unwrap();
+        let before = ledger_text(root, "plans").unwrap();
         let out = cli(
             root,
             &[
@@ -773,7 +772,7 @@ fn an_edge_whitespace_change_beside_the_transition_refuses() {
         );
         let env: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(env["code"], "CONSTRAINT_UNSATISFIED", "{env}");
-        assert_eq!(fs::read_to_string(&ledger).unwrap(), before);
+        assert_eq!(ledger_text(root, "plans").unwrap(), before);
     }
 }
 
@@ -1405,5 +1404,30 @@ fn the_first_author_survives_a_rename_on_both_backends() {
             Some(serde_json::json!("identity-a")),
             "git_branch {git_branch}: {v}"
         );
+    }
+}
+
+/// The check rows a workspace holds for `mem`, in the transport form: the
+/// lines of its ledger file, then the lines of the mem's checks ref in
+/// the workspace's own mem-repo. `Err` when neither exists.
+#[allow(dead_code)]
+fn ledger_text(root: &std::path::Path, mem: &str) -> std::io::Result<String> {
+    let file = std::fs::read_to_string(root.join(".memstead/state/checks/checks.jsonl"));
+    let gitdir = root.join("mem-repo").join(".git");
+    let from_ref = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&gitdir)
+        .args(["show", &format!("refs/memstead/checks/{mem}:checks.jsonl")])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    match (file, from_ref) {
+        (Err(e), None) => Err(e),
+        (file, from_ref) => Ok(format!(
+            "{}{}",
+            file.unwrap_or_default(),
+            from_ref.unwrap_or_default()
+        )),
     }
 }

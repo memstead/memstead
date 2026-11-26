@@ -2961,14 +2961,7 @@ fn check_operation_records_derives_state_and_mutates_nothing() {
     );
     assert!(failed["isError"] != true, "{failed}");
     assert_eq!(failed["structuredContent"]["check_state"], "check_failed");
-    let ledger = std::fs::read_to_string(
-        tmp.path()
-            .join(".memstead")
-            .join("state")
-            .join("checks")
-            .join("checks.jsonl"),
-    )
-    .expect("check ledger exists");
+    let ledger = ledger_text(tmp.path(), "specs").expect("check ledger exists");
     assert_eq!(
         ledger.lines().count(),
         3,
@@ -4225,4 +4218,29 @@ fn mem_delete_removes_neither_the_workspace_directory_nor_another_stores_branch(
         );
     }
     assert_eq!(branch_tip(), before, "the store's branch stays");
+}
+
+/// The check rows a workspace holds for `mem`, in the transport form: the
+/// lines of its ledger file, then the lines of the mem's checks ref in
+/// the workspace's own mem-repo. `Err` when neither exists.
+#[allow(dead_code)]
+fn ledger_text(root: &std::path::Path, mem: &str) -> std::io::Result<String> {
+    let file = std::fs::read_to_string(root.join(".memstead/state/checks/checks.jsonl"));
+    let gitdir = root.join("mem-repo").join(".git");
+    let from_ref = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&gitdir)
+        .args(["show", &format!("refs/memstead/checks/{mem}:checks.jsonl")])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    match (file, from_ref) {
+        (Err(e), None) => Err(e),
+        (file, from_ref) => Ok(format!(
+            "{}{}",
+            file.unwrap_or_default(),
+            from_ref.unwrap_or_default()
+        )),
+    }
 }

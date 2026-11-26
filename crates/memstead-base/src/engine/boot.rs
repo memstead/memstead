@@ -654,6 +654,7 @@ impl Engine {
             schemas_epoch: 0,
             git_branch_ops: None,
             defer_transition_gates: false,
+            checks_cache: Default::default(),
             event_subscribers: Arc::new(std::sync::Mutex::new(
                 crate::engine::events::SubscriberRegistry::new(),
             )),

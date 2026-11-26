@@ -248,8 +248,7 @@ fn a_plain_clone_is_restored_by_pull_all() {
     for id in ["knowledge--first-note", "kitchen--stove"] {
         assert_eq!(entity_hash(&f.a, id), entity_hash(&f.b, id), "{id}");
     }
-    let ledger = fs::read_to_string(f.b.join(".memstead/state/checks/checks.jsonl"))
-        .expect("the check rows arrive with the pull");
+    let ledger = ledger_text(&f.b, "knowledge").expect("the check rows arrive with the pull");
     assert!(ledger.contains("knowledge--first-note"), "{ledger}");
 
     // In sync both ways now: nothing to push, nothing stale.
@@ -1138,4 +1137,29 @@ fn a_config_file_both_clones_changed_refuses_naming_it() {
     assert!(text.contains("mems/kitchen/config.json"), "{text}");
     let after = git(&b.join("mem-repo"), &["rev-parse", "refs/heads/__MEMSTEAD"]);
     assert_eq!(before, after, "the ref was not moved");
+}
+
+/// The check rows a workspace holds for `mem`, in the transport form: the
+/// lines of its ledger file, then the lines of the mem's checks ref in
+/// the workspace's own mem-repo. `Err` when neither exists.
+#[allow(dead_code)]
+fn ledger_text(root: &std::path::Path, mem: &str) -> std::io::Result<String> {
+    let file = std::fs::read_to_string(root.join(".memstead/state/checks/checks.jsonl"));
+    let gitdir = root.join("mem-repo").join(".git");
+    let from_ref = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&gitdir)
+        .args(["show", &format!("refs/memstead/checks/{mem}:checks.jsonl")])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    match (file, from_ref) {
+        (Err(e), None) => Err(e),
+        (file, from_ref) => Ok(format!(
+            "{}{}",
+            file.unwrap_or_default(),
+            from_ref.unwrap_or_default()
+        )),
+    }
 }

@@ -45,6 +45,8 @@ use tempfile::TempDir;
 /// The mem the view mounts writable, and its branch.
 const WRITE_BRANCH: &str = "refs/heads/notes";
 const REGISTRY_REF: &str = "refs/heads/__MEMSTEAD";
+/// Where the write mount's check rows live, beside its branch.
+const WRITE_CHECKS_REF: &str = "refs/memstead/checks/notes";
 
 /// A mem of the store the view does not mount, and a name no mem has.
 const UNMOUNTED: &str = "annex";
@@ -583,7 +585,7 @@ enum Expect {
     MayWrite,
     /// Must answer and move the write mount's branch.
     Writes,
-    /// Must answer and write the view's own check ledger; no ref moves.
+    /// Must answer and move the write mount's checks ref, and no other.
     Records,
     /// Must answer and move the registry ref, where the settings of a
     /// mem live, and no other.
@@ -599,11 +601,13 @@ impl Expect {
 
     fn refs_that_may_move(self) -> &'static [&'static str] {
         match self {
-            Expect::Reads | Expect::Refuses | Expect::Records => &[],
+            Expect::Reads | Expect::Refuses => &[],
+            Expect::Records => &[WRITE_CHECKS_REF],
             // The registry ref beside the branch: the engine stamps its
             // version into the mem's configuration after an entity
-            // write.
-            Expect::MayWrite | Expect::Writes => &[WRITE_BRANCH, REGISTRY_REF],
+            // write. The checks ref: a gated write carries the check
+            // that licensed it.
+            Expect::MayWrite | Expect::Writes => &[WRITE_BRANCH, REGISTRY_REF, WRITE_CHECKS_REF],
             Expect::Sets => &[REGISTRY_REF],
         }
     }
@@ -1132,12 +1136,7 @@ fn observe(
             let (wrote, place) = match probe.expect {
                 Expect::Writes => (moved(WRITE_BRANCH), "the write mount's branch"),
                 Expect::Sets => (moved(REGISTRY_REF), "the registry ref"),
-                _ => (
-                    changed_view
-                        .iter()
-                        .any(|path| path.starts_with(".memstead/state/checks/")),
-                    "the view's check ledger",
-                ),
+                _ => (moved(WRITE_CHECKS_REF), "the write mount's checks ref"),
             };
             if !wrote {
                 violations.push(format!(

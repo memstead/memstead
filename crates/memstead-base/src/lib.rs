@@ -76,7 +76,7 @@ pub use engine::{
     EntityTouch, ExpectedHash, FromArchiveBytesError, GitBranchBranchResetFn,
     GitBranchChangesSinceFn, GitBranchCreateBranchAtFn, GitBranchDiffFn, GitBranchExportFn,
     GitBranchExportToBytesFn, GitBranchFetchFn, GitBranchLsRemoteFn, GitBranchMergeDisjointFn,
-    GitBranchOps, GitBranchPullFn, GitBranchPushFn, GitBranchReadConfigAtRefFn,
+    GitBranchOps, GitBranchPullFn, GitBranchPushFn, GitBranchPushRefFn, GitBranchReadConfigAtRefFn,
     GitBranchReadTreeFn, GitBranchResolveRefFn, HISTORY_PAGE_DEFAULT, HISTORY_PAGE_MAX,
     HashOverride, INLINE_LIST_CAP, MutationClock, ReferrerInfo, RelateAction, RelateEntityArgs,
     RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome, RetypeEdge, RetypeEdgeDirection,
@@ -117,11 +117,12 @@ pub use pipeline_store::{BindingConfigs, MemPipelineRecord, load_pipeline_config
 pub use provenance::{Provenance, ProvenanceKind};
 pub use store::{Edge, EdgeSource, InEdge, Store};
 pub use workspace::{
-    CreateRuleSetting, DeleteRuleSetting, MEMSTEAD_CHECKS_REF_BRANCH, MEMSTEAD_REF_BRANCH, Mount,
-    MountCapability, MountLifecycle, MountStorage, MountedPins, SCHEMA_WILDCARD, SchemaRegistry,
-    Workspace, WorkspaceSettings, branch_full_ref, branch_short_name, checks_ref_member_path,
-    lives_in_another_git_directory, pin_is_held_where_the_mem_lives, schema_registries,
-    schema_registry_gitdirs,
+    CHECKS_REF_FILE, CreateRuleSetting, DeleteRuleSetting, MEMSTEAD_CHECKS_REF_BRANCH,
+    MEMSTEAD_CHECKS_REF_PREFIX, MEMSTEAD_REF_BRANCH, Mount, MountCapability, MountLifecycle,
+    MountStorage, MountedPins, SCHEMA_WILDCARD, SchemaRegistry, Workspace, WorkspaceSettings,
+    branch_full_ref, branch_short_name, checks_ref_for_mem, checks_ref_member_path,
+    checks_tracking_ref, lives_in_another_git_directory, pin_is_held_where_the_mem_lives,
+    schema_registries, schema_registry_gitdirs,
 };
 pub use workspace_store::{
     FileWorkspaceStore, InstantiateError, Layout, StoreError, WORKSPACE_STORE_DIR,

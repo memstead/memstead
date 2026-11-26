@@ -34,6 +34,7 @@ pub mod archive;
 pub mod boot;
 pub mod callers;
 pub mod check_ops;
+pub mod checks_home;
 pub mod checks_transport;
 pub mod conflicts;
 pub mod drift;
@@ -446,6 +447,11 @@ pub struct Engine {
     /// entity once, after both are prepared, and the per-step reading is
     /// deferred ([`Self::gate_transition_forms`]).
     pub(crate) defer_transition_gates: bool,
+    /// The check rows each git-branch mem's store holds, read through
+    /// the mem's checks ref and kept per (git directory, mem) with the
+    /// ref's tip they were read at; a read whose tip moved reads again
+    /// ([`Self::store_check_rows`]).
+    pub(crate) checks_cache: std::sync::Mutex<checks_home::ChecksCache>,
     /// Per-mem subscriber registry for [`MemChangedEvent`]s. Held
     /// behind `Arc<Mutex<_>>` so [`SubscriptionHandle`]s — which own
     /// the consumer's view of the subscription lifetime — can call
@@ -730,6 +736,14 @@ pub type GitBranchPullFn = fn(
     mem: &str,
 ) -> Result<crate::ops::PullOutcome, BackendError>;
 
+/// Push the local ref `src` to the ref `dst` on `remote`, fast-forward
+/// only, returning the sha the remote now holds at `dst`. A refusal for
+/// a non-fast-forward is `NON_FAST_FORWARD:<dst>:<remote>`, as
+/// [`GitBranchPushFn`]'s. The check rows' publish uses it to push a
+/// commit it built on the tracking ref.
+pub type GitBranchPushRefFn =
+    fn(gitdir: &Path, remote: &str, src: &str, dst: &str) -> Result<String, BackendError>;
+
 /// `Engine::push` dispatch for git-branch mounts. `branch` is the
 /// mount's declared branch (see [`GitBranchPullFn`]); `mem` labels
 /// the outcome only.
@@ -970,6 +984,7 @@ pub struct GitBranchOps {
     pub fetch: GitBranchFetchFn,
     pub pull: GitBranchPullFn,
     pub push: GitBranchPushFn,
+    pub push_ref: GitBranchPushRefFn,
     pub ls_remote: GitBranchLsRemoteFn,
     pub resolve_ref: GitBranchResolveRefFn,
     pub is_ancestor: GitBranchIsAncestorFn,

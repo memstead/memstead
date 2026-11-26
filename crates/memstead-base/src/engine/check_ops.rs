@@ -3,7 +3,9 @@
 //! `record_check` is the engine-recorded act of verification: it
 //! appends one [`crate::check::CheckRecord`] — verdict, method note,
 //! the entity's `content_hash` at check time, and provenance
-//! (actor, client, declared role) — to the workspace check ledger.
+//! (actor, client, declared role) — where the mem's rows live: the
+//! mem's checks ref in its store for a git-branch mem, the workspace's
+//! ledger file otherwise (`engine::checks_home`).
 //! Checking mutates nothing: no entity write, no mem commit, no
 //! `content_hash` change. That non-mutation is load-bearing — it is
 //! what makes check-staleness derivable by hash comparison.
@@ -14,7 +16,7 @@
 //! [`crate::check::derive_state`] so surfaces and health share one
 //! implementation.
 
-use crate::check::{CheckKind, CheckLedger, CheckRecord, CheckState, Verdict, derive_state};
+use crate::check::{CheckKind, CheckRecord, CheckState, Verdict, derive_state};
 use crate::vcs::{Actor, ClientId};
 
 use super::{Engine, error::EngineError};
@@ -149,12 +151,14 @@ impl Engine {
             .find(|e| e.mem == mem_name && e.id.0 == entity_id)
             .map(|e| e.content_hash.clone())
             .ok_or_else(|| self.not_found(entity_id))?;
-        let Some(root) = self.workspace_root() else {
+        if self.check_home(mem_name) == super::checks_home::CheckHome::File
+            && self.workspace_root().is_none()
+        {
             return Err(EngineError::CheckNotRecorded {
                 reason: "engine has no workspace root — no durable check store".to_string(),
             });
-        };
-        let ledger = CheckLedger::for_workspace(root);
+        }
+        let ledger = self.check_ledger_for_mem(mem_name);
         let record = CheckRecord {
             ts: now,
             observed_at,
@@ -194,11 +198,9 @@ impl Engine {
                 .last_write(entity_id)
                 .map(str::to_string),
         };
-        ledger
-            .record_local(record)
-            .map_err(|e| EngineError::CheckNotRecorded {
-                reason: format!("ledger append failed: {e}"),
-            })
+        let record = ledger.stamp_local(record);
+        self.append_check_rows(mem_name, std::slice::from_ref(&record))?;
+        Ok(record)
     }
 
     /// The check records of one mem's entities, in standing order
@@ -217,19 +219,14 @@ impl Engine {
     /// second value says whether the mem is mounted now.
     pub fn check_records(&self, mem_name: &str) -> (Vec<CheckRecord>, bool) {
         let mounted = self.mounts.iter().any(|m| m.mount.mem == mem_name);
-        let rows = self
-            .workspace_root()
-            .map(|root| CheckLedger::for_workspace(root).rows_for_mem(mem_name))
-            .unwrap_or_default();
+        let rows = self.check_ledger_for_mem(mem_name).rows_for_mem(mem_name);
         (rows, mounted)
     }
 
     /// Every record of the workspace ledger, in standing order, whatever mem
     /// the entity belongs to and whether that mem is mounted.
     pub fn check_records_all(&self) -> Vec<CheckRecord> {
-        self.workspace_root()
-            .map(|root| CheckLedger::for_workspace(root).in_standing_order())
-            .unwrap_or_default()
+        self.check_ledger_all().in_standing_order()
     }
 
     /// Carry the check ledger across a rename: every line recorded under
@@ -248,14 +245,17 @@ impl Engine {
         old: &crate::entity::EntityId,
         new: &crate::entity::EntityId,
     ) -> Result<usize, EngineError> {
-        let Some(root) = self.workspace_root() else {
-            return Ok(0);
-        };
-        CheckLedger::for_workspace(root)
-            .carry_rename(old.as_ref(), new.as_ref())
+        let carried = self
+            .check_ledger_for_mem(old.mem())
+            .carried_rename_rows(old.as_ref(), new.as_ref());
+        self.append_check_rows(new.mem(), &carried)
             .map_err(|e| EngineError::CheckNotRecorded {
-                reason: format!("ledger carry across rename {old} → {new} failed: {e}"),
-            })
+                reason: format!(
+                    "ledger carry across rename {old} → {new} failed: {}",
+                    e.prose_render()
+                ),
+            })?;
+        Ok(carried.len())
     }
 
     /// The write-time reading of both transition forms. A form gates only
@@ -470,20 +470,21 @@ impl Engine {
         if kinds.is_empty() || pre_hash == post_hash {
             return Ok(0);
         }
-        let Some(root) = self.workspace_root() else {
-            return Ok(0);
-        };
-        let ledger = CheckLedger::for_workspace(root);
+        let ledger = self.check_ledger_for_mem(id.mem());
         let mut carried = 0;
         for kind in kinds {
-            let moved = ledger
-                .carry_transition(id.as_ref(), kind, pre_hash, post_hash)
+            let Some(row) = ledger.carried_transition_row(id.as_ref(), kind, pre_hash, post_hash)
+            else {
+                continue;
+            };
+            self.append_check_rows(id.mem(), std::slice::from_ref(&row))
                 .map_err(|e| EngineError::CheckNotRecorded {
                     reason: format!(
-                        "ledger carry of the `{kind}` record across the transition of {id} failed: {e}"
+                        "ledger carry of the `{kind}` record across the transition of {id} failed: {}",
+                        e.prose_render()
                     ),
                 })?;
-            carried += usize::from(moved);
+            carried += 1;
         }
         Ok(carried)
     }
@@ -509,9 +510,8 @@ impl Engine {
                 .and_then(|sealed| sealed.latest(path.path(), kind))
                 .map(|sc| sc.to_record(entity_id, kind));
         }
-        self.workspace_root()
-            .map(CheckLedger::for_workspace)
-            .and_then(|l| l.latest_for_wire_kind(entity_id, kind))
+        self.check_ledger_for_mem(mem_name)
+            .latest_for_wire_kind(entity_id, kind)
     }
 
     /// The newest record per foreign `x-<name>` kind of one entity, in
@@ -531,9 +531,7 @@ impl Engine {
                 })
                 .unwrap_or_default();
         }
-        let Some(ledger) = self.workspace_root().map(CheckLedger::for_workspace) else {
-            return Vec::new();
-        };
+        let ledger = self.check_ledger_for_mem(mem_name);
         let mut latest: std::collections::BTreeMap<String, CheckRecord> =
             std::collections::BTreeMap::new();
         for rec in ledger.in_standing_order() {

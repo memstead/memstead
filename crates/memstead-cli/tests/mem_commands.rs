@@ -2845,9 +2845,8 @@ fn check_observed_at_is_stored_beside_the_write_time() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     make_anchor_workspace(root);
-    let ledger = root.join(".memstead/state/checks/checks.jsonl");
     let lines = || {
-        fs::read_to_string(&ledger)
+        ledger_text(root, "hold")
             .map(|t| t.lines().count())
             .unwrap_or(0)
     };
@@ -2877,7 +2876,7 @@ fn check_observed_at_is_stored_beside_the_write_time() {
     assert!(v["ts"].as_u64().unwrap() > 1_792_396_800, "{v}");
     assert_eq!(lines(), 1);
     assert!(
-        fs::read_to_string(&ledger)
+        ledger_text(root, "hold")
             .unwrap()
             .contains("\"observed_at\":1792396800"),
         "the ledger line carries the stated time"
@@ -2908,9 +2907,14 @@ fn check_observed_at_is_stored_beside_the_write_time() {
     assert_eq!(v["checks"][0]["observed_at"], 1_792_281_600, "{v}");
     assert!(v["checks"][1]["observed_at"].is_null(), "{v}");
     assert_eq!(lines(), 3);
-    let raw = fs::read_to_string(&ledger).unwrap();
+    let raw = ledger_text(root, "hold").unwrap();
+    // The store keeps its lines in the transport order (by time, then
+    // bytes), so the undated line is found by its kind, not its place.
     assert!(
-        !raw.lines().nth(2).unwrap().contains("observed_at"),
+        !raw.lines()
+            .find(|l| l.contains("\"kind\":\"x-question\""))
+            .unwrap()
+            .contains("observed_at"),
         "an undated line carries no key: {raw}"
     );
 
@@ -3138,9 +3142,8 @@ fn check_findings_persist_and_open_kinds_are_recorded_not_interpreted() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     make_anchor_workspace(root);
-    let ledger = root.join(".memstead/state/checks/checks.jsonl");
     let lines = || {
-        fs::read_to_string(&ledger)
+        ledger_text(root, "hold")
             .map(|t| t.lines().count())
             .unwrap_or(0)
     };
@@ -3171,7 +3174,7 @@ fn check_findings_persist_and_open_kinds_are_recorded_not_interpreted() {
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["checks"][0]["finding"]["code"], "hidden-premise", "{v}");
     assert_eq!(lines(), 1);
-    let line = fs::read_to_string(&ledger).unwrap();
+    let line = ledger_text(root, "hold").unwrap();
     assert!(
         line.contains("\"finding\":{\"code\":\"hidden-premise\""),
         "{line}"
@@ -4840,4 +4843,29 @@ fn verify_anchors_backfills_hashless_anchor_and_recheck_drains() {
         v2["hash_backfilled"], 0,
         "idempotent — nothing staged: {v2}"
     );
+}
+
+/// The check rows a workspace holds for `mem`, in the transport form: the
+/// lines of its ledger file, then the lines of the mem's checks ref in
+/// the workspace's own mem-repo. `Err` when neither exists.
+#[allow(dead_code)]
+fn ledger_text(root: &std::path::Path, mem: &str) -> std::io::Result<String> {
+    let file = std::fs::read_to_string(root.join(".memstead/state/checks/checks.jsonl"));
+    let gitdir = root.join("mem-repo").join(".git");
+    let from_ref = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&gitdir)
+        .args(["show", &format!("refs/memstead/checks/{mem}:checks.jsonl")])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    match (file, from_ref) {
+        (Err(e), None) => Err(e),
+        (file, from_ref) => Ok(format!(
+            "{}{}",
+            file.unwrap_or_default(),
+            from_ref.unwrap_or_default()
+        )),
+    }
 }

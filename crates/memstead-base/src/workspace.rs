@@ -115,18 +115,39 @@ impl Mount {
 /// name.
 pub const MEMSTEAD_REF_BRANCH: &str = "__MEMSTEAD";
 
-/// Branch name of the mem-repo's check-ledger transport ref: one tree
-/// with `mems/<mem>/checks.jsonl` per mem, the mem's rows of the
-/// workspace check ledger as last published. Not a mem and not the
-/// ledger's home: the ledger stays the workspace file, and this ref
-/// is how its rows travel between machines with `push`, `fetch` and
-/// `pull` (the engine unions rows, never rewrites them). Never
-/// mounted; `status --remote` does not classify it.
+/// Branch name of the check-ledger transport ref engines before 0.29
+/// published: one tree with `mems/<mem>/checks.jsonl` per mem. Read on
+/// fetch and pull from a remote that still carries it, never written:
+/// a git-branch mem's rows live on its own ref in its store
+/// ([`checks_ref_for_mem`]). Never mounted; `status --remote` does not
+/// classify it.
 pub const MEMSTEAD_CHECKS_REF_BRANCH: &str = "__MEMSTEAD_CHECKS";
 
-/// The path of one mem's ledger rows on the checks transport ref.
+/// The path of one mem's ledger rows on the old checks transport ref.
 pub fn checks_ref_member_path(mem: &str) -> String {
     format!("mems/{mem}/checks.jsonl")
+}
+
+/// The ref namespace of the store-held check rows: one ref per mem,
+/// outside `refs/heads/`, so it never lists as a branch and never
+/// clashes with a mem's branch name.
+pub const MEMSTEAD_CHECKS_REF_PREFIX: &str = "refs/memstead/checks/";
+
+/// The file each mem's checks ref carries: the mem's rows in the
+/// transport form, one JSON record per line.
+pub const CHECKS_REF_FILE: &str = "checks.jsonl";
+
+/// The ref in a mem's store that holds the mem's check rows. A mem name
+/// containing `/` stays one ref path.
+pub fn checks_ref_for_mem(mem: &str) -> String {
+    format!("{MEMSTEAD_CHECKS_REF_PREFIX}{mem}")
+}
+
+/// Where a fetch from `remote` places that remote's checks ref of `mem`
+/// before its rows are united into the local one: outside
+/// `refs/remotes/`, so no remote-tracking reading classifies it.
+pub fn checks_tracking_ref(remote: &str, mem: &str) -> String {
+    format!("refs/memstead/remotes/{remote}/checks/{mem}")
 }
 
 /// A mount's declared branch as a fully-qualified local ref. The

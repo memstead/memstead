@@ -420,10 +420,8 @@ pub fn health_checks_axis(
     // newest record of any kind (for its finding), the foreign kinds.
     // State is kind-scoped: a conformance record never supersedes a
     // verification record, or the reverse.
-    let ledger_records: Vec<crate::check::CheckRecord> = engine
-        .workspace_root()
-        .map(|root| crate::check::CheckLedger::for_workspace(root).in_standing_order())
-        .unwrap_or_default();
+    let ledger_records: Vec<crate::check::CheckRecord> =
+        engine.check_ledger_all().in_standing_order();
     let from_ledger = CheckMaps::from_records(ledger_records.iter());
 
     let mut mems: Vec<String> = engine.mem_names().iter().map(|s| s.to_string()).collect();

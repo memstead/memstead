@@ -97,18 +97,21 @@ pub struct Args {
 
 /// `memstead checks`: list check records, every row, every kind, in
 /// standing order (the order the newest record is read from), with
-/// optional filters; one mem's
-/// rows with `--mem`, the whole workspace ledger without. Read-only; the
-/// read a consumer takes instead of parsing
-/// `.memstead/state/checks/checks.jsonl` itself, so the line shape can
-/// grow without breaking anyone. Serves the workspace ledger; an archive
-/// mount's sealed records stay under `entity <id> --provenance`.
+/// optional filters; one mem's rows with `--mem`, every row this
+/// workspace sees without. Read-only; the read a consumer takes instead
+/// of parsing the rows itself, so the line shape and the place they live
+/// can change without breaking anyone. A git-branch mem's rows live in
+/// its store, on the mem's checks ref, where every workspace that mounts
+/// the mem reads them; the workspace's ledger file holds the rest (a
+/// folder mem's, a read-only mount's, rows of earlier engines). An
+/// archive mount's sealed records stay under `entity <id> --provenance`.
 #[derive(Parser, Debug)]
 pub struct ListArgs {
     /// The mem whose check records to list. The mem need not be mounted:
-    /// the ledger keeps a mem's rows after it was unmounted or deleted
-    /// (an archived bundle, a deleted fork), and they are served with
-    /// `mounted: false`. Omit to list every row of the workspace ledger.
+    /// the rows outlive the mount (an archived bundle, a deleted fork),
+    /// read from the ledger file and from the workspace's own mem-repo,
+    /// and they are served with `mounted: false`. Omit to list every row
+    /// this workspace sees.
     #[arg(long, value_name = "NAME")]
     pub mem: Option<String>,
 
@@ -143,6 +146,14 @@ pub struct ListArgs {
     /// ends at the start of that day).
     #[arg(long, value_name = "ISO-8601")]
     pub until: Option<String>,
+
+    /// Move the rows this workspace's ledger file holds for its writable
+    /// git-branch mems into those mems' stores, and report what moved per
+    /// mem. Idempotent; the file keeps its lines. An engine moves them on
+    /// its own when it opens a workspace whose file changed; this runs the
+    /// move on demand. Takes no filter.
+    #[arg(long, conflicts_with_all = ["mem", "kind", "verdict", "identity", "entity", "since", "until"])]
+    pub migrate: bool,
 }
 
 fn parse_instant(flag: &str, raw: &str) -> Result<u64, CliError> {
@@ -159,6 +170,9 @@ fn parse_instant(flag: &str, raw: &str) -> Result<u64, CliError> {
 }
 
 pub fn run_list(ctx: &CliContext, args: ListArgs) -> anyhow::Result<()> {
+    if args.migrate {
+        return run_migrate(ctx);
+    }
     if let Some(v) = args.verdict.as_deref() {
         parse_verdict(v)?;
     }
@@ -589,6 +603,27 @@ fn run_batch(ctx: &CliContext, path: &std::path::Path) -> anyhow::Result<()> {
             r["verdict"].as_str().unwrap_or_default(),
             r["kind"].as_str().unwrap_or_default(),
         ));
+    }
+    print_markdown(&md);
+    Ok(())
+}
+
+/// `memstead checks --migrate`: the workspace's file rows into the stores.
+fn run_migrate(ctx: &CliContext) -> anyhow::Result<()> {
+    let engine = ctx.cli_engine()?.into_base();
+    let moved = engine
+        .migrate_checks_to_stores()
+        .map_err(|e| CliError::new(ExitKind::Validation, e.code(), e.prose_render()))?;
+    if ctx.json {
+        print_json(&serde_json::json!({ "migrated": moved }))?;
+        return Ok(());
+    }
+    let mut md = String::from("# Check rows moved into the stores\n\n");
+    if moved.is_empty() {
+        md.push_str("- None: the ledger file holds no row of a writable git-branch mem.\n");
+    }
+    for m in &moved {
+        md.push_str(&format!("- `{}`: {} row(s) moved\n", m.mem, m.moved));
     }
     print_markdown(&md);
     Ok(())

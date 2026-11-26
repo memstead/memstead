@@ -351,6 +351,12 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     // `memstead_base::engine::boot`. Publishing them at load made every read
     // of a mem write to the directory it read; it now happens in the
     // schema-authoring commands instead.
+    //
+    // The check rows a workspace's ledger file holds for its writable
+    // git-branch mems move into those mems' stores when the file changed
+    // since the last move: at the first opening by an engine that keeps
+    // rows in the store, and after an older engine appended to the file.
+    engine.migrate_checks_if_ledger_changed();
     Ok(engine)
 }
 

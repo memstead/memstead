@@ -1288,7 +1288,7 @@ impl Engine {
                     e.prose_render()
                 ))
             })?;
-        outcome.checks_published = published;
+        outcome.checks_published = published.into_iter().next().map(|p| p.new_sha);
         outcome.checks_refused = refused;
         Ok(outcome)
     }
@@ -1395,7 +1395,9 @@ impl Engine {
                 // The check-ledger transport ref is derived from the
                 // workspace ledger before every publish and unioned on
                 // every fetch: it has no ahead or behind to report.
-                if *ref_name == checks_ref {
+                if *ref_name == checks_ref
+                    || ref_name.starts_with(crate::workspace::MEMSTEAD_CHECKS_REF_PREFIX)
+                {
                     continue;
                 }
                 let schemas_ref = *ref_name == memstead_ref;
@@ -1615,31 +1617,35 @@ impl Engine {
                     _ => None,
                 })
                 .collect();
-            let mem_refs: Vec<&str> = mems.iter().map(String::as_str).collect();
-            let checks_ref = crate::workspace::branch_full_ref(crate::MEMSTEAD_CHECKS_REF_BRANCH);
-            let previous_sha = remote_refs.get(&checks_ref).cloned().unwrap_or_default();
-            match self.publish_checks(&hook, gitdir, remote, &mem_refs) {
-                Ok((Some(new_sha), refused)) => {
-                    outcome.checks_refused.extend(refused);
-                    outcome.pushed.push(PushedRef {
-                        ref_name: checks_ref,
-                        mem: None,
-                        previous_sha,
-                        new_sha,
-                    })
-                }
-                Ok((None, refused)) => {
-                    outcome.checks_refused.extend(refused);
-                    if !previous_sha.is_empty() {
-                        outcome.in_sync.push(checks_ref);
+            // Each mem's checks ref is published on its own, so one
+            // mem's refusal never holds another's rows back.
+            for mem in &mems {
+                let checks_ref = crate::workspace::checks_ref_for_mem(mem);
+                let previous_sha = remote_refs.get(&checks_ref).cloned().unwrap_or_default();
+                match self.publish_checks(&hook, gitdir, remote, &[mem.as_str()]) {
+                    Ok((published, refused)) => {
+                        outcome.checks_refused.extend(refused);
+                        match published.into_iter().next() {
+                            Some(p) => outcome.pushed.push(PushedRef {
+                                ref_name: p.ref_name,
+                                mem: Some(mem.clone()),
+                                previous_sha,
+                                new_sha: p.new_sha,
+                            }),
+                            None => {
+                                if !previous_sha.is_empty() {
+                                    outcome.in_sync.push(checks_ref);
+                                }
+                            }
+                        }
                     }
+                    Err(e) => outcome.refused.push(RefusedRef {
+                        ref_name: checks_ref,
+                        mem: Some(mem.clone()),
+                        code: e.code().to_string(),
+                        message: e.prose_render(),
+                    }),
                 }
-                Err(e) => outcome.refused.push(RefusedRef {
-                    ref_name: checks_ref,
-                    mem: None,
-                    code: e.code().to_string(),
-                    message: e.prose_render(),
-                }),
             }
         }
 

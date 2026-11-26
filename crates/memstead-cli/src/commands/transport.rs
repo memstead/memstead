@@ -12,8 +12,9 @@ use crate::setup::{CliContext, CliEngine};
 #[derive(Args, Debug)]
 pub struct FetchArgs {
     /// The mem whose remote to fetch. The mem's check records travel
-    /// with it: the remote's check-ledger ref is fetched too and the
-    /// mem's rows are added to this workspace's ledger (rows already
+    /// with it: the remote's checks ref of the mem is fetched too and
+    /// its rows are added to the mem's own checks ref in its store (to
+    /// this workspace's ledger file for a read-only mount; rows already
     /// present are skipped; nothing is rewritten). Only a mounted mem's
     /// own rows are ever imported.
     pub mem: String,
@@ -30,9 +31,10 @@ pub struct FetchArgs {
 #[derive(Args, Debug)]
 pub struct PullArgs {
     /// The mem whose branch to fast-forward. Its check records come
-    /// with it: the remote's check-ledger ref is fetched and the mem's
-    /// rows are added to this workspace's ledger, so an export made
-    /// here seals the checks recorded elsewhere. Omitted with `--all`.
+    /// with it: the remote's checks ref of the mem is fetched and its
+    /// rows are added to the mem's checks ref in its store, so every
+    /// workspace of the store reads them and an export made here seals
+    /// the checks recorded elsewhere. Omitted with `--all`.
     #[arg(required_unless_present = "all", conflicts_with = "all")]
     pub mem: Option<String>,
     #[arg(long, default_value = "origin")]
@@ -55,10 +57,9 @@ pub struct PullArgs {
 #[derive(Args, Debug)]
 pub struct PushArgs {
     /// Mem whose branch to push. Omitted with `--all`. The mem's check
-    /// records go with the branch: its rows of this workspace's ledger
-    /// are published on the mem-repo's check-ledger ref, unioned with
-    /// what the remote already holds, and the ref is pushed beside the
-    /// branch.
+    /// records go with the branch: the mem's checks ref in its store
+    /// (`refs/memstead/checks/<mem>`), united with what the remote
+    /// already holds, is pushed beside the branch.
     #[arg(required_unless_present = "all", conflicts_with = "all")]
     pub mem: Option<String>,
     #[arg(long, default_value = "origin")]
@@ -70,7 +71,7 @@ pub struct PushArgs {
     #[arg(long, default_value_t = false, conflicts_with = "all")]
     pub force: bool,
     /// Push every mounted git-branch mem's branch plus the workspace's
-    /// schema-and-config ref and its check-ledger ref, fast-forward only. Refs already at the
+    /// schema-and-config ref and every mounted mem's checks ref, fast-forward only. Refs already at the
     /// remote's SHA are skipped silently; one line per ref moved; a
     /// ref that cannot fast-forward is refused by name
     /// (`NON_FAST_FORWARD`) while the other refs still go, and the

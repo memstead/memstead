@@ -241,7 +241,19 @@ pub fn sealed_checks_bytes_for(
         return (None, Vec::new());
     };
     let records = crate::check::CheckLedger::for_workspace(root).in_standing_order();
-    let (sealed, redactions) = build_redacted_sealed_checks(&records, mem_name, entity_paths, rows);
+    sealed_checks_bytes_from(&records, mem_name, entity_paths, rows)
+}
+
+/// [`sealed_checks_bytes_for`] over rows the caller read: the engine's
+/// reading of a mem whose rows live in its store as well as in the
+/// workspace file.
+pub fn sealed_checks_bytes_from(
+    records: &[crate::check::CheckRecord],
+    mem_name: &str,
+    entity_paths: &[String],
+    rows: Option<SealedRowReader<'_>>,
+) -> (Option<Vec<u8>>, Vec<crate::ops::redaction::RedactionCount>) {
+    let (sealed, redactions) = build_redacted_sealed_checks(records, mem_name, entity_paths, rows);
     (sealed.and_then(|s| s.to_archive_bytes().ok()), redactions)
 }
 

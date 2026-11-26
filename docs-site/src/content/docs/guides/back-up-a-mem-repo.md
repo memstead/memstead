@@ -128,26 +128,39 @@ memstead fetch knowledge     # see what moved (updated refs print per ref)
 memstead pull knowledge      # fast-forward + reload, refuses on divergence
 memstead pull --all          # the schema ref, every mem branch and the check records
 memstead push knowledge      # send your own commits
-memstead push --all          # every mem branch plus __MEMSTEAD and __MEMSTEAD_CHECKS, fast-forward only
+memstead push --all          # every mem branch, its checks ref, and __MEMSTEAD, fast-forward only
 ```
 
-A mem's check records travel with it. The check ledger lives in the
-workspace, not on the mem's branch (a check is never a commit, which is
-what keeps staleness derivable by hash), so the mem-repo carries one
-more engine-owned ref, `__MEMSTEAD_CHECKS`, with the mem's ledger rows
-as last published. `push` publishes the mem's rows there and pushes the
-ref beside the branch; `fetch` and `pull` fetch it and add the mem's
-rows to the local ledger. A row is a fact whose identity is its bytes:
-two machines checking the same mem merge by union, nothing is rewritten,
-a round trip adds nothing, and an export made on the other machine
-seals the checks recorded here. Only the rows of a mem this workspace
-mounts are ever imported, and only through its own `fetch`, `pull` and
-`push`; a fork's ref is never read, so a contributor cannot ship check
-rows that close your gates. Merged rows count by their own fields: the
-newest check of a kind is the one whose act is latest, not the line
-that arrived last, so both machines read the same standing. A row dated
-more than five minutes ahead of the receiving engine's clock is refused
-and named under `checks_refused`; the other rows still land.
+A mem's check records travel with it. A check is never a commit on the
+mem's branch (that is what keeps staleness derivable by hash), so a
+git-branch mem keeps its check rows on one more engine-owned ref beside
+the branch, `refs/memstead/checks/<mem>`, in the mem-repo that holds it.
+Every workspace that mounts the mem reads the same rows from there, and
+a copy of the mem-repo (`git clone --mirror`, a backup of the git
+directory) carries them as a plain ref. `push` pushes the mem's checks
+ref beside the branch; `fetch` and `pull` fetch the remote's and add its
+rows to the local one; `mem mount --remote` brings them along with an
+adopted mem. A row is a fact whose identity is its bytes: two machines
+checking the same mem merge by union, nothing is rewritten, a round trip
+adds nothing, and an export made on the other machine seals the checks
+recorded here. Only the rows of a mem this workspace mounts are ever
+imported, and only through its own `fetch`, `pull`, `push` and `mount`;
+a fork's ref is never read, so a contributor cannot ship check rows that
+close your gates. Merged rows count by their own fields: the newest
+check of a kind is the one whose act is latest, not the line that
+arrived last, so both machines read the same standing. A row dated more
+than five minutes ahead of the receiving engine's clock is refused and
+named under `checks_refused`; the other rows still land, and the refused
+row stays on the remote.
+
+Rows recorded before the store held them (by an engine before 0.29, in
+the workspace's `.memstead/state/checks/checks.jsonl`) move into the
+mem's checks ref when an engine of 0.29 or later first opens the
+workspace, and again whenever the file grew since; `memstead checks
+--migrate` runs the move on demand and reports it per mem. Keep a
+workspace's state directory until that has happened: the rows of a
+workspace you delete first are gone. A folder mem, and a mem mounted
+read-only, keep their rows in that file.
 
 `push --all` is the whole-workspace form: it lists the remote once, skips
 every ref already in sync (a run with nothing to send prints nothing),

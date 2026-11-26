@@ -230,6 +230,39 @@ pub fn push_in_gitdir(
     })
 }
 
+/// Push the local ref `src` to `dst` on `remote`, fast-forward only
+/// ([`memstead_base::engine::GitBranchPushRefFn`]).
+pub fn push_ref_in_gitdir(
+    gitdir: &Path,
+    remote: &str,
+    src: &str,
+    dst: &str,
+) -> Result<String, BackendError> {
+    let local_sha = resolve_ref(gitdir, src)
+        .ok_or_else(|| BackendError::Other(format!("UNKNOWN_REF: {src}")))?;
+    let refspec = format!("{src}:{dst}");
+    let remote_owned = remote.to_string();
+    let dst_owned = dst.to_string();
+    run_git(gitdir, &["push", "--", remote, &refspec], move |stderr| {
+        let lower = stderr.to_lowercase();
+        if lower.contains("non-fast-forward")
+            || lower.contains("non-fast forward")
+            || lower.contains("fetch first")
+            || lower.contains("[rejected]")
+            || lower.contains("updates were rejected")
+        {
+            return format!("NON_FAST_FORWARD:{dst_owned}:{remote_owned}");
+        }
+        if remote_did_not_answer(&lower)
+            || (lower.contains("fatal: '") && lower.contains("does not exist"))
+        {
+            return remote_marker(gitdir, &remote_owned, stderr);
+        }
+        format!("push to `{remote_owned}` failed: {stderr}")
+    })?;
+    Ok(local_sha)
+}
+
 /// `Engine::push_all` first half: the remote's branch table in one
 /// round-trip (`git ls-remote --heads <remote>`), as `(full ref
 /// name, sha)` pairs. The same failure classification as `fetch`:
@@ -248,7 +281,15 @@ pub fn ls_remote_in_gitdir(
     let remote_owned = remote.to_string();
     let stdout = run_git(
         gitdir,
-        &["ls-remote", "--heads", "--", remote],
+        // The branches, and the mems' checks refs beside them.
+        &[
+            "ls-remote",
+            "--refs",
+            "--",
+            remote,
+            "refs/heads/*",
+            "refs/memstead/checks/*",
+        ],
         move |stderr| classify_remote_failure(gitdir, &remote_owned, stderr),
     )?;
     Ok(stdout
